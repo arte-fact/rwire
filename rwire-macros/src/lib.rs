@@ -1,4 +1,4 @@
-//! Procedural macros for wire-wasm client state management.
+//! Procedural macros for rwire client state management.
 //!
 //! This crate provides:
 //! - `#[derive(ClientState)]` - marker trait for state types
@@ -26,7 +26,7 @@ pub fn derive_client_state(input: TokenStream) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let expanded = quote! {
-        impl #impl_generics wire_wasm::ClientState for #name #ty_generics #where_clause {}
+        impl #impl_generics rwire::ClientState for #name #ty_generics #where_clause {}
     };
 
     TokenStream::from(expanded)
@@ -49,11 +49,11 @@ pub fn derive_client_state(input: TokenStream) -> TokenStream {
 /// Expands to:
 ///
 /// ```ignore
-/// fn increment() -> wire_wasm::HandlerFn {
+/// fn increment() -> rwire::HandlerFn {
 ///     fn __increment_inner(state: &mut Counter) {
 ///         state.count += 1;
 ///     }
-///     wire_wasm::HandlerFn::new::<Counter>(__increment_inner)
+///     rwire::HandlerFn::new::<Counter>(__increment_inner)
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -87,9 +87,9 @@ pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        #vis fn #fn_name() -> wire_wasm::HandlerFn {
+        #vis fn #fn_name() -> rwire::HandlerFn {
             fn #inner_name(#param_pat: &mut #state_type) #block
-            wire_wasm::HandlerFn::new::<#state_type>(#inner_name)
+            rwire::HandlerFn::new::<#state_type>(#inner_name)
         }
     };
 
@@ -153,9 +153,9 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        #vis fn #fn_name() -> wire_wasm::ElementBuilder {
+        #vis fn #fn_name() -> rwire::ElementBuilder {
             fn #inner_name(#param_pat: &#state_type) #return_type #block
-            wire_wasm::ElementBuilder::synced::<#state_type>(#inner_name)
+            rwire::ElementBuilder::synced::<#state_type>(#inner_name)
         }
     };
 

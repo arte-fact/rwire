@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use wire_wasm::{el, El, Ev, ClientState, handler, renderer};
+//! use rwire::{el, El, Ev, ClientState, handler, renderer};
 //!
 //! #[derive(ClientState, Default)]
 //! struct Counter {
@@ -49,7 +49,7 @@ use crate::state::{ClientState, HandlerFn, Renderer};
 /// # Example
 ///
 /// ```ignore
-/// use wire_wasm::{el, El};
+/// use rwire::{el, El};
 ///
 /// let button = el(El::Button).text("Click me").class("primary");
 /// ```

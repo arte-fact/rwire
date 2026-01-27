@@ -1,4 +1,4 @@
-//! wire-wasm - WebSocket server with binary DOM opcodes and reactive state.
+//! rwire - WebSocket server with binary DOM opcodes and reactive state.
 //!
 //! This library provides:
 //! - A binary protocol for efficient DOM manipulation
@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use wire_wasm::{el, El, Ev, Server, ClientState, handler, renderer};
+//! use rwire::{el, El, Ev, Server, ClientState, handler, renderer};
 //!
 //! #[derive(ClientState, Default)]
 //! struct Counter {
@@ -69,7 +69,7 @@ pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 pub use server::Server;
 
 // Macro re-exports
-pub use wire_wasm_macros::{handler, renderer, ClientState};
+pub use rwire_macros::{handler, renderer, ClientState};
 
 // Re-export common types for convenience
 pub use bytes::Bytes;

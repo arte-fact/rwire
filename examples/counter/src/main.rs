@@ -1,9 +1,9 @@
-//! Counter example - demonstrates wire-wasm reactive state API.
+//! Counter example - demonstrates rwire reactive state API.
 //!
 //! A simple counter component with increment/decrement buttons.
 //! Only the count display re-renders when state changes.
 
-use wire_wasm::{el, handler, renderer, ClientState, El, ElementBuilder, Ev, Server};
+use rwire::{el, handler, renderer, ClientState, El, ElementBuilder, Ev, Server};
 
 #[derive(ClientState, Default)]
 struct Counter {
@@ -12,7 +12,7 @@ struct Counter {
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("wire-wasm Server - Counter Example");
+    println!("rwire Server - Counter Example");
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
 

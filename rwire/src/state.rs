@@ -1,4 +1,4 @@
-//! Client state management for wire-wasm.
+//! Client state management for rwire.
 //!
 //! This module provides traits and types for managing per-connection state
 //! with reactive rendering.

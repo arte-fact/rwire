@@ -1,4 +1,4 @@
-//! WebSocket server for wire-wasm with stateful client connections.
+//! WebSocket server for rwire with stateful client connections.
 //!
 //! Single port serving both:
 //! - HTTP GET / → capsule HTML

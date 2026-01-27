@@ -218,7 +218,7 @@ name = "counter"
 version = "0.1.0"
 dependencies = [
  "async-std",
- "wire-wasm",
+ "rwire",
 ]
 
 [[package]]
@@ -783,6 +783,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "rwire"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "async-tungstenite",
+ "bytes",
+ "futures",
+ "rwire-macros",
+]
+
+[[package]]
+name = "rwire-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,26 +1078,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
-]
-
-[[package]]
-name = "wire-wasm"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "async-tungstenite",
- "bytes",
- "futures",
- "wire-wasm-macros",
-]
-
-[[package]]
-name = "wire-wasm-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.114",
 ]
 
 [[package]]

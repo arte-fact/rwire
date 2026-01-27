@@ -1,7 +1,7 @@
 //! Tests for state management.
 
 use std::any::TypeId;
-use wire_wasm::{ClientState, HandlerFn};
+use rwire::{ClientState, HandlerFn};
 
 #[derive(Default)]
 struct TestState {

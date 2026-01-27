@@ -1,7 +1,7 @@
 //! Tests for the element builder API.
 
-use wire_wasm::{el, El};
-use wire_wasm::builder::BuildContext;
+use rwire::{el, El};
+use rwire::builder::BuildContext;
 
 #[test]
 fn test_el_builder_basic() {

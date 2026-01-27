@@ -1,6 +1,6 @@
 //! Tests for the binary protocol encoder and decoder.
 
-use wire_wasm::protocol::*;
+use rwire::protocol::*;
 
 mod encoder {
     use super::*;

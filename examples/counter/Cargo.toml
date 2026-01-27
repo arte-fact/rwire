@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wire-wasm = { path = "../../wire-wasm" }
+rwire = { path = "../../rwire" }
 async-std = { version = "1.12", features = ["attributes"] }

@@ -1,10 +1,10 @@
-//! Integration tests for the wire-wasm server.
+//! Integration tests for the rwire server.
 
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
 use std::time::Duration;
-use wire_wasm::{el, El, Ev, Server, ElementBuilder, HandlerFn, ClientState};
+use rwire::{el, El, Ev, Server, ElementBuilder, HandlerFn, ClientState};
 
 // Test state
 #[derive(Default)]
