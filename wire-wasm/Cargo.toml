@@ -1,0 +1,11 @@
+[package]
+name = "wire-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-std = { version = "1.12", features = ["attributes"] }
+async-tungstenite = { version = "0.25", features = ["async-std-runtime"] }
+bytes = "1.5"
+futures = "0.3"
+wire-wasm-macros = { path = "../wire-wasm-macros" }

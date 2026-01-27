@@ -1,0 +1,3 @@
+[workspace]
+members = ["wire-wasm", "wire-wasm-macros", "examples/counter"]
+resolver = "2"

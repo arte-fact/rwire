@@ -1,0 +1,8 @@
+[package]
+name = "counter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wire-wasm = { path = "../../wire-wasm" }
+async-std = { version = "1.12", features = ["attributes"] }
