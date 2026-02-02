@@ -441,10 +441,13 @@ impl BuildContext {
 
     /// Collect all symbols from an element tree (first pass).
     /// Also tracks used element and event types for tree shaking.
+    ///
+    /// Note: Synced element IDs are no longer interned as symbols - they use
+    /// dedicated CREATE_SYNCED/GET_SYNCED opcodes with varint encoding.
     pub fn collect_symbols(&mut self, el: &ElementBuilder, state: &dyn Any) {
         // If this is a synced element, render it first with state
         if let Some(renderer) = &el.synced {
-            // Track the span wrapper element type
+            // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
             if let Some(rendered) = renderer.render_with_state(state) {
                 self.collect_symbols(&rendered, state);
@@ -469,12 +472,10 @@ impl BuildContext {
         for (ev, _) in &el.events {
             self.used_events.insert(ev.as_u8());
         }
-        // Intern synced element IDs
+        // Process synced children - just track the ID counter, no symbol interning needed
         for child in &el.children {
             if child.synced.is_some() {
-                // Pre-intern the synced element's wrapper ID
-                let synced_id = format!("__synced_{}", self.next_synced_id);
-                self.intern(&synced_id);
+                // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
                 self.next_synced_id += 1;
             }
             self.collect_symbols(child, state);
@@ -483,6 +484,9 @@ impl BuildContext {
 
     /// Collect all symbols from an element tree with multi-state support.
     /// Each synced element is rendered with its corresponding state type.
+    ///
+    /// Note: Synced element IDs are no longer interned as symbols - they use
+    /// dedicated CREATE_SYNCED/GET_SYNCED opcodes with varint encoding.
     pub fn collect_symbols_multi(
         &mut self,
         el: &ElementBuilder,
@@ -490,11 +494,9 @@ impl BuildContext {
     ) {
         // If this is a synced element, render it first with the appropriate state
         if let Some(renderer) = &el.synced {
-            // Track the span wrapper element type
+            // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
-            // Pre-intern the synced element's wrapper ID
-            let synced_id = format!("__synced_{}", self.next_synced_id);
-            self.intern(&synced_id);
+            // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
             self.next_synced_id += 1;
 
             // Find the state for this renderer's state type
@@ -581,16 +583,11 @@ impl BuildContext {
             });
 
             if let Some(rendered) = renderer.render_with_state(state) {
-                // Create a wrapper span with an ID for later targeting
-                let wrapper_id = format!("__synced_{}", synced_id);
-                let wrapper_id_sym = *self.symbol_map.get(&wrapper_id).unwrap();
-
                 // Track span element usage for synced wrapper
                 self.used_elements.insert(El::Span.as_u8());
 
-                let ref_idx = self.buf.create(El::Span.as_u8());
-                // Built-in symbol 0x04 is "id"
-                self.buf.set_attr(ref_idx, 0x04, wrapper_id_sym);
+                // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
+                let ref_idx = self.buf.create_synced(synced_id);
 
                 // Emit the rendered content as a child
                 self.emit_element(&rendered, Some(ref_idx), state);
@@ -700,16 +697,11 @@ impl BuildContext {
             let state_type_id = renderer.state_type_id();
             if let Some(state) = states.get(&state_type_id) {
                 if let Some(rendered) = renderer.render_with_state(*state) {
-                    // Create a wrapper span with an ID for later targeting
-                    let wrapper_id = format!("__synced_{}", synced_id);
-                    let wrapper_id_sym = *self.symbol_map.get(&wrapper_id).unwrap();
-
                     // Track span element usage for synced wrapper
                     self.used_elements.insert(El::Span.as_u8());
 
-                    let ref_idx = self.buf.create(El::Span.as_u8());
-                    // Built-in symbol 0x04 is "id"
-                    self.buf.set_attr(ref_idx, 0x04, wrapper_id_sym);
+                    // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
+                    let ref_idx = self.buf.create_synced(synced_id);
 
                     // Emit the rendered content as a child
                     self.emit_element_multi(&rendered, Some(ref_idx), states);
@@ -854,6 +846,15 @@ impl BuildContext {
         &self.local_state_indices
     }
 
+    /// Get the symbol map for tracking sent symbols.
+    ///
+    /// This returns a clone of the symbol map after rendering, which can be
+    /// used to track which symbols were sent to the client for incremental
+    /// symbol updates.
+    pub fn take_symbol_map(&self) -> HashMap<String, u8> {
+        self.symbol_map.clone()
+    }
+
     /// Emit local state initialization opcodes.
     ///
     /// This should be called after emit() and emit_local_handlers() to initialize
@@ -902,32 +903,60 @@ pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + S
 /// Nested synced elements are properly handled: when a parent synced element
 /// re-renders, any nested synced elements within its content are wrapped with
 /// their correct IDs so subsequent updates can find them.
+///
+/// Note: This function uses GET_SYNCED opcodes with varint-encoded IDs instead of
+/// GET_BY_ID with symbol table entries for "__synced_N" strings. This significantly
+/// reduces update message sizes (~15 bytes per synced element).
 pub fn build_synced_update_multi(
     synced: &[SyncedElement],
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     handlers: &mut Vec<HandlerFn>,
     changes: ChangeSet,
 ) -> Bytes {
+    build_synced_update_with_known_symbols(synced, states, handlers, changes, None)
+}
+
+/// Build an update for synced elements with incremental symbol support.
+///
+/// This is the same as `build_synced_update_multi` but supports tracking which
+/// symbols have already been sent to the client. If `known_symbols` is provided:
+/// - Only new symbols are sent using SYMBOLS_EXTEND
+/// - Known symbols use their existing indices
+/// - `known_symbols` is updated with any new symbols after this call
+///
+/// This can reduce update message sizes by 50-90% for repeated updates.
+pub fn build_synced_update_with_known_symbols(
+    synced: &[SyncedElement],
+    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+    handlers: &mut Vec<HandlerFn>,
+    changes: ChangeSet,
+    known_symbols: Option<&mut HashMap<String, u8>>,
+) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
-    // Collect all symbols first
-    let mut symbols: Vec<String> = Vec::new();
+    // Collect all symbols first (but NOT synced element IDs - those use GET_SYNCED opcode)
+    let mut new_symbols: Vec<String> = Vec::new();
     let mut symbol_map: HashMap<String, u8> = HashMap::new();
 
-    fn intern(s: &str, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>) -> u8 {
-        if let Some(&idx) = symbol_map.get(s) {
-            return idx;
+    // If we have known symbols, seed the symbol_map with them
+    let next_symbol_idx = if let Some(known) = &known_symbols {
+        // Copy known symbols into symbol_map
+        for (sym, idx) in known.iter() {
+            symbol_map.insert(sym.clone(), *idx);
         }
-        let idx = 0x80 + symbols.len() as u8;
-        symbols.push(s.to_string());
-        symbol_map.insert(s.to_string(), idx);
-        idx
-    }
+        // Next index is 0x80 + count of known symbols
+        0x80u8.saturating_add(known.len() as u8)
+    } else {
+        0x80u8
+    };
 
-    // First pass: collect symbols (including nested synced element wrapper IDs)
+    let mut current_next_idx = next_symbol_idx;
+
+    // First pass: collect symbols (NOT including synced element wrapper IDs anymore)
     // We need to track synced counter to assign correct IDs to nested synced elements
     // Only process synced elements that need updating based on the ChangeSet
     let mut synced_counter: u32 = 0;
+    let mut has_updates = false;
     for se in synced {
         // Track the highest synced ID to know where nested ones start
         if se.id >= synced_counter {
@@ -938,17 +967,16 @@ pub fn build_synced_update_multi(
         if !se.deps.needs_update(changes) {
             continue;
         }
-
-        let wrapper_id = format!("__synced_{}", se.id);
-        intern(&wrapper_id, &mut symbols, &mut symbol_map);
+        has_updates = true;
 
         // Find the state for this synced element's state type
         if let Some(state) = states.get(&se.state_type_id) {
             if let Some(rendered) = se.renderer.render_with_state(*state) {
-                collect_symbols_recursive(
+                collect_symbols_recursive_with_known(
                     &rendered,
-                    &mut symbols,
+                    &mut new_symbols,
                     &mut symbol_map,
+                    &mut current_next_idx,
                     &mut synced_counter,
                     states,
                 );
@@ -956,14 +984,30 @@ pub fn build_synced_update_multi(
         }
     }
 
-    if symbols.is_empty() {
+    // Early return if no updates needed
+    if !has_updates {
         return Bytes::new();
     }
 
-    // Emit symbol table
-    buf.begin_symbols(symbols.len() as u8);
-    for sym in &symbols {
-        buf.add_symbol(sym);
+    // Emit symbol table if we have any NEW symbols
+    if !new_symbols.is_empty() {
+        if known_symbols.is_some() {
+            // Use SYMBOLS_EXTEND for incremental update
+            buf.begin_symbols_extend(new_symbols.len() as u8, next_symbol_idx);
+        } else {
+            // Use regular SYMBOLS for full table
+            buf.begin_symbols(new_symbols.len() as u8);
+        }
+        for sym in &new_symbols {
+            buf.add_symbol(sym);
+        }
+    }
+
+    // Update known_symbols with new symbols
+    if let Some(known) = known_symbols {
+        for (sym, idx) in symbol_map.iter() {
+            known.insert(sym.clone(), *idx);
+        }
     }
 
     // Second pass: emit updates with full re-render
@@ -982,14 +1026,11 @@ pub fn build_synced_update_multi(
             continue;
         }
 
-        let wrapper_id = format!("__synced_{}", se.id);
-        let wrapper_id_sym = *symbol_map.get(&wrapper_id).unwrap();
-
         // Find the state for this synced element's state type
         if let Some(state) = states.get(&se.state_type_id) {
             if let Some(rendered) = se.renderer.render_with_state(*state) {
-                // Get the wrapper by ID - this returns the ref index
-                let wrapper_ref = buf.get_by_id(wrapper_id_sym);
+                // Use GET_SYNCED opcode - more compact than GET_BY_ID with symbol
+                let wrapper_ref = buf.get_synced(se.id);
 
                 // Clear all existing children
                 buf.clear_children(wrapper_ref);
@@ -1020,7 +1061,8 @@ pub fn build_synced_update_multi(
 /// are registered if they weren't present during initial render.
 ///
 /// For nested synced elements, this creates wrapper spans with the correct IDs
-/// so that subsequent updates can find them.
+/// so that subsequent updates can find them. Uses CREATE_SYNCED opcode for
+/// compact encoding.
 fn emit_update_element(
     el: &ElementBuilder,
     parent_ref: u8,
@@ -1039,29 +1081,24 @@ fn emit_update_element(
         let state_type_id = renderer.state_type_id();
         if let Some(state) = states.get(&state_type_id) {
             if let Some(rendered) = renderer.render_with_state(*state) {
-                // Create a wrapper span with an ID for later targeting
-                let wrapper_id = format!("__synced_{}", synced_id);
-                if let Some(&wrapper_id_sym) = symbol_map.get(&wrapper_id) {
-                    let wrapper_ref = buf.create(El::Span.as_u8());
-                    // Built-in symbol 0x04 is "id"
-                    buf.set_attr(wrapper_ref, 0x04, wrapper_id_sym);
+                // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
+                let wrapper_ref = buf.create_synced(synced_id);
 
-                    // Emit the rendered content as a child of the wrapper
-                    emit_update_element(
-                        &rendered,
-                        wrapper_ref,
-                        buf,
-                        symbol_map,
-                        handlers,
-                        synced_counter,
-                        states,
-                    );
+                // Emit the rendered content as a child of the wrapper
+                emit_update_element(
+                    &rendered,
+                    wrapper_ref,
+                    buf,
+                    symbol_map,
+                    handlers,
+                    synced_counter,
+                    states,
+                );
 
-                    // Append wrapper to parent
-                    buf.append(parent_ref, wrapper_ref);
+                // Append wrapper to parent
+                buf.append(parent_ref, wrapper_ref);
 
-                    return wrapper_ref;
-                }
+                return wrapper_ref;
             }
         }
         // If state not found or render failed, skip this synced element
@@ -1136,6 +1173,9 @@ fn emit_update_element(
     ref_idx
 }
 
+// Note: This function is kept for backwards compatibility with tests that use
+// build_synced_update_multi without known symbols tracking.
+#[allow(dead_code)]
 fn collect_symbols_recursive(
     el: &ElementBuilder,
     symbols: &mut Vec<String>,
@@ -1152,11 +1192,10 @@ fn collect_symbols_recursive(
         symbol_map.insert(s.to_string(), idx);
     }
 
-    // Handle synced elements - they need wrapper IDs and recursive symbol collection
+    // Handle synced elements - recursive symbol collection but NO wrapper ID interning
+    // (using CREATE_SYNCED opcode instead)
     if let Some(renderer) = &el.synced {
-        // Intern the wrapper ID for this nested synced element
-        let wrapper_id = format!("__synced_{}", *synced_counter);
-        intern(&wrapper_id, symbols, symbol_map);
+        // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
         *synced_counter += 1;
 
         // Render and collect symbols from the rendered content
@@ -1181,5 +1220,75 @@ fn collect_symbols_recursive(
     }
     for child in &el.children {
         collect_symbols_recursive(child, symbols, symbol_map, synced_counter, states);
+    }
+}
+
+/// Variant of collect_symbols_recursive that supports incremental symbol updates.
+/// Only new symbols (not in the initial symbol_map) are added to new_symbols.
+fn collect_symbols_recursive_with_known(
+    el: &ElementBuilder,
+    new_symbols: &mut Vec<String>,
+    symbol_map: &mut HashMap<String, u8>,
+    next_idx: &mut u8,
+    synced_counter: &mut u32,
+    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+) {
+    fn intern_with_known(
+        s: &str,
+        new_symbols: &mut Vec<String>,
+        symbol_map: &mut HashMap<String, u8>,
+        next_idx: &mut u8,
+    ) {
+        if symbol_map.contains_key(s) {
+            return;
+        }
+        let idx = *next_idx;
+        *next_idx = next_idx.saturating_add(1);
+        new_symbols.push(s.to_string());
+        symbol_map.insert(s.to_string(), idx);
+    }
+
+    // Handle synced elements - recursive symbol collection but NO wrapper ID interning
+    // (using CREATE_SYNCED opcode instead)
+    if let Some(renderer) = &el.synced {
+        // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
+        *synced_counter += 1;
+
+        // Render and collect symbols from the rendered content
+        let state_type_id = renderer.state_type_id();
+        if let Some(state) = states.get(&state_type_id) {
+            if let Some(rendered) = renderer.render_with_state(*state) {
+                collect_symbols_recursive_with_known(
+                    &rendered,
+                    new_symbols,
+                    symbol_map,
+                    next_idx,
+                    synced_counter,
+                    states,
+                );
+            }
+        }
+        return;
+    }
+
+    if let Some(ref text) = el.text {
+        intern_with_known(text, new_symbols, symbol_map, next_idx);
+    }
+    if let Some(ref class) = el.class {
+        intern_with_known(class, new_symbols, symbol_map, next_idx);
+    }
+    for (key, value) in &el.attrs {
+        intern_with_known(key, new_symbols, symbol_map, next_idx);
+        intern_with_known(value, new_symbols, symbol_map, next_idx);
+    }
+    for child in &el.children {
+        collect_symbols_recursive_with_known(
+            child,
+            new_symbols,
+            symbol_map,
+            next_idx,
+            synced_counter,
+            states,
+        );
     }
 }

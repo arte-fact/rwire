@@ -4,10 +4,12 @@ use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
     APPEND, BATCH_END, BIND_LOCAL, BIND_OPTIMISTIC, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
-    CREATE, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED, FORM_SET_VALIDATION,
-    FORM_SHOW_ERROR, GET_BY_ID, INIT_LOCAL_STATE, ROUTE_PUSH, ROUTE_REPLACE, SET_ATTR, SET_CLASS,
-    SET_DATA, SET_TEXT, STYLE_INJECT, STYLE_SET, SYMBOLS, SYMBOL_SESSION_START,
+    CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
+    FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
+    ROUTE_REPLACE, SET_ATTR, SET_CLASS, SET_DATA, SET_TEXT, STYLE_INJECT, STYLE_SET, SYMBOLS,
+    SYMBOLS_EXTEND, SYMBOL_SESSION_START,
 };
+use super::varint::write_varint;
 
 /// Buffer for building opcode sequences.
 ///
@@ -65,6 +67,17 @@ impl OpcodeBuffer {
         idx
     }
 
+    /// Start extending an existing symbol table.
+    ///
+    /// Use this for updates when some symbols were already sent in the initial render.
+    /// The `start_index` should be 0x80 + count of already-sent symbols.
+    pub fn begin_symbols_extend(&mut self, count: u8, start_index: u8) -> &mut Self {
+        self.buf.put_u8(SYMBOLS_EXTEND);
+        self.buf.put_u8(count);
+        self.next_symbol = start_index;
+        self
+    }
+
     /// Create an element. Returns the ref index.
     ///
     /// Note: Returns u8 for backward compatibility. Use `create_ext` for >255 elements.
@@ -77,6 +90,44 @@ impl OpcodeBuffer {
         let ref_idx = self.next_ref;
         self.buf.put_u8(CREATE);
         self.buf.put_u8(element_type);
+        self.next_ref += 1;
+        ref_idx
+    }
+
+    /// Create a synced wrapper span with id="__synced_N".
+    ///
+    /// This is more compact than CREATE span + SET_ATTR id, saving ~15 bytes per synced element.
+    /// Format: [CREATE_SYNCED, synced_id_varint] → creates span, sets id, returns ref
+    ///
+    /// Note: Returns u8 for backward compatibility. Use `create_synced_ext` for >255 elements.
+    pub fn create_synced(&mut self, synced_id: u32) -> u8 {
+        self.create_synced_ext(synced_id) as u8
+    }
+
+    /// Create a synced wrapper span with extended ref support.
+    pub fn create_synced_ext(&mut self, synced_id: u32) -> u32 {
+        let ref_idx = self.next_ref;
+        self.buf.put_u8(CREATE_SYNCED);
+        write_varint(&mut self.buf, synced_id);
+        self.next_ref += 1;
+        ref_idx
+    }
+
+    /// Get a synced element by numeric ID.
+    ///
+    /// This is more compact than GET_BY_ID with a symbol for "__synced_N".
+    /// Format: [GET_SYNCED, synced_id_varint] → returns ref
+    ///
+    /// Note: Returns u8 for backward compatibility. Use `get_synced_ext` for >255 elements.
+    pub fn get_synced(&mut self, synced_id: u32) -> u8 {
+        self.get_synced_ext(synced_id) as u8
+    }
+
+    /// Get a synced element by numeric ID with extended ref support.
+    pub fn get_synced_ext(&mut self, synced_id: u32) -> u32 {
+        let ref_idx = self.next_ref;
+        self.buf.put_u8(GET_SYNCED);
+        write_varint(&mut self.buf, synced_id);
         self.next_ref += 1;
         ref_idx
     }

@@ -82,9 +82,15 @@ fn generate_event_map(used: &HashSet<u8>) -> String {
 ///
 /// The sep() function sends events with param bytes (for ItemRef handlers):
 /// - Format: [handler_idx | 0x80, event_type, ref, param_len, ...param_bytes, payload_len, ...payload]
-const RUNTIME_JS: &str = r#"const O={S:0xF0,G:0x01,C:0x02,L:0x10,T:0x11,A:0x12,D:0x14,P:0x20,CC:0x25,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,E:0xFF};
+///
+/// New opcodes for bandwidth optimization:
+/// - CREATE_SYNCED (0x03): Create span with id="__synced_N" using varint ID
+/// - GET_SYNCED (0x05): Get synced element by numeric ID using varint
+/// - SYMBOLS_EXTEND (0xF1): Add new symbols to existing table
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,A:0x12,D:0x14,P:0x20,CC:0x25,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,E:0xFF};
 const A={4:'id'};
-let s={},w;
+let s={},w,sc=0;
+function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
 function gp(e,el){
 let t=el.tagName.toLowerCase();
 if(e.type==='submit'&&t==='form'){e.preventDefault();let fd=new FormData(el),obj={};fd.forEach((v,k)=>obj[k]=v);return JSON.stringify({t:'form',v:obj})}
@@ -97,9 +103,12 @@ function x(d){
 let r=[],i=0;
 while(i<d.length){
 let o=d[i++];
-if(o===O.S){let n=d[i++],j=0x80;while(n--){let l=d[i++];s[j++]=new TextDecoder().decode(d.slice(i,i+l));i+=l}}
+if(o===O.S){let n=d[i++];sc=0x80;while(n--){let l=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+l));i+=l}}
+else if(o===O.SE){let n=d[i++];while(n--){let l=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+l));i+=l}}
 else if(o===O.G){let k=s[d[i++]];let el=document.getElementById(k);r.push(el)}
 else if(o===O.C){r.push(document.createElement(E[d[i++]]||'div'))}
+else if(o===O.CS){let[id,l]=rv(d,i);i+=l;let e=document.createElement('span');e.id='__synced_'+id;r.push(e)}
+else if(o===O.GS){let[id,l]=rv(d,i);i+=l;r.push(document.getElementById('__synced_'+id))}
 else if(o===O.T){r[d[i++]].textContent=s[d[i++]]||''}
 else if(o===O.L){r[d[i++]].className=s[d[i++]]||''}
 else if(o===O.A){let f=d[i++];r[f].setAttribute(A[d[i]]||s[d[i]]||'data',s[d[i+1]]||'');i+=2}

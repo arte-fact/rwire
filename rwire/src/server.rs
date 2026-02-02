@@ -15,7 +15,9 @@ use std::error::Error;
 use std::net::{AddrParseError, SocketAddr};
 use std::sync::Arc;
 
-use crate::builder::{build_synced_update_multi, BuildContext, ElementBuilder, SyncedElement};
+use crate::builder::{
+    build_synced_update_with_known_symbols, BuildContext, ElementBuilder, SyncedElement,
+};
 use crate::capsule;
 use crate::capsule_gen;
 use crate::protocol::ClientEvent;
@@ -167,6 +169,9 @@ struct ConnectionState {
     handlers: Vec<HandlerFn>,
     /// Synced elements that need to re-render on state change.
     synced_elements: Vec<SyncedElement>,
+    /// Symbols that have been sent to this client (for incremental symbol updates).
+    /// Maps symbol string -> symbol index (0x80+).
+    sent_symbols: HashMap<String, u8>,
 }
 
 impl ConnectionState {
@@ -175,6 +180,7 @@ impl ConnectionState {
             states: HashMap::new(),
             handlers: Vec::new(),
             synced_elements: Vec::new(),
+            sent_symbols: HashMap::new(),
         }
     }
 
@@ -267,6 +273,8 @@ where
     // Re-extract handlers and synced elements (they should be the same)
     conn_state.handlers = ctx.handlers().to_vec();
     conn_state.synced_elements = ctx.take_synced_elements();
+    // Capture sent symbols for incremental updates
+    conn_state.sent_symbols = ctx.take_symbol_map();
 
     let initial_dom = ctx.finish();
 
@@ -319,11 +327,13 @@ where
                             .iter()
                             .map(|(k, v)| (*k, v.as_ref()))
                             .collect();
-                        let update = build_synced_update_multi(
+                        // Use incremental symbols - pass known symbols and update them
+                        let update = build_synced_update_with_known_symbols(
                             &conn_state.synced_elements,
                             &states_map,
                             &mut conn_state.handlers,
                             changes,
+                            Some(&mut conn_state.sent_symbols),
                         );
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;

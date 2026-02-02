@@ -8,9 +8,24 @@ use std::any::TypeId;
 use std::collections::HashMap;
 
 use rwire::builder::{build_synced_update_multi, BuildContext, ElementBuilder};
-use rwire::protocol::opcodes::{BATCH_END, CREATE, GET_BY_ID, SYMBOLS};
+use rwire::protocol::opcodes::{BATCH_END, CREATE, CREATE_SYNCED, GET_SYNCED, SYMBOLS};
 use rwire::state::ChangeSet;
 use rwire::{el, El, HandlerFn, MemoryState};
+
+/// Check if the bytes contain a GET_SYNCED opcode (0x05) for a given synced_id.
+/// The synced_id is encoded as a varint after the opcode.
+fn has_get_synced_for_id(bytes: &[u8], synced_id: u32) -> bool {
+    for i in 0..bytes.len() {
+        if bytes[i] == GET_SYNCED {
+            // Check if the next byte(s) match the synced_id as varint
+            if synced_id < 0x80 && i + 1 < bytes.len() && bytes[i + 1] == synced_id as u8 {
+                return true;
+            }
+            // For ids >= 128, would need more bytes, but test IDs are 0, 1, 2
+        }
+    }
+    false
+}
 
 #[derive(Default)]
 struct ParentState {
@@ -190,20 +205,17 @@ fn test_nested_update_preserves_structure() {
     let mut handlers: Vec<HandlerFn> = vec![];
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
 
-    // Check that update bytes contain both synced IDs in the symbol table
+    // Check that update bytes contain GET_SYNCED opcodes for both synced IDs
     let bytes = update_bytes.as_ref();
 
-    // Find "__synced_0" and "__synced_1" strings in the bytes
-    let synced_0 = b"__synced_0";
-    let synced_1 = b"__synced_1";
+    // We now use GET_SYNCED opcodes instead of symbol table strings
+    let has_synced_0 = has_get_synced_for_id(bytes, 0);
+    let has_synced_1 = has_get_synced_for_id(bytes, 1);
 
-    let has_synced_0 = bytes.windows(synced_0.len()).any(|w| w == synced_0);
-    let has_synced_1 = bytes.windows(synced_1.len()).any(|w| w == synced_1);
+    assert!(has_synced_0, "Update should have GET_SYNCED for id 0");
+    assert!(has_synced_1, "Update should have GET_SYNCED for id 1");
 
-    assert!(has_synced_0, "Update should reference __synced_0");
-    assert!(has_synced_1, "Update should reference __synced_1");
-
-    println!("Both synced element IDs found in update bytes");
+    println!("Both synced element IDs found via GET_SYNCED opcodes");
 }
 
 /// Test that nested synced elements are wrapped with correct IDs during update emission.
@@ -233,24 +245,32 @@ fn test_nested_update_emits_wrapper_ids() {
     let bytes = update_bytes.as_ref();
 
     // Verify the update contains:
-    // 1. SYMBOLS opcode at the start
+    // 1. Update should have content
     assert!(bytes.len() > 2, "Update should have content");
-    assert_eq!(bytes[0], SYMBOLS, "Should start with SYMBOLS opcode");
 
-    // 2. GET_BY_ID opcodes - at least 2 for the top-level synced elements
-    // Note: there may be more due to nested structures
-    let get_by_id_count = bytes.iter().filter(|&&b| b == GET_BY_ID).count();
+    // Note: The update may or may not start with SYMBOLS depending on whether
+    // non-synced-ID symbols are present. Check for symbol table OR GET_SYNCED.
+    let starts_with_symbols = bytes[0] == SYMBOLS;
+    let has_get_synced = bytes.iter().any(|&b| b == GET_SYNCED);
     assert!(
-        get_by_id_count >= 2,
-        "Should have at least 2 GET_BY_ID opcodes (one for each synced element), found {}",
-        get_by_id_count
+        starts_with_symbols || has_get_synced,
+        "Should have SYMBOLS or GET_SYNCED"
     );
 
-    // 3. CREATE opcodes for creating new elements
-    let create_count = bytes.iter().filter(|&&b| b == CREATE).count();
+    // 2. GET_SYNCED opcodes - at least 2 for the top-level synced elements
+    let get_synced_count = bytes.iter().filter(|&&b| b == GET_SYNCED).count();
     assert!(
-        create_count >= 2,
-        "Should have at least 2 CREATE opcodes (parent content + nested wrapper)"
+        get_synced_count >= 2,
+        "Should have at least 2 GET_SYNCED opcodes (one for each synced element), found {}",
+        get_synced_count
+    );
+
+    // 3. CREATE opcodes for creating new elements, or CREATE_SYNCED for nested
+    let create_count = bytes.iter().filter(|&&b| b == CREATE).count();
+    let create_synced_count = bytes.iter().filter(|&&b| b == CREATE_SYNCED).count();
+    assert!(
+        create_count >= 1 || create_synced_count >= 1,
+        "Should have CREATE or CREATE_SYNCED opcodes"
     );
 
     // 4. BATCH_END at the end
@@ -261,9 +281,9 @@ fn test_nested_update_emits_wrapper_ids() {
     );
 
     println!("Update bytes verify nested wrapper creation:");
-    println!("  - SYMBOLS count: 1");
-    println!("  - GET_BY_ID count: {}", get_by_id_count);
+    println!("  - GET_SYNCED count: {}", get_synced_count);
     println!("  - CREATE count: {}", create_count);
+    println!("  - CREATE_SYNCED count: {}", create_synced_count);
     println!("  - Total bytes: {}", bytes.len());
 }
 
@@ -319,23 +339,17 @@ fn test_deeply_nested_synced_elements() {
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
     let bytes = update_bytes.as_ref();
 
-    // All three wrapper IDs should be in the update
+    // All three wrapper IDs should be referenced via GET_SYNCED
     assert!(
-        bytes
-            .windows(b"__synced_0".len())
-            .any(|w| w == b"__synced_0"),
-        "Should have __synced_0"
+        has_get_synced_for_id(bytes, 0),
+        "Should have GET_SYNCED for id 0"
     );
     assert!(
-        bytes
-            .windows(b"__synced_1".len())
-            .any(|w| w == b"__synced_1"),
-        "Should have __synced_1"
+        has_get_synced_for_id(bytes, 1),
+        "Should have GET_SYNCED for id 1"
     );
     assert!(
-        bytes
-            .windows(b"__synced_2".len())
-            .any(|w| w == b"__synced_2"),
-        "Should have __synced_2"
+        has_get_synced_for_id(bytes, 2),
+        "Should have GET_SYNCED for id 2"
     );
 }

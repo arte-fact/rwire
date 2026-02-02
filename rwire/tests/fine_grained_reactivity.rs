@@ -10,8 +10,24 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 use rwire::builder::{build_synced_update_multi, ElementBuilder, SyncedElement, SyncedRenderer};
+use rwire::protocol::opcodes::GET_SYNCED;
 use rwire::state::{ChangeSet, RendererDeps};
 use rwire::{el, El, HandlerFn, MemoryState};
+
+/// Check if the bytes contain a GET_SYNCED opcode (0x05) for a given synced_id.
+/// The synced_id is encoded as a varint after the opcode.
+fn has_get_synced_for_id(bytes: &[u8], synced_id: u32) -> bool {
+    for i in 0..bytes.len() {
+        if bytes[i] == GET_SYNCED {
+            // Check if the next byte(s) match the synced_id as varint
+            if synced_id < 0x80 && i + 1 < bytes.len() && bytes[i + 1] == synced_id as u8 {
+                return true;
+            }
+            // For ids >= 128, would need more bytes, but test IDs are 0, 1, 2
+        }
+    }
+    false
+}
 
 // ============================================================================
 // RendererDeps Tests
@@ -253,16 +269,16 @@ fn test_build_synced_update_filters_by_changeset() {
     // Should only update element 0 (depends on field_a)
     let bytes = update.as_ref();
     assert!(
-        bytes.windows(b"__synced_0".len()).any(|w| w == b"__synced_0"),
-        "Should have __synced_0 (depends on field_a)"
+        has_get_synced_for_id(bytes, 0),
+        "Should have GET_SYNCED for id 0 (depends on field_a)"
     );
     assert!(
-        !bytes.windows(b"__synced_1".len()).any(|w| w == b"__synced_1"),
-        "Should NOT have __synced_1 (depends on field_b)"
+        !has_get_synced_for_id(bytes, 1),
+        "Should NOT have GET_SYNCED for id 1 (depends on field_b)"
     );
     assert!(
-        !bytes.windows(b"__synced_2".len()).any(|w| w == b"__synced_2"),
-        "Should NOT have __synced_2 (depends on field_c)"
+        !has_get_synced_for_id(bytes, 2),
+        "Should NOT have GET_SYNCED for id 2 (depends on field_c)"
     );
 }
 
@@ -286,12 +302,12 @@ fn test_build_synced_update_all_changes() {
     // Should update both elements
     let bytes = update.as_ref();
     assert!(
-        bytes.windows(b"__synced_0".len()).any(|w| w == b"__synced_0"),
-        "Should have __synced_0"
+        has_get_synced_for_id(bytes, 0),
+        "Should have GET_SYNCED for id 0"
     );
     assert!(
-        bytes.windows(b"__synced_1".len()).any(|w| w == b"__synced_1"),
-        "Should have __synced_1"
+        has_get_synced_for_id(bytes, 1),
+        "Should have GET_SYNCED for id 1"
     );
 }
 
@@ -301,9 +317,10 @@ fn test_build_synced_update_no_changes() {
     let mut states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
     states.insert(TypeId::of::<MultiFieldState>(), &state);
 
-    let synced = vec![
-        make_synced_element_with_deps(0, RendererDeps::from_fields(&[MultiFieldState::FIELD_A])),
-    ];
+    let synced = vec![make_synced_element_with_deps(
+        0,
+        RendererDeps::from_fields(&[MultiFieldState::FIELD_A]),
+    )];
 
     let mut handlers: Vec<HandlerFn> = vec![];
 
@@ -335,13 +352,13 @@ fn test_build_synced_update_always_deps() {
     let bytes = update.as_ref();
     // Element 0 should NOT update (depends on field_a, not field_b)
     assert!(
-        !bytes.windows(b"__synced_0".len()).any(|w| w == b"__synced_0"),
-        "Should NOT have __synced_0"
+        !has_get_synced_for_id(bytes, 0),
+        "Should NOT have GET_SYNCED for id 0"
     );
     // Element 1 should update (always deps)
     assert!(
-        bytes.windows(b"__synced_1".len()).any(|w| w == b"__synced_1"),
-        "Should have __synced_1 (always deps)"
+        has_get_synced_for_id(bytes, 1),
+        "Should have GET_SYNCED for id 1 (always deps)"
     );
 }
 
@@ -370,12 +387,12 @@ fn test_build_synced_update_multiple_fields_overlap() {
     let bytes = update.as_ref();
     // Element 0 should update (depends on A, which changed)
     assert!(
-        bytes.windows(b"__synced_0".len()).any(|w| w == b"__synced_0"),
-        "Should have __synced_0 (depends on A)"
+        has_get_synced_for_id(bytes, 0),
+        "Should have GET_SYNCED for id 0 (depends on A)"
     );
     // Element 1 should NOT update (depends only on C)
     assert!(
-        !bytes.windows(b"__synced_1".len()).any(|w| w == b"__synced_1"),
-        "Should NOT have __synced_1 (depends on C)"
+        !has_get_synced_for_id(bytes, 1),
+        "Should NOT have GET_SYNCED for id 1 (depends on C)"
     );
 }

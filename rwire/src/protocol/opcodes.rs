@@ -7,6 +7,16 @@
 /// Create an element. Format: [CREATE, element_type] → assigns next ref
 pub const CREATE: u8 = 0x02;
 
+/// Create a synced wrapper span with id="__synced_N".
+/// Format: [CREATE_SYNCED, synced_id_varint] → creates span, sets id, returns ref
+/// This is more compact than CREATE span + SET_ATTR id.
+pub const CREATE_SYNCED: u8 = 0x03;
+
+/// Get a synced element by numeric ID.
+/// Format: [GET_SYNCED, synced_id_varint] → returns ref to existing element
+/// This is more compact than GET_BY_ID with a symbol table entry for "__synced_N".
+pub const GET_SYNCED: u8 = 0x05;
+
 /// Set class on element. Format: [SET_CLASS, ref, symbol_idx]
 pub const SET_CLASS: u8 = 0x10;
 
@@ -122,6 +132,11 @@ pub const STYLE_SET: u8 = 0x81;
 
 /// Symbol table header. Format: [SYMBOLS, count, ...symbols]
 pub const SYMBOLS: u8 = 0xF0;
+
+/// Extend existing symbol table. Format: [SYMBOLS_EXTEND, count, ...symbols]
+/// New symbols are added starting at next available index (0x80 + existing count).
+/// Use this for updates when some symbols were already sent in initial render.
+pub const SYMBOLS_EXTEND: u8 = 0xF1;
 
 /// End of batch marker
 pub const BATCH_END: u8 = 0xFF;

@@ -144,7 +144,11 @@ fn render_summary(state: &AppState) -> ElementBuilder {
     let summary = format!(
         "Summary: counter={}, name={}, enabled={}, items={}",
         state.counter,
-        if state.name.is_empty() { "?" } else { &state.name },
+        if state.name.is_empty() {
+            "?"
+        } else {
+            &state.name
+        },
         state.enabled,
         state.items.len()
     );
@@ -160,9 +164,8 @@ fn build_app() -> ElementBuilder {
         el(El::H1).text("Fine-Grained Reactivity Demo"),
         el(El::P).class("intro").text(
             "Each renderer only updates when its specific fields change. \
-             Watch the server console to see which renderers are called!"
+             Watch the server console to see which renderers are called!",
         ),
-
         // Counter section
         el(El::Div).class("section").append([
             el(El::H2).text("Counter (field: counter)"),
@@ -172,26 +175,25 @@ fn build_app() -> ElementBuilder {
             ]),
             render_counter(),
         ]),
-
         // Name section
         el(El::Div).class("section").append([
             el(El::H2).text("Name (field: name)"),
             el(El::Div).class("controls").append([
-                el(El::Button).text("Set Alice").on(Ev::Click, set_name_alice()),
+                el(El::Button)
+                    .text("Set Alice")
+                    .on(Ev::Click, set_name_alice()),
                 el(El::Button).text("Set Bob").on(Ev::Click, set_name_bob()),
             ]),
             render_name(),
         ]),
-
         // Enabled section
         el(El::Div).class("section").append([
             el(El::H2).text("Enabled (field: enabled)"),
-            el(El::Div).class("controls").append([
-                el(El::Button).text("Toggle").on(Ev::Click, toggle_enabled()),
-            ]),
+            el(El::Div).class("controls").append([el(El::Button)
+                .text("Toggle")
+                .on(Ev::Click, toggle_enabled())]),
             render_enabled(),
         ]),
-
         // Items section
         el(El::Div).class("section").append([
             el(El::H2).text("Items (field: items)"),
@@ -201,20 +203,21 @@ fn build_app() -> ElementBuilder {
             ]),
             render_items(),
         ]),
-
         // Summary section (depends on all fields)
         el(El::Div).class("section").append([
             el(El::H2).text("Summary (all fields)"),
-            el(El::P).class("note").text(
-                "This renderer depends on ALL fields, so it updates on any change."
-            ),
+            el(El::P)
+                .class("note")
+                .text("This renderer depends on ALL fields, so it updates on any change."),
             render_summary(),
         ]),
-
         // Reset button
         el(El::Div).class("section").append([
             el(El::H2).text("Reset"),
-            el(El::Button).class("reset").text("Reset All").on(Ev::Click, reset_all()),
+            el(El::Button)
+                .class("reset")
+                .text("Reset All")
+                .on(Ev::Click, reset_all()),
         ]),
     ])
 }
