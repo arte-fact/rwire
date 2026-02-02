@@ -211,3 +211,72 @@ fn test_complex_tree() {
     // Verify structure was encoded
     assert!(!bytes.is_empty());
 }
+
+#[test]
+fn test_text_encoding_analysis() {
+
+    // Build a tree with repeated words
+    let page = el(El::Div).append([
+        el(El::Span).text("Hello world"),
+        el(El::Span).text("Hello there"),
+        el(El::Span).text("world peace"),
+    ]);
+
+    let mut ctx = BuildContext::new();
+    let state: () = ();
+    ctx.collect_symbols(&page, &state);
+
+    // Build word table and text encodings
+    ctx.build_word_table();
+
+    // Check word table was built with repeated words
+    let word_table = ctx.word_table();
+    assert!(!word_table.is_empty(), "Word table should have common words");
+    // "Hello" and "world" each appear 2 times, so they should be in the table
+    assert!(
+        word_table.contains(&"Hello".to_string()),
+        "Word table should contain 'Hello'"
+    );
+    assert!(
+        word_table.contains(&"world".to_string()),
+        "Word table should contain 'world'"
+    );
+}
+
+#[test]
+fn test_integer_text_encoding() {
+    use rwire::builder::TextEncoding;
+
+    // Build a tree with integer text
+    let counter = el(El::Div).append([
+        el(El::Span).text("42"),
+        el(El::Span).text("-10"),
+        el(El::Span).text("0"),
+    ]);
+
+    let mut ctx = BuildContext::new();
+    let state: () = ();
+    ctx.collect_symbols(&counter, &state);
+    ctx.build_word_table();
+
+    // Check that integer texts get Int encoding
+    let enc_42 = ctx.get_text_encoding("42");
+    let enc_neg = ctx.get_text_encoding("-10");
+    let enc_zero = ctx.get_text_encoding("0");
+
+    assert!(
+        matches!(enc_42, Some(TextEncoding::Int(42))),
+        "Expected Int(42), got {:?}",
+        enc_42
+    );
+    assert!(
+        matches!(enc_neg, Some(TextEncoding::Int(-10))),
+        "Expected Int(-10), got {:?}",
+        enc_neg
+    );
+    assert!(
+        matches!(enc_zero, Some(TextEncoding::Int(0))),
+        "Expected Int(0), got {:?}",
+        enc_zero
+    );
+}

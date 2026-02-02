@@ -311,6 +311,123 @@ mod encoder {
 
         // Savings: ~19 bytes per synced element reference!
     }
+
+    #[test]
+    fn test_word_table() {
+        use rwire::protocol::opcodes::WORD_TABLE;
+
+        let mut buf = OpcodeBuffer::new();
+        buf.begin_word_table(2);
+        buf.add_word("hello");
+        buf.add_word("world");
+
+        let bytes = buf.finish();
+        assert_eq!(bytes[0], WORD_TABLE);
+        assert_eq!(bytes[1], 2); // count
+        assert_eq!(bytes[2], 5); // len "hello"
+        assert_eq!(&bytes[3..8], b"hello");
+        assert_eq!(bytes[8], 5); // len "world"
+        assert_eq!(&bytes[9..14], b"world");
+    }
+
+    #[test]
+    fn test_set_text_words() {
+        use rwire::protocol::opcodes::SET_TEXT_WORDS;
+
+        let mut buf = OpcodeBuffer::new();
+        let el = buf.create(El::Span.as_u8());
+        buf.set_text_words(el, &[0, 1, 2]);
+
+        let bytes = buf.finish();
+        // CREATE Span (2 bytes) + SET_TEXT_WORDS (1 + 1 + 1 + 3 = 6 bytes)
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(bytes[2], SET_TEXT_WORDS);
+        assert_eq!(bytes[3], 0); // ref
+        assert_eq!(bytes[4], 3); // count
+        assert_eq!(bytes[5], 0); // word index 0
+        assert_eq!(bytes[6], 1); // word index 1
+        assert_eq!(bytes[7], 2); // word index 2
+    }
+
+    #[test]
+    fn test_set_text_int() {
+        use rwire::protocol::opcodes::SET_TEXT_INT;
+
+        // Test positive number
+        let mut buf = OpcodeBuffer::new();
+        let el = buf.create(El::Span.as_u8());
+        buf.set_text_int(el, 42);
+
+        let bytes = buf.finish();
+        assert_eq!(bytes[2], SET_TEXT_INT);
+        assert_eq!(bytes[3], 0); // ref
+        // 42 as zigzag: (42 << 1) ^ (42 >> 31) = 84
+        assert_eq!(bytes[4], 84); // varint for 84 is single byte
+
+        // Test negative number
+        let mut buf = OpcodeBuffer::new();
+        let el = buf.create(El::Span.as_u8());
+        buf.set_text_int(el, -1);
+
+        let bytes = buf.finish();
+        // -1 as zigzag: (-1 << 1) ^ (-1 >> 31) = -2 ^ -1 = 1
+        assert_eq!(bytes[4], 1);
+
+        // Test zero
+        let mut buf = OpcodeBuffer::new();
+        let el = buf.create(El::Span.as_u8());
+        buf.set_text_int(el, 0);
+
+        let bytes = buf.finish();
+        assert_eq!(bytes[4], 0);
+    }
+
+    #[test]
+    fn test_text_compression_byte_savings() {
+        // Compare byte costs of different text encoding approaches
+        // This test documents byte savings from text compression opcodes
+
+        // Scenario: Displaying "Hello world" using repeated words
+
+        // Traditional approach: Symbol table + SET_TEXT
+        // [SYMBOLS, 1, 11, "Hello world"] = 14 bytes
+        // [SET_TEXT, ref, sym] = 3 bytes
+        // Total: 17 bytes
+
+        // Word table approach: WORD_TABLE + SET_TEXT_WORDS
+        // [WORD_TABLE, 2, 5, "Hello", 5, "world"] = 14 bytes
+        // [SET_TEXT_WORDS, ref, 2, 0, 1] = 5 bytes
+        // Total: 19 bytes (slightly worse for single use)
+
+        // BUT if the same words appear multiple times:
+        // 10 uses of "Hello world" with symbol table:
+        // 14 + 10*3 = 44 bytes
+
+        // 10 uses of "Hello" and "world" separately:
+        // 14 (word table) + 10*5 = 64 bytes
+        // vs 14+14 (2 symbols) + 10*3*2 = 88 bytes
+
+        // For integer values:
+        // Symbol "123456789": 9 + 3 = 12 bytes
+        // SET_TEXT_INT: 3 + 5 (varint) = 8 bytes max
+        let mut buf = OpcodeBuffer::new();
+        buf.begin_symbols(1);
+        buf.add_symbol("123456789");
+        let symbol_bytes = buf.finish();
+
+        let mut buf = OpcodeBuffer::new();
+        let el = buf.create(El::Span.as_u8());
+        buf.set_text_int(el, 123456789);
+        let int_bytes = buf.finish();
+
+        // Symbol approach: SYMBOLS header (2) + string (10) = 12 bytes for table
+        // Int approach: CREATE (2) + SET_TEXT_INT (1 + 1 + 4) = 8 bytes total
+        println!("Symbol table for '123456789': {} bytes", symbol_bytes.len());
+        println!("SET_TEXT_INT for 123456789: {} bytes", int_bytes.len());
+
+        // Verify SET_TEXT_INT is more compact for numbers
+        assert!(int_bytes.len() < symbol_bytes.len() + 3); // + 3 for SET_TEXT
+    }
 }
 
 mod decoder {

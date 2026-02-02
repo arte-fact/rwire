@@ -6,8 +6,8 @@ use super::opcodes::{
     APPEND, BATCH_END, BIND_LOCAL, BIND_OPTIMISTIC, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
     CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
-    ROUTE_REPLACE, SET_ATTR, SET_CLASS, SET_DATA, SET_TEXT, STYLE_INJECT, STYLE_SET, SYMBOLS,
-    SYMBOLS_EXTEND, SYMBOL_SESSION_START,
+    ROUTE_REPLACE, SET_ATTR, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
+    STYLE_INJECT, STYLE_SET, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 
@@ -78,6 +78,23 @@ impl OpcodeBuffer {
         self
     }
 
+    /// Start a word table for text compression.
+    ///
+    /// Words are indexed 0..count-1. Use `add_word` to add each word.
+    /// Most frequent words should be added first (lowest indices).
+    pub fn begin_word_table(&mut self, count: u8) -> &mut Self {
+        self.buf.put_u8(WORD_TABLE);
+        self.buf.put_u8(count);
+        self
+    }
+
+    /// Add a word to the word table.
+    pub fn add_word(&mut self, word: &str) -> &mut Self {
+        self.buf.put_u8(word.len() as u8);
+        self.buf.put_slice(word.as_bytes());
+        self
+    }
+
     /// Create an element. Returns the ref index.
     ///
     /// Note: Returns u8 for backward compatibility. Use `create_ext` for >255 elements.
@@ -145,6 +162,33 @@ impl OpcodeBuffer {
         self.buf.put_u8(SET_TEXT);
         self.buf.put_u8(ref_idx);
         self.buf.put_u8(symbol_idx);
+        self
+    }
+
+    /// Set text content from word indices (words joined with spaces).
+    ///
+    /// More compact than symbol table when words are reused across strings.
+    /// Format: [SET_TEXT_WORDS, ref, count, idx0, idx1, ...]
+    pub fn set_text_words(&mut self, ref_idx: u8, word_indices: &[u8]) -> &mut Self {
+        self.buf.put_u8(SET_TEXT_WORDS);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(word_indices.len() as u8);
+        for &idx in word_indices {
+            self.buf.put_u8(idx);
+        }
+        self
+    }
+
+    /// Set text content to a number (varint encoded).
+    ///
+    /// More compact than symbol table for dynamic numeric values.
+    /// Format: [SET_TEXT_INT, ref, varint]
+    pub fn set_text_int(&mut self, ref_idx: u8, value: i32) -> &mut Self {
+        self.buf.put_u8(SET_TEXT_INT);
+        self.buf.put_u8(ref_idx);
+        // Encode as zigzag varint for signed integers
+        let zigzag = ((value << 1) ^ (value >> 31)) as u32;
+        write_varint(&mut self.buf, zigzag);
         self
     }
 

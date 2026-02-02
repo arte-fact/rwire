@@ -298,6 +298,17 @@ impl ElementBuilder {
     }
 }
 
+/// Represents how a text string should be encoded.
+#[derive(Clone, Debug)]
+pub enum TextEncoding {
+    /// Use symbol table (traditional approach)
+    Symbol(u8),
+    /// Use word indices (space-separated words)
+    Words(Vec<u8>),
+    /// Use integer encoding (for pure numeric strings)
+    Int(i32),
+}
+
 /// Context for building the DOM tree with state support.
 pub struct BuildContext {
     buf: OpcodeBuffer,
@@ -317,6 +328,14 @@ pub struct BuildContext {
     local_state_indices: HashMap<TypeId, u8>,
     /// Next available local state index
     next_local_state_idx: u8,
+    /// Word frequency counts (built during collect_symbols)
+    word_counts: HashMap<String, usize>,
+    /// Word table: word -> index (built after collect_symbols, before emit)
+    word_indices: HashMap<String, u8>,
+    /// Ordered word list (most frequent first)
+    words: Vec<String>,
+    /// Text encoding decisions (text -> encoding)
+    text_encodings: HashMap<String, TextEncoding>,
 }
 
 /// Information about a synced element for later updates.
@@ -384,7 +403,109 @@ impl BuildContext {
             has_local_handlers: false,
             local_state_indices: HashMap::new(),
             next_local_state_idx: 0,
+            word_counts: HashMap::new(),
+            word_indices: HashMap::new(),
+            words: Vec::new(),
+            text_encodings: HashMap::new(),
         }
+    }
+
+    /// Analyze a text string and count word frequencies.
+    fn analyze_text(&mut self, text: &str) {
+        // Check if it's a pure integer
+        if text.parse::<i32>().is_ok() {
+            return; // Will use SET_TEXT_INT
+        }
+
+        // Tokenize into words and count
+        for word in text.split_whitespace() {
+            *self.word_counts.entry(word.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    /// Build the word table after collecting all text.
+    /// Call this after collect_symbols and before emit.
+    pub fn build_word_table(&mut self) {
+        // Sort words by frequency (most common first)
+        let mut word_freq: Vec<_> = self.word_counts.drain().collect();
+        word_freq.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Only include words that appear more than once or are short common words
+        // Limit to 255 words (u8 index)
+        for (word, count) in word_freq.into_iter().take(255) {
+            // Include if: appears multiple times, OR is a common short word
+            if count > 1 || (word.len() <= 4 && count > 0) {
+                let idx = self.words.len() as u8;
+                self.word_indices.insert(word.clone(), idx);
+                self.words.push(word);
+            }
+        }
+
+        // Now decide encoding for each text string
+        self.decide_text_encodings();
+    }
+
+    /// Decide optimal encoding for each text string.
+    fn decide_text_encodings(&mut self) {
+        // Collect all text strings from symbols that look like text content
+        let texts: Vec<String> = self.symbols.clone();
+
+        for text in texts {
+            let encoding = self.choose_encoding(&text);
+            self.text_encodings.insert(text, encoding);
+        }
+    }
+
+    /// Choose the best encoding for a text string.
+    fn choose_encoding(&self, text: &str) -> TextEncoding {
+        // Try integer encoding first
+        if let Ok(n) = text.parse::<i32>() {
+            // Integer encoding: 3 bytes base + varint (1-5 bytes)
+            // Symbol encoding: 3 bytes + symbol table entry
+            // Integer is better for most numbers
+            return TextEncoding::Int(n);
+        }
+
+        // Try word encoding
+        let words: Vec<&str> = text.split_whitespace().collect();
+        if !words.is_empty() {
+            let word_indices: Vec<u8> = words
+                .iter()
+                .filter_map(|w| self.word_indices.get(*w).copied())
+                .collect();
+
+            // If all words are in the table, consider word encoding
+            if word_indices.len() == words.len() {
+                // Word encoding cost: 3 + word_count bytes
+                let word_cost = 3 + word_indices.len();
+                // Symbol encoding cost: 3 bytes (but symbol adds to table)
+                // For reused symbols, symbol is better
+                // For unique text with common words, words may be better
+
+                // Use word encoding if text is longer than encoding
+                if text.len() > word_cost + 2 {
+                    return TextEncoding::Words(word_indices);
+                }
+            }
+        }
+
+        // Fall back to symbol encoding
+        if let Some(&idx) = self.symbol_map.get(text) {
+            TextEncoding::Symbol(idx)
+        } else {
+            // Will be interned during emit
+            TextEncoding::Symbol(0) // Placeholder
+        }
+    }
+
+    /// Get the encoding for a text string.
+    pub fn get_text_encoding(&self, text: &str) -> Option<&TextEncoding> {
+        self.text_encodings.get(text)
+    }
+
+    /// Get the word table for emission.
+    pub fn word_table(&self) -> &[String] {
+        &self.words
     }
 
     /// Get or allocate a state index for a local state type.
@@ -459,6 +580,7 @@ impl BuildContext {
         self.used_elements.insert(el.el_type.as_u8());
 
         if let Some(ref text) = el.text {
+            self.analyze_text(text);
             self.intern(text);
         }
         if let Some(ref class) = el.class {
@@ -513,6 +635,7 @@ impl BuildContext {
         self.used_elements.insert(el.el_type.as_u8());
 
         if let Some(ref text) = el.text {
+            self.analyze_text(text);
             self.intern(text);
         }
         if let Some(ref class) = el.class {
@@ -537,11 +660,22 @@ impl BuildContext {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
 
+        // Build word table and decide text encodings
+        self.build_word_table();
+
         // Emit symbol table first (only on first call)
         if !self.symbols.is_empty() {
             self.buf.begin_symbols(self.symbols.len() as u8);
             for sym in self.symbols.drain(..) {
                 self.buf.add_symbol(&sym);
+            }
+        }
+
+        // Emit word table if we have words
+        if !self.words.is_empty() {
+            self.buf.begin_word_table(self.words.len() as u8);
+            for word in &self.words {
+                self.buf.add_word(word);
             }
         }
 
@@ -557,6 +691,9 @@ impl BuildContext {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
 
+        // Build word table and decide text encodings
+        self.build_word_table();
+
         // Emit symbol table first (only on first call)
         if !self.symbols.is_empty() {
             self.buf.begin_symbols(self.symbols.len() as u8);
@@ -565,7 +702,32 @@ impl BuildContext {
             }
         }
 
+        // Emit word table if we have words
+        if !self.words.is_empty() {
+            self.buf.begin_word_table(self.words.len() as u8);
+            for word in &self.words {
+                self.buf.add_word(word);
+            }
+        }
+
         self.emit_element_multi(el, None, states)
+    }
+
+    /// Emit text content using the best encoding.
+    fn emit_text(&mut self, ref_idx: u8, text: &str) {
+        match self.text_encodings.get(text) {
+            Some(TextEncoding::Int(n)) => {
+                self.buf.set_text_int(ref_idx, *n);
+            }
+            Some(TextEncoding::Words(indices)) => {
+                self.buf.set_text_words(ref_idx, indices);
+            }
+            _ => {
+                // Fall back to symbol encoding
+                let sym = *self.symbol_map.get(text).unwrap();
+                self.buf.set_text(ref_idx, sym);
+            }
+        }
     }
 
     fn emit_element(&mut self, el: &ElementBuilder, parent_ref: Option<u8>, state: &dyn Any) -> u8 {
@@ -614,8 +776,7 @@ impl BuildContext {
         }
 
         if let Some(ref text) = el.text {
-            let sym = *self.symbol_map.get(text).unwrap();
-            self.buf.set_text(ref_idx, sym);
+            self.emit_text(ref_idx, text);
         }
 
         for (key, value) in &el.attrs {
@@ -731,8 +892,7 @@ impl BuildContext {
         }
 
         if let Some(ref text) = el.text {
-            let sym = *self.symbol_map.get(text).unwrap();
-            self.buf.set_text(ref_idx, sym);
+            self.emit_text(ref_idx, text);
         }
 
         for (key, value) in &el.attrs {

@@ -138,6 +138,19 @@ pub const SYMBOLS: u8 = 0xF0;
 /// Use this for updates when some symbols were already sent in initial render.
 pub const SYMBOLS_EXTEND: u8 = 0xF1;
 
+/// Word table for text compression. Format: [WORD_TABLE, count, len, word, len, word, ...]
+/// Words are indexed 0..count-1, most frequent words should have lowest indices.
+/// Used with SET_TEXT_WORDS for efficient text encoding.
+pub const WORD_TABLE: u8 = 0xF2;
+
+/// Set text content from word indices. Format: [SET_TEXT_WORDS, ref, count, idx0, idx1, ...]
+/// Words are joined with spaces. More compact than symbol table for repeated words.
+pub const SET_TEXT_WORDS: u8 = 0x13;
+
+/// Set text content to a number. Format: [SET_TEXT_INT, ref, varint]
+/// More compact than symbol table for dynamic numeric values.
+pub const SET_TEXT_INT: u8 = 0x15;
+
 /// End of batch marker
 pub const BATCH_END: u8 = 0xFF;
 
