@@ -34,7 +34,8 @@ impl Style {
 
     /// Set a CSS property.
     pub fn set(mut self, property: &str, value: &str) -> Self {
-        self.properties.insert(property.to_string(), value.to_string());
+        self.properties
+            .insert(property.to_string(), value.to_string());
         self
     }
 
@@ -391,9 +392,7 @@ mod tests {
 
     #[test]
     fn test_style_basic() {
-        let style = Style::new()
-            .color("red")
-            .background("blue");
+        let style = Style::new().color("red").background("blue");
 
         let css = style.to_css();
         assert!(css.contains("color:red"));

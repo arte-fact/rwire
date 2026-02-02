@@ -167,8 +167,8 @@ mod tests {
     #[test]
     fn test_boundary_values() {
         // Test the exact boundary values
-        assert_eq!(encode(0x7F).len(), 1);  // 127 - max single byte
-        assert_eq!(encode(0x80).len(), 2);  // 128 - min two bytes
+        assert_eq!(encode(0x7F).len(), 1); // 127 - max single byte
+        assert_eq!(encode(0x80).len(), 2); // 128 - min two bytes
         assert_eq!(encode(0x407F).len(), 2); // 16,511 - max two bytes
         assert_eq!(encode(0x4080).len(), 3); // 16,512 - min three bytes
     }

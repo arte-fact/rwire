@@ -213,9 +213,9 @@ impl<T> IterWithRef<T> for Vec<T> {
     where
         T: 'a,
     {
-        self.iter().enumerate().map(|(idx, item)| {
-            (ItemRef::new(idx), item)
-        })
+        self.iter()
+            .enumerate()
+            .map(|(idx, item)| (ItemRef::new(idx), item))
     }
 }
 
@@ -224,9 +224,9 @@ impl<T> IterWithRef<T> for [T] {
     where
         T: 'a,
     {
-        self.iter().enumerate().map(|(idx, item)| {
-            (ItemRef::new(idx), item)
-        })
+        self.iter()
+            .enumerate()
+            .map(|(idx, item)| (ItemRef::new(idx), item))
     }
 }
 
@@ -235,9 +235,9 @@ impl<T, const N: usize> IterWithRef<T> for [T; N] {
     where
         T: 'a,
     {
-        self.iter().enumerate().map(|(idx, item)| {
-            (ItemRef::new(idx), item)
-        })
+        self.iter()
+            .enumerate()
+            .map(|(idx, item)| (ItemRef::new(idx), item))
     }
 }
 

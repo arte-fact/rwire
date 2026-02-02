@@ -22,7 +22,10 @@ mod encoder {
         assert_eq!(ref1, 1);
 
         let bytes = buf.finish();
-        assert_eq!(bytes.as_ref(), &[0x02, El::Div.as_u8(), 0x02, El::Button.as_u8()]);
+        assert_eq!(
+            bytes.as_ref(),
+            &[0x02, El::Div.as_u8(), 0x02, El::Button.as_u8()]
+        );
     }
 
     #[test]
@@ -37,10 +40,10 @@ mod encoder {
 
         let bytes = buf.finish();
         assert_eq!(bytes[0], 0xF0); // SYMBOLS
-        assert_eq!(bytes[1], 2);    // count
-        assert_eq!(bytes[2], 5);    // len "hello"
+        assert_eq!(bytes[1], 2); // count
+        assert_eq!(bytes[2], 5); // len "hello"
         assert_eq!(&bytes[3..8], b"hello");
-        assert_eq!(bytes[8], 5);    // len "world"
+        assert_eq!(bytes[8], 5); // len "world"
         assert_eq!(&bytes[9..14], b"world");
     }
 
@@ -74,10 +77,7 @@ mod encoder {
         buf.append(parent, child);
 
         let bytes = buf.finish();
-        assert_eq!(
-            bytes.as_ref(),
-            &[0x02, 0x00, 0x02, 0x01, 0x20, 0, 1]
-        );
+        assert_eq!(bytes.as_ref(), &[0x02, 0x00, 0x02, 0x01, 0x20, 0, 1]);
     }
 
     #[test]
@@ -102,10 +102,20 @@ mod encoder {
         assert_eq!(
             bytes.as_ref(),
             &[
-                0x02, El::Button.as_u8(),
-                0x30, 0, Ev::Click.as_u8(), 0,
-                0x31, 0, Ev::Submit.as_u8(), 1,
-                0x32, 0, Ev::Input.as_u8(), 2,
+                0x02,
+                El::Button.as_u8(),
+                0x30,
+                0,
+                Ev::Click.as_u8(),
+                0,
+                0x31,
+                0,
+                Ev::Submit.as_u8(),
+                1,
+                0x32,
+                0,
+                Ev::Input.as_u8(),
+                2,
             ]
         );
     }
@@ -148,12 +158,25 @@ mod encoder {
         assert_eq!(
             bytes.as_ref(),
             &[
-                0xF0, 1, 3, b'b', b't', b'n', // SYMBOLS
-                0x02, El::Button.as_u8(),      // CREATE
-                0x10, 0, 0x80,                 // SET_CLASS
-                0x30, 0, Ev::Click.as_u8(), 0, // BIND_LOCAL
-                0x20, 0xFF, 0,                 // APPEND to body
-                0xFF,                          // END
+                0xF0,
+                1,
+                3,
+                b'b',
+                b't',
+                b'n', // SYMBOLS
+                0x02,
+                El::Button.as_u8(), // CREATE
+                0x10,
+                0,
+                0x80, // SET_CLASS
+                0x30,
+                0,
+                Ev::Click.as_u8(),
+                0, // BIND_LOCAL
+                0x20,
+                0xFF,
+                0,    // APPEND to body
+                0xFF, // END
             ]
         );
     }
@@ -254,7 +277,10 @@ mod decoder {
     #[test]
     fn test_decode_error_display() {
         assert_eq!(DecodeError::TooShort.to_string(), "message too short");
-        assert_eq!(DecodeError::PayloadTruncated.to_string(), "payload truncated");
+        assert_eq!(
+            DecodeError::PayloadTruncated.to_string(),
+            "payload truncated"
+        );
     }
 }
 

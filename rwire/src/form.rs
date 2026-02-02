@@ -413,21 +413,16 @@ mod tests {
             ValidationRule::MinLength(5).to_json_value(),
             r#"{"type":"minLength","value":5}"#
         );
-        assert_eq!(
-            ValidationRule::Email.to_json_value(),
-            r#"{"type":"email"}"#
-        );
+        assert_eq!(ValidationRule::Email.to_json_value(), r#"{"type":"email"}"#);
     }
 
     #[test]
     fn test_form_builder() {
-        let form = Form::new()
-            .class("login-form")
-            .fields([
-                Field::text("username").required(),
-                Field::password("password").required(),
-                Field::submit("Log In"),
-            ]);
+        let form = Form::new().class("login-form").fields([
+            Field::text("username").required(),
+            Field::password("password").required(),
+            Field::submit("Log In"),
+        ]);
 
         assert_eq!(form.class, Some("login-form".to_string()));
         assert_eq!(form.fields.len(), 3);

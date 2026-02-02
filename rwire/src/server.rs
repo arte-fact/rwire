@@ -35,7 +35,9 @@ pub struct ServerWithRoot<F> {
 impl Server {
     /// Start building a server bound to the given address.
     pub fn bind(addr: &str) -> Result<ServerBuilder, AddrParseError> {
-        Ok(ServerBuilder { addr: addr.parse()? })
+        Ok(ServerBuilder {
+            addr: addr.parse()?,
+        })
     }
 }
 
@@ -310,6 +312,8 @@ where
                         }
 
                         // Re-render synced elements using multi-state support
+                        // Only re-render elements whose dependencies overlap with changed fields
+                        let changes = handler.changes();
                         let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
                             .states
                             .iter()
@@ -319,6 +323,7 @@ where
                             &conn_state.synced_elements,
                             &states_map,
                             &mut conn_state.handlers,
+                            changes,
                         );
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;

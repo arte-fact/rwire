@@ -225,7 +225,10 @@ mod tests {
         assert_eq!(ready.to_json(), r#"{"ready":true}"#);
 
         let not_ready = ReadyResponse::not_ready("at_capacity");
-        assert_eq!(not_ready.to_json(), r#"{"ready":false,"reason":"at_capacity"}"#);
+        assert_eq!(
+            not_ready.to_json(),
+            r#"{"ready":false,"reason":"at_capacity"}"#
+        );
     }
 
     #[test]

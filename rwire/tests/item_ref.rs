@@ -112,7 +112,11 @@ fn test_iter_with_ref_empty() {
 
 #[test]
 fn test_item_ref_get_with_iter_with_ref() {
-    let items = vec!["apple".to_string(), "banana".to_string(), "cherry".to_string()];
+    let items = vec![
+        "apple".to_string(),
+        "banana".to_string(),
+        "cherry".to_string(),
+    ];
 
     for (item_ref, item) in items.iter_with_ref() {
         // Verify that get() returns the same item

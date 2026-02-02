@@ -211,8 +211,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
 
-    Server::bind("127.0.0.1:9000")?
-        .root(build_app)
-        .run()
-        .await
+    Server::bind("127.0.0.1:9000")?.root(build_app).run().await
 }

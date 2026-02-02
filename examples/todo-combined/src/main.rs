@@ -15,7 +15,9 @@
 
 // EventContext is used in handler signatures (macro-transformed, so rustc doesn't see it)
 #[allow(unused_imports)]
-use rwire::{el, handler, renderer, El, ElementBuilder, Ev, EventContext, IterWithRef, Server, State};
+use rwire::{
+    el, handler, renderer, El, ElementBuilder, Ev, EventContext, IterWithRef, Server, State,
+};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -92,7 +94,8 @@ fn update_memory_input(state: &mut MemoryTodoState, ctx: &EventContext) {
 #[handler]
 fn add_memory_item(state: &mut MemoryTodoState, ctx: &EventContext) {
     // Try to get text from form field or direct input
-    let text = ctx.field("todo")
+    let text = ctx
+        .field("todo")
         .or_else(|| ctx.text())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
@@ -164,7 +167,8 @@ struct PersistedTodoItem {
 /// Handler with EventContext - adds todo from form submission
 #[handler]
 fn add_persisted_item(state: &mut PersistedTodoState, ctx: &EventContext) {
-    let text = ctx.field("todo")
+    let text = ctx
+        .field("todo")
         .or_else(|| ctx.text())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
@@ -268,12 +272,10 @@ fn build_memory_column() -> ElementBuilder {
                 .class("btn primary")
                 .on(Ev::Click, add_memory_item()),
         ]),
-        el(El::Div).class("controls").append([
-            el(El::Button)
-                .text("Clear Done")
-                .class("btn secondary")
-                .on(Ev::Click, clear_memory_completed()),
-        ]),
+        el(El::Div).class("controls").append([el(El::Button)
+            .text("Clear Done")
+            .class("btn secondary")
+            .on(Ev::Click, clear_memory_completed())]),
         render_memory_items(),
     ])
 }
@@ -299,12 +301,10 @@ fn build_persisted_column() -> ElementBuilder {
                     .text("Add")
                     .class("btn primary"),
             ]),
-        el(El::Div).class("controls").append([
-            el(El::Button)
-                .text("Clear Done")
-                .class("btn secondary")
-                .on(Ev::Click, clear_persisted_completed()),
-        ]),
+        el(El::Div).class("controls").append([el(El::Button)
+            .text("Clear Done")
+            .class("btn secondary")
+            .on(Ev::Click, clear_persisted_completed())]),
         render_persisted_items(),
     ])
 }
@@ -312,6 +312,16 @@ fn build_persisted_column() -> ElementBuilder {
 // ============================================================================
 // Renderers
 // ============================================================================
+
+// NOTE: The framework does NOT properly support nested renderers during updates!
+// See docs/architecture-state.md for details.
+//
+// When a parent renderer re-renders, it clears its wrapper's children.
+// If the parent contains a nested renderer, that nested wrapper is destroyed.
+// The nested renderer's update then tries to find a non-existent element.
+//
+// WORKAROUND: Keep renderers flat (no nested renderers).
+// Split logic into separate renderers that are siblings, not nested.
 
 #[renderer]
 fn render_local_items(state: &LocalUiState) -> ElementBuilder {
@@ -344,47 +354,23 @@ fn render_local_items(state: &LocalUiState) -> ElementBuilder {
     el(El::Span).class("item-list").text(&display)
 }
 
+// Memory todo - split into 3 renderers (items list, count, empty state)
+// These are SIBLINGS, not nested, to avoid the nested renderer bug.
+
 #[renderer]
-fn render_memory_items(state: &MemoryTodoState) -> ElementBuilder {
-    if state.items.is_empty() {
-        return el(El::Div).class("empty").text("No items - type above and click Add");
-    }
-
-    // Use iter_with_ref() for type-safe item references
-    let items: Vec<ElementBuilder> = state
-        .items
-        .iter_with_ref()
-        .map(|(item_ref, item)| {
-            let class = if item.done { "item done" } else { "item" };
-            el(El::Div).class(class).append([
-                el(El::Span)
-                    .class("checkbox")
-                    .text(if item.done { "[x]" } else { "[ ]" })
-                    // Use on_ref() instead of data("id") + on()
-                    .on_ref(Ev::Click, toggle_memory_item(), item_ref),
-                el(El::Span).class("text").text(&item.text),
-                el(El::Button)
-                    .class("delete")
-                    .text("x")
-                    // Use on_ref() for delete too
-                    .on_ref(Ev::Click, delete_memory_item(), item_ref),
-            ])
-        })
-        .collect();
-
-    let count = state.items.iter().filter(|i| !i.done).count();
-    let count_text = format!("{} item{} left", count, if count == 1 { "" } else { "s" });
-
-    el(El::Div).class("todo-list").append([
-        el(El::Div).class("items").append(items),
-        el(El::Div).class("footer").text(&count_text),
-    ])
+fn render_memory_items(_state: &MemoryTodoState) -> ElementBuilder {
+    // Container with items list and footer as siblings
+    el(El::Div)
+        .class("todo-list")
+        .append([render_memory_items_list(), render_memory_count()])
 }
 
 #[renderer]
-fn render_persisted_items(state: &PersistedTodoState) -> ElementBuilder {
+fn render_memory_items_list(state: &MemoryTodoState) -> ElementBuilder {
     if state.items.is_empty() {
-        return el(El::Div).class("empty").text("No items - type above and click Add");
+        return el(El::Div)
+            .class("empty")
+            .text("No items - type above and click Add");
     }
 
     // Use iter_with_ref() for type-safe item references
@@ -397,25 +383,73 @@ fn render_persisted_items(state: &PersistedTodoState) -> ElementBuilder {
                 el(El::Span)
                     .class("checkbox")
                     .text(if item.done { "[x]" } else { "[ ]" })
-                    // Use on_ref() instead of data("id") + on()
-                    .on_ref(Ev::Click, toggle_persisted_item(), item_ref),
+                    .on_ref(Ev::Click, toggle_memory_item(), item_ref),
                 el(El::Span).class("text").text(&item.text),
-                el(El::Button)
-                    .class("delete")
-                    .text("x")
-                    // Use on_ref() for delete too
-                    .on_ref(Ev::Click, delete_persisted_item(), item_ref),
+                el(El::Button).class("delete").text("x").on_ref(
+                    Ev::Click,
+                    delete_memory_item(),
+                    item_ref,
+                ),
             ])
         })
         .collect();
 
+    el(El::Div).class("items").append(items)
+}
+
+#[renderer]
+fn render_memory_count(state: &MemoryTodoState) -> ElementBuilder {
     let count = state.items.iter().filter(|i| !i.done).count();
     let count_text = format!("{} item{} left", count, if count == 1 { "" } else { "s" });
+    el(El::Div).class("footer").text(&count_text)
+}
 
-    el(El::Div).class("todo-list").append([
-        el(El::Div).class("items").append(items),
-        el(El::Div).class("footer").text(&count_text),
-    ])
+// Persisted todo - split into 3 renderers (same pattern)
+
+#[renderer]
+fn render_persisted_items(_state: &PersistedTodoState) -> ElementBuilder {
+    el(El::Div)
+        .class("todo-list")
+        .append([render_persisted_items_list(), render_persisted_count()])
+}
+
+#[renderer]
+fn render_persisted_items_list(state: &PersistedTodoState) -> ElementBuilder {
+    if state.items.is_empty() {
+        return el(El::Div)
+            .class("empty")
+            .text("No items - type above and click Add");
+    }
+
+    // Use iter_with_ref() for type-safe item references
+    let items: Vec<ElementBuilder> = state
+        .items
+        .iter_with_ref()
+        .map(|(item_ref, item)| {
+            let class = if item.done { "item done" } else { "item" };
+            el(El::Div).class(class).append([
+                el(El::Span)
+                    .class("checkbox")
+                    .text(if item.done { "[x]" } else { "[ ]" })
+                    .on_ref(Ev::Click, toggle_persisted_item(), item_ref),
+                el(El::Span).class("text").text(&item.text),
+                el(El::Button).class("delete").text("x").on_ref(
+                    Ev::Click,
+                    delete_persisted_item(),
+                    item_ref,
+                ),
+            ])
+        })
+        .collect();
+
+    el(El::Div).class("items").append(items)
+}
+
+#[renderer]
+fn render_persisted_count(state: &PersistedTodoState) -> ElementBuilder {
+    let count = state.items.iter().filter(|i| !i.done).count();
+    let count_text = format!("{} item{} left", count, if count == 1 { "" } else { "s" });
+    el(El::Div).class("footer").text(&count_text)
 }
 
 // ============================================================================

@@ -3,8 +3,9 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use rwire::{el, El, Ev, HandlerFn, MemoryState};
 use rwire::builder::{build_synced_update_multi, BuildContext, SyncedElement};
+use rwire::state::ChangeSet;
+use rwire::{el, El, Ev, HandlerFn, MemoryState};
 
 #[derive(Default)]
 struct TestState {
@@ -21,7 +22,7 @@ fn test_build_synced_update_multi_with_empty_synced() {
     let states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
     let mut handlers: Vec<HandlerFn> = vec![];
 
-    let update = build_synced_update_multi(&synced, &states, &mut handlers);
+    let update = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
 
     // With no synced elements, should return empty bytes
     assert!(update.is_empty());
@@ -76,10 +77,7 @@ fn test_build_context_tracks_elements() {
     let mut ctx = BuildContext::new();
     let state = ();
 
-    let el = el(El::Div).append([
-        el(El::Span).text("hello"),
-        el(El::Button).text("click"),
-    ]);
+    let el = el(El::Div).append([el(El::Span).text("hello"), el(El::Button).text("click")]);
 
     ctx.collect_symbols(&el, &state);
 
@@ -97,9 +95,7 @@ fn test_build_context_tracks_events() {
 
     let handler_spec = rwire::state::HandlerSpec::memory(test_handler);
 
-    let el = el(El::Button)
-        .text("click")
-        .on(Ev::Click, handler_spec);
+    let el = el(El::Button).text("click").on(Ev::Click, handler_spec);
 
     ctx.collect_symbols(&el, &state);
 
@@ -136,10 +132,9 @@ fn test_build_context_symbol_interning() {
     let state = ();
 
     // Use the same class name multiple times
-    let el = el(El::Div).class("shared").append([
-        el(El::Span).class("shared"),
-        el(El::Button).class("shared"),
-    ]);
+    let el = el(El::Div)
+        .class("shared")
+        .append([el(El::Span).class("shared"), el(El::Button).class("shared")]);
 
     ctx.collect_symbols(&el, &state);
     ctx.emit(&el, &state);
@@ -183,10 +178,7 @@ fn test_element_builder_accessors() {
 
 #[test]
 fn test_element_builder_children() {
-    let parent = el(El::Div).append([
-        el(El::Span).text("child1"),
-        el(El::Span).text("child2"),
-    ]);
+    let parent = el(El::Div).append([el(El::Span).text("child1"), el(El::Span).text("child2")]);
 
     let children = parent.children();
     assert_eq!(children.len(), 2);

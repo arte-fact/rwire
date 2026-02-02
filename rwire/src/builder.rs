@@ -43,7 +43,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::item_ref::ItemRef;
 use crate::protocol::{El, Ev, OpcodeBuffer};
-use crate::state::{HandlerFn, HandlerSpec, LocalMutations, Renderer, StorageType};
+use crate::state::{
+    ChangeSet, HandlerFn, HandlerSpec, LocalMutations, Renderer, RendererDeps, StorageType,
+};
 
 /// Create a new element builder.
 ///
@@ -59,7 +61,10 @@ pub fn el(el_type: El) -> ElementBuilder {
 }
 
 /// Trait for type-erased synced renderers.
-pub(crate) trait SyncedRenderer: Send + Sync {
+///
+/// This trait allows renderers to be stored and invoked without knowing
+/// the concrete state type at compile time.
+pub trait SyncedRenderer: Send + Sync {
     /// Render with the given state, returning a new ElementBuilder.
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder>;
     /// Clone this renderer into a boxed trait object.
@@ -68,11 +73,14 @@ pub(crate) trait SyncedRenderer: Send + Sync {
     fn state_type_id(&self) -> TypeId;
     /// Create a default state instance for this renderer's state type.
     fn create_default_state(&self) -> Box<dyn Any + Send + Sync>;
+    /// Get the dependency information for this renderer.
+    fn deps(&self) -> RendererDeps;
 }
 
 /// Implementation of SyncedRenderer for a specific state type.
 struct SyncedRendererImpl<S: Default + Send + Sync + 'static> {
     render: Renderer<S>,
+    deps: RendererDeps,
 }
 
 impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S> {
@@ -81,7 +89,10 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
     }
 
     fn clone_box(&self) -> Box<dyn SyncedRenderer> {
-        Box::new(SyncedRendererImpl { render: self.render })
+        Box::new(SyncedRendererImpl {
+            render: self.render,
+            deps: self.deps,
+        })
     }
 
     fn state_type_id(&self) -> TypeId {
@@ -90,6 +101,10 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
 
     fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
         Box::new(S::default())
+    }
+
+    fn deps(&self) -> RendererDeps {
+        self.deps
     }
 }
 
@@ -126,8 +141,26 @@ impl ElementBuilder {
     }
 
     /// Create a synced element that will re-render when state changes.
-    /// This is called by the `#[renderer]` macro.
+    ///
+    /// This is the legacy method that always re-renders on any state change.
+    /// Prefer using `synced_with_deps` for fine-grained reactivity.
     pub fn synced<S: Default + Send + Sync + 'static>(render: Renderer<S>) -> Self {
+        Self::synced_with_deps::<S>(render, RendererDeps::always())
+    }
+
+    /// Create a synced element with explicit dependency tracking.
+    ///
+    /// This is called by the `#[renderer]` macro with auto-detected or
+    /// explicitly specified dependencies.
+    ///
+    /// # Arguments
+    ///
+    /// * `render` - The render function that takes state and returns an ElementBuilder
+    /// * `deps` - Dependency information specifying which fields trigger re-renders
+    pub fn synced_with_deps<S: Default + Send + Sync + 'static>(
+        render: Renderer<S>,
+        deps: RendererDeps,
+    ) -> Self {
         Self {
             el_type: El::Div, // Placeholder, will be replaced by rendered content
             text: None,
@@ -135,7 +168,7 @@ impl ElementBuilder {
             attrs: Vec::new(),
             events: Vec::new(),
             children: Vec::new(),
-            synced: Some(Box::new(SyncedRendererImpl { render })),
+            synced: Some(Box::new(SyncedRendererImpl { render, deps })),
         }
     }
 
@@ -204,7 +237,12 @@ impl ElementBuilder {
     ///         .on_ref(Ev::Click, toggle_item(), item_ref)
     /// })
     /// ```
-    pub fn on_ref<T: 'static>(mut self, ev: Ev, handler: HandlerSpec, item_ref: ItemRef<T>) -> Self {
+    pub fn on_ref<T: 'static>(
+        mut self,
+        ev: Ev,
+        handler: HandlerSpec,
+        item_ref: ItemRef<T>,
+    ) -> Self {
         // Encode the item reference to bytes
         let mut param_bytes = Vec::new();
         item_ref.encode(&mut param_bytes);
@@ -283,9 +321,12 @@ pub struct BuildContext {
 
 /// Information about a synced element for later updates.
 pub struct SyncedElement {
-    pub(crate) id: u32,
+    /// Unique ID for this synced element (used in __synced_N wrapper IDs).
+    pub id: u32,
     pub(crate) renderer: Box<dyn SyncedRenderer>,
     pub(crate) state_type_id: TypeId,
+    /// Dependency information for fine-grained updates.
+    pub deps: RendererDeps,
 }
 
 impl Clone for SyncedElement {
@@ -294,11 +335,29 @@ impl Clone for SyncedElement {
             id: self.id,
             renderer: self.renderer.clone_box(),
             state_type_id: self.state_type_id,
+            deps: self.deps,
         }
     }
 }
 
 impl SyncedElement {
+    /// Create a new SyncedElement with explicit dependencies.
+    ///
+    /// This is primarily used for testing the fine-grained reactivity system.
+    pub fn new_with_deps(
+        id: u32,
+        renderer: Box<dyn SyncedRenderer>,
+        state_type_id: TypeId,
+        deps: RendererDeps,
+    ) -> Self {
+        Self {
+            id,
+            renderer,
+            state_type_id,
+            deps,
+        }
+    }
+
     /// Get the TypeId of the state type this element renders from.
     pub fn state_type_id(&self) -> TypeId {
         self.state_type_id
@@ -365,7 +424,11 @@ impl BuildContext {
         idx
     }
 
-    fn register_local_handler(&mut self, mut mutations: LocalMutations, state_type_id: Option<TypeId>) -> u8 {
+    fn register_local_handler(
+        &mut self,
+        mut mutations: LocalMutations,
+        state_type_id: Option<TypeId>,
+    ) -> u8 {
         self.has_local_handlers = true;
         // Assign state index if state type is known
         if let Some(type_id) = state_type_id {
@@ -514,6 +577,7 @@ impl BuildContext {
                 id: synced_id,
                 state_type_id: renderer.state_type_id(),
                 renderer: renderer.clone_box(),
+                deps: renderer.deps(),
             });
 
             if let Some(rendered) = renderer.render_with_state(state) {
@@ -571,10 +635,8 @@ impl BuildContext {
                 StorageType::Local => {
                     // Local handler - register mutations and emit BIND_LOCAL
                     if let Some(mutations) = &handler_spec.local_mutations {
-                        let handler_idx = self.register_local_handler(
-                            mutations.clone(),
-                            handler_spec.state_type_id,
-                        );
+                        let handler_idx = self
+                            .register_local_handler(mutations.clone(), handler_spec.state_type_id);
                         self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
                     }
                 }
@@ -631,6 +693,7 @@ impl BuildContext {
                 id: synced_id,
                 state_type_id: renderer.state_type_id(),
                 renderer: renderer.clone_box(),
+                deps: renderer.deps(),
             });
 
             // Find the state for this renderer's state type
@@ -694,10 +757,8 @@ impl BuildContext {
                 StorageType::Local => {
                     // Local handler - register mutations and emit BIND_LOCAL
                     if let Some(mutations) = &handler_spec.local_mutations {
-                        let handler_idx = self.register_local_handler(
-                            mutations.clone(),
-                            handler_spec.state_type_id,
-                        );
+                        let handler_idx = self
+                            .register_local_handler(mutations.clone(), handler_spec.state_type_id);
                         self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
                     }
                 }
@@ -819,12 +880,13 @@ impl Default for BuildContext {
 /// Build an update for synced elements that need to re-render.
 ///
 /// This version uses a single state for all synced elements (backwards compatible).
+/// Re-renders all synced elements (uses `ChangeSet::all()`).
 /// Note: This version doesn't support registering new handlers during re-render.
 pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + Sync)) -> Bytes {
     let mut states = HashMap::new();
     states.insert(state.type_id(), state);
     let mut handlers = Vec::new();
-    build_synced_update_multi(synced, &states, &mut handlers)
+    build_synced_update_multi(synced, &states, &mut handlers, ChangeSet::all())
 }
 
 /// Build an update for synced elements with multi-state support.
@@ -832,10 +894,19 @@ pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + S
 /// Each synced element will be rendered with its corresponding state type.
 /// Handlers are passed to enable event rebinding on dynamically created elements.
 /// New handlers discovered during re-render will be added to the handlers vector.
+///
+/// The `changes` parameter specifies which state fields were modified by the handler.
+/// Only synced elements whose dependencies overlap with the changed fields will be
+/// re-rendered. This provides zero-runtime overhead filtering using u64 bitmask operations.
+///
+/// Nested synced elements are properly handled: when a parent synced element
+/// re-renders, any nested synced elements within its content are wrapped with
+/// their correct IDs so subsequent updates can find them.
 pub fn build_synced_update_multi(
     synced: &[SyncedElement],
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     handlers: &mut Vec<HandlerFn>,
+    changes: ChangeSet,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
@@ -853,15 +924,34 @@ pub fn build_synced_update_multi(
         idx
     }
 
-    // First pass: collect symbols
+    // First pass: collect symbols (including nested synced element wrapper IDs)
+    // We need to track synced counter to assign correct IDs to nested synced elements
+    // Only process synced elements that need updating based on the ChangeSet
+    let mut synced_counter: u32 = 0;
     for se in synced {
+        // Track the highest synced ID to know where nested ones start
+        if se.id >= synced_counter {
+            synced_counter = se.id + 1;
+        }
+
+        // Skip elements that don't need updating (zero-cost bitmask check)
+        if !se.deps.needs_update(changes) {
+            continue;
+        }
+
         let wrapper_id = format!("__synced_{}", se.id);
         intern(&wrapper_id, &mut symbols, &mut symbol_map);
 
         // Find the state for this synced element's state type
         if let Some(state) = states.get(&se.state_type_id) {
             if let Some(rendered) = se.renderer.render_with_state(*state) {
-                collect_symbols_recursive(&rendered, &mut symbols, &mut symbol_map);
+                collect_symbols_recursive(
+                    &rendered,
+                    &mut symbols,
+                    &mut symbol_map,
+                    &mut synced_counter,
+                    states,
+                );
             }
         }
     }
@@ -877,7 +967,21 @@ pub fn build_synced_update_multi(
     }
 
     // Second pass: emit updates with full re-render
+    // Reset counter to track nested synced elements during emit
+    // Only process synced elements that need updating
+    let mut emit_synced_counter: u32 = synced
+        .iter()
+        .map(|se| se.id)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+
     for se in synced {
+        // Skip elements that don't need updating (zero-cost bitmask check)
+        if !se.deps.needs_update(changes) {
+            continue;
+        }
+
         let wrapper_id = format!("__synced_{}", se.id);
         let wrapper_id_sym = *symbol_map.get(&wrapper_id).unwrap();
 
@@ -891,7 +995,16 @@ pub fn build_synced_update_multi(
                 buf.clear_children(wrapper_ref);
 
                 // Emit the full rendered tree as children of wrapper
-                emit_update_element(&rendered, wrapper_ref, &mut buf, &symbol_map, handlers);
+                // Pass synced_counter to handle nested synced elements
+                emit_update_element(
+                    &rendered,
+                    wrapper_ref,
+                    &mut buf,
+                    &symbol_map,
+                    handlers,
+                    &mut emit_synced_counter,
+                    states,
+                );
             }
         }
     }
@@ -905,13 +1018,56 @@ pub fn build_synced_update_multi(
 /// This creates new DOM elements and appends them to the parent.
 /// Event handlers are rebound using existing handler indices, or new handlers
 /// are registered if they weren't present during initial render.
+///
+/// For nested synced elements, this creates wrapper spans with the correct IDs
+/// so that subsequent updates can find them.
 fn emit_update_element(
     el: &ElementBuilder,
     parent_ref: u8,
     buf: &mut OpcodeBuffer,
     symbol_map: &HashMap<String, u8>,
     handlers: &mut Vec<HandlerFn>,
+    synced_counter: &mut u32,
+    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
 ) -> u8 {
+    // Handle nested synced elements - create wrapper with ID
+    if let Some(renderer) = &el.synced {
+        let synced_id = *synced_counter;
+        *synced_counter += 1;
+
+        // Find the state for this renderer's state type
+        let state_type_id = renderer.state_type_id();
+        if let Some(state) = states.get(&state_type_id) {
+            if let Some(rendered) = renderer.render_with_state(*state) {
+                // Create a wrapper span with an ID for later targeting
+                let wrapper_id = format!("__synced_{}", synced_id);
+                if let Some(&wrapper_id_sym) = symbol_map.get(&wrapper_id) {
+                    let wrapper_ref = buf.create(El::Span.as_u8());
+                    // Built-in symbol 0x04 is "id"
+                    buf.set_attr(wrapper_ref, 0x04, wrapper_id_sym);
+
+                    // Emit the rendered content as a child of the wrapper
+                    emit_update_element(
+                        &rendered,
+                        wrapper_ref,
+                        buf,
+                        symbol_map,
+                        handlers,
+                        synced_counter,
+                        states,
+                    );
+
+                    // Append wrapper to parent
+                    buf.append(parent_ref, wrapper_ref);
+
+                    return wrapper_ref;
+                }
+            }
+        }
+        // If state not found or render failed, skip this synced element
+        return 0;
+    }
+
     // Create the element
     let ref_idx = buf.create(el.el_type.as_u8());
 
@@ -963,7 +1119,15 @@ fn emit_update_element(
 
     // Recursively emit children
     for child in &el.children {
-        emit_update_element(child, ref_idx, buf, symbol_map, handlers);
+        emit_update_element(
+            child,
+            ref_idx,
+            buf,
+            symbol_map,
+            handlers,
+            synced_counter,
+            states,
+        );
     }
 
     // Append to parent
@@ -972,27 +1136,50 @@ fn emit_update_element(
     ref_idx
 }
 
-fn collect_symbols_recursive(el: &ElementBuilder, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>) {
-    let mut intern = |s: &str| {
+fn collect_symbols_recursive(
+    el: &ElementBuilder,
+    symbols: &mut Vec<String>,
+    symbol_map: &mut HashMap<String, u8>,
+    synced_counter: &mut u32,
+    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+) {
+    fn intern(s: &str, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>) {
         if symbol_map.contains_key(s) {
             return;
         }
         let idx = 0x80 + symbols.len() as u8;
         symbols.push(s.to_string());
         symbol_map.insert(s.to_string(), idx);
-    };
+    }
+
+    // Handle synced elements - they need wrapper IDs and recursive symbol collection
+    if let Some(renderer) = &el.synced {
+        // Intern the wrapper ID for this nested synced element
+        let wrapper_id = format!("__synced_{}", *synced_counter);
+        intern(&wrapper_id, symbols, symbol_map);
+        *synced_counter += 1;
+
+        // Render and collect symbols from the rendered content
+        let state_type_id = renderer.state_type_id();
+        if let Some(state) = states.get(&state_type_id) {
+            if let Some(rendered) = renderer.render_with_state(*state) {
+                collect_symbols_recursive(&rendered, symbols, symbol_map, synced_counter, states);
+            }
+        }
+        return;
+    }
 
     if let Some(ref text) = el.text {
-        intern(text);
+        intern(text, symbols, symbol_map);
     }
     if let Some(ref class) = el.class {
-        intern(class);
+        intern(class, symbols, symbol_map);
     }
     for (key, value) in &el.attrs {
-        intern(key);
-        intern(value);
+        intern(key, symbols, symbol_map);
+        intern(value, symbols, symbol_map);
     }
     for child in &el.children {
-        collect_symbols_recursive(child, symbols, symbol_map);
+        collect_symbols_recursive(child, symbols, symbol_map, synced_counter, states);
     }
 }

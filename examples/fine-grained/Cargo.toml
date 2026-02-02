@@ -1,0 +1,8 @@
+[package]
+name = "fine-grained"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rwire = { path = "../../rwire" }
+async-std = { version = "1", features = ["attributes"] }

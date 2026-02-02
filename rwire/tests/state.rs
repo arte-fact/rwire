@@ -1,7 +1,7 @@
 //! Tests for state management.
 
+use rwire::{ChangeSet, EventContext, EventPayload, HandlerFn, MemoryState, RendererDeps};
 use std::any::TypeId;
-use rwire::{EventContext, EventPayload, HandlerFn, MemoryState};
 
 #[derive(Default)]
 struct TestState {
@@ -229,4 +229,142 @@ fn test_event_payload_enum() {
         EventPayload::Empty => {}
         _ => panic!("Expected Empty variant"),
     }
+}
+
+// ============================================================================
+// RendererDeps and ChangeSet Tests
+// ============================================================================
+
+#[test]
+fn test_renderer_deps_always() {
+    let deps = RendererDeps::always();
+    assert!(deps.always);
+
+    // Always deps should trigger update for any change
+    assert!(deps.needs_update(ChangeSet::new()));
+    assert!(deps.needs_update(ChangeSet::all()));
+    assert!(deps.needs_update(ChangeSet::from_fields(&[0])));
+}
+
+#[test]
+fn test_renderer_deps_from_fields() {
+    let deps = RendererDeps::from_fields(&[0, 2, 5]);
+
+    // Should set bits 0, 2, and 5
+    assert_eq!(deps.mask, 0b100101);
+    assert!(!deps.always);
+
+    // Should need update when overlapping fields change
+    assert!(deps.needs_update(ChangeSet::from_fields(&[0])));
+    assert!(deps.needs_update(ChangeSet::from_fields(&[2])));
+    assert!(deps.needs_update(ChangeSet::from_fields(&[5])));
+    assert!(deps.needs_update(ChangeSet::from_fields(&[0, 1, 2])));
+
+    // Should not need update when non-overlapping fields change
+    assert!(!deps.needs_update(ChangeSet::from_fields(&[1])));
+    assert!(!deps.needs_update(ChangeSet::from_fields(&[3, 4])));
+    assert!(!deps.needs_update(ChangeSet::new()));
+}
+
+#[test]
+fn test_renderer_deps_all_changed() {
+    let deps = RendererDeps::from_fields(&[0]);
+
+    // all_changed should trigger any deps
+    assert!(deps.needs_update(ChangeSet::all()));
+}
+
+#[test]
+fn test_renderer_deps_none() {
+    let deps = RendererDeps::none();
+    assert_eq!(deps.mask, 0);
+    assert!(!deps.always);
+
+    // None deps should only update for all_changed
+    assert!(!deps.needs_update(ChangeSet::new()));
+    assert!(!deps.needs_update(ChangeSet::from_fields(&[0, 1, 2])));
+    assert!(deps.needs_update(ChangeSet::all()));
+}
+
+#[test]
+fn test_renderer_deps_merge() {
+    let deps1 = RendererDeps::from_fields(&[0, 1]);
+    let deps2 = RendererDeps::from_fields(&[2, 3]);
+    let merged = deps1.merge(deps2);
+
+    assert_eq!(merged.mask, 0b1111); // bits 0, 1, 2, 3
+    assert!(!merged.always);
+
+    // Merging with always produces always
+    let always = RendererDeps::always();
+    let merged_always = deps1.merge(always);
+    assert!(merged_always.always);
+}
+
+#[test]
+fn test_renderer_deps_high_field_ids() {
+    // Field IDs >= 64 should be ignored
+    let deps = RendererDeps::from_fields(&[63, 64, 100]);
+    assert_eq!(deps.mask, 1u64 << 63);
+}
+
+#[test]
+fn test_changeset_new() {
+    let cs = ChangeSet::new();
+    assert_eq!(cs.mask, 0);
+    assert!(!cs.all_changed);
+    assert!(cs.is_empty());
+}
+
+#[test]
+fn test_changeset_all() {
+    let cs = ChangeSet::all();
+    assert!(cs.all_changed);
+    assert!(!cs.is_empty());
+}
+
+#[test]
+fn test_changeset_from_fields() {
+    let cs = ChangeSet::from_fields(&[1, 3, 7]);
+    assert_eq!(cs.mask, 0b10001010);
+    assert!(!cs.all_changed);
+    assert!(!cs.is_empty());
+}
+
+#[test]
+fn test_changeset_merge() {
+    let cs1 = ChangeSet::from_fields(&[0]);
+    let cs2 = ChangeSet::from_fields(&[1]);
+    let merged = cs1.merge(cs2);
+
+    assert_eq!(merged.mask, 0b11);
+    assert!(!merged.all_changed);
+
+    // Merging with all produces all
+    let all = ChangeSet::all();
+    let merged_all = cs1.merge(all);
+    assert!(merged_all.all_changed);
+}
+
+#[test]
+fn test_changeset_with_field() {
+    let cs = ChangeSet::new().with_field(3).with_field(5);
+    assert_eq!(cs.mask, 0b101000);
+}
+
+#[test]
+fn test_deps_changeset_interaction() {
+    // Simulate counter app: renderer depends on field 0 (count)
+    const FIELD_COUNT: u8 = 0;
+    const FIELD_NAME: u8 = 1;
+
+    let render_count_deps = RendererDeps::from_fields(&[FIELD_COUNT]);
+
+    // Handler increments count -> field 0 changes
+    let increment_changes = ChangeSet::from_fields(&[FIELD_COUNT]);
+    assert!(render_count_deps.needs_update(increment_changes));
+
+    // Handler updates name -> field 1 changes
+    let update_name_changes = ChangeSet::from_fields(&[FIELD_NAME]);
+    assert!(!render_count_deps.needs_update(update_name_changes));
 }

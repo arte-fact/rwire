@@ -286,9 +286,7 @@ mod tests {
             el(El::Div).text("Users")
         }
 
-        let router = Router::new()
-            .route("/", home)
-            .route("/users", users);
+        let router = Router::new().route("/", home).route("/users", users);
 
         assert!(router.match_path("/").is_some());
         assert!(router.match_path("/users").is_some());

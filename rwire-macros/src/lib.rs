@@ -6,6 +6,7 @@
 //! - `#[handler]` - registers a handler function with its state type
 //! - `#[renderer]` - transforms a render function into a synced element factory
 
+mod field_access_parser;
 mod mutation_parser;
 
 use proc_macro::TokenStream;
@@ -84,7 +85,11 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         parse_storage_attr(attr)
     } else {
         // Default to Memory storage
-        (quote!(rwire::StorageType::Memory), String::new(), String::new())
+        (
+            quote!(rwire::StorageType::Memory),
+            String::new(),
+            String::new(),
+        )
     };
 
     // Extract field information for local state
@@ -281,9 +286,12 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
             (ty, pat, name)
         }
         _ => {
-            return syn::Error::new_spanned(&input.sig, "handler must take &mut State as first argument")
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(
+                &input.sig,
+                "handler must take &mut State as first argument",
+            )
+            .to_compile_error()
+            .into();
         }
     };
 
@@ -379,26 +387,48 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
+    // Auto-detect field writes for ChangeSet
+    let field_writes = field_access_parser::extract_writes(block, &param_name);
+    let changes_expr = if field_writes.is_empty() {
+        // No writes detected - could be complex logic (method calls, etc.)
+        // Use all() as fallback
+        quote! { rwire::ChangeSet::all() }
+    } else {
+        // Generate field constant references
+        let field_consts: Vec<_> = field_writes
+            .iter()
+            .map(|name| {
+                let const_name = syn::Ident::new(
+                    &format!("FIELD_{}", name.to_uppercase()),
+                    proc_macro2::Span::call_site(),
+                );
+                quote! { #state_type::#const_name }
+            })
+            .collect();
+        quote! { rwire::ChangeSet::from_fields(&[#(#field_consts),*]) }
+    };
+
     // Check if we have a 2-parameter handler with EventContext
     if has_context_param {
         if let Some(ctx_pat) = ctx_param_pat {
-            // Generate HandlerSpec with context support
+            // Generate HandlerSpec with context support and ChangeSet
             let expanded = quote! {
                 #vis fn #fn_name() -> rwire::HandlerSpec {
+                    const CHANGES: rwire::ChangeSet = #changes_expr;
                     fn #inner_name(#param_pat: &mut #state_type, #ctx_pat: &rwire::EventContext) #block
-                    rwire::HandlerSpec::from_fn_with_context::<#state_type>(#inner_name)
+                    rwire::HandlerSpec::from_fn_with_context_and_changes::<#state_type>(#inner_name, CHANGES)
                 }
             };
             return TokenStream::from(expanded);
         }
     }
 
-    // Default: generate HandlerSpec that uses the State trait's STORAGE_TYPE
-    // to determine behavior at compile time (single-parameter handler)
+    // Default: generate HandlerSpec with auto-detected ChangeSet
     let expanded = quote! {
         #vis fn #fn_name() -> rwire::HandlerSpec {
+            const CHANGES: rwire::ChangeSet = #changes_expr;
             fn #inner_name(#param_pat: &mut #state_type) #block
-            rwire::HandlerSpec::from_fn::<#state_type>(#inner_name)
+            rwire::HandlerSpec::from_fn_with_changes::<#state_type>(#inner_name, CHANGES)
         }
     };
 
@@ -409,35 +439,58 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Transforms a function taking `&State` and returning `ElementBuilder` into
 /// a synced element factory. The returned element will automatically re-render
-/// when the state changes.
+/// when state changes, with fine-grained dependency tracking.
 ///
-/// # Example
+/// # Dependency Detection
+///
+/// By default, the macro analyzes the function body to detect which state fields
+/// are accessed. Only changes to those fields trigger re-renders.
 ///
 /// ```ignore
 /// #[renderer]
 /// fn render_count(state: &Counter) -> ElementBuilder {
+///     // Auto-detected: depends on `count` field
 ///     el(El::Span).text(&state.count.to_string())
 /// }
 /// ```
 ///
-/// Expands to:
+/// # Always Re-render
+///
+/// Use `#[renderer(always)]` when field dependencies can't be statically determined
+/// (e.g., accessing fields through methods, closures, or dynamic indexes):
+///
+/// ```ignore
+/// #[renderer(always)]
+/// fn render_debug(state: &AppState) -> ElementBuilder {
+///     // Complex logic that can't be analyzed
+///     el(El::Pre).text(&format!("{:?}", state))
+/// }
+/// ```
+///
+/// # Expansion
+///
+/// The macro generates code that tracks dependencies at compile time:
 ///
 /// ```ignore
 /// fn render_count() -> ElementBuilder {
+///     const DEPS: RendererDeps = RendererDeps::from_fields(&[Counter::FIELD_COUNT]);
 ///     fn __render_count_inner(state: &Counter) -> ElementBuilder {
 ///         el(El::Span).text(&state.count.to_string())
 ///     }
-///     ElementBuilder::synced::<Counter>(__render_count_inner)
+///     ElementBuilder::synced_with_deps::<Counter>(__render_count_inner, DEPS)
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn renderer(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);
     let fn_name = &input.sig.ident;
     let inner_name = syn::Ident::new(&format!("__{}_inner", fn_name), fn_name.span());
     let vis = &input.vis;
     let block = &input.block;
     let return_type = &input.sig.output;
+
+    // Check for #[renderer(always)] attribute
+    let is_always = !attr.is_empty() && attr.to_string().contains("always");
 
     // Extract the state type from the first parameter
     let state_type = match input.sig.inputs.first() {
@@ -449,22 +502,61 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
         _ => {
-            return syn::Error::new_spanned(&input.sig, "renderer must take &State as first argument")
-                .to_compile_error()
-                .into();
+            return syn::Error::new_spanned(
+                &input.sig,
+                "renderer must take &State as first argument",
+            )
+            .to_compile_error()
+            .into();
         }
     };
 
     // Get the parameter pattern (the variable name)
-    let param_pat = match input.sig.inputs.first() {
-        Some(FnArg::Typed(pat_type)) => pat_type.pat.as_ref().clone(),
+    let (param_pat, param_name) = match input.sig.inputs.first() {
+        Some(FnArg::Typed(pat_type)) => {
+            let pat = pat_type.pat.as_ref().clone();
+            let name = match &pat {
+                syn::Pat::Ident(ident) => ident.ident.to_string(),
+                _ => "state".to_string(),
+            };
+            (pat, name)
+        }
         _ => unreachable!(),
+    };
+
+    // Generate dependency tracking
+    let deps_expr = if is_always {
+        // Always re-render mode
+        quote! { rwire::RendererDeps::always() }
+    } else {
+        // Auto-detect dependencies from function body
+        let field_names = field_access_parser::extract_reads(block, &param_name);
+
+        if field_names.is_empty() {
+            // No fields detected - could be complex logic, use always
+            quote! { rwire::RendererDeps::always() }
+        } else {
+            // Generate field constant references
+            let field_consts: Vec<_> = field_names
+                .iter()
+                .map(|name| {
+                    let const_name = syn::Ident::new(
+                        &format!("FIELD_{}", name.to_uppercase()),
+                        proc_macro2::Span::call_site(),
+                    );
+                    quote! { #state_type::#const_name }
+                })
+                .collect();
+
+            quote! { rwire::RendererDeps::from_fields(&[#(#field_consts),*]) }
+        }
     };
 
     let expanded = quote! {
         #vis fn #fn_name() -> rwire::ElementBuilder {
+            const DEPS: rwire::RendererDeps = #deps_expr;
             fn #inner_name(#param_pat: &#state_type) #return_type #block
-            rwire::ElementBuilder::synced::<#state_type>(#inner_name)
+            rwire::ElementBuilder::synced_with_deps::<#state_type>(#inner_name, DEPS)
         }
     };
 

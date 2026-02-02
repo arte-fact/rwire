@@ -101,10 +101,7 @@ impl Histogram {
 
     /// Create a histogram with custom bucket boundaries.
     pub fn with_buckets(boundaries: &[f64]) -> Self {
-        let buckets = boundaries
-            .iter()
-            .map(|&b| (b, AtomicU64::new(0)))
-            .collect();
+        let buckets = boundaries.iter().map(|&b| (b, AtomicU64::new(0))).collect();
 
         Self {
             buckets,
@@ -226,7 +223,8 @@ impl Metrics {
         let labels = self.labels.read().ok();
         match labels {
             Some(l) if !l.is_empty() => {
-                let pairs: Vec<String> = l.iter().map(|(k, v)| format!("{}=\"{}\"", k, v)).collect();
+                let pairs: Vec<String> =
+                    l.iter().map(|(k, v)| format!("{}=\"{}\"", k, v)).collect();
                 format!("{{{}}}", pairs.join(","))
             }
             _ => String::new(),

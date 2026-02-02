@@ -79,7 +79,10 @@ pub fn parse_mutations(
 }
 
 /// Parse a single expression into a mutation operation.
-fn parse_expr_mutation(expr: &Expr, state_param: &str) -> Result<Option<MutationOp>, MutationError> {
+fn parse_expr_mutation(
+    expr: &Expr,
+    state_param: &str,
+) -> Result<Option<MutationOp>, MutationError> {
     match expr {
         // Assignment: state.field = value
         Expr::Assign(assign) => parse_assignment(assign, state_param),
@@ -91,13 +94,17 @@ fn parse_expr_mutation(expr: &Expr, state_param: &str) -> Result<Option<Mutation
         _ => Err(MutationError::new(
             expr.span(),
             "unsupported expression in local handler; only field assignments \
-                 (state.field = value) and compound assignments (state.field += n) are supported".to_string(),
+                 (state.field = value) and compound assignments (state.field += n) are supported"
+                .to_string(),
         )),
     }
 }
 
 /// Parse an assignment expression: state.field = value
-fn parse_assignment(assign: &ExprAssign, state_param: &str) -> Result<Option<MutationOp>, MutationError> {
+fn parse_assignment(
+    assign: &ExprAssign,
+    state_param: &str,
+) -> Result<Option<MutationOp>, MutationError> {
     // Left side must be state.field
     let field_name = extract_field_access(&assign.left, state_param)?;
 
@@ -297,7 +304,9 @@ mod tests {
         });
         let mutations = parse_mutations(&stmts, "state").unwrap();
         assert_eq!(mutations.len(), 1);
-        assert!(matches!(&mutations[0], MutationOp::AddI8 { field_name, value } if field_name == "count" && *value == 1));
+        assert!(
+            matches!(&mutations[0], MutationOp::AddI8 { field_name, value } if field_name == "count" && *value == 1)
+        );
     }
 
     #[test]
@@ -307,7 +316,9 @@ mod tests {
         });
         let mutations = parse_mutations(&stmts, "state").unwrap();
         assert_eq!(mutations.len(), 1);
-        assert!(matches!(&mutations[0], MutationOp::AddI8 { field_name, value } if field_name == "count" && *value == -5));
+        assert!(
+            matches!(&mutations[0], MutationOp::AddI8 { field_name, value } if field_name == "count" && *value == -5)
+        );
     }
 
     #[test]
@@ -317,7 +328,9 @@ mod tests {
         });
         let mutations = parse_mutations(&stmts, "state").unwrap();
         assert_eq!(mutations.len(), 1);
-        assert!(matches!(&mutations[0], MutationOp::SetBool { field_name, value } if field_name == "flag" && *value));
+        assert!(
+            matches!(&mutations[0], MutationOp::SetBool { field_name, value } if field_name == "flag" && *value)
+        );
     }
 
     #[test]
@@ -327,7 +340,9 @@ mod tests {
         });
         let mutations = parse_mutations(&stmts, "state").unwrap();
         assert_eq!(mutations.len(), 1);
-        assert!(matches!(&mutations[0], MutationOp::SetI32 { field_name, value } if field_name == "value" && *value == 42));
+        assert!(
+            matches!(&mutations[0], MutationOp::SetI32 { field_name, value } if field_name == "value" && *value == 42)
+        );
     }
 
     #[test]
@@ -337,7 +352,9 @@ mod tests {
         });
         let mutations = parse_mutations(&stmts, "state").unwrap();
         assert_eq!(mutations.len(), 1);
-        assert!(matches!(&mutations[0], MutationOp::SetI32 { field_name, value } if field_name == "value" && *value == -10));
+        assert!(
+            matches!(&mutations[0], MutationOp::SetI32 { field_name, value } if field_name == "value" && *value == -10)
+        );
     }
 
     #[test]
@@ -347,7 +364,9 @@ mod tests {
         });
         let mutations = parse_mutations(&stmts, "state").unwrap();
         assert_eq!(mutations.len(), 1);
-        assert!(matches!(&mutations[0], MutationOp::SetStr { field_name, value } if field_name == "name" && value == "hello"));
+        assert!(
+            matches!(&mutations[0], MutationOp::SetStr { field_name, value } if field_name == "name" && value == "hello")
+        );
     }
 
     #[test]

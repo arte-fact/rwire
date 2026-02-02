@@ -3,8 +3,8 @@
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
+use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, MemoryState, Server, State, StorageType};
 use std::time::Duration;
-use rwire::{el, El, Ev, Server, ElementBuilder, HandlerSpec, MemoryState, State, StorageType};
 
 // Test state
 #[derive(Default)]
@@ -25,7 +25,9 @@ fn build_counter() -> ElementBuilder {
     el(El::Div).class("counter").append([
         el(El::Button).text("-"),
         el(El::Span).text("0"),
-        el(El::Button).text("+").on(Ev::Click, HandlerSpec::memory(increment)),
+        el(El::Button)
+            .text("+")
+            .on(Ev::Click, HandlerSpec::memory(increment)),
     ])
 }
 
@@ -50,7 +52,10 @@ async fn test_server_accepts_http() {
 
     // Connect and send HTTP request
     let mut stream = TcpStream::connect("127.0.0.1:19001").await.unwrap();
-    stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
 
     // Read response
     let mut response = vec![0u8; 4096];
@@ -84,7 +89,10 @@ async fn test_capsule_tree_shaking() {
     task::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19002").await.unwrap();
-    stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
 
     let mut response = vec![0u8; 4096];
     let n = stream.read(&mut response).await.unwrap();
@@ -113,7 +121,10 @@ async fn test_counter_capsule() {
     task::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19003").await.unwrap();
-    stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
 
     let mut response = vec![0u8; 4096];
     let n = stream.read(&mut response).await.unwrap();
@@ -162,8 +173,16 @@ Sec-WebSocket-Version: 13\r\n\r\n";
 
     // Should get WebSocket upgrade response
     let response_lower = response_str.to_lowercase();
-    assert!(response_str.contains("101 Switching Protocols"), "Expected 101 response, got: {}", response_str);
-    assert!(response_lower.contains("upgrade: websocket"), "Expected Upgrade header, got: {}", response_str);
+    assert!(
+        response_str.contains("101 Switching Protocols"),
+        "Expected 101 response, got: {}",
+        response_str
+    );
+    assert!(
+        response_lower.contains("upgrade: websocket"),
+        "Expected Upgrade header, got: {}",
+        response_str
+    );
 
     drop(stream);
     server_task.cancel().await;
@@ -183,19 +202,24 @@ async fn test_concurrent_connections() {
     task::sleep(Duration::from_millis(100)).await;
 
     // Spawn multiple concurrent requests
-    let handles: Vec<_> = (0..5).map(|_| {
-        task::spawn(async {
-            let mut stream = TcpStream::connect("127.0.0.1:19005").await.unwrap();
-            stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+    let handles: Vec<_> = (0..5)
+        .map(|_| {
+            task::spawn(async {
+                let mut stream = TcpStream::connect("127.0.0.1:19005").await.unwrap();
+                stream
+                    .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    .await
+                    .unwrap();
 
-            let mut response = vec![0u8; 4096];
-            let n = stream.read(&mut response).await.unwrap();
-            let response_str = String::from_utf8_lossy(&response[..n]);
+                let mut response = vec![0u8; 4096];
+                let n = stream.read(&mut response).await.unwrap();
+                let response_str = String::from_utf8_lossy(&response[..n]);
 
-            assert!(response_str.contains("HTTP/1.1 200 OK"));
-            true
+                assert!(response_str.contains("HTTP/1.1 200 OK"));
+                true
+            })
         })
-    }).collect();
+        .collect();
 
     // Wait for all requests
     for handle in handles {
@@ -219,7 +243,10 @@ async fn test_content_length() {
     task::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19006").await.unwrap();
-    stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
 
     let mut response = vec![0u8; 8192];
     let n = stream.read(&mut response).await.unwrap();

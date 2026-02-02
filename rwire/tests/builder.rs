@@ -1,7 +1,7 @@
 //! Tests for the element builder API.
 
-use rwire::{el, El};
 use rwire::builder::BuildContext;
+use rwire::{el, El};
 
 #[test]
 fn test_el_builder_basic() {
@@ -33,15 +33,15 @@ fn test_el_builder_attrs() {
     let attrs = elem.attributes();
     assert_eq!(attrs.len(), 2);
     assert_eq!(attrs[0], ("type".to_string(), "text".to_string()));
-    assert_eq!(attrs[1], ("placeholder".to_string(), "Enter name".to_string()));
+    assert_eq!(
+        attrs[1],
+        ("placeholder".to_string(), "Enter name".to_string())
+    );
 }
 
 #[test]
 fn test_el_builder_children() {
-    let elem = el(El::Div).append([
-        el(El::Span).text("one"),
-        el(El::Span).text("two"),
-    ]);
+    let elem = el(El::Div).append([el(El::Span).text("one"), el(El::Span).text("two")]);
 
     assert_eq!(elem.children().len(), 2);
     assert_eq!(elem.children()[0].text_content(), Some("one"));
@@ -63,15 +63,16 @@ fn test_el_builder_chaining() {
 
 #[test]
 fn test_el_builder_nested() {
-    let elem = el(El::Div).class("outer").append([
-        el(El::Div).class("inner").append([
-            el(El::Span).text("deep"),
-        ]),
-    ]);
+    let elem = el(El::Div).class("outer").append([el(El::Div)
+        .class("inner")
+        .append([el(El::Span).text("deep")])]);
 
     assert_eq!(elem.class_name(), Some("outer"));
     assert_eq!(elem.children()[0].class_name(), Some("inner"));
-    assert_eq!(elem.children()[0].children()[0].text_content(), Some("deep"));
+    assert_eq!(
+        elem.children()[0].children()[0].text_content(),
+        Some("deep")
+    );
 }
 
 #[test]
@@ -84,10 +85,7 @@ fn test_build_context_new() {
 
 #[test]
 fn test_build_context_tracks_elements() {
-    let elem = el(El::Div).append([
-        el(El::Button),
-        el(El::Span),
-    ]);
+    let elem = el(El::Div).append([el(El::Button), el(El::Span)]);
 
     let mut ctx = BuildContext::new();
     let state: () = ();
@@ -121,9 +119,9 @@ fn test_build_context_emits_opcodes() {
 #[test]
 fn test_build_context_symbol_interning() {
     // Same string used multiple times should be interned once
-    let elem = el(El::Div).class("shared").append([
-        el(El::Span).class("shared"),
-    ]);
+    let elem = el(El::Div)
+        .class("shared")
+        .append([el(El::Span).class("shared")]);
 
     let mut ctx = BuildContext::new();
     let state: () = ();
@@ -188,7 +186,9 @@ fn test_complex_tree() {
         ]),
         el(El::Div).class("field").append([
             el(El::Span).text("Password:"),
-            el(El::Input).attr("type", "password").attr("name", "password"),
+            el(El::Input)
+                .attr("type", "password")
+                .attr("name", "password"),
         ]),
         el(El::Button).text("Login").attr("type", "submit"),
     ]);
