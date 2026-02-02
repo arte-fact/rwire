@@ -9,3 +9,5 @@ async-tungstenite = { version = "0.25", features = ["async-std-runtime"] }
 bytes = "1.5"
 futures = "0.3"
 rwire-macros = { path = "../rwire-macros" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

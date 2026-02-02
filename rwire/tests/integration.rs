@@ -4,7 +4,7 @@ use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
 use std::time::Duration;
-use rwire::{el, El, Ev, Server, ElementBuilder, HandlerFn, ClientState};
+use rwire::{el, El, Ev, Server, ElementBuilder, HandlerSpec, MemoryState, State, StorageType};
 
 // Test state
 #[derive(Default)]
@@ -12,7 +12,10 @@ struct Counter {
     count: i32,
 }
 
-impl ClientState for Counter {}
+impl MemoryState for Counter {}
+impl State for Counter {
+    const STORAGE_TYPE: StorageType = StorageType::Memory;
+}
 
 fn increment(state: &mut Counter) {
     state.count += 1;
@@ -22,7 +25,7 @@ fn build_counter() -> ElementBuilder {
     el(El::Div).class("counter").append([
         el(El::Button).text("-"),
         el(El::Span).text("0"),
-        el(El::Button).text("+").on(Ev::Click, HandlerFn::new(increment)),
+        el(El::Button).text("+").on(Ev::Click, HandlerSpec::memory(increment)),
     ])
 }
 

@@ -52,15 +52,33 @@
 pub mod builder;
 pub mod capsule;
 pub mod capsule_gen;
+pub mod config;
+pub mod form;
+pub mod health;
+pub mod item_ref;
+pub mod metrics;
 pub mod protocol;
+pub mod registry;
+pub mod router;
 pub mod server;
+pub mod session;
 pub mod state;
+pub mod store;
+pub mod style;
 
 // Builder API exports
 pub use builder::{el, ElementBuilder};
 
+// Item reference exports
+pub use item_ref::{ItemRef, IterWithRef};
+
 // State exports
-pub use state::{ClientState, HandlerFn};
+#[allow(deprecated)]
+pub use state::ClientState;
+pub use state::{
+    EventContext, EventPayload, HandlerFn, HandlerSpec, LocalMutations, LocalState, MemoryState,
+    Mutation, PersistedState, State, StorageType,
+};
 
 // Protocol exports
 pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
@@ -68,8 +86,37 @@ pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 // Server exports
 pub use server::Server;
 
+// Store exports
+pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};
+
+// Config exports
+pub use config::ServerConfig;
+
+// Registry exports
+pub use registry::{AdmissionError, ConnectionGuard, ConnectionRegistry};
+
+// Health exports
+pub use health::{HealthResponse, HealthStatus, ReadyResponse};
+
+// Form exports
+pub use form::{Field, FieldType, Form, ValidationRule};
+
+// Router exports
+pub use router::{Link, Route, RoutePattern, Router};
+
+// Style exports
+pub use style::{ScopedClass, Style};
+
+// Metrics exports
+pub use metrics::{Counter, Gauge, Histogram, Metrics};
+
+// Session exports
+pub use session::{Session, SessionId};
+
 // Macro re-exports
-pub use rwire_macros::{handler, renderer, ClientState};
+#[allow(deprecated)]
+pub use rwire_macros::ClientState;
+pub use rwire_macros::{handler, renderer, State};
 
 // Re-export common types for convenience
 pub use bytes::Bytes;

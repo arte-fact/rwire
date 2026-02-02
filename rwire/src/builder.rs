@@ -38,11 +38,12 @@
 //! ```
 
 use bytes::Bytes;
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 
+use crate::item_ref::ItemRef;
 use crate::protocol::{El, Ev, OpcodeBuffer};
-use crate::state::{ClientState, HandlerFn, Renderer};
+use crate::state::{HandlerFn, HandlerSpec, LocalMutations, Renderer, StorageType};
 
 /// Create a new element builder.
 ///
@@ -63,20 +64,32 @@ pub(crate) trait SyncedRenderer: Send + Sync {
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder>;
     /// Clone this renderer into a boxed trait object.
     fn clone_box(&self) -> Box<dyn SyncedRenderer>;
+    /// Get the TypeId of the state type this renderer expects.
+    fn state_type_id(&self) -> TypeId;
+    /// Create a default state instance for this renderer's state type.
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync>;
 }
 
 /// Implementation of SyncedRenderer for a specific state type.
-struct SyncedRendererImpl<S: ClientState> {
+struct SyncedRendererImpl<S: Default + Send + Sync + 'static> {
     render: Renderer<S>,
 }
 
-impl<S: ClientState> SyncedRenderer for SyncedRendererImpl<S> {
+impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S> {
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
         state.downcast_ref::<S>().map(|s| (self.render)(s))
     }
 
     fn clone_box(&self) -> Box<dyn SyncedRenderer> {
         Box::new(SyncedRendererImpl { render: self.render })
+    }
+
+    fn state_type_id(&self) -> TypeId {
+        TypeId::of::<S>()
+    }
+
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        Box::new(S::default())
     }
 }
 
@@ -93,7 +106,7 @@ pub struct ElementBuilder {
     text: Option<String>,
     class: Option<String>,
     attrs: Vec<(String, String)>,
-    events: Vec<(Ev, HandlerFn)>,
+    events: Vec<(Ev, HandlerSpec)>,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
 }
@@ -114,7 +127,7 @@ impl ElementBuilder {
 
     /// Create a synced element that will re-render when state changes.
     /// This is called by the `#[renderer]` macro.
-    pub fn synced<S: ClientState>(render: Renderer<S>) -> Self {
+    pub fn synced<S: Default + Send + Sync + 'static>(render: Renderer<S>) -> Self {
         Self {
             el_type: El::Div, // Placeholder, will be replaced by rendered content
             text: None,
@@ -144,11 +157,61 @@ impl ElementBuilder {
         self
     }
 
+    /// Set a data attribute on this element (e.g., `data-id="5"`).
+    ///
+    /// This is a convenience method that prefixes the key with "data-".
+    /// The value can be retrieved in handlers via `ctx.data("key")`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Button)
+    ///     .text("Delete")
+    ///     .data("id", &item.id.to_string())
+    ///     .on(Ev::Click, delete_item())
+    /// ```
+    pub fn data(self, key: &str, value: &str) -> Self {
+        self.attr(&format!("data-{}", key), value)
+    }
+
+    /// Set inline style on this element.
+    pub fn style(self, style: crate::style::Style) -> Self {
+        self.attr("style", &style.to_css())
+    }
+
     /// Bind an event handler to this element.
     ///
     /// The handler function will be called when the event occurs.
-    pub fn on(mut self, ev: Ev, handler: HandlerFn) -> Self {
+    /// For local state handlers, the event is handled entirely on the client.
+    /// For memory/persisted state handlers, the event triggers a server round-trip.
+    pub fn on(mut self, ev: Ev, handler: HandlerSpec) -> Self {
         self.events.push((ev, handler));
+        self
+    }
+
+    /// Bind an event handler with an item reference parameter.
+    ///
+    /// This is used for dynamically-generated content where each item needs
+    /// its own event handler. The `ItemRef<T>` is encoded and sent back with
+    /// the event, enabling type-safe item lookup in the handler.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// state.items.iter_with_ref().map(|(item_ref, item)| {
+    ///     el(El::Li)
+    ///         .text(&item.text)
+    ///         .on_ref(Ev::Click, toggle_item(), item_ref)
+    /// })
+    /// ```
+    pub fn on_ref<T: 'static>(mut self, ev: Ev, handler: HandlerSpec, item_ref: ItemRef<T>) -> Self {
+        // Encode the item reference to bytes
+        let mut param_bytes = Vec::new();
+        item_ref.encode(&mut param_bytes);
+
+        // Clone the handler and attach the param bytes
+        let handler_with_params = handler.with_param_bytes(param_bytes);
+        self.events.push((ev, handler_with_params));
         self
     }
 
@@ -192,7 +255,7 @@ impl ElementBuilder {
     }
 
     /// Get the events.
-    pub fn events(&self) -> &[(Ev, HandlerFn)] {
+    pub fn events(&self) -> &[(Ev, HandlerSpec)] {
         &self.events
     }
 }
@@ -202,17 +265,27 @@ pub struct BuildContext {
     buf: OpcodeBuffer,
     symbols: Vec<String>,
     symbol_map: HashMap<String, u8>,
+    /// Remote handlers (Memory/Persisted state)
     handlers: Vec<HandlerFn>,
+    /// Local handlers with their mutations
+    local_handlers: Vec<LocalMutations>,
     synced_elements: Vec<SyncedElement>,
     next_synced_id: u32,
     used_elements: HashSet<u8>,
     used_events: HashSet<u8>,
+    /// Whether any local handlers are used (for tree shaking capsule)
+    has_local_handlers: bool,
+    /// Mapping from local state TypeId to state index
+    local_state_indices: HashMap<TypeId, u8>,
+    /// Next available local state index
+    next_local_state_idx: u8,
 }
 
 /// Information about a synced element for later updates.
 pub struct SyncedElement {
     pub(crate) id: u32,
     pub(crate) renderer: Box<dyn SyncedRenderer>,
+    pub(crate) state_type_id: TypeId,
 }
 
 impl Clone for SyncedElement {
@@ -220,7 +293,20 @@ impl Clone for SyncedElement {
         Self {
             id: self.id,
             renderer: self.renderer.clone_box(),
+            state_type_id: self.state_type_id,
         }
+    }
+}
+
+impl SyncedElement {
+    /// Get the TypeId of the state type this element renders from.
+    pub fn state_type_id(&self) -> TypeId {
+        self.state_type_id
+    }
+
+    /// Create a default state instance for this element's state type.
+    pub fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        self.renderer.create_default_state()
     }
 }
 
@@ -231,11 +317,26 @@ impl BuildContext {
             symbols: Vec::new(),
             symbol_map: HashMap::new(),
             handlers: Vec::new(),
+            local_handlers: Vec::new(),
             synced_elements: Vec::new(),
             next_synced_id: 0,
             used_elements: HashSet::new(),
             used_events: HashSet::new(),
+            has_local_handlers: false,
+            local_state_indices: HashMap::new(),
+            next_local_state_idx: 0,
         }
+    }
+
+    /// Get or allocate a state index for a local state type.
+    fn get_or_create_local_state_idx(&mut self, state_type_id: TypeId) -> u8 {
+        if let Some(&idx) = self.local_state_indices.get(&state_type_id) {
+            return idx;
+        }
+        let idx = self.next_local_state_idx;
+        self.next_local_state_idx += 1;
+        self.local_state_indices.insert(state_type_id, idx);
+        idx
     }
 
     fn intern(&mut self, s: &str) -> u8 {
@@ -248,7 +349,7 @@ impl BuildContext {
         idx
     }
 
-    fn register_handler(&mut self, handler: HandlerFn) -> u8 {
+    fn register_remote_handler(&mut self, handler: HandlerFn) -> u8 {
         // Check if handler is already registered (by comparing function pointers)
         for (i, h) in self.handlers.iter().enumerate() {
             // Compare the underlying function pointers
@@ -261,6 +362,17 @@ impl BuildContext {
         }
         let idx = self.handlers.len() as u8;
         self.handlers.push(handler);
+        idx
+    }
+
+    fn register_local_handler(&mut self, mut mutations: LocalMutations, state_type_id: Option<TypeId>) -> u8 {
+        self.has_local_handlers = true;
+        // Assign state index if state type is known
+        if let Some(type_id) = state_type_id {
+            mutations.state_idx = self.get_or_create_local_state_idx(type_id);
+        }
+        let idx = self.local_handlers.len() as u8;
+        self.local_handlers.push(mutations);
         idx
     }
 
@@ -304,12 +416,62 @@ impl BuildContext {
             }
             self.collect_symbols(child, state);
         }
-        // Reset synced_id counter after collecting - we'll increment again during emit
-        self.next_synced_id = 0;
+    }
+
+    /// Collect all symbols from an element tree with multi-state support.
+    /// Each synced element is rendered with its corresponding state type.
+    pub fn collect_symbols_multi(
+        &mut self,
+        el: &ElementBuilder,
+        states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+    ) {
+        // If this is a synced element, render it first with the appropriate state
+        if let Some(renderer) = &el.synced {
+            // Track the span wrapper element type
+            self.used_elements.insert(El::Span.as_u8());
+            // Pre-intern the synced element's wrapper ID
+            let synced_id = format!("__synced_{}", self.next_synced_id);
+            self.intern(&synced_id);
+            self.next_synced_id += 1;
+
+            // Find the state for this renderer's state type
+            let state_type_id = renderer.state_type_id();
+            if let Some(state) = states.get(&state_type_id) {
+                if let Some(rendered) = renderer.render_with_state(*state) {
+                    self.collect_symbols_multi(&rendered, states);
+                }
+            }
+            return;
+        }
+
+        // Track element type usage
+        self.used_elements.insert(el.el_type.as_u8());
+
+        if let Some(ref text) = el.text {
+            self.intern(text);
+        }
+        if let Some(ref class) = el.class {
+            self.intern(class);
+        }
+        for (key, value) in &el.attrs {
+            self.intern(key);
+            self.intern(value);
+        }
+        // Track event type usage
+        for (ev, _) in &el.events {
+            self.used_events.insert(ev.as_u8());
+        }
+        // Process children
+        for child in &el.children {
+            self.collect_symbols_multi(child, states);
+        }
     }
 
     /// Emit opcodes for an element tree (second pass).
     pub fn emit(&mut self, el: &ElementBuilder, state: &dyn Any) -> u8 {
+        // Reset synced_id counter - we increment again during emit
+        self.next_synced_id = 0;
+
         // Emit symbol table first (only on first call)
         if !self.symbols.is_empty() {
             self.buf.begin_symbols(self.symbols.len() as u8);
@@ -321,6 +483,26 @@ impl BuildContext {
         self.emit_element(el, None, state)
     }
 
+    /// Emit opcodes for an element tree with multi-state support.
+    pub fn emit_multi(
+        &mut self,
+        el: &ElementBuilder,
+        states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+    ) -> u8 {
+        // Reset synced_id counter - we increment again during emit
+        self.next_synced_id = 0;
+
+        // Emit symbol table first (only on first call)
+        if !self.symbols.is_empty() {
+            self.buf.begin_symbols(self.symbols.len() as u8);
+            for sym in self.symbols.drain(..) {
+                self.buf.add_symbol(&sym);
+            }
+        }
+
+        self.emit_element_multi(el, None, states)
+    }
+
     fn emit_element(&mut self, el: &ElementBuilder, parent_ref: Option<u8>, state: &dyn Any) -> u8 {
         // If this is a synced element, render it and wrap with an ID
         if let Some(renderer) = &el.synced {
@@ -330,6 +512,7 @@ impl BuildContext {
             // Store the synced element info for later updates
             self.synced_elements.push(SyncedElement {
                 id: synced_id,
+                state_type_id: renderer.state_type_id(),
                 renderer: renderer.clone_box(),
             });
 
@@ -381,10 +564,39 @@ impl BuildContext {
         }
 
         // Bind events and track event type usage
-        for (ev, handler) in &el.events {
+        for (ev, handler_spec) in &el.events {
             self.used_events.insert(ev.as_u8());
-            let handler_idx = self.register_handler(handler.clone());
-            self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
+
+            match handler_spec.storage_type {
+                StorageType::Local => {
+                    // Local handler - register mutations and emit BIND_LOCAL
+                    if let Some(mutations) = &handler_spec.local_mutations {
+                        let handler_idx = self.register_local_handler(
+                            mutations.clone(),
+                            handler_spec.state_type_id,
+                        );
+                        self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
+                    }
+                }
+                StorageType::Memory | StorageType::Persisted => {
+                    // Remote handler - register handler and emit BIND_REMOTE or BIND_REMOTE_PARAM
+                    if let Some(handler) = &handler_spec.remote_handler {
+                        let handler_idx = self.register_remote_handler(handler.clone());
+
+                        // Use BIND_REMOTE_PARAM if we have param bytes, otherwise BIND_REMOTE
+                        if let Some(param_bytes) = &handler_spec.param_bytes {
+                            self.buf.bind_remote_param(
+                                ref_idx,
+                                ev.as_u8(),
+                                handler_idx,
+                                param_bytes,
+                            );
+                        } else {
+                            self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
+                        }
+                    }
+                }
+            }
         }
 
         // Emit children
@@ -402,15 +614,163 @@ impl BuildContext {
         ref_idx
     }
 
+    /// Emit an element with multi-state support.
+    fn emit_element_multi(
+        &mut self,
+        el: &ElementBuilder,
+        parent_ref: Option<u8>,
+        states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+    ) -> u8 {
+        // If this is a synced element, render it and wrap with an ID
+        if let Some(renderer) = &el.synced {
+            let synced_id = self.next_synced_id;
+            self.next_synced_id += 1;
+
+            // Store the synced element info for later updates
+            self.synced_elements.push(SyncedElement {
+                id: synced_id,
+                state_type_id: renderer.state_type_id(),
+                renderer: renderer.clone_box(),
+            });
+
+            // Find the state for this renderer's state type
+            let state_type_id = renderer.state_type_id();
+            if let Some(state) = states.get(&state_type_id) {
+                if let Some(rendered) = renderer.render_with_state(*state) {
+                    // Create a wrapper span with an ID for later targeting
+                    let wrapper_id = format!("__synced_{}", synced_id);
+                    let wrapper_id_sym = *self.symbol_map.get(&wrapper_id).unwrap();
+
+                    // Track span element usage for synced wrapper
+                    self.used_elements.insert(El::Span.as_u8());
+
+                    let ref_idx = self.buf.create(El::Span.as_u8());
+                    // Built-in symbol 0x04 is "id"
+                    self.buf.set_attr(ref_idx, 0x04, wrapper_id_sym);
+
+                    // Emit the rendered content as a child
+                    self.emit_element_multi(&rendered, Some(ref_idx), states);
+
+                    // Append wrapper to parent
+                    if let Some(parent) = parent_ref {
+                        self.buf.append(parent, ref_idx);
+                    } else {
+                        self.buf.append_to_body(ref_idx);
+                    }
+
+                    return ref_idx;
+                }
+            }
+            // If state not found or render failed, skip this synced element
+            return 0;
+        }
+
+        // Track element type usage
+        self.used_elements.insert(el.el_type.as_u8());
+
+        let ref_idx = self.buf.create(el.el_type.as_u8());
+
+        if let Some(ref class) = el.class {
+            let sym = *self.symbol_map.get(class).unwrap();
+            self.buf.set_class(ref_idx, sym);
+        }
+
+        if let Some(ref text) = el.text {
+            let sym = *self.symbol_map.get(text).unwrap();
+            self.buf.set_text(ref_idx, sym);
+        }
+
+        for (key, value) in &el.attrs {
+            let key_sym = *self.symbol_map.get(key).unwrap();
+            let val_sym = *self.symbol_map.get(value).unwrap();
+            self.buf.set_attr(ref_idx, key_sym, val_sym);
+        }
+
+        // Bind events and track event type usage
+        for (ev, handler_spec) in &el.events {
+            self.used_events.insert(ev.as_u8());
+
+            match handler_spec.storage_type {
+                StorageType::Local => {
+                    // Local handler - register mutations and emit BIND_LOCAL
+                    if let Some(mutations) = &handler_spec.local_mutations {
+                        let handler_idx = self.register_local_handler(
+                            mutations.clone(),
+                            handler_spec.state_type_id,
+                        );
+                        self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
+                    }
+                }
+                StorageType::Memory | StorageType::Persisted => {
+                    // Remote handler - register handler and emit BIND_REMOTE or BIND_REMOTE_PARAM
+                    if let Some(handler) = &handler_spec.remote_handler {
+                        let handler_idx = self.register_remote_handler(handler.clone());
+
+                        // Use BIND_REMOTE_PARAM if we have param bytes, otherwise BIND_REMOTE
+                        if let Some(param_bytes) = &handler_spec.param_bytes {
+                            self.buf.bind_remote_param(
+                                ref_idx,
+                                ev.as_u8(),
+                                handler_idx,
+                                param_bytes,
+                            );
+                        } else {
+                            self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Emit children
+        for child in &el.children {
+            self.emit_element_multi(child, Some(ref_idx), states);
+        }
+
+        // Append to parent
+        if let Some(parent) = parent_ref {
+            self.buf.append(parent, ref_idx);
+        } else {
+            self.buf.append_to_body(ref_idx);
+        }
+
+        ref_idx
+    }
+
+    /// Emit local handler definitions to the buffer.
+    ///
+    /// This should be called after emit() but before finish().
+    pub fn emit_local_handlers(&mut self) {
+        for (idx, mutations) in self.local_handlers.iter().enumerate() {
+            let encoded = mutations.encode();
+            self.buf.def_local_handler(
+                idx as u8,
+                mutations.state_idx,
+                &encoded,
+                mutations.mutations.len() as u8,
+            );
+        }
+    }
+
     /// Finish building and return the bytes.
     pub fn finish(mut self) -> Bytes {
         self.buf.end();
         self.buf.finish()
     }
 
-    /// Get the registered handlers.
+    /// Get the registered remote handlers.
     pub fn handlers(&self) -> &[HandlerFn] {
         &self.handlers
+    }
+
+    /// Get the registered local handlers.
+    pub fn local_handlers(&self) -> &[LocalMutations] {
+        &self.local_handlers
+    }
+
+    /// Check if any local handlers are registered.
+    pub fn has_local_handlers(&self) -> bool {
+        self.has_local_handlers
     }
 
     /// Take the synced elements.
@@ -427,6 +787,27 @@ impl BuildContext {
     pub fn used_events(&self) -> &HashSet<u8> {
         &self.used_events
     }
+
+    /// Get the local state type indices mapping.
+    pub fn local_state_indices(&self) -> &HashMap<TypeId, u8> {
+        &self.local_state_indices
+    }
+
+    /// Emit local state initialization opcodes.
+    ///
+    /// This should be called after emit() and emit_local_handlers() to initialize
+    /// client-side state. The `serializer` function takes a TypeId and returns
+    /// the JSON serialization of the default state for that type.
+    pub fn emit_local_state<F>(&mut self, serializer: F)
+    where
+        F: Fn(TypeId) -> Option<String>,
+    {
+        for (&type_id, &state_idx) in &self.local_state_indices {
+            if let Some(json) = serializer(type_id) {
+                self.buf.init_local_state(state_idx, &json);
+            }
+        }
+    }
 }
 
 impl Default for BuildContext {
@@ -436,14 +817,33 @@ impl Default for BuildContext {
 }
 
 /// Build an update for synced elements that need to re-render.
-pub fn build_synced_update(synced: &[SyncedElement], state: &dyn Any) -> Bytes {
+///
+/// This version uses a single state for all synced elements (backwards compatible).
+/// Note: This version doesn't support registering new handlers during re-render.
+pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + Sync)) -> Bytes {
+    let mut states = HashMap::new();
+    states.insert(state.type_id(), state);
+    let mut handlers = Vec::new();
+    build_synced_update_multi(synced, &states, &mut handlers)
+}
+
+/// Build an update for synced elements with multi-state support.
+///
+/// Each synced element will be rendered with its corresponding state type.
+/// Handlers are passed to enable event rebinding on dynamically created elements.
+/// New handlers discovered during re-render will be added to the handlers vector.
+pub fn build_synced_update_multi(
+    synced: &[SyncedElement],
+    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+    handlers: &mut Vec<HandlerFn>,
+) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
     // Collect all symbols first
     let mut symbols: Vec<String> = Vec::new();
     let mut symbol_map: HashMap<String, u8> = HashMap::new();
 
-    let intern = |s: &str, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>| -> u8 {
+    fn intern(s: &str, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>) -> u8 {
         if let Some(&idx) = symbol_map.get(s) {
             return idx;
         }
@@ -451,15 +851,18 @@ pub fn build_synced_update(synced: &[SyncedElement], state: &dyn Any) -> Bytes {
         symbols.push(s.to_string());
         symbol_map.insert(s.to_string(), idx);
         idx
-    };
+    }
 
     // First pass: collect symbols
     for se in synced {
         let wrapper_id = format!("__synced_{}", se.id);
         intern(&wrapper_id, &mut symbols, &mut symbol_map);
 
-        if let Some(rendered) = se.renderer.render_with_state(state) {
-            collect_symbols_recursive(&rendered, &mut symbols, &mut symbol_map);
+        // Find the state for this synced element's state type
+        if let Some(state) = states.get(&se.state_type_id) {
+            if let Some(rendered) = se.renderer.render_with_state(*state) {
+                collect_symbols_recursive(&rendered, &mut symbols, &mut symbol_map);
+            }
         }
     }
 
@@ -473,27 +876,100 @@ pub fn build_synced_update(synced: &[SyncedElement], state: &dyn Any) -> Bytes {
         buf.add_symbol(sym);
     }
 
-    // Second pass: emit updates
+    // Second pass: emit updates with full re-render
     for se in synced {
         let wrapper_id = format!("__synced_{}", se.id);
         let wrapper_id_sym = *symbol_map.get(&wrapper_id).unwrap();
 
-        if let Some(rendered) = se.renderer.render_with_state(state) {
-            // Get the wrapper by ID
-            buf.get_by_id(wrapper_id_sym);
-            let wrapper_ref = 0u8; // GET_BY_ID assigns ref 0
+        // Find the state for this synced element's state type
+        if let Some(state) = states.get(&se.state_type_id) {
+            if let Some(rendered) = se.renderer.render_with_state(*state) {
+                // Get the wrapper by ID - this returns the ref index
+                let wrapper_ref = buf.get_by_id(wrapper_id_sym);
 
-            // Clear and rebuild the wrapper's content
-            // For now, we'll just update the text if it's a simple element
-            if let Some(text) = rendered.text_content() {
-                let text_sym = *symbol_map.get(text).unwrap();
-                buf.set_text(wrapper_ref, text_sym);
+                // Clear all existing children
+                buf.clear_children(wrapper_ref);
+
+                // Emit the full rendered tree as children of wrapper
+                emit_update_element(&rendered, wrapper_ref, &mut buf, &symbol_map, handlers);
             }
         }
     }
 
     buf.end();
     buf.finish()
+}
+
+/// Emit an element and its children during a synced update.
+///
+/// This creates new DOM elements and appends them to the parent.
+/// Event handlers are rebound using existing handler indices, or new handlers
+/// are registered if they weren't present during initial render.
+fn emit_update_element(
+    el: &ElementBuilder,
+    parent_ref: u8,
+    buf: &mut OpcodeBuffer,
+    symbol_map: &HashMap<String, u8>,
+    handlers: &mut Vec<HandlerFn>,
+) -> u8 {
+    // Create the element
+    let ref_idx = buf.create(el.el_type.as_u8());
+
+    // Set class
+    if let Some(ref class) = el.class {
+        if let Some(&sym) = symbol_map.get(class) {
+            buf.set_class(ref_idx, sym);
+        }
+    }
+
+    // Set text content
+    if let Some(ref text) = el.text {
+        if let Some(&sym) = symbol_map.get(text) {
+            buf.set_text(ref_idx, sym);
+        }
+    }
+
+    // Set attributes
+    for (key, value) in &el.attrs {
+        if let (Some(&key_sym), Some(&val_sym)) = (symbol_map.get(key), symbol_map.get(value)) {
+            buf.set_attr(ref_idx, key_sym, val_sym);
+        }
+    }
+
+    // Bind events - look up handler index from existing handlers by function pointer
+    // If handler not found, register it as a new handler
+    for (ev, spec) in &el.events {
+        if let Some(handler) = &spec.remote_handler {
+            let handler_fn_id = handler.fn_id();
+            // Find matching handler by function pointer ID
+            let handler_idx = handlers
+                .iter()
+                .position(|h| h.fn_id() == handler_fn_id)
+                .unwrap_or_else(|| {
+                    // Handler not found - register it as new
+                    let idx = handlers.len();
+                    handlers.push(handler.clone());
+                    idx
+                });
+
+            // Use BIND_REMOTE_PARAM if we have param bytes
+            if let Some(param_bytes) = &spec.param_bytes {
+                buf.bind_remote_param(ref_idx, ev.as_u8(), handler_idx as u8, param_bytes);
+            } else {
+                buf.bind_remote(ref_idx, ev.as_u8(), handler_idx as u8);
+            }
+        }
+    }
+
+    // Recursively emit children
+    for child in &el.children {
+        emit_update_element(child, ref_idx, buf, symbol_map, handlers);
+    }
+
+    // Append to parent
+    buf.append(parent_ref, ref_idx);
+
+    ref_idx
 }
 
 fn collect_symbols_recursive(el: &ElementBuilder, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>) {

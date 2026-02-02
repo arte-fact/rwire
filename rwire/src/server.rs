@@ -9,16 +9,17 @@ use async_std::task;
 use async_tungstenite::accept_async;
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
-use std::any::Any;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::{AddrParseError, SocketAddr};
 use std::sync::Arc;
 
-use crate::builder::{build_synced_update, BuildContext, ElementBuilder, SyncedElement};
+use crate::builder::{build_synced_update_multi, BuildContext, ElementBuilder, SyncedElement};
 use crate::capsule;
 use crate::capsule_gen;
 use crate::protocol::ClientEvent;
-use crate::state::HandlerFn;
+use crate::state::{EventContext, HandlerFn};
 
 /// Server builder - first step.
 pub struct ServerBuilder {
@@ -74,7 +75,11 @@ where
         ctx.emit(&root_element, &placeholder);
 
         // Generate minimal capsule with only used element/event types
-        let capsule = capsule_gen::generate_capsule(ctx.used_elements(), ctx.used_events());
+        let capsule = capsule_gen::generate_capsule(
+            ctx.used_elements(),
+            ctx.used_events(),
+            ctx.has_local_handlers(),
+        );
         let capsule_size = capsule.len();
         let capsule = Arc::new(capsule);
 
@@ -152,11 +157,11 @@ async fn handle_client<F>(
     }
 }
 
-/// Per-connection state container.
+/// Per-connection state container supporting multiple state types.
 struct ConnectionState {
-    /// The actual state value, type-erased.
-    state: Box<dyn Any + Send + Sync>,
-    /// Registered event handlers.
+    /// State values keyed by TypeId, supporting multiple state types per connection.
+    states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    /// Registered event handlers with their associated state type.
     handlers: Vec<HandlerFn>,
     /// Synced elements that need to re-render on state change.
     synced_elements: Vec<SyncedElement>,
@@ -165,34 +170,40 @@ struct ConnectionState {
 impl ConnectionState {
     fn new() -> Self {
         Self {
-            state: Box::new(()),
+            states: HashMap::new(),
             handlers: Vec::new(),
             synced_elements: Vec::new(),
         }
     }
 
-    /// Check if state is initialized (not placeholder).
-    fn is_state_initialized(&self) -> bool {
-        self.state.downcast_ref::<()>().is_none()
+    /// Ensure state of a given type is initialized using the handler's factory.
+    fn ensure_state_initialized_for(&mut self, handler: &HandlerFn) {
+        let type_id = handler.state_type_id();
+        self.states
+            .entry(type_id)
+            .or_insert_with(|| handler.create_state());
     }
 
-    /// Initialize state using a handler's factory if not already initialized.
-    fn ensure_state_initialized(&mut self) {
-        if !self.is_state_initialized() {
-            if let Some(first_handler) = self.handlers.first() {
-                self.state = first_handler.create_state();
-            }
+    /// Initialize all states from the registered handlers and synced elements.
+    fn initialize_all_states(&mut self) {
+        // Collect unique state types from handlers
+        let handlers: Vec<_> = self.handlers.clone();
+        for handler in &handlers {
+            self.ensure_state_initialized_for(handler);
+        }
+        // Also initialize states from synced element renderers
+        // These states might not have handlers but need to exist for rendering
+        for synced in &self.synced_elements {
+            let type_id = synced.state_type_id;
+            self.states
+                .entry(type_id)
+                .or_insert_with(|| synced.create_default_state());
         }
     }
 
-    /// Get state as Any for type-erased access.
-    fn state_as_any(&self) -> &dyn Any {
-        self.state.as_ref()
-    }
-
-    /// Get mutable state as Any for type-erased access.
-    fn state_as_any_mut(&mut self) -> &mut dyn Any {
-        self.state.as_mut()
+    /// Get mutable state by TypeId for type-erased access.
+    fn get_state_mut(&mut self, type_id: TypeId) -> Option<&mut (dyn Any + Send + Sync)> {
+        self.states.get_mut(&type_id).map(|s| s.as_mut())
     }
 }
 
@@ -212,7 +223,7 @@ where
     // Build the root element
     let root_element = root();
 
-    // First pass: collect handlers to find the state type
+    // First pass: collect handlers to find the state types
     let mut ctx = BuildContext::new();
 
     // Use a temporary unit state for the first pass to collect handlers
@@ -224,13 +235,32 @@ where
     conn_state.handlers = ctx.handlers().to_vec();
     conn_state.synced_elements = ctx.take_synced_elements();
 
-    // Initialize state from the first handler's factory
-    conn_state.ensure_state_initialized();
+    // Initialize all state types from handlers and synced elements
+    conn_state.initialize_all_states();
 
-    // Now rebuild the DOM with the actual state
+    // Now rebuild the DOM with all states available
+    // Build a HashMap of all states for multi-state rendering
     let mut ctx = BuildContext::new();
-    ctx.collect_symbols(&root_element, conn_state.state_as_any());
-    ctx.emit(&root_element, conn_state.state_as_any());
+    let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
+        .states
+        .iter()
+        .map(|(k, v)| (*k, v.as_ref()))
+        .collect();
+
+    if states_map.is_empty() {
+        // No states available, use placeholder
+        ctx.collect_symbols(&root_element, &placeholder_state);
+        ctx.emit(&root_element, &placeholder_state);
+    } else {
+        // Use multi-state methods to render all synced elements correctly
+        ctx.collect_symbols_multi(&root_element, &states_map);
+        ctx.emit_multi(&root_element, &states_map);
+    }
+
+    // Emit local handlers if any
+    if ctx.has_local_handlers() {
+        ctx.emit_local_handlers();
+    }
 
     // Re-extract handlers and synced elements (they should be the same)
     conn_state.handlers = ctx.handlers().to_vec();
@@ -239,11 +269,12 @@ where
     let initial_dom = ctx.finish();
 
     println!(
-        "[{}] Sending initial DOM ({} bytes, {} handlers, {} synced)",
+        "[{}] Sending initial DOM ({} bytes, {} handlers, {} synced, {} state types)",
         peer_addr,
         initial_dom.len(),
         conn_state.handlers.len(),
-        conn_state.synced_elements.len()
+        conn_state.synced_elements.len(),
+        conn_state.states.len()
     );
     write.send(Message::Binary(initial_dom.to_vec())).await?;
 
@@ -265,15 +296,30 @@ where
                         // Clone the handler to avoid borrowing issues
                         let handler = conn_state.handlers[handler_idx].clone();
 
-                        // Ensure state is initialized
-                        conn_state.ensure_state_initialized();
+                        // Ensure state for this handler's type is initialized
+                        conn_state.ensure_state_initialized_for(&handler);
 
-                        // Call the handler
-                        handler.call(conn_state.state_as_any_mut());
+                        // Create EventContext from payload and param_bytes
+                        let ctx = EventContext::new_with_params(event.payload, event.param_bytes);
 
-                        // Re-render synced elements
-                        let update =
-                            build_synced_update(&conn_state.synced_elements, conn_state.state_as_any());
+                        // Get the state for this handler's type
+                        let state_type_id = handler.state_type_id();
+                        if let Some(state) = conn_state.get_state_mut(state_type_id) {
+                            // Call the handler with context
+                            handler.call_with_context(state, &ctx);
+                        }
+
+                        // Re-render synced elements using multi-state support
+                        let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
+                            .states
+                            .iter()
+                            .map(|(k, v)| (*k, v.as_ref()))
+                            .collect();
+                        let update = build_synced_update_multi(
+                            &conn_state.synced_elements,
+                            &states_map,
+                            &mut conn_state.handlers,
+                        );
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;
                         }

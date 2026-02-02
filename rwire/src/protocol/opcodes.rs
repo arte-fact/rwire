@@ -22,6 +22,9 @@ pub const SET_DATA: u8 = 0x14;
 /// Append child to parent. Format: [APPEND, parent_ref, child_ref]
 pub const APPEND: u8 = 0x20;
 
+/// Clear all children from element. Format: [CLEAR_CHILDREN, ref]
+pub const CLEAR_CHILDREN: u8 = 0x25;
+
 /// Get element by ID (for updates). Format: [GET_BY_ID, symbol_idx] → ref
 pub const GET_BY_ID: u8 = 0x01;
 
@@ -41,6 +44,78 @@ pub const BIND_OPTIMISTIC: u8 = 0x32;
 /// Bind debounced handler. Format: [BIND_DEBOUNCED, ref, event_type, handler_idx, ms_hi, ms_lo]
 pub const BIND_DEBOUNCED: u8 = 0x33;
 
+/// Bind remote handler with parameter. Format: [BIND_REMOTE_PARAM, ref, event_type, handler_idx, param_len, ...param_bytes]
+/// The param_bytes are sent back with the event, enabling item-specific handlers.
+pub const BIND_REMOTE_PARAM: u8 = 0x34;
+
+// ============================================================================
+// State Operations
+// ============================================================================
+
+/// Initialize local state on client. Format: [INIT_LOCAL_STATE, state_idx, len, json_bytes...]
+pub const INIT_LOCAL_STATE: u8 = 0x40;
+
+/// Define a local handler. Format: [DEF_LOCAL_HANDLER, handler_idx, state_idx, mut_count, ...mutations]
+pub const DEF_LOCAL_HANDLER: u8 = 0x42;
+
+// ============================================================================
+// Mutation Opcodes (for local state handlers)
+// ============================================================================
+
+/// Toggle boolean field. Format: [MUT_TOGGLE, field_idx]
+pub const MUT_TOGGLE: u8 = 0x50;
+
+/// Add i8 to numeric field. Format: [MUT_ADD_I8, field_idx, value_i8]
+pub const MUT_ADD_I8: u8 = 0x51;
+
+/// Add i32 to numeric field. Format: [MUT_ADD_I32, field_idx, b3, b2, b1, b0] (big-endian)
+pub const MUT_ADD_I32: u8 = 0x52;
+
+/// Set boolean field. Format: [MUT_SET_BOOL, field_idx, 0|1]
+pub const MUT_SET_BOOL: u8 = 0x53;
+
+/// Set i32 field. Format: [MUT_SET_I32, field_idx, b3, b2, b1, b0] (big-endian)
+pub const MUT_SET_I32: u8 = 0x54;
+
+/// Set string field. Format: [MUT_SET_STR, field_idx, len, bytes...]
+pub const MUT_SET_STR: u8 = 0x55;
+
+// ============================================================================
+// Form Operations
+// ============================================================================
+
+/// Set validation rules on a form field. Format: [FORM_SET_VALIDATION, ref, rules_symbol]
+pub const FORM_SET_VALIDATION: u8 = 0x60;
+
+/// Show validation error on a field. Format: [FORM_SHOW_ERROR, ref, message_symbol]
+pub const FORM_SHOW_ERROR: u8 = 0x61;
+
+/// Clear validation error on a field. Format: [FORM_CLEAR_ERROR, ref]
+pub const FORM_CLEAR_ERROR: u8 = 0x62;
+
+/// Set field as required. Format: [FORM_SET_REQUIRED, ref, 0|1]
+pub const FORM_SET_REQUIRED: u8 = 0x63;
+
+// ============================================================================
+// Routing Operations
+// ============================================================================
+
+/// Push new URL to history. Format: [ROUTE_PUSH, url_symbol]
+pub const ROUTE_PUSH: u8 = 0x70;
+
+/// Replace current URL in history. Format: [ROUTE_REPLACE, url_symbol]
+pub const ROUTE_REPLACE: u8 = 0x71;
+
+// ============================================================================
+// Styling Operations
+// ============================================================================
+
+/// Inject CSS styles. Format: [STYLE_INJECT, len_hi, len_lo, css_bytes...]
+pub const STYLE_INJECT: u8 = 0x80;
+
+/// Set inline style. Format: [STYLE_SET, ref, style_symbol]
+pub const STYLE_SET: u8 = 0x81;
+
 // ============================================================================
 // Control
 // ============================================================================
@@ -59,11 +134,24 @@ pub const EL_DIV: u8 = 0x00;
 pub const EL_SPAN: u8 = 0x01;
 pub const EL_BUTTON: u8 = 0x02;
 pub const EL_INPUT: u8 = 0x03;
-pub const EL_FORM: u8 = 0x10;
 pub const EL_P: u8 = 0x04;
 pub const EL_H1: u8 = 0x05;
 pub const EL_H2: u8 = 0x06;
 pub const EL_A: u8 = 0x07;
+pub const EL_TEXTAREA: u8 = 0x08;
+pub const EL_SELECT: u8 = 0x09;
+pub const EL_OPTION: u8 = 0x0A;
+pub const EL_LABEL: u8 = 0x0B;
+pub const EL_FIELDSET: u8 = 0x0C;
+pub const EL_LEGEND: u8 = 0x0D;
+pub const EL_FORM: u8 = 0x10;
+pub const EL_UL: u8 = 0x11;
+pub const EL_LI: u8 = 0x12;
+pub const EL_NAV: u8 = 0x13;
+pub const EL_HEADER: u8 = 0x14;
+pub const EL_FOOTER: u8 = 0x15;
+pub const EL_SECTION: u8 = 0x16;
+pub const EL_ARTICLE: u8 = 0x17;
 
 /// Element type enum for fluent builder API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,11 +160,24 @@ pub enum El {
     Span,
     Button,
     Input,
-    Form,
     P,
     H1,
     H2,
     A,
+    Textarea,
+    Select,
+    Option,
+    Label,
+    Fieldset,
+    Legend,
+    Form,
+    Ul,
+    Li,
+    Nav,
+    Header,
+    Footer,
+    Section,
+    Article,
 }
 
 impl El {
@@ -87,11 +188,24 @@ impl El {
             El::Span => EL_SPAN,
             El::Button => EL_BUTTON,
             El::Input => EL_INPUT,
-            El::Form => EL_FORM,
             El::P => EL_P,
             El::H1 => EL_H1,
             El::H2 => EL_H2,
             El::A => EL_A,
+            El::Textarea => EL_TEXTAREA,
+            El::Select => EL_SELECT,
+            El::Option => EL_OPTION,
+            El::Label => EL_LABEL,
+            El::Fieldset => EL_FIELDSET,
+            El::Legend => EL_LEGEND,
+            El::Form => EL_FORM,
+            El::Ul => EL_UL,
+            El::Li => EL_LI,
+            El::Nav => EL_NAV,
+            El::Header => EL_HEADER,
+            El::Footer => EL_FOOTER,
+            El::Section => EL_SECTION,
+            El::Article => EL_ARTICLE,
         }
     }
 }

@@ -3,9 +3,10 @@
 //! A simple counter component with increment/decrement buttons.
 //! Only the count display re-renders when state changes.
 
-use rwire::{el, handler, renderer, ClientState, El, ElementBuilder, Ev, Server};
+use rwire::{el, handler, renderer, El, ElementBuilder, Ev, Server, State};
 
-#[derive(ClientState, Default)]
+#[derive(State, Default)]
+#[storage(memory)]
 struct Counter {
     count: i32,
 }

@@ -2,12 +2,20 @@
 
 use bytes::{BufMut, BytesMut};
 
-use super::opcodes::*;
+use super::opcodes::{
+    APPEND, BATCH_END, BIND_LOCAL, BIND_OPTIMISTIC, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
+    CREATE, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED, FORM_SET_VALIDATION,
+    FORM_SHOW_ERROR, GET_BY_ID, INIT_LOCAL_STATE, ROUTE_PUSH, ROUTE_REPLACE, SET_ATTR, SET_CLASS,
+    SET_DATA, SET_TEXT, STYLE_INJECT, STYLE_SET, SYMBOLS, SYMBOL_SESSION_START,
+};
 
 /// Buffer for building opcode sequences.
+///
+/// Supports both legacy u8 refs (for backward compatibility) and
+/// extended u32 refs using varint encoding (for >255 elements).
 pub struct OpcodeBuffer {
     buf: BytesMut,
-    next_ref: u8,
+    next_ref: u32,
     next_symbol: u8,
 }
 
@@ -18,6 +26,27 @@ impl OpcodeBuffer {
             next_ref: 0,
             next_symbol: SYMBOL_SESSION_START,
         }
+    }
+
+    /// Create a new buffer with extended ref support (varint encoding).
+    ///
+    /// Use this when you expect more than 127 elements.
+    pub fn new_extended() -> Self {
+        Self {
+            buf: BytesMut::with_capacity(256),
+            next_ref: 0,
+            next_symbol: SYMBOL_SESSION_START,
+        }
+    }
+
+    /// Check if we've exceeded the u8 ref limit.
+    pub fn needs_extended_refs(&self) -> bool {
+        self.next_ref > 127
+    }
+
+    /// Get the current ref count.
+    pub fn ref_count(&self) -> u32 {
+        self.next_ref
     }
 
     /// Start a symbol table. Call `add_symbol` for each symbol, then continue with DOM ops.
@@ -37,7 +66,14 @@ impl OpcodeBuffer {
     }
 
     /// Create an element. Returns the ref index.
+    ///
+    /// Note: Returns u8 for backward compatibility. Use `create_ext` for >255 elements.
     pub fn create(&mut self, element_type: u8) -> u8 {
+        self.create_ext(element_type) as u8
+    }
+
+    /// Create an element with extended ref support. Returns the ref index as u32.
+    pub fn create_ext(&mut self, element_type: u8) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(CREATE);
         self.buf.put_u8(element_type);
@@ -95,6 +131,13 @@ impl OpcodeBuffer {
         self
     }
 
+    /// Clear all children from an element.
+    pub fn clear_children(&mut self, ref_idx: u8) -> &mut Self {
+        self.buf.put_u8(CLEAR_CHILDREN);
+        self.buf.put_u8(ref_idx);
+        self
+    }
+
     /// Bind a local (WASM-only) event handler.
     pub fn bind_local(&mut self, ref_idx: u8, event_type: u8, handler_idx: u8) -> &mut Self {
         self.buf.put_u8(BIND_LOCAL);
@@ -122,13 +165,149 @@ impl OpcodeBuffer {
         self
     }
 
+    /// Bind a remote event handler with parameter bytes.
+    ///
+    /// The param_bytes are stored on the element and sent back with the event,
+    /// enabling item-specific handlers for dynamically generated content.
+    ///
+    /// Format: [BIND_REMOTE_PARAM, ref, event_type, handler_idx, param_len, ...param_bytes]
+    pub fn bind_remote_param(
+        &mut self,
+        ref_idx: u8,
+        event_type: u8,
+        handler_idx: u8,
+        param_bytes: &[u8],
+    ) -> &mut Self {
+        self.buf.put_u8(BIND_REMOTE_PARAM);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(event_type);
+        self.buf.put_u8(handler_idx);
+        self.buf.put_u8(param_bytes.len() as u8);
+        self.buf.put_slice(param_bytes);
+        self
+    }
+
     /// Get element by ID (for updates). Returns next ref index.
+    ///
+    /// Note: Returns u8 for backward compatibility. Use `get_by_id_ext` for >255 elements.
     pub fn get_by_id(&mut self, symbol_idx: u8) -> u8 {
+        self.get_by_id_ext(symbol_idx) as u8
+    }
+
+    /// Get element by ID with extended ref support. Returns the ref index as u32.
+    pub fn get_by_id_ext(&mut self, symbol_idx: u8) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(GET_BY_ID);
         self.buf.put_u8(symbol_idx);
         self.next_ref += 1;
         ref_idx
+    }
+
+    /// Initialize local state on the client.
+    ///
+    /// Format: [INIT_LOCAL_STATE, state_idx, len_hi, len_lo, json_bytes...]
+    pub fn init_local_state(&mut self, state_idx: u8, json: &str) -> &mut Self {
+        let bytes = json.as_bytes();
+        self.buf.put_u8(INIT_LOCAL_STATE);
+        self.buf.put_u8(state_idx);
+        // Length as 2 bytes (up to 65535 bytes of JSON)
+        self.buf.put_u8((bytes.len() >> 8) as u8);
+        self.buf.put_u8(bytes.len() as u8);
+        self.buf.put_slice(bytes);
+        self
+    }
+
+    /// Define a local handler with mutations.
+    ///
+    /// Format: [DEF_LOCAL_HANDLER, handler_idx, state_idx, mut_count, ...mutation_bytes]
+    pub fn def_local_handler(
+        &mut self,
+        handler_idx: u8,
+        state_idx: u8,
+        mutations: &[u8],
+        mutation_count: u8,
+    ) -> &mut Self {
+        self.buf.put_u8(DEF_LOCAL_HANDLER);
+        self.buf.put_u8(handler_idx);
+        self.buf.put_u8(state_idx);
+        self.buf.put_u8(mutation_count);
+        self.buf.put_slice(mutations);
+        self
+    }
+
+    // ========================================================================
+    // Form Operations
+    // ========================================================================
+
+    /// Set validation rules on a form field.
+    pub fn form_set_validation(&mut self, ref_idx: u8, rules_symbol: u8) -> &mut Self {
+        self.buf.put_u8(FORM_SET_VALIDATION);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(rules_symbol);
+        self
+    }
+
+    /// Show validation error on a field.
+    pub fn form_show_error(&mut self, ref_idx: u8, message_symbol: u8) -> &mut Self {
+        self.buf.put_u8(FORM_SHOW_ERROR);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(message_symbol);
+        self
+    }
+
+    /// Clear validation error on a field.
+    pub fn form_clear_error(&mut self, ref_idx: u8) -> &mut Self {
+        self.buf.put_u8(FORM_CLEAR_ERROR);
+        self.buf.put_u8(ref_idx);
+        self
+    }
+
+    /// Set field as required.
+    pub fn form_set_required(&mut self, ref_idx: u8, required: bool) -> &mut Self {
+        self.buf.put_u8(FORM_SET_REQUIRED);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(if required { 1 } else { 0 });
+        self
+    }
+
+    // ========================================================================
+    // Routing Operations
+    // ========================================================================
+
+    /// Push new URL to history.
+    pub fn route_push(&mut self, url_symbol: u8) -> &mut Self {
+        self.buf.put_u8(ROUTE_PUSH);
+        self.buf.put_u8(url_symbol);
+        self
+    }
+
+    /// Replace current URL in history.
+    pub fn route_replace(&mut self, url_symbol: u8) -> &mut Self {
+        self.buf.put_u8(ROUTE_REPLACE);
+        self.buf.put_u8(url_symbol);
+        self
+    }
+
+    // ========================================================================
+    // Styling Operations
+    // ========================================================================
+
+    /// Inject CSS styles.
+    pub fn style_inject(&mut self, css: &str) -> &mut Self {
+        let bytes = css.as_bytes();
+        self.buf.put_u8(STYLE_INJECT);
+        self.buf.put_u8((bytes.len() >> 8) as u8);
+        self.buf.put_u8(bytes.len() as u8);
+        self.buf.put_slice(bytes);
+        self
+    }
+
+    /// Set inline style on an element.
+    pub fn style_set(&mut self, ref_idx: u8, style_symbol: u8) -> &mut Self {
+        self.buf.put_u8(STYLE_SET);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(style_symbol);
+        self
     }
 
     /// End the batch.

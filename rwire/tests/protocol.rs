@@ -233,6 +233,7 @@ mod decoder {
                 event_type: ev.as_u8(),
                 target_ref: 0,
                 payload: vec![],
+                param_bytes: vec![],
             };
             assert_eq!(event.event_type_name(), expected_name);
         }
@@ -245,6 +246,7 @@ mod decoder {
             event_type: 0xFF,
             target_ref: 0,
             payload: vec![],
+            param_bytes: vec![],
         };
         assert_eq!(event.event_type_name(), "unknown");
     }
