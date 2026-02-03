@@ -68,6 +68,8 @@ pub mod store;
 pub mod style;
 pub mod theme;
 pub mod tokens;
+pub mod variants;
+pub mod components;
 
 // Builder API exports
 pub use builder::{el, ElementBuilder};
@@ -126,6 +128,12 @@ pub use theme::{
     generate_accent_css, generate_base_css, generate_radius_css, generate_semantic_css,
     generate_theme_css, AccentColor, RadiusScale, Theme, ThemeMode,
 };
+
+// Variant exports
+pub use variants::{Variant, VariantComponent};
+
+// Component exports
+pub use components::{generate_components_css, Button, ButtonIntent, ButtonSize};
 
 // Metrics exports
 pub use metrics::{Counter, Gauge, Histogram, Metrics};
