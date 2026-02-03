@@ -191,6 +191,106 @@ impl SharedServerState {
             }
         }
     }
+
+    /// Persist all dirty state to the store.
+    ///
+    /// This is called by the background persist task and during graceful shutdown.
+    /// Returns the number of keys successfully persisted.
+    pub fn persist_dirty(&self, store: &crate::persist::SqliteStore) -> Result<usize, crate::persist::PersistError> {
+        let dirty_keys = self.drain_dirty();
+        if dirty_keys.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = store.connection();
+        let conn = conn.lock().unwrap();
+
+        // Start transaction
+        conn.execute("BEGIN TRANSACTION", [])?;
+
+        let mut persisted_count = 0;
+        let mut failed_keys = Vec::new();
+
+        for key in &dirty_keys {
+            match self.persist_single_state(&conn, store, key) {
+                Ok(()) => persisted_count += 1,
+                Err(e) => {
+                    eprintln!("Failed to persist {}: {}", key, e);
+                    failed_keys.push(key.clone());
+                }
+            }
+        }
+
+        if failed_keys.is_empty() {
+            conn.execute("COMMIT", [])?;
+        } else {
+            conn.execute("ROLLBACK", [])?;
+            // Re-mark all failed keys as dirty for retry
+            for key in failed_keys {
+                self.mark_dirty(&key);
+            }
+        }
+
+        Ok(persisted_count)
+    }
+
+    /// Persist a single state to the database.
+    fn persist_single_state(
+        &self,
+        conn: &rusqlite::Connection,
+        store: &crate::persist::SqliteStore,
+        key: &str,
+    ) -> Result<(), crate::persist::PersistError> {
+        // Parse table name and session_id from key
+        let mut parts = key.splitn(2, ':');
+        let table_name = parts.next().ok_or_else(|| {
+            crate::persist::PersistError::ConnectionError("Invalid key format".to_string())
+        })?;
+        let session_id = parts.next().ok_or_else(|| {
+            crate::persist::PersistError::ConnectionError("Invalid key format".to_string())
+        })?;
+
+        // Get persistable type info from registry
+        let registry = store.registry();
+        let registry = registry.lock().unwrap();
+        let persistable = registry
+            .get_by_table(table_name)
+            .ok_or_else(|| crate::persist::PersistError::TypeNotFound(table_name.to_string()))?;
+
+        // Get state from cache
+        let cache = self.shared_cache.read().unwrap();
+        let state = cache
+            .get(key)
+            .ok_or_else(|| crate::persist::PersistError::ConnectionError(format!("State not in cache: {}", key)))?;
+
+        // Save to database using the persistable's save function
+        (persistable.save_fn)(conn, session_id, &**state)
+    }
+}
+
+/// Background task that persists dirty state to the database.
+///
+/// This task runs in a loop, sleeping for the configured interval between
+/// persistence cycles. Dirty keys are drained and persisted in a single
+/// transaction for efficiency.
+pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist::SqliteStore) {
+    loop {
+        // Wait for persist interval
+        task::sleep(shared.persist_interval).await;
+
+        // Persist dirty state
+        match shared.persist_dirty(&store) {
+            Ok(count) if count > 0 => {
+                // Optionally log: println!("Persisted {} keys", count);
+            }
+            Ok(_) => {
+                // No dirty keys
+            }
+            Err(e) => {
+                eprintln!("Persist task error: {}", e);
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -720,5 +820,79 @@ mod tests {
         shared.broadcast("key", TypeId::of::<i32>(), ChangeSet::all(), 0);
 
         assert_eq!(rx.len(), 2);
+    }
+
+    #[test]
+    fn test_persist_dirty_with_registered_type() {
+        use crate::persist::{PersistableType, SqliteStore};
+
+        let store = SqliteStore::memory().unwrap();
+
+        // Register a simple persistable type
+        let persistable = PersistableType {
+            table_name: "counters",
+            schema: &["CREATE TABLE IF NOT EXISTS counters (id TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)"],
+            type_id: TypeId::of::<i32>(),
+            key_field: "id",
+            load_fn: |conn, key| {
+                use crate::persist::PersistError;
+                use rusqlite::Error as SqliteError;
+                match conn.query_row(
+                    "SELECT value FROM counters WHERE id = ?",
+                    [key],
+                    |row| row.get::<_, i32>(0),
+                ) {
+                    Ok(value) => Ok(Some(Box::new(value))),
+                    Err(SqliteError::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(PersistError::Sqlite(e)),
+                }
+            },
+            save_fn: |conn, key, state| {
+                use crate::persist::PersistError;
+                let value = state.downcast_ref::<i32>().ok_or(PersistError::TypeMismatch)?;
+                conn.execute(
+                    "INSERT INTO counters (id, value) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET value = excluded.value",
+                    rusqlite::params![key, value],
+                )?;
+                Ok(())
+            },
+            default_fn: || Box::new(0i32),
+        };
+
+        store.register(persistable);
+        store.ensure_schema().unwrap();
+
+        let shared = SharedServerState::new(Duration::from_millis(100));
+
+        // Insert state into cache
+        shared.insert_state("counters:test1".to_string(), Box::new(42i32));
+        shared.mark_dirty("counters:test1");
+
+        // Persist dirty state
+        let count = shared.persist_dirty(&store).unwrap();
+        assert_eq!(count, 1);
+
+        // Verify no longer dirty
+        assert!(!shared.has_dirty());
+
+        // Verify in database
+        let conn = store.connection();
+        let conn = conn.lock().unwrap();
+        let value: i32 = conn
+            .query_row("SELECT value FROM counters WHERE id = 'test1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn test_persist_dirty_empty() {
+        use crate::persist::SqliteStore;
+
+        let store = SqliteStore::memory().unwrap();
+        let shared = SharedServerState::new(Duration::from_millis(100));
+
+        // No dirty keys
+        let count = shared.persist_dirty(&store).unwrap();
+        assert_eq!(count, 0);
     }
 }

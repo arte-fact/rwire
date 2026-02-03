@@ -85,7 +85,7 @@ pub use state::{
 pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 
 // Server exports
-pub use server::{BroadcastMsg, Server, SharedServerState};
+pub use server::{persist_task, BroadcastMsg, Server, SharedServerState};
 
 // Store exports
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};
