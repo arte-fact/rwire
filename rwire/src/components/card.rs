@@ -131,6 +131,9 @@ impl Card {
 
     /// Build the card into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
+        // Register for CSS tree-shaking
+        super::registry::mark_component_used(super::registry::ComponentType::Card);
+
         let class = self.compute_class();
         let mut builder = el(El::Div).class(&class);
 

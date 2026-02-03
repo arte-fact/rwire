@@ -51,12 +51,14 @@ mod badge;
 mod button;
 mod card;
 mod input;
+pub mod registry;
 mod stack;
 
 pub use badge::{Badge, BadgeIntent, BADGE_CSS};
 pub use button::{Button, ButtonIntent, ButtonSize, BUTTON_CSS};
 pub use card::{Card, CardPadding, CardShadow, CARD_CSS};
 pub use input::{Input, InputSize, InputType, INPUT_CSS};
+pub use registry::{begin_tracking, end_tracking, ComponentRegistry, ComponentType};
 pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify, STACK_CSS};
 
 /// Generate CSS for all components.

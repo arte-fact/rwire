@@ -145,7 +145,12 @@ pub use components::{
     Card, CardPadding, CardShadow,
     // Badge
     Badge, BadgeIntent,
+    // Registry
+    begin_tracking, end_tracking, ComponentRegistry, ComponentType,
 };
+
+// Capsule styling exports
+pub use capsule_gen::{generate_capsule_css, generate_styled_capsule, CapsuleConfig};
 
 // Metrics exports
 pub use metrics::{Counter, Gauge, Histogram, Metrics};

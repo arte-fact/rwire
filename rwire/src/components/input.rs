@@ -197,6 +197,9 @@ impl Input {
 
     /// Build the input into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
+        // Register for CSS tree-shaking
+        super::registry::mark_component_used(super::registry::ComponentType::Input);
+
         let class = self.compute_class();
         let mut builder = el(El::Input)
             .class(&class)

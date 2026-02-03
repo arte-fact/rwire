@@ -6,8 +6,14 @@
 //! When local state handlers are used, the capsule includes a mutation
 //! interpreter (~150 bytes) that executes mutations on the client without
 //! server round-trips.
+//!
+//! The capsule also includes design token CSS and component CSS, tree-shaken
+//! to include only the styles for components actually used.
 
 use std::collections::HashSet;
+
+use crate::components::ComponentRegistry;
+use crate::theme::Theme;
 
 /// All supported element types with their byte codes and tag names.
 const ELEMENT_MAPPINGS: &[(u8, &str)] = &[
@@ -215,9 +221,225 @@ pub fn generate_capsule_legacy(used_elements: &HashSet<u8>, used_events: &HashSe
     generate_capsule(used_elements, used_events, false)
 }
 
+/// Configuration for capsule generation with styling.
+#[derive(Clone, Debug, Default)]
+pub struct CapsuleConfig {
+    /// Theme configuration for CSS variables
+    pub theme: Theme,
+    /// Registry of used components for tree-shaking CSS
+    pub components: ComponentRegistry,
+    /// Whether to include local state mutation interpreter
+    pub has_local_handlers: bool,
+}
+
+impl CapsuleConfig {
+    /// Create a new config with defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the theme.
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    /// Set the component registry.
+    pub fn components(mut self, registry: ComponentRegistry) -> Self {
+        self.components = registry;
+        self
+    }
+
+    /// Set whether local handlers are used.
+    pub fn has_local_handlers(mut self, has: bool) -> Self {
+        self.has_local_handlers = has;
+        self
+    }
+}
+
+/// Generate complete CSS for the capsule.
+///
+/// Includes:
+/// - Base reset CSS
+/// - Primitive token CSS variables
+/// - Semantic token CSS variables
+/// - Theme overrides (accent, radius)
+/// - Component CSS (tree-shaken)
+pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
+    use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css};
+    use crate::tokens::css::generate_primitive_css;
+
+    let mut css = String::with_capacity(12288);
+
+    // 1. Base reset
+    css.push_str(generate_base_css());
+
+    // 2. Primitive tokens
+    css.push_str(&generate_primitive_css());
+
+    // 3. Semantic tokens (light + dark)
+    css.push_str(&generate_semantic_css());
+
+    // 4. Accent override (if non-default)
+    if let Some(accent_css) = generate_accent_css(config.theme.accent) {
+        css.push_str(&accent_css);
+    }
+
+    // 5. Radius override (if non-default)
+    if let Some(radius_css) = generate_radius_css(config.theme.radius) {
+        css.push_str(radius_css);
+    }
+
+    // 6. Component CSS (tree-shaken)
+    css.push_str(&config.components.generate_css());
+
+    css
+}
+
+/// Generate a capsule with styling support.
+///
+/// This is the recommended way to generate capsules for styled applications.
+/// Includes:
+/// - Tree-shaken element/event mappings
+/// - Theme CSS variables
+/// - Component CSS (only for used components)
+pub fn generate_styled_capsule(
+    used_elements: &HashSet<u8>,
+    used_events: &HashSet<u8>,
+    config: &CapsuleConfig,
+) -> String {
+    let elements_js = generate_element_map(used_elements);
+    let events_js = generate_event_map(used_events);
+    let css = generate_capsule_css(config);
+    let theme_attrs = config.theme.data_attrs();
+
+    // Choose the appropriate bind handler based on whether we have local state
+    let bind_and_local_js = if config.has_local_handlers {
+        LOCAL_STATE_JS
+    } else {
+        BIND_LOCAL_REMOTE_JS
+    };
+
+    format!(
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>{css}</style></head><body>
+<div id="rw" {theme_attrs}></div>
+<script>
+const E={{{elements_js}}};
+const V={{{events_js}}};
+{bind_and_local_js}
+{RUNTIME_JS}
+</script>
+</body></html>"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::registry::ComponentType;
+    use crate::theme::{AccentColor, ThemeMode};
+
+    #[test]
+    fn test_capsule_config_defaults() {
+        let config = CapsuleConfig::new();
+        assert_eq!(config.theme.mode, ThemeMode::Light);
+        assert_eq!(config.theme.accent, AccentColor::Blue);
+        assert!(!config.has_local_handlers);
+        assert!(config.components.is_empty());
+    }
+
+    #[test]
+    fn test_capsule_css_generation() {
+        let mut registry = ComponentRegistry::new();
+        registry.mark_used(ComponentType::Button);
+
+        let config = CapsuleConfig::new().components(registry);
+        let css = generate_capsule_css(&config);
+
+        // Should contain base reset
+        assert!(css.contains("box-sizing"));
+        // Should contain primitive tokens
+        assert!(css.contains("--rw-neutral-1"));
+        // Should contain semantic tokens
+        assert!(css.contains("--rw-bg-app"));
+        // Should contain button CSS
+        assert!(css.contains(".rw-btn"));
+        // Should NOT contain input CSS (not used)
+        assert!(!css.contains(".rw-input"));
+    }
+
+    #[test]
+    fn test_styled_capsule_structure() {
+        let mut elements = HashSet::new();
+        elements.insert(0); // div
+        elements.insert(2); // button
+
+        let mut events = HashSet::new();
+        events.insert(1); // click
+
+        let mut registry = ComponentRegistry::new();
+        registry.mark_used(ComponentType::Button);
+
+        let config = CapsuleConfig::new()
+            .theme(Theme::dark().with_accent(AccentColor::Green))
+            .components(registry)
+            .has_local_handlers(false);
+
+        let capsule = generate_styled_capsule(&elements, &events, &config);
+
+        // Should have HTML structure
+        assert!(capsule.contains("<!DOCTYPE html>"));
+        assert!(capsule.contains("<style>"));
+        assert!(capsule.contains("</style>"));
+
+        // Should have theme data attribute
+        assert!(capsule.contains("data-theme=\"dark\""));
+        assert!(capsule.contains("data-accent=\"green\""));
+
+        // Should have div#rw for app root
+        assert!(capsule.contains("<div id=\"rw\""));
+
+        // Should have element/event mappings
+        assert!(capsule.contains("const E="));
+        assert!(capsule.contains("const V="));
+
+        // CSS should be in the style tag
+        assert!(capsule.contains("--rw-neutral-1"));
+        assert!(css_appears_before_script(&capsule));
+    }
+
+    #[test]
+    fn test_styled_capsule_size() {
+        let mut elements = HashSet::new();
+        elements.insert(0); // div
+        elements.insert(2); // button
+
+        let mut events = HashSet::new();
+        events.insert(1); // click
+
+        let mut registry = ComponentRegistry::new();
+        registry.mark_used(ComponentType::Button);
+
+        let config = CapsuleConfig::new().components(registry);
+        let capsule = generate_styled_capsule(&elements, &events, &config);
+
+        // Full capsule should be under 15KB
+        assert!(
+            capsule.len() < 15360,
+            "Styled capsule too large: {} bytes",
+            capsule.len()
+        );
+        println!("Styled capsule size: {} bytes", capsule.len());
+    }
+
+    fn css_appears_before_script(html: &str) -> bool {
+        let style_pos = html.find("<style>");
+        let script_pos = html.find("<script>");
+        match (style_pos, script_pos) {
+            (Some(s), Some(sc)) => s < sc,
+            _ => false,
+        }
+    }
 
     #[test]
     fn test_minimal_element_map() {

@@ -112,6 +112,9 @@ impl Badge {
 
     /// Build the badge into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
+        // Register for CSS tree-shaking
+        super::registry::mark_component_used(super::registry::ComponentType::Badge);
+
         let class = self.compute_class();
         let mut builder = el(El::Span).class(&class);
 

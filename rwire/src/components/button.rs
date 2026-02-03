@@ -208,6 +208,9 @@ impl Button {
 
     /// Build the button into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
+        // Register for CSS tree-shaking
+        super::registry::mark_component_used(super::registry::ComponentType::Button);
+
         let class = self.compute_class();
         let mut builder = el(El::Button).class(&class);
 
