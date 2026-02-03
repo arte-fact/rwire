@@ -133,7 +133,19 @@ pub use theme::{
 pub use variants::{Variant, VariantComponent};
 
 // Component exports
-pub use components::{generate_components_css, Button, ButtonIntent, ButtonSize};
+pub use components::{
+    generate_components_css,
+    // Button
+    Button, ButtonIntent, ButtonSize,
+    // Input
+    Input, InputSize, InputType,
+    // Stack
+    Stack, StackAlign, StackDirection, StackJustify, Gap,
+    // Card
+    Card, CardPadding, CardShadow,
+    // Badge
+    Badge, BadgeIntent,
+};
 
 // Metrics exports
 pub use metrics::{Counter, Gauge, Histogram, Metrics};
