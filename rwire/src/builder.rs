@@ -1389,57 +1389,7 @@ fn emit_update_element(
     ref_idx
 }
 
-// Note: This function is kept for backwards compatibility with tests that use
-// build_synced_update_multi without known symbols tracking.
-#[allow(dead_code)]
-fn collect_symbols_recursive(
-    el: &ElementBuilder,
-    symbols: &mut Vec<String>,
-    symbol_map: &mut HashMap<String, u8>,
-    synced_counter: &mut u32,
-    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
-) {
-    fn intern(s: &str, symbols: &mut Vec<String>, symbol_map: &mut HashMap<String, u8>) {
-        if symbol_map.contains_key(s) {
-            return;
-        }
-        let idx = 0x80 + symbols.len() as u8;
-        symbols.push(s.to_string());
-        symbol_map.insert(s.to_string(), idx);
-    }
-
-    // Handle synced elements - recursive symbol collection but NO wrapper ID interning
-    // (using CREATE_SYNCED opcode instead)
-    if let Some(renderer) = &el.synced {
-        // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
-        *synced_counter += 1;
-
-        // Render and collect symbols from the rendered content
-        let state_type_id = renderer.state_type_id();
-        if let Some(state) = states.get(&state_type_id) {
-            if let Some(rendered) = renderer.render_with_state(*state) {
-                collect_symbols_recursive(&rendered, symbols, symbol_map, synced_counter, states);
-            }
-        }
-        return;
-    }
-
-    if let Some(ref text) = el.text {
-        intern(text, symbols, symbol_map);
-    }
-    if let Some(ref class) = el.class {
-        intern(class, symbols, symbol_map);
-    }
-    for (key, value) in &el.attrs {
-        intern(key, symbols, symbol_map);
-        intern(value, symbols, symbol_map);
-    }
-    for child in &el.children {
-        collect_symbols_recursive(child, symbols, symbol_map, synced_counter, states);
-    }
-}
-
-/// Variant of collect_symbols_recursive that supports incremental symbol updates.
+/// Collect symbols recursively with support for incremental symbol updates.
 /// Only new symbols (not in the initial symbol_map) are added to new_symbols.
 fn collect_symbols_recursive_with_known(
     el: &ElementBuilder,

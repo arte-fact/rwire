@@ -350,6 +350,7 @@ pub struct ServerWithRoot<F> {
     addr: SocketAddr,
     persist_interval: Duration,
     root: F,
+    shared: Option<Arc<SharedServerState>>,
 }
 
 impl Server {
@@ -385,6 +386,7 @@ impl ServerBuilder {
             addr: self.addr,
             persist_interval: self.persist_interval,
             root: f,
+            shared: None,
         }
     }
 }
@@ -393,12 +395,35 @@ impl<F> ServerWithRoot<F>
 where
     F: Fn() -> ElementBuilder + Send + Sync + Clone + 'static,
 {
+    /// Set a pre-created shared server state.
+    ///
+    /// Use this when you need to hydrate state from a database before running
+    /// the server. This allows persistence to be configured before accepting
+    /// connections.
+    pub fn with_shared_state(mut self, shared: Arc<SharedServerState>) -> Self {
+        self.shared = Some(shared);
+        self
+    }
+
+    /// Get the shared server state, creating it if needed.
+    ///
+    /// Call this before `run()` to get a reference to the shared state for
+    /// hydration and persistence setup. The same instance will be used when
+    /// `run()` is called.
+    pub fn shared_state(&mut self) -> Arc<SharedServerState> {
+        self.shared
+            .get_or_insert_with(|| SharedServerState::new(self.persist_interval))
+            .clone()
+    }
+
     /// Run the server, accepting connections until shutdown.
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
         let listener = TcpListener::bind(self.addr).await?;
 
-        // Create shared server state
-        let shared = SharedServerState::new(self.persist_interval);
+        // Use provided shared state or create new
+        let shared = self
+            .shared
+            .unwrap_or_else(|| SharedServerState::new(self.persist_interval));
 
         // Pre-analyze the root element to determine used types for tree shaking
         let root_element = (self.root)();
@@ -496,6 +521,8 @@ async fn handle_client<F>(
 struct ConnectionState {
     /// Unique connection ID for this connection.
     connection_id: u64,
+    /// Session ID for this connection (used for persisted state keying).
+    session_id: String,
     /// State values keyed by TypeId, supporting multiple state types per connection.
     /// Note: For persisted state, the authoritative copy is in SharedServerState.
     states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
@@ -507,14 +534,16 @@ struct ConnectionState {
     /// Maps symbol string -> symbol index (0x80+).
     sent_symbols: HashMap<String, u8>,
     /// Keys this connection is subscribed to (for cleanup on disconnect).
-    #[allow(dead_code)]
     subscribed_keys: HashSet<String>,
 }
 
 impl ConnectionState {
     fn new(connection_id: u64) -> Self {
+        // Generate a unique session ID for this connection
+        let session_id = crate::session::SessionId::generate().as_str().to_string();
         Self {
             connection_id,
+            session_id,
             states: HashMap::new(),
             handlers: Vec::new(),
             synced_elements: Vec::new(),
@@ -653,35 +682,81 @@ where
                         // Clone the handler to avoid borrowing issues
                         let handler = conn_state.handlers[handler_idx].clone();
 
-                        // Ensure state for this handler's type is initialized
-                        conn_state.ensure_state_initialized_for(&handler);
-
                         // Create EventContext from payload and param_bytes
                         let ctx = EventContext::new_with_params(event.payload, event.param_bytes);
 
-                        // Get the state for this handler's type
+                        // Handle persisted vs memory state differently
                         let state_type_id = handler.state_type_id();
-                        if let Some(state) = conn_state.get_state_mut(state_type_id) {
-                            // Call the handler with context
-                            handler.call_with_context(state, &ctx);
+                        let cache_key = if let Some(table) = handler.table_name() {
+                            // Persisted state: use shared cache
+                            Some(format!("{}:{}", table, conn_state.session_id))
+                        } else {
+                            None
+                        };
+
+                        if let Some(key) = &cache_key {
+                            // Persisted state: get from shared cache, execute, write back
+                            let mut cache = shared.shared_cache.write().unwrap();
+                            let state = cache
+                                .entry(key.clone())
+                                .or_insert_with(|| handler.create_state());
+                            handler.call_with_context(state.as_mut(), &ctx);
+                            drop(cache);
+
+                            // Mark as dirty for background persistence
+                            shared.mark_dirty(key);
+
+                            // Subscribe this connection to updates for this key
+                            if !conn_state.subscribed_keys.contains(key) {
+                                shared.subscribe(conn_state.connection_id, key);
+                                conn_state.subscribed_keys.insert(key.clone());
+                            }
+                        } else {
+                            // Memory state: use connection-local state
+                            conn_state.ensure_state_initialized_for(&handler);
+                            if let Some(state) = conn_state.get_state_mut(state_type_id) {
+                                handler.call_with_context(state, &ctx);
+                            }
                         }
 
                         // Re-render synced elements using multi-state support
-                        // Only re-render elements whose dependencies overlap with changed fields
+                        // Build states map that includes both local and shared state
                         let changes = handler.changes();
-                        let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
-                            .states
-                            .iter()
-                            .map(|(k, v)| (*k, v.as_ref()))
-                            .collect();
-                        // Use incremental symbols - pass known symbols and update them
-                        let update = build_synced_update_with_known_symbols(
-                            &conn_state.synced_elements,
-                            &states_map,
-                            &mut conn_state.handlers,
-                            changes,
-                            Some(&mut conn_state.sent_symbols),
-                        );
+
+                        // Build the update bytes within a block to limit lock scope
+                        let update = {
+                            // Acquire read lock on shared cache (if needed)
+                            let cache_guard = if cache_key.is_some() {
+                                Some(shared.shared_cache.read().unwrap())
+                            } else {
+                                None
+                            };
+
+                            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                                conn_state
+                                    .states
+                                    .iter()
+                                    .map(|(k, v)| (*k, v.as_ref()))
+                                    .collect();
+
+                            // For persisted state, add the shared state to the map
+                            if let (Some(key), Some(ref cache)) = (&cache_key, &cache_guard) {
+                                if let Some(state) = cache.get(key) {
+                                    states_map.insert(state_type_id, state.as_ref());
+                                }
+                            }
+
+                            // Use incremental symbols - pass known symbols and update them
+                            build_synced_update_with_known_symbols(
+                                &conn_state.synced_elements,
+                                &states_map,
+                                &mut conn_state.handlers,
+                                changes,
+                                Some(&mut conn_state.sent_symbols),
+                            )
+                            // cache_guard dropped here at end of block
+                        };
+
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;
                         }

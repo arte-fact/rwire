@@ -286,6 +286,34 @@ Each module should have:
 
 Test file naming: `tests/<module_name>.rs`
 
+## E2E Debugging
+
+When debugging browser interactions, use the Playwright MCP tools. A helper script is available:
+
+```bash
+# Restart the todo-combined server (kills existing, rebuilds, starts fresh)
+./restart-server.sh
+
+# Server logs go to /tmp/server.log
+cat /tmp/server.log
+```
+
+### Debugging Workflow
+
+1. **Start server**: `./restart-server.sh` or `cargo run -p todo-combined`
+2. **Navigate**: Use `mcp__plugin_playwright_playwright__browser_navigate` to open http://127.0.0.1:9000
+3. **Inspect DOM**: Use `mcp__plugin_playwright_playwright__browser_snapshot` to see element refs
+4. **Interact**: Use `browser_click`, `browser_type` with element refs from snapshot
+5. **Check logs**: `cat /tmp/server.log` for server-side events and errors
+6. **Console**: Use `browser_console_messages` to check JS errors
+
+### Tips
+
+- Element refs (e.g., `ref=e33`) are used to target elements for interaction
+- Always check server log after interactions to verify events are received
+- For persistence debugging, restart server and check "Hydrated X entries" message
+- Use `browser_snapshot` after clicks to see updated DOM state
+
 ## Common Issues
 
 ### "Address already in use"

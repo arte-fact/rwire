@@ -94,6 +94,9 @@ pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};
 // Persist exports
 pub use persist::{PersistError, PersistRegistry, PersistableType, SqliteStore};
 
+// Re-export rusqlite for use in load_fn/save_fn implementations
+pub use rusqlite;
+
 // Config exports
 pub use config::ServerConfig;
 

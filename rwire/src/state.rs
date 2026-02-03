@@ -979,6 +979,10 @@ pub struct HandlerFn {
     inner: Box<dyn HandlerInner>,
     /// Which fields this handler modifies (for fine-grained reactivity)
     changes: ChangeSet,
+    /// Storage type for this handler's state
+    storage_type: StorageType,
+    /// Table name for persisted state (None for non-persisted)
+    table_name: Option<&'static str>,
 }
 
 trait HandlerInner: Send + Sync {
@@ -995,11 +999,13 @@ trait HandlerInner: Send + Sync {
 /// Handler that takes only state (legacy, single-parameter).
 struct TypedHandler<S: Default + Send + Sync + 'static> {
     handler: fn(&mut S),
+    _marker: std::marker::PhantomData<S>,
 }
 
 /// Handler that takes state and EventContext (new, two-parameter).
 struct TypedHandlerWithContext<S: Default + Send + Sync + 'static> {
     handler: fn(&mut S, &EventContext),
+    _marker: std::marker::PhantomData<S>,
 }
 
 impl<S: Default + Send + Sync + 'static> HandlerInner for TypedHandler<S> {
@@ -1029,6 +1035,7 @@ impl<S: Default + Send + Sync + 'static> HandlerInner for TypedHandler<S> {
     fn clone_box(&self) -> Box<dyn HandlerInner> {
         Box::new(TypedHandler {
             handler: self.handler,
+            _marker: std::marker::PhantomData,
         })
     }
 
@@ -1064,6 +1071,7 @@ impl<S: Default + Send + Sync + 'static> HandlerInner for TypedHandlerWithContex
     fn clone_box(&self) -> Box<dyn HandlerInner> {
         Box::new(TypedHandlerWithContext {
             handler: self.handler,
+            _marker: std::marker::PhantomData,
         })
     }
 
@@ -1077,6 +1085,8 @@ impl Clone for HandlerFn {
         Self {
             inner: self.inner.clone_box(),
             changes: self.changes,
+            storage_type: self.storage_type,
+            table_name: self.table_name,
         }
     }
 }
@@ -1087,18 +1097,20 @@ impl HandlerFn {
     #[allow(deprecated)]
     pub fn new<S: ClientState>(handler: fn(&mut S)) -> Self {
         Self {
-            inner: Box::new(TypedHandler { handler }),
+            inner: Box::new(TypedHandler {
+                handler,
+                _marker: std::marker::PhantomData,
+            }),
             changes: ChangeSet::all(),
+            storage_type: StorageType::Memory,
+            table_name: None,
         }
     }
 
     /// Create a new handler for the given State type.
     /// Uses `ChangeSet::all()` for backwards compatibility.
     pub fn new_state<S: State + Default>(handler: fn(&mut S)) -> Self {
-        Self {
-            inner: Box::new(TypedHandler { handler }),
-            changes: ChangeSet::all(),
-        }
+        Self::new_state_with_changes::<S>(handler, ChangeSet::all())
     }
 
     /// Create a new handler for the given State type with explicit ChangeSet.
@@ -1106,19 +1118,27 @@ impl HandlerFn {
         handler: fn(&mut S),
         changes: ChangeSet,
     ) -> Self {
+        let storage_type = S::STORAGE_TYPE;
+        let table_name = if S::TABLE_NAME.is_empty() {
+            None
+        } else {
+            Some(S::TABLE_NAME)
+        };
         Self {
-            inner: Box::new(TypedHandler { handler }),
+            inner: Box::new(TypedHandler {
+                handler,
+                _marker: std::marker::PhantomData,
+            }),
             changes,
+            storage_type,
+            table_name,
         }
     }
 
     /// Create a new handler with context support for the given State type.
     /// Uses `ChangeSet::all()` for backwards compatibility.
     pub fn new_with_context<S: State + Default>(handler: fn(&mut S, &EventContext)) -> Self {
-        Self {
-            inner: Box::new(TypedHandlerWithContext { handler }),
-            changes: ChangeSet::all(),
-        }
+        Self::new_with_context_and_changes::<S>(handler, ChangeSet::all())
     }
 
     /// Create a new handler with context support for the given State type with explicit ChangeSet.
@@ -1126,9 +1146,20 @@ impl HandlerFn {
         handler: fn(&mut S, &EventContext),
         changes: ChangeSet,
     ) -> Self {
+        let storage_type = S::STORAGE_TYPE;
+        let table_name = if S::TABLE_NAME.is_empty() {
+            None
+        } else {
+            Some(S::TABLE_NAME)
+        };
         Self {
-            inner: Box::new(TypedHandlerWithContext { handler }),
+            inner: Box::new(TypedHandlerWithContext {
+                handler,
+                _marker: std::marker::PhantomData,
+            }),
             changes,
+            storage_type,
+            table_name,
         }
     }
 
@@ -1168,6 +1199,16 @@ impl HandlerFn {
     /// where we need to find the correct handler index for rebinding events.
     pub fn fn_id(&self) -> usize {
         self.inner.fn_id()
+    }
+
+    /// Get the storage type for this handler's state.
+    pub fn storage_type(&self) -> StorageType {
+        self.storage_type
+    }
+
+    /// Get the table name for persisted state (None for non-persisted).
+    pub fn table_name(&self) -> Option<&'static str> {
+        self.table_name
     }
 }
 
