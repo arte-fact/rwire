@@ -1,0 +1,9 @@
+[package]
+name = "token-counter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rwire = { path = "../../rwire" }
+rwire-token = { path = "../../rwire-token" }
+async-std = { version = "1.12", features = ["attributes"] }
