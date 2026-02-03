@@ -66,6 +66,7 @@ pub mod session;
 pub mod state;
 pub mod store;
 pub mod style;
+pub mod tokens;
 
 // Builder API exports
 pub use builder::{el, ElementBuilder};
@@ -114,6 +115,10 @@ pub use router::{Link, Route, RoutePattern, Router};
 
 // Style exports
 pub use style::{ScopedClass, Style};
+
+// Token exports
+pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
+pub use tokens::css::{generate_primitive_css, minify_css};
 
 // Metrics exports
 pub use metrics::{Counter, Gauge, Histogram, Metrics};
