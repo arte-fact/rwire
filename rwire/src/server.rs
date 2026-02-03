@@ -266,6 +266,48 @@ impl SharedServerState {
         // Save to database using the persistable's save function
         (persistable.save_fn)(conn, session_id, &**state)
     }
+
+    /// Flush all dirty state to the store synchronously.
+    ///
+    /// This is called during graceful shutdown to ensure all state is persisted
+    /// before the server exits. It will retry failed keys up to max_attempts times.
+    ///
+    /// Returns the total number of keys successfully persisted.
+    pub fn flush_all_dirty(
+        &self,
+        store: &crate::persist::SqliteStore,
+        max_attempts: u32,
+    ) -> Result<usize, crate::persist::PersistError> {
+        let mut total_persisted = 0;
+        let mut attempts = 0;
+
+        while self.has_dirty() && attempts < max_attempts {
+            attempts += 1;
+
+            let dirty_count = self.dirty_count();
+            eprintln!("Flushing {} dirty keys (attempt {})...", dirty_count, attempts);
+
+            match self.persist_dirty(store) {
+                Ok(count) => {
+                    total_persisted += count;
+                    eprintln!("  Persisted {} keys successfully.", count);
+                }
+                Err(e) => {
+                    eprintln!("  Flush error: {}", e);
+                }
+            }
+        }
+
+        if self.has_dirty() {
+            let remaining = self.dirty_count();
+            eprintln!(
+                "WARNING: {} keys could not be persisted after {} attempts",
+                remaining, max_attempts
+            );
+        }
+
+        Ok(total_persisted)
+    }
 }
 
 /// Background task that persists dirty state to the database.
@@ -894,5 +936,71 @@ mod tests {
         // No dirty keys
         let count = shared.persist_dirty(&store).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_flush_all_dirty() {
+        use crate::persist::{PersistableType, SqliteStore};
+
+        let store = SqliteStore::memory().unwrap();
+
+        let persistable = PersistableType {
+            table_name: "counters",
+            schema: &["CREATE TABLE IF NOT EXISTS counters (id TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)"],
+            type_id: TypeId::of::<i32>(),
+            key_field: "id",
+            load_fn: |conn, key| {
+                use crate::persist::PersistError;
+                use rusqlite::Error as SqliteError;
+                match conn.query_row(
+                    "SELECT value FROM counters WHERE id = ?",
+                    [key],
+                    |row| row.get::<_, i32>(0),
+                ) {
+                    Ok(value) => Ok(Some(Box::new(value))),
+                    Err(SqliteError::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(PersistError::Sqlite(e)),
+                }
+            },
+            save_fn: |conn, key, state| {
+                use crate::persist::PersistError;
+                let value = state.downcast_ref::<i32>().ok_or(PersistError::TypeMismatch)?;
+                conn.execute(
+                    "INSERT INTO counters (id, value) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET value = excluded.value",
+                    rusqlite::params![key, value],
+                )?;
+                Ok(())
+            },
+            default_fn: || Box::new(0i32),
+        };
+
+        store.register(persistable);
+        store.ensure_schema().unwrap();
+
+        let shared = SharedServerState::new(Duration::from_millis(100));
+
+        // Insert multiple states
+        shared.insert_state("counters:a".to_string(), Box::new(1i32));
+        shared.insert_state("counters:b".to_string(), Box::new(2i32));
+        shared.insert_state("counters:c".to_string(), Box::new(3i32));
+
+        shared.mark_dirty("counters:a");
+        shared.mark_dirty("counters:b");
+        shared.mark_dirty("counters:c");
+
+        // Flush all dirty
+        let count = shared.flush_all_dirty(&store, 3).unwrap();
+        assert_eq!(count, 3);
+
+        // Verify all persisted
+        assert!(!shared.has_dirty());
+
+        // Verify in database
+        let conn = store.connection();
+        let conn = conn.lock().unwrap();
+        let total: i32 = conn
+            .query_row("SELECT COUNT(*) FROM counters", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, 3);
     }
 }
