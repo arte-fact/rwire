@@ -66,6 +66,7 @@ pub mod session;
 pub mod state;
 pub mod store;
 pub mod style;
+pub mod theme;
 pub mod tokens;
 
 // Builder API exports
@@ -119,6 +120,12 @@ pub use style::{ScopedClass, Style};
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
 pub use tokens::css::{generate_primitive_css, minify_css};
+
+// Theme exports
+pub use theme::{
+    generate_accent_css, generate_base_css, generate_radius_css, generate_semantic_css,
+    generate_theme_css, AccentColor, RadiusScale, Theme, ThemeMode,
+};
 
 // Metrics exports
 pub use metrics::{Counter, Gauge, Histogram, Metrics};
