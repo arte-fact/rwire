@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-channel = "2.3"
 async-std = { version = "1.12", features = ["attributes"] }
 async-tungstenite = { version = "0.25", features = ["async-std-runtime"] }
 bytes = "1.5"
