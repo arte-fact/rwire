@@ -21,7 +21,8 @@ use crate::builder::{
     build_synced_update_with_known_symbols, BuildContext, ElementBuilder, SyncedElement,
 };
 use crate::capsule;
-use crate::capsule_gen;
+use crate::capsule_gen::{self, CapsuleConfig};
+use crate::components::{begin_tracking, end_tracking};
 use crate::protocol::ClientEvent;
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn};
@@ -352,6 +353,7 @@ pub struct ServerWithRoot<F> {
     persist_interval: Duration,
     root: F,
     shared: Option<Arc<SharedServerState>>,
+    capsule_config: Option<CapsuleConfig>,
 }
 
 impl Server {
@@ -388,6 +390,7 @@ impl ServerBuilder {
             persist_interval: self.persist_interval,
             root: f,
             shared: None,
+            capsule_config: None,
         }
     }
 }
@@ -403,6 +406,15 @@ where
     /// connections.
     pub fn with_shared_state(mut self, shared: Arc<SharedServerState>) -> Self {
         self.shared = Some(shared);
+        self
+    }
+
+    /// Set the capsule configuration for styled output.
+    ///
+    /// This enables the styling system with theme support and component CSS.
+    /// The capsule will include tree-shaken CSS for only the components used.
+    pub fn capsule_config(mut self, config: CapsuleConfig) -> Self {
+        self.capsule_config = Some(config);
         self
     }
 
@@ -427,18 +439,33 @@ where
             .unwrap_or_else(|| SharedServerState::new(self.persist_interval));
 
         // Pre-analyze the root element to determine used types for tree shaking
+        // Wrap in component tracking to detect which styled components are used
+        begin_tracking();
         let root_element = (self.root)();
         let mut ctx = BuildContext::new();
         let placeholder: () = ();
         ctx.collect_symbols(&root_element, &placeholder);
         ctx.emit(&root_element, &placeholder);
+        let component_registry = end_tracking();
 
-        // Generate minimal capsule with only used element/event types
-        let capsule = capsule_gen::generate_capsule(
-            ctx.used_elements(),
-            ctx.used_events(),
-            ctx.has_local_handlers(),
-        );
+        // Generate capsule - styled if config provided, basic otherwise
+        let capsule = if let Some(config) = self.capsule_config {
+            // Merge tracked components into config
+            let config = config
+                .components(component_registry)
+                .has_local_handlers(ctx.has_local_handlers());
+            capsule_gen::generate_styled_capsule(
+                ctx.used_elements(),
+                ctx.used_events(),
+                &config,
+            )
+        } else {
+            capsule_gen::generate_capsule(
+                ctx.used_elements(),
+                ctx.used_events(),
+                ctx.has_local_handlers(),
+            )
+        };
         let capsule_size = capsule.len();
         let capsule = Arc::new(capsule);
 

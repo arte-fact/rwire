@@ -16,6 +16,9 @@
 use rwire::{
     el, handler, persist_task, renderer, El, ElementBuilder, Ev, IterWithRef, PersistError,
     PersistableType, Server, SqliteStore, State,
+    // Styling system
+    Button, ButtonSize, Input, Stack, Gap, Card, CardPadding,
+    Theme, CapsuleConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
@@ -220,101 +223,128 @@ fn clear_persisted_completed(state: &mut PersistedTodoState) {
 // ============================================================================
 
 fn build_app() -> ElementBuilder {
-    el(El::Div).class("app").append([
-        el(El::H1).text("rwire Multi-State TodoMVC"),
-        el(El::P)
-            .class("subtitle")
-            .text("Three todo lists demonstrating different storage strategies with EventContext"),
-        el(El::Div).class("columns").append([
-            build_local_column(),
-            build_memory_column(),
-            build_persisted_column(),
-        ]),
-    ])
+    Stack::column()
+        .gap(Gap::Lg)
+        .class("app")
+        .children([
+            el(El::H1).text("rwire Multi-State TodoMVC"),
+            el(El::P)
+                .class("subtitle")
+                .text("Three todo lists demonstrating different storage strategies with EventContext"),
+            Stack::row()
+                .gap(Gap::Lg)
+                .class("columns")
+                .children([
+                    build_local_column(),
+                    build_memory_column(),
+                    build_persisted_column(),
+                ])
+                .build(),
+        ])
+        .build()
 }
 
 fn build_local_column() -> ElementBuilder {
-    el(El::Div).class("column local").append([
-        el(El::H2).text("Local State"),
-        el(El::P)
-            .class("description")
-            .text("Instant - no server round-trip"),
-        el(El::Div).class("controls").append([
-            el(El::Button)
-                .text("Toggle #1")
-                .class("btn")
-                .on(Ev::Click, toggle_local_1()),
-            el(El::Button)
-                .text("Toggle #2")
-                .class("btn")
-                .on(Ev::Click, toggle_local_2()),
-            el(El::Button)
-                .text("Toggle #3")
-                .class("btn")
-                .on(Ev::Click, toggle_local_3()),
-            el(El::Button)
-                .text("Toggle Show Done")
-                .class("btn secondary")
-                .on(Ev::Click, toggle_show_completed()),
-        ]),
-        render_local_items(),
-    ])
+    Card::new()
+        .class("column local")
+        .child(
+            Stack::column()
+                .gap(Gap::Md)
+                .children([
+                    el(El::H2).text("Local State"),
+                    el(El::P)
+                        .class("description")
+                        .text("Instant - no server round-trip"),
+                    Stack::row()
+                        .gap(Gap::Sm)
+                        .wrap(true)
+                        .class("controls")
+                        .children([
+                            Button::secondary("Toggle #1").on_click(toggle_local_1()),
+                            Button::secondary("Toggle #2").on_click(toggle_local_2()),
+                            Button::secondary("Toggle #3").on_click(toggle_local_3()),
+                            Button::secondary("Toggle Show Done").on_click(toggle_show_completed()),
+                        ])
+                        .build(),
+                    render_local_items(),
+                ])
+                .build(),
+        )
+        .build()
 }
 
 fn build_memory_column() -> ElementBuilder {
-    el(El::Div).class("column memory").append([
-        el(El::H2).text("Memory State"),
-        el(El::P)
-            .class("description")
-            .text("Server-side with text input, lost on disconnect"),
-        // Input form for adding items
-        el(El::Div).class("input-row").append([
-            el(El::Input)
-                .attr("type", "text")
-                .attr("placeholder", "What needs to be done?")
-                .attr("name", "todo")
-                .class("todo-input")
-                .on(Ev::Input, update_memory_input()),
-            el(El::Button)
-                .text("Add")
-                .class("btn primary")
-                .on(Ev::Click, add_memory_item()),
-        ]),
-        el(El::Div).class("controls").append([el(El::Button)
-            .text("Clear Done")
-            .class("btn secondary")
-            .on(Ev::Click, clear_memory_completed())]),
-        render_memory_items(),
-    ])
+    Card::new()
+        .class("column memory")
+        .child(
+            Stack::column()
+                .gap(Gap::Md)
+                .children([
+                    el(El::H2).text("Memory State"),
+                    el(El::P)
+                        .class("description")
+                        .text("Server-side with text input, lost on disconnect"),
+                    // Input form for adding items
+                    Stack::row()
+                        .gap(Gap::Sm)
+                        .class("input-row")
+                        .children([
+                            Input::text()
+                                .placeholder("What needs to be done?")
+                                .name("todo")
+                                .on_input(update_memory_input()),
+                            Button::primary("Add").on_click(add_memory_item()),
+                        ])
+                        .build(),
+                    Stack::row()
+                        .gap(Gap::Sm)
+                        .class("controls")
+                        .children([Button::secondary("Clear Done")
+                            .on_click(clear_memory_completed())])
+                        .build(),
+                    render_memory_items(),
+                ])
+                .build(),
+        )
+        .build()
 }
 
 fn build_persisted_column() -> ElementBuilder {
-    el(El::Div).class("column persisted").append([
-        el(El::H2).text("Persisted State"),
-        el(El::P)
-            .class("description")
-            .text("Memory-first with SQLite background sync"),
-        // Input form for adding items
-        el(El::Form)
-            .class("input-row")
-            .on(Ev::Submit, add_persisted_item())
-            .append([
-                el(El::Input)
-                    .attr("type", "text")
-                    .attr("placeholder", "What needs to be done?")
-                    .attr("name", "todo")
-                    .class("todo-input"),
-                el(El::Button)
-                    .attr("type", "submit")
-                    .text("Add")
-                    .class("btn primary"),
-            ]),
-        el(El::Div).class("controls").append([el(El::Button)
-            .text("Clear Done")
-            .class("btn secondary")
-            .on(Ev::Click, clear_persisted_completed())]),
-        render_persisted_items(),
-    ])
+    Card::new()
+        .class("column persisted")
+        .child(
+            Stack::column()
+                .gap(Gap::Md)
+                .children([
+                    el(El::H2).text("Persisted State"),
+                    el(El::P)
+                        .class("description")
+                        .text("Memory-first with SQLite background sync"),
+                    // Input form for adding items - use Form element for submit handling
+                    el(El::Form)
+                        .class("input-row rw-stack rw-stack-row rw-gap-sm")
+                        .on(Ev::Submit, add_persisted_item())
+                        .append([
+                            Input::text()
+                                .placeholder("What needs to be done?")
+                                .name("todo")
+                                .build(),
+                            el(El::Button)
+                                .attr("type", "submit")
+                                .text("Add")
+                                .class("rw-btn"),
+                        ]),
+                    Stack::row()
+                        .gap(Gap::Sm)
+                        .class("controls")
+                        .children([Button::secondary("Clear Done")
+                            .on_click(clear_persisted_completed())])
+                        .build(),
+                    render_persisted_items(),
+                ])
+                .build(),
+        )
+        .build()
 }
 
 // ============================================================================
@@ -376,9 +406,11 @@ fn render_memory_items(_state: &MemoryTodoState) -> ElementBuilder {
 #[renderer]
 fn render_memory_items_list(state: &MemoryTodoState) -> ElementBuilder {
     if state.items.is_empty() {
-        return el(El::Div)
+        return Card::new()
+            .padding(CardPadding::Md)
             .class("empty")
-            .text("No items - type above and click Add");
+            .child(el(El::P).text("No items - type above and click Add"))
+            .build();
     }
 
     // Use iter_with_ref() for type-safe item references
@@ -387,22 +419,31 @@ fn render_memory_items_list(state: &MemoryTodoState) -> ElementBuilder {
         .iter_with_ref()
         .map(|(item_ref, item)| {
             let class = if item.done { "item done" } else { "item" };
-            el(El::Div).class(class).append([
-                el(El::Span)
-                    .class("checkbox")
-                    .text(if item.done { "[x]" } else { "[ ]" })
-                    .on_ref(Ev::Click, toggle_memory_item(), item_ref),
-                el(El::Span).class("text").text(&item.text),
-                el(El::Button).class("delete").text("x").on_ref(
-                    Ev::Click,
-                    delete_memory_item(),
-                    item_ref,
-                ),
-            ])
+            Stack::row()
+                .gap(Gap::Sm)
+                .align(rwire::StackAlign::Center)
+                .class(class)
+                .children([
+                    el(El::Span)
+                        .class("checkbox")
+                        .text(if item.done { "[x]" } else { "[ ]" })
+                        .on_ref(Ev::Click, toggle_memory_item(), item_ref),
+                    el(El::Span).class("text").text(&item.text),
+                    Button::ghost("×")
+                        .size(ButtonSize::Sm)
+                        .class("delete")
+                        .build()
+                        .on_ref(Ev::Click, delete_memory_item(), item_ref),
+                ])
+                .build()
         })
         .collect();
 
-    el(El::Div).class("items").append(items)
+    Stack::column()
+        .gap(Gap::Xs)
+        .class("items")
+        .children(items)
+        .build()
 }
 
 #[renderer]
@@ -424,9 +465,11 @@ fn render_persisted_items(_state: &PersistedTodoState) -> ElementBuilder {
 #[renderer]
 fn render_persisted_items_list(state: &PersistedTodoState) -> ElementBuilder {
     if state.items.is_empty() {
-        return el(El::Div)
+        return Card::new()
+            .padding(CardPadding::Md)
             .class("empty")
-            .text("No items - type above and click Add");
+            .child(el(El::P).text("No items - type above and click Add"))
+            .build();
     }
 
     // Use iter_with_ref() for type-safe item references
@@ -435,22 +478,31 @@ fn render_persisted_items_list(state: &PersistedTodoState) -> ElementBuilder {
         .iter_with_ref()
         .map(|(item_ref, item)| {
             let class = if item.done { "item done" } else { "item" };
-            el(El::Div).class(class).append([
-                el(El::Span)
-                    .class("checkbox")
-                    .text(if item.done { "[x]" } else { "[ ]" })
-                    .on_ref(Ev::Click, toggle_persisted_item(), item_ref),
-                el(El::Span).class("text").text(&item.text),
-                el(El::Button).class("delete").text("x").on_ref(
-                    Ev::Click,
-                    delete_persisted_item(),
-                    item_ref,
-                ),
-            ])
+            Stack::row()
+                .gap(Gap::Sm)
+                .align(rwire::StackAlign::Center)
+                .class(class)
+                .children([
+                    el(El::Span)
+                        .class("checkbox")
+                        .text(if item.done { "[x]" } else { "[ ]" })
+                        .on_ref(Ev::Click, toggle_persisted_item(), item_ref),
+                    el(El::Span).class("text").text(&item.text),
+                    Button::ghost("×")
+                        .size(ButtonSize::Sm)
+                        .class("delete")
+                        .build()
+                        .on_ref(Ev::Click, delete_persisted_item(), item_ref),
+                ])
+                .build()
         })
         .collect();
 
-    el(El::Div).class("items").append(items)
+    Stack::column()
+        .gap(Gap::Xs)
+        .class("items")
+        .children(items)
+        .build()
 }
 
 #[renderer]
@@ -517,10 +569,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("SQLite database initialized: ./todo.db");
 
-    // Build server with persistence support
+    // Configure theme for styled capsule
+    let theme = Theme::light();
+    let config = CapsuleConfig::new().theme(theme);
+
+    // Build server with persistence support and styling
     let mut server = Server::bind("127.0.0.1:9000")?
         .persist_interval(Duration::from_millis(100))
-        .root(build_app);
+        .root(build_app)
+        .capsule_config(config);
 
     // Get shared state for persist task and shutdown
     let shared = server.shared_state();

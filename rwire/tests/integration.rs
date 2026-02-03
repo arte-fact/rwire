@@ -58,7 +58,7 @@ async fn test_server_accepts_http() {
         .unwrap();
 
     // Read response
-    let mut response = vec![0u8; 4096];
+    let mut response = vec![0u8; 8192];
     let n = stream.read(&mut response).await.unwrap();
     let response_str = String::from_utf8_lossy(&response[..n]);
 
@@ -94,7 +94,7 @@ async fn test_capsule_tree_shaking() {
         .await
         .unwrap();
 
-    let mut response = vec![0u8; 4096];
+    let mut response = vec![0u8; 8192];
     let n = stream.read(&mut response).await.unwrap();
     let response_str = String::from_utf8_lossy(&response[..n]);
 
@@ -126,7 +126,7 @@ async fn test_counter_capsule() {
         .await
         .unwrap();
 
-    let mut response = vec![0u8; 4096];
+    let mut response = vec![0u8; 8192];
     let n = stream.read(&mut response).await.unwrap();
     let response_str = String::from_utf8_lossy(&response[..n]);
 
@@ -211,7 +211,7 @@ async fn test_concurrent_connections() {
                     .await
                     .unwrap();
 
-                let mut response = vec![0u8; 4096];
+                let mut response = vec![0u8; 8192];
                 let n = stream.read(&mut response).await.unwrap();
                 let response_str = String::from_utf8_lossy(&response[..n]);
 
