@@ -1,5 +1,13 @@
 /target
 
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# Playwright MCP
+.playwright-mcp/
+
 # Auto Claude data directory
 .auto-claude/
 
