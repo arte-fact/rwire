@@ -143,6 +143,26 @@ impl SharedServerState {
             .push(conn_id);
     }
 
+    /// Hydrate shared cache from a SqliteStore.
+    ///
+    /// This loads all persisted state from the database into memory.
+    /// Should be called at server startup before accepting connections.
+    pub fn hydrate(&self, store: &crate::persist::SqliteStore) -> Result<usize, crate::persist::PersistError> {
+        // Ensure schemas exist
+        store.ensure_schema()?;
+
+        // Load all state into cache
+        let states = store.hydrate_all()?;
+        let count = states.len();
+
+        let mut cache = self.shared_cache.write().unwrap();
+        for (key, state) in states {
+            cache.insert(key, state);
+        }
+
+        Ok(count)
+    }
+
     /// Broadcast state change to subscribed connections.
     pub fn broadcast(
         &self,

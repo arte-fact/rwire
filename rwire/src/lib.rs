@@ -57,6 +57,7 @@ pub mod form;
 pub mod health;
 pub mod item_ref;
 pub mod metrics;
+pub mod persist;
 pub mod protocol;
 pub mod registry;
 pub mod router;
@@ -88,6 +89,9 @@ pub use server::{BroadcastMsg, Server, SharedServerState};
 
 // Store exports
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};
+
+// Persist exports
+pub use persist::{PersistError, PersistRegistry, PersistableType, SqliteStore};
 
 // Config exports
 pub use config::ServerConfig;
