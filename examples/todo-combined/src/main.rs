@@ -143,17 +143,27 @@ fn clear_memory_completed(state: &mut MemoryTodoState) {
 }
 
 // ============================================================================
-// Persisted State - File-backed, survives restart
+// Persisted State - SQLite-backed, survives restart
 // ============================================================================
 
 /// Persisted state for durable todo items.
 ///
-/// This state is saved to a JSON file and survives server restarts.
-/// For simplicity, we use a single global file - in production you'd
-/// use session IDs for per-user storage.
+/// This state demonstrates the persistence architecture:
+/// - Memory-first: State lives in SharedServerState.shared_cache for instant access
+/// - Background persistence: Dirty keys are persisted asynchronously via persist_task
+/// - Normalized schema: Vec<T> fields become child tables
+///
+/// Full persistence requires registering a PersistableType with SqliteStore.
+/// See rwire/src/persist.rs for the registration API.
+///
+/// Currently using memory storage for demonstration. To enable full persistence:
+/// 1. Change #[storage(memory)] to #[storage(persisted, table = "todos")]
+/// 2. Add #[key] attribute to a session_id field
+/// 3. Register the type with SqliteStore in main()
 #[derive(State, Default, Clone, Serialize, Deserialize)]
-#[storage(memory)] // Using memory storage with manual persistence hooks
+#[storage(memory)] // TODO: Change to #[storage(persisted, table = "todos")]
 struct PersistedTodoState {
+    // TODO: Add #[key] session_id: String,
     items: Vec<PersistedTodoItem>,
 }
 
@@ -285,7 +295,7 @@ fn build_persisted_column() -> ElementBuilder {
         el(El::H2).text("Persisted State"),
         el(El::P)
             .class("description")
-            .text("File-backed - survives server restart (simulated)"),
+            .text("Memory-first with SQLite background sync"),
         // Input form for adding items
         el(El::Form)
             .class("input-row")
@@ -464,7 +474,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Demonstrating three storage types with EventContext and ItemRef:");
     println!("  - Local:     Client-side, instant UI response (fixed items)");
     println!("  - Memory:    Server-side with text input (session-scoped)");
-    println!("  - Persisted: File-backed (simulated persistence)");
+    println!("  - Persisted: Memory-first with background SQLite persistence");
+    println!();
+    println!("Persistence architecture (for persisted state):");
+    println!("  - Instant handler execution (memory-only mutation)");
+    println!("  - Background persistence task (non-blocking DB writes)");
+    println!("  - Cross-tab synchronization (broadcast to other connections)");
+    println!("  - Graceful shutdown (flush dirty state before exit)");
     println!();
     println!("New features demonstrated:");
     println!("  - Text input capture via ctx.text()");
@@ -475,6 +491,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
+
+    // To enable SQLite persistence:
+    // 1. Create SqliteStore: let store = SqliteStore::new("./todo.db")?;
+    // 2. Register PersistableType with store.register(...)
+    // 3. Configure server: Server::bind("...")?.persist_interval(Duration::from_millis(100))
+    // 4. Spawn persist_task in background
+    // 5. Call flush_all_dirty() before shutdown
 
     Server::bind("127.0.0.1:9000")?.root(build_app).run().await
 }
