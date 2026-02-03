@@ -1171,8 +1171,21 @@ pub fn build_synced_update_with_known_symbols(
     }
 
     // Second pass: emit updates with full re-render
-    // Reset counter to track nested synced elements during emit
-    // Only process synced elements that need updating
+    // Track which synced elements have been rendered as nested elements of a parent.
+    // These should be skipped in the main loop since they're already updated.
+    let mut rendered_ids: HashSet<u32> = HashSet::new();
+
+    // Build a map of state_type_id -> list of synced element IDs (in order)
+    // This allows us to match nested synced elements by type and order
+    let mut ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
+    for se in synced {
+        ids_by_type.entry(se.state_type_id).or_default().push(se.id);
+    }
+
+    // Track next index to use for each state type during emit
+    let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
+
+    // Counter for any truly new nested synced elements (not in original list)
     let mut emit_synced_counter: u32 = synced
         .iter()
         .map(|se| se.id)
@@ -1181,10 +1194,21 @@ pub fn build_synced_update_with_known_symbols(
         .unwrap_or(0);
 
     for se in synced {
+        // Skip elements that were already rendered as nested elements
+        if rendered_ids.contains(&se.id) {
+            continue;
+        }
+
         // Skip elements that don't need updating (zero-cost bitmask check)
         if !se.deps.needs_update(changes) {
             continue;
         }
+
+        // Mark this element as being processed (it's a top-level render, not nested)
+        rendered_ids.insert(se.id);
+        // Advance the index for this type since we're rendering it now
+        let idx = next_idx_by_type.entry(se.state_type_id).or_insert(0);
+        *idx += 1;
 
         // Find the state for this synced element's state type
         if let Some(state) = states.get(&se.state_type_id) {
@@ -1196,13 +1220,16 @@ pub fn build_synced_update_with_known_symbols(
                 buf.clear_children(wrapper_ref);
 
                 // Emit the full rendered tree as children of wrapper
-                // Pass synced_counter to handle nested synced elements
+                // Pass type->ID mapping so nested elements can find their original IDs
                 emit_update_element(
                     &rendered,
                     wrapper_ref,
                     &mut buf,
                     &symbol_map,
                     handlers,
+                    &ids_by_type,
+                    &mut next_idx_by_type,
+                    &mut rendered_ids,
                     &mut emit_synced_counter,
                     states,
                 );
@@ -1220,28 +1247,51 @@ pub fn build_synced_update_with_known_symbols(
 /// Event handlers are rebound using existing handler indices, or new handlers
 /// are registered if they weren't present during initial render.
 ///
-/// For nested synced elements, this creates wrapper spans with the correct IDs
-/// so that subsequent updates can find them. Uses CREATE_SYNCED opcode for
-/// compact encoding.
+/// For nested synced elements, this finds their original ID by matching state type
+/// and order, then marks them as already rendered to avoid duplicate updates.
+#[allow(clippy::too_many_arguments)]
 fn emit_update_element(
     el: &ElementBuilder,
     parent_ref: u8,
     buf: &mut OpcodeBuffer,
     symbol_map: &HashMap<String, u8>,
     handlers: &mut Vec<HandlerFn>,
+    ids_by_type: &HashMap<TypeId, Vec<u32>>,
+    next_idx_by_type: &mut HashMap<TypeId, usize>,
+    rendered_ids: &mut HashSet<u32>,
     synced_counter: &mut u32,
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
 ) -> u8 {
-    // Handle nested synced elements - create wrapper with ID
+    // Handle nested synced elements - create wrapper with ORIGINAL ID
     if let Some(renderer) = &el.synced {
-        let synced_id = *synced_counter;
-        *synced_counter += 1;
+        let state_type_id = renderer.state_type_id();
+
+        // Find the original synced element ID by matching state_type_id and order
+        let synced_id = if let Some(ids) = ids_by_type.get(&state_type_id) {
+            let idx = next_idx_by_type.entry(state_type_id).or_insert(0);
+            if *idx < ids.len() {
+                let id = ids[*idx];
+                *idx += 1;
+                // Mark as rendered so it won't be processed in main loop
+                rendered_ids.insert(id);
+                id
+            } else {
+                // More nested elements than original - assign new ID
+                let id = *synced_counter;
+                *synced_counter += 1;
+                id
+            }
+        } else {
+            // Truly new synced element type, assign new ID
+            let id = *synced_counter;
+            *synced_counter += 1;
+            id
+        };
 
         // Find the state for this renderer's state type
-        let state_type_id = renderer.state_type_id();
         if let Some(state) = states.get(&state_type_id) {
             if let Some(rendered) = renderer.render_with_state(*state) {
-                // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
+                // Use CREATE_SYNCED opcode with the ORIGINAL ID
                 let wrapper_ref = buf.create_synced(synced_id);
 
                 // Emit the rendered content as a child of the wrapper
@@ -1251,6 +1301,9 @@ fn emit_update_element(
                     buf,
                     symbol_map,
                     handlers,
+                    ids_by_type,
+                    next_idx_by_type,
+                    rendered_ids,
                     synced_counter,
                     states,
                 );
@@ -1322,6 +1375,9 @@ fn emit_update_element(
             buf,
             symbol_map,
             handlers,
+            ids_by_type,
+            next_idx_by_type,
+            rendered_ids,
             synced_counter,
             states,
         );

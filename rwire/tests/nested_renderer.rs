@@ -27,6 +27,20 @@ fn has_get_synced_for_id(bytes: &[u8], synced_id: u32) -> bool {
     false
 }
 
+/// Check if the bytes contain a CREATE_SYNCED opcode (0x03) for a given synced_id.
+/// The synced_id is encoded as a varint after the opcode.
+fn has_create_synced_for_id(bytes: &[u8], synced_id: u32) -> bool {
+    for i in 0..bytes.len() {
+        if bytes[i] == CREATE_SYNCED {
+            // Check if the next byte(s) match the synced_id as varint
+            if synced_id < 0x80 && i + 1 < bytes.len() && bytes[i + 1] == synced_id as u8 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[derive(Default)]
 struct ParentState {
     count: i32,
@@ -178,11 +192,14 @@ fn test_collect_symbols_finds_nested_synced() {
 /// This test verifies that nested synced elements are properly wrapped during updates.
 ///
 /// The sequence of events during an update:
-/// 1. Parent synced element (id=0) clears its children
+/// 1. Parent synced element (id=0) gets GET_SYNCED, clears its children
 /// 2. Parent renderer is called, returns content with nested synced element
-/// 3. emit_update_element() now recognizes synced elements and creates wrapper spans
-/// 4. Child synced element gets wrapped with __synced_N ID
-/// 5. When child synced element updates independently, it can find its wrapper
+/// 3. emit_update_element() recognizes nested synced element and uses CREATE_SYNCED
+/// 4. Child synced element gets wrapper with its original ID (id=1)
+/// 5. Child is marked as "already rendered" and skipped in main loop
+///
+/// This avoids the bug where GET_SYNCED(1) would fail because the original
+/// wrapper was destroyed when parent cleared its children.
 #[test]
 fn test_nested_update_preserves_structure() {
     let mut ctx = BuildContext::new();
@@ -205,17 +222,22 @@ fn test_nested_update_preserves_structure() {
     let mut handlers: Vec<HandlerFn> = vec![];
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
 
-    // Check that update bytes contain GET_SYNCED opcodes for both synced IDs
     let bytes = update_bytes.as_ref();
 
-    // We now use GET_SYNCED opcodes instead of symbol table strings
+    // Parent (id=0) should have GET_SYNCED to find its existing wrapper
     let has_synced_0 = has_get_synced_for_id(bytes, 0);
+    assert!(has_synced_0, "Update should have GET_SYNCED for parent (id 0)");
+
+    // Nested child (id=1) should NOT have GET_SYNCED - it's rendered via CREATE_SYNCED
+    // as part of parent's content, avoiding the destroyed-wrapper bug
     let has_synced_1 = has_get_synced_for_id(bytes, 1);
+    assert!(!has_synced_1, "Nested child should NOT have GET_SYNCED (uses CREATE_SYNCED instead)");
 
-    assert!(has_synced_0, "Update should have GET_SYNCED for id 0");
-    assert!(has_synced_1, "Update should have GET_SYNCED for id 1");
+    // Verify CREATE_SYNCED is present for the nested element
+    let has_create_synced_1 = has_create_synced_for_id(bytes, 1);
+    assert!(has_create_synced_1, "Update should have CREATE_SYNCED for nested child (id 1)");
 
-    println!("Both synced element IDs found via GET_SYNCED opcodes");
+    println!("Parent uses GET_SYNCED, nested child uses CREATE_SYNCED");
 }
 
 /// Test that nested synced elements are wrapped with correct IDs during update emission.
@@ -339,17 +361,28 @@ fn test_deeply_nested_synced_elements() {
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
     let bytes = update_bytes.as_ref();
 
-    // All three wrapper IDs should be referenced via GET_SYNCED
+    // Only top-level (id=0) gets GET_SYNCED
+    // Nested elements (id=1, id=2) get CREATE_SYNCED as part of parent's content
     assert!(
         has_get_synced_for_id(bytes, 0),
-        "Should have GET_SYNCED for id 0"
+        "Should have GET_SYNCED for top-level (id 0)"
     );
     assert!(
-        has_get_synced_for_id(bytes, 1),
-        "Should have GET_SYNCED for id 1"
+        !has_get_synced_for_id(bytes, 1),
+        "Nested id=1 should NOT have GET_SYNCED"
     );
     assert!(
-        has_get_synced_for_id(bytes, 2),
-        "Should have GET_SYNCED for id 2"
+        !has_get_synced_for_id(bytes, 2),
+        "Nested id=2 should NOT have GET_SYNCED"
+    );
+
+    // Nested elements should use CREATE_SYNCED with their original IDs
+    assert!(
+        has_create_synced_for_id(bytes, 1),
+        "Should have CREATE_SYNCED for nested id=1"
+    );
+    assert!(
+        has_create_synced_for_id(bytes, 2),
+        "Should have CREATE_SYNCED for nested id=2"
     );
 }
