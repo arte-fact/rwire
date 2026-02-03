@@ -8,6 +8,7 @@
 
 mod field_access_parser;
 mod mutation_parser;
+mod schema_gen;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -144,6 +145,35 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    // Generate SCHEMA constant for persisted types
+    let schema_impl = if storage_type.to_string().contains("Persisted") && !table_name.is_empty() {
+        let data_fields = match &input.data {
+            syn::Data::Struct(data) => &data.fields,
+            _ => {
+                return syn::Error::new_spanned(
+                    &input,
+                    "Only structs can derive State with persisted storage",
+                )
+                .to_compile_error()
+                .into();
+            }
+        };
+
+        let tables = schema_gen::generate_schema(&table_name, &key_field, data_fields);
+        let schema_sql: Vec<String> = tables.iter().map(schema_gen::table_to_sql).collect();
+
+        quote! {
+            impl #impl_generics #name #ty_generics #where_clause {
+                /// SQL statements to create tables for this state.
+                pub const SCHEMA: &'static [&'static str] = &[
+                    #(#schema_sql),*
+                ];
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             #(#field_constants)*
@@ -156,6 +186,8 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         }
 
         #marker_trait_impl
+
+        #schema_impl
     };
 
     TokenStream::from(expanded)

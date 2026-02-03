@@ -9,6 +9,7 @@ use rwire::{el, El, Ev, HandlerFn, MemoryState};
 
 #[derive(Default)]
 struct TestState {
+    #[allow(dead_code)]
     items: Vec<String>,
 }
 

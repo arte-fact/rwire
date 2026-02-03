@@ -197,6 +197,7 @@ fn test_needs_update_none_deps_with_all_changed() {
 // ============================================================================
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct MultiFieldState {
     field_a: i32,
     field_b: String,
