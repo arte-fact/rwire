@@ -273,16 +273,9 @@ Don't refactor:
 
 ### Deprecation Process
 
-1. Mark old API with `#[deprecated(note = "Use X instead")]`
-2. Update all internal usages to new API
-3. Update examples and documentation
-4. Remove deprecated code in next release
-
-Example:
-```rust
-#[deprecated(note = "Use #[derive(State)] with #[storage(memory)] instead")]
-pub trait ClientState: MemoryState {}
-```
+- We are in an experimental phase; breaking changes are allowed.
+- The only consumers are internal examples. Do breaking changes, then update examples using compiler errors as guidance.
+- No need for formal deprecation warnings or versioning.
 
 ### Test Coverage
 
