@@ -138,8 +138,46 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
             impl #impl_generics rwire::MemoryState for #name #ty_generics #where_clause {}
         }
     } else if storage_type.to_string().contains("Local") {
+        // Generate JSON serialization for local state default values
+        let field_json_parts: Vec<_> = fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let field_name = f.ident.as_ref().unwrap().to_string();
+                let field_type = &f.ty;
+                let comma = if i > 0 { "," } else { "" };
+                // Generate JSON for default value based on type
+                quote! {
+                    format!(
+                        "{}\"{}\":{}",
+                        #comma,
+                        #field_name,
+                        <#field_type as rwire::LocalStateJson>::default_json()
+                    )
+                }
+            })
+            .collect();
+
         quote! {
             impl #impl_generics rwire::LocalState for #name #ty_generics #where_clause {}
+
+            impl #impl_generics #name #ty_generics #where_clause {
+                /// Return the default state as JSON.
+                ///
+                /// This is used to initialize client-side local state.
+                pub fn __local_state_default_json() -> String {
+                    // Register this type with the local state registry on first call
+                    static ONCE: std::sync::Once = std::sync::Once::new();
+                    ONCE.call_once(|| {
+                        rwire::register_local_state_default::<#name>(Self::__local_state_default_json);
+                    });
+
+                    let mut json = String::from("{");
+                    #(json.push_str(&#field_json_parts);)*
+                    json.push('}');
+                    json
+                }
+            }
         }
     } else {
         quote! {}
@@ -403,6 +441,10 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 let expanded = quote! {
                     #vis fn #fn_name() -> rwire::HandlerSpec {
+                        // Ensure local state type is registered with the local state registry.
+                        // This triggers the Once::call_once registration.
+                        let _ = #state_type::__local_state_default_json();
+
                         rwire::HandlerSpec::local::<#state_type>(rwire::LocalMutations::new(vec![
                             #(#mutation_exprs),*
                         ]))

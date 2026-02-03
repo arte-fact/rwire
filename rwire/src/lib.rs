@@ -77,8 +77,9 @@ pub use item_ref::{ItemRef, IterWithRef};
 #[allow(deprecated)]
 pub use state::ClientState;
 pub use state::{
-    ChangeSet, EventContext, EventPayload, HandlerFn, HandlerSpec, LocalMutations, LocalState,
-    MemoryState, Mutation, PersistedState, RendererDeps, State, StorageType,
+    get_local_state_default_json, register_local_state_default, ChangeSet, EventContext,
+    EventPayload, HandlerFn, HandlerSpec, LocalMutations, LocalState, LocalStateJson, MemoryState,
+    Mutation, PersistedState, RendererDeps, State, StorageType,
 };
 
 // Protocol exports

@@ -613,6 +613,8 @@ where
     // Emit local handlers if any
     if ctx.has_local_handlers() {
         ctx.emit_local_handlers();
+        // Emit default state for each local state type
+        ctx.emit_local_state(crate::state::get_local_state_default_json);
     }
 
     // Re-extract handlers and synced elements (they should be the same)

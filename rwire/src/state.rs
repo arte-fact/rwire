@@ -1178,3 +1178,124 @@ impl std::fmt::Debug for HandlerFn {
             .finish()
     }
 }
+
+// ============================================================================
+// Local State JSON Serialization
+// ============================================================================
+
+/// Trait for serializing basic types to JSON for local state.
+///
+/// This is implemented for types that can be used as fields in local state structs.
+/// The macro uses this to generate the default JSON for each field.
+pub trait LocalStateJson {
+    /// Return the default value as a JSON string.
+    fn default_json() -> String;
+}
+
+impl LocalStateJson for bool {
+    fn default_json() -> String {
+        "false".to_string()
+    }
+}
+
+impl LocalStateJson for i8 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for i16 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for i32 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for i64 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for u8 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for u16 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for u32 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for u64 {
+    fn default_json() -> String {
+        "0".to_string()
+    }
+}
+
+impl LocalStateJson for f32 {
+    fn default_json() -> String {
+        "0.0".to_string()
+    }
+}
+
+impl LocalStateJson for f64 {
+    fn default_json() -> String {
+        "0.0".to_string()
+    }
+}
+
+impl LocalStateJson for String {
+    fn default_json() -> String {
+        "\"\"".to_string()
+    }
+}
+
+// ============================================================================
+// Local State Registry
+// ============================================================================
+
+use std::sync::RwLock;
+
+/// Type alias for a function that returns the default state as JSON.
+pub type LocalStateDefaultFn = fn() -> String;
+
+/// Global registry mapping TypeId to default JSON serializer for local state types.
+///
+/// This is populated by the `#[derive(State)]` macro for `#[storage(local)]` types.
+static LOCAL_STATE_REGISTRY: OnceLock<RwLock<HashMap<TypeId, LocalStateDefaultFn>>> =
+    OnceLock::new();
+
+fn local_state_registry() -> &'static RwLock<HashMap<TypeId, LocalStateDefaultFn>> {
+    LOCAL_STATE_REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Register a local state default serializer.
+///
+/// This is called by the `#[derive(State)]` macro for `#[storage(local)]` types.
+/// The serializer function should return the JSON representation of Default::default().
+pub fn register_local_state_default<S: 'static>(serializer: LocalStateDefaultFn) {
+    let mut registry = local_state_registry().write().unwrap();
+    registry.insert(TypeId::of::<S>(), serializer);
+}
+
+/// Get the default JSON for a local state type by TypeId.
+///
+/// Returns None if the type is not registered.
+pub fn get_local_state_default_json(type_id: TypeId) -> Option<String> {
+    let registry = local_state_registry().read().unwrap();
+    registry.get(&type_id).map(|f| f())
+}
