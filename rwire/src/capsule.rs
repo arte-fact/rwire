@@ -10,23 +10,39 @@
 
 use async_std::io::WriteExt;
 use async_std::net::TcpStream;
+use std::time::Duration;
 
-/// HTTP response headers for the capsule.
-const HTTP_RESPONSE_HEADER: &str = "HTTP/1.1 200 OK\r\n\
-Content-Type: text/html; charset=utf-8\r\n\
-Connection: close\r\n\
-Cache-Control: no-cache\r\n";
+use crate::session::{SessionId, COOKIE_MAX_AGE_SECS};
 
 /// Serve a pre-generated capsule HTML over the TCP stream.
-pub async fn serve(mut stream: TcpStream, capsule: &str) -> std::io::Result<()> {
-    // Write HTTP response
-    let response = format!(
-        "{}Content-Length: {}\r\n\r\n{}",
-        HTTP_RESPONSE_HEADER,
-        capsule.len(),
-        capsule
-    );
-    stream.write_all(response.as_bytes()).await?;
+///
+/// If `session_id` is provided and `is_new_session` is true, sets a session cookie.
+pub async fn serve(
+    mut stream: TcpStream,
+    capsule: &str,
+    session_id: Option<&SessionId>,
+    is_new_session: bool,
+) -> std::io::Result<()> {
+    // Build HTTP response headers
+    let mut headers = String::from("HTTP/1.1 200 OK\r\n");
+    headers.push_str("Content-Type: text/html; charset=utf-8\r\n");
+    headers.push_str("Connection: close\r\n");
+    headers.push_str("Cache-Control: no-cache\r\n");
+
+    // Set session cookie if this is a new session
+    if let Some(sid) = session_id {
+        if is_new_session {
+            let cookie = sid.to_cookie(Some(Duration::from_secs(COOKIE_MAX_AGE_SECS)));
+            headers.push_str(&format!("Set-Cookie: {}\r\n", cookie));
+        }
+    }
+
+    headers.push_str(&format!("Content-Length: {}\r\n", capsule.len()));
+    headers.push_str("\r\n");
+
+    // Write response
+    stream.write_all(headers.as_bytes()).await?;
+    stream.write_all(capsule.as_bytes()).await?;
     stream.flush().await?;
     Ok(())
 }

@@ -11,11 +11,17 @@
 //! let session_id = SessionId::generate();
 //!
 //! // Parse from cookie header
-//! let cookie = "rwire_session=abc123def456";
+//! let cookie = "rwire_sid=abc123def456";
 //! if let Some(id) = SessionId::from_cookie(cookie) {
 //!     println!("Session ID: {}", id);
 //! }
 //! ```
+
+/// Default cookie name for rwire sessions.
+pub const COOKIE_NAME: &str = "rwire_sid";
+
+/// Default cookie max age (1 year in seconds).
+pub const COOKIE_MAX_AGE_SECS: u64 = 365 * 24 * 60 * 60;
 
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -46,9 +52,9 @@ impl SessionId {
 
     /// Parse a session ID from a cookie header value.
     ///
-    /// Looks for a cookie named "rwire_session" or the specified name.
+    /// Looks for a cookie named "rwire_sid".
     pub fn from_cookie(cookie_header: &str) -> Option<Self> {
-        Self::from_cookie_named(cookie_header, "rwire_session")
+        Self::from_cookie_named(cookie_header, COOKIE_NAME)
     }
 
     /// Parse a session ID from a cookie header with a custom cookie name.
@@ -71,7 +77,7 @@ impl SessionId {
 
     /// Create a Set-Cookie header value for this session ID.
     pub fn to_cookie(&self, max_age: Option<Duration>) -> String {
-        self.to_cookie_named("rwire_session", max_age)
+        self.to_cookie_named(COOKIE_NAME, max_age)
     }
 
     /// Create a Set-Cookie header value with a custom cookie name.
@@ -200,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_session_id_from_cookie() {
-        let cookie = "rwire_session=abc123; other=value";
+        let cookie = "rwire_sid=abc123; other=value";
         let id = SessionId::from_cookie(cookie);
 
         assert!(id.is_some());
@@ -209,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_session_id_from_cookie_custom_name() {
-        let cookie = "my_session=xyz789; rwire_session=abc123";
+        let cookie = "my_session=xyz789; rwire_sid=abc123";
         let id = SessionId::from_cookie_named(cookie, "my_session");
 
         assert!(id.is_some());
@@ -221,9 +227,25 @@ mod tests {
         let id = SessionId::new("test123".to_string());
         let cookie = id.to_cookie(Some(Duration::from_secs(3600)));
 
-        assert!(cookie.contains("rwire_session=test123"));
+        assert!(cookie.contains("rwire_sid=test123"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("Max-Age=3600"));
+    }
+
+    #[test]
+    fn test_session_cookie_roundtrip() {
+        let id = SessionId::generate();
+        let set_cookie = id.to_cookie(Some(Duration::from_secs(3600)));
+
+        // Simulate browser sending cookie back (just the name=value part)
+        let cookie_value = format!("{}={}", COOKIE_NAME, id.as_str());
+        let parsed = SessionId::from_cookie(&cookie_value);
+
+        assert!(parsed.is_some());
+        assert_eq!(parsed.unwrap().as_str(), id.as_str());
+
+        // Also verify the Set-Cookie contains the expected parts
+        assert!(set_cookie.contains(&cookie_value));
     }
 
     #[test]

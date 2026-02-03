@@ -23,6 +23,7 @@ use crate::builder::{
 use crate::capsule;
 use crate::capsule_gen;
 use crate::protocol::ClientEvent;
+use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn};
 
 // ============================================================================
@@ -464,6 +465,18 @@ where
     }
 }
 
+/// Extract Cookie header value from HTTP request.
+fn extract_cookie_from_request(request: &str) -> Option<String> {
+    for line in request.lines() {
+        let line_lower = line.to_lowercase();
+        if line_lower.starts_with("cookie:") {
+            // Extract value after "Cookie:" (case-insensitive)
+            return Some(line[7..].trim().to_string());
+        }
+    }
+    None
+}
+
 async fn handle_client<F>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
@@ -485,12 +498,28 @@ async fn handle_client<F>(
 
     let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
 
+    // Extract session ID from cookie, or generate new one
+    let (session_id, is_new_session) = if let Some(cookie_value) = extract_cookie_from_request(&peek_str) {
+        if let Some(sid) = SessionId::from_cookie(&cookie_value) {
+            println!("[{}] Found session: {}", peer_addr, sid);
+            (sid, false)
+        } else {
+            let sid = SessionId::generate();
+            println!("[{}] New session (no valid cookie): {}", peer_addr, sid);
+            (sid, true)
+        }
+    } else {
+        let sid = SessionId::generate();
+        println!("[{}] New session: {}", peer_addr, sid);
+        (sid, true)
+    };
+
     // Check if this is a WebSocket upgrade request
     if capsule::is_websocket_upgrade(&peek_str) {
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -509,7 +538,8 @@ async fn handle_client<F>(
             return;
         }
 
-        if let Err(e) = capsule::serve(stream, &capsule).await {
+        // Serve capsule with session cookie
+        if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
             eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
         }
     } else {
@@ -538,12 +568,10 @@ struct ConnectionState {
 }
 
 impl ConnectionState {
-    fn new(connection_id: u64) -> Self {
-        // Generate a unique session ID for this connection
-        let session_id = crate::session::SessionId::generate().as_str().to_string();
+    fn new(connection_id: u64, session_id: SessionId) -> Self {
         Self {
             connection_id,
-            session_id,
+            session_id: session_id.as_str().to_string(),
             states: HashMap::new(),
             handlers: Vec::new(),
             synced_elements: Vec::new(),
@@ -588,6 +616,7 @@ async fn handle_websocket<F>(
     peer_addr: SocketAddr,
     root: Arc<F>,
     shared: Arc<SharedServerState>,
+    session_id: SessionId,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -599,8 +628,8 @@ where
     let (broadcast_tx, _broadcast_rx) = async_channel::bounded::<BroadcastMsg>(32);
     shared.register_connection(connection_id, broadcast_tx);
 
-    // Create per-connection state
-    let mut conn_state = ConnectionState::new(connection_id);
+    // Create per-connection state with the session ID from cookie
+    let mut conn_state = ConnectionState::new(connection_id, session_id);
 
     // Build the root element
     let root_element = root();
@@ -620,39 +649,72 @@ where
     // Initialize all state types from handlers and synced elements
     conn_state.initialize_all_states();
 
+    // For persisted state handlers, check if state exists in shared cache
+    // and subscribe to updates
+    for handler in &conn_state.handlers {
+        if let Some(table) = handler.table_name() {
+            let cache_key = format!("{}:{}", table, conn_state.session_id);
+            if !conn_state.subscribed_keys.contains(&cache_key) {
+                shared.subscribe(conn_state.connection_id, &cache_key);
+                conn_state.subscribed_keys.insert(cache_key);
+            }
+        }
+    }
+
     // Now rebuild the DOM with all states available
     // Build a HashMap of all states for multi-state rendering
-    let mut ctx = BuildContext::new();
-    let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
-        .states
-        .iter()
-        .map(|(k, v)| (*k, v.as_ref()))
-        .collect();
+    // For persisted state, use shared cache; for memory state, use connection state
+    let initial_dom = {
+        let mut ctx = BuildContext::new();
 
-    if states_map.is_empty() {
-        // No states available, use placeholder
-        ctx.collect_symbols(&root_element, &placeholder_state);
-        ctx.emit(&root_element, &placeholder_state);
-    } else {
-        // Use multi-state methods to render all synced elements correctly
-        ctx.collect_symbols_multi(&root_element, &states_map);
-        ctx.emit_multi(&root_element, &states_map);
-    }
+        // Acquire read lock on shared cache
+        let cache_guard = shared.shared_cache.read().unwrap();
 
-    // Emit local handlers if any
-    if ctx.has_local_handlers() {
-        ctx.emit_local_handlers();
-        // Emit default state for each local state type
-        ctx.emit_local_state(crate::state::get_local_state_default_json);
-    }
+        // Build states_map with connection state, then override with shared cache
+        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
+            .states
+            .iter()
+            .map(|(k, v)| (*k, v.as_ref()))
+            .collect();
 
-    // Re-extract handlers and synced elements (they should be the same)
-    conn_state.handlers = ctx.handlers().to_vec();
-    conn_state.synced_elements = ctx.take_synced_elements();
-    // Capture sent symbols for incremental updates
-    conn_state.sent_symbols = ctx.take_symbol_map();
+        // Override with persisted state from shared cache if available
+        for handler in &conn_state.handlers {
+            if let Some(table) = handler.table_name() {
+                let cache_key = format!("{}:{}", table, conn_state.session_id);
+                if let Some(state) = cache_guard.get(&cache_key) {
+                    states_map.insert(handler.state_type_id(), state.as_ref());
+                }
+            }
+        }
 
-    let initial_dom = ctx.finish();
+        if states_map.is_empty() {
+            // No states available, use placeholder
+            ctx.collect_symbols(&root_element, &placeholder_state);
+            ctx.emit(&root_element, &placeholder_state);
+        } else {
+            // Use multi-state methods to render all synced elements correctly
+            ctx.collect_symbols_multi(&root_element, &states_map);
+            ctx.emit_multi(&root_element, &states_map);
+        }
+
+        // Drop cache_guard before continuing (it's automatically dropped at end of scope)
+        drop(cache_guard);
+
+        // Emit local handlers if any
+        if ctx.has_local_handlers() {
+            ctx.emit_local_handlers();
+            // Emit default state for each local state type
+            ctx.emit_local_state(crate::state::get_local_state_default_json);
+        }
+
+        // Re-extract handlers and synced elements (they should be the same)
+        conn_state.handlers = ctx.handlers().to_vec();
+        conn_state.synced_elements = ctx.take_synced_elements();
+        // Capture sent symbols for incremental updates
+        conn_state.sent_symbols = ctx.take_symbol_map();
+
+        ctx.finish()
+    };
 
     println!(
         "[{}] Sending initial DOM ({} bytes, {} handlers, {} synced, {} state types)",
@@ -1013,6 +1075,29 @@ mod tests {
         // No dirty keys
         let count = shared.persist_dirty(&store).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_extract_cookie_from_request() {
+        // Standard case
+        let request = "GET / HTTP/1.1\r\nHost: localhost\r\nCookie: rwire_sid=abc123\r\n\r\n";
+        let cookie = super::extract_cookie_from_request(request);
+        assert_eq!(cookie, Some("rwire_sid=abc123".to_string()));
+
+        // Case-insensitive
+        let request = "GET / HTTP/1.1\r\nhost: localhost\r\ncookie: rwire_sid=def456\r\n\r\n";
+        let cookie = super::extract_cookie_from_request(request);
+        assert_eq!(cookie, Some("rwire_sid=def456".to_string()));
+
+        // No cookie header
+        let request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let cookie = super::extract_cookie_from_request(request);
+        assert_eq!(cookie, None);
+
+        // Multiple cookies
+        let request = "GET / HTTP/1.1\r\nCookie: foo=bar; rwire_sid=xyz789; other=value\r\n\r\n";
+        let cookie = super::extract_cookie_from_request(request);
+        assert_eq!(cookie, Some("foo=bar; rwire_sid=xyz789; other=value".to_string()));
     }
 
     #[test]
