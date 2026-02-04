@@ -1,10 +1,58 @@
 //! Integration tests for the rwire server.
 
+use async_std::io::ReadExt;
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, MemoryState, Server, State, StorageType};
 use std::time::Duration;
+
+/// Read a full HTTP response by parsing Content-Length and reading until complete.
+async fn read_full_http_response(stream: &mut TcpStream) -> String {
+    let mut buffer = Vec::with_capacity(16384);
+    let mut temp = [0u8; 4096];
+
+    // Read until we have the full response
+    loop {
+        let n = stream.read(&mut temp).await.unwrap();
+        if n == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&temp[..n]);
+
+        // Check if we have the full response
+        let response_str = String::from_utf8_lossy(&buffer);
+        if let Some(header_end) = response_str.find("\r\n\r\n") {
+            // Parse Content-Length
+            if let Some(cl_line) = response_str.lines().find(|l| l.starts_with("Content-Length:"))
+            {
+                if let Ok(content_length) = cl_line
+                    .split(':')
+                    .nth(1)
+                    .unwrap_or("0")
+                    .trim()
+                    .parse::<usize>()
+                {
+                    let body_start = header_end + 4;
+                    let body_len = buffer.len() - body_start;
+                    if body_len >= content_length {
+                        break; // We have the full response
+                    }
+                }
+            } else {
+                // No Content-Length, assume response is complete after headers
+                break;
+            }
+        }
+
+        // Safety timeout - don't loop forever
+        if buffer.len() > 65536 {
+            break;
+        }
+    }
+
+    String::from_utf8_lossy(&buffer).to_string()
+}
 
 // Test state
 #[derive(Default)]
@@ -57,10 +105,8 @@ async fn test_server_accepts_http() {
         .await
         .unwrap();
 
-    // Read response
-    let mut response = vec![0u8; 8192];
-    let n = stream.read(&mut response).await.unwrap();
-    let response_str = String::from_utf8_lossy(&response[..n]);
+    // Read full response
+    let response_str = read_full_http_response(&mut stream).await;
 
     // Verify HTTP response
     assert!(response_str.contains("HTTP/1.1 200 OK"));
@@ -94,9 +140,7 @@ async fn test_capsule_tree_shaking() {
         .await
         .unwrap();
 
-    let mut response = vec![0u8; 8192];
-    let n = stream.read(&mut response).await.unwrap();
-    let response_str = String::from_utf8_lossy(&response[..n]);
+    let response_str = read_full_http_response(&mut stream).await;
 
     // Simple component only uses div - should only have div in mappings
     assert!(response_str.contains("0:'div'"));
@@ -126,9 +170,7 @@ async fn test_counter_capsule() {
         .await
         .unwrap();
 
-    let mut response = vec![0u8; 8192];
-    let n = stream.read(&mut response).await.unwrap();
-    let response_str = String::from_utf8_lossy(&response[..n]);
+    let response_str = read_full_http_response(&mut stream).await;
 
     // Counter uses div, span, button
     assert!(response_str.contains("0:'div'"));

@@ -57,14 +57,15 @@ mod encoder {
         buf.set_data(el, 0x84, 0x85);
 
         let bytes = buf.finish();
+        // Symbol indices 0x80+ are varint-encoded (2 bytes each)
         assert_eq!(
             bytes.as_ref(),
             &[
                 0x02, 0x00, // CREATE div
-                0x10, 0, 0x80, // SET_CLASS
-                0x11, 0, 0x81, // SET_TEXT
-                0x12, 0, 0x82, 0x83, // SET_ATTR
-                0x14, 0, 0x84, 0x85, // SET_DATA
+                0x10, 0, 0x80, 0x00, // SET_CLASS (0x80 as varint)
+                0x11, 0, 0x80, 0x01, // SET_TEXT (0x81 as varint)
+                0x12, 0, 0x80, 0x02, 0x80, 0x03, // SET_ATTR (0x82, 0x83 as varints)
+                0x14, 0, 0x80, 0x04, 0x80, 0x05, // SET_DATA (0x84, 0x85 as varints)
             ]
         );
     }
@@ -130,7 +131,8 @@ mod encoder {
         assert_eq!(ref1, 1);
 
         let bytes = buf.finish();
-        assert_eq!(bytes.as_ref(), &[0x01, 0x80, 0x01, 0x81]);
+        // Symbol indices 0x80+ are varint-encoded (2 bytes each)
+        assert_eq!(bytes.as_ref(), &[0x01, 0x80, 0x00, 0x01, 0x80, 0x01]);
     }
 
     #[test]
@@ -155,6 +157,7 @@ mod encoder {
         buf.end();
 
         let bytes = buf.finish();
+        // Symbol index 0x80 is varint-encoded (2 bytes)
         assert_eq!(
             bytes.as_ref(),
             &[
@@ -163,12 +166,13 @@ mod encoder {
                 3,
                 b'b',
                 b't',
-                b'n', // SYMBOLS
+                b'n', // SYMBOLS (count=1 as varint)
                 0x02,
                 El::Button.as_u8(), // CREATE
                 0x10,
                 0,
-                0x80, // SET_CLASS
+                0x80,
+                0x00, // SET_CLASS (0x80 as varint)
                 0x30,
                 0,
                 Ev::Click.as_u8(),

@@ -1,3 +1,3 @@
 [workspace]
-members = ["rwire", "rwire-macros", "examples/counter", "examples/todolist", "examples/todo-combined", "examples/fine-grained"]
+members = ["rwire", "rwire-macros", "examples/counter", "examples/todolist", "examples/todo-combined", "examples/fine-grained", "examples/design-system"]
 resolver = "2"

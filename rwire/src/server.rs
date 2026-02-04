@@ -18,12 +18,13 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::builder::{
-    build_synced_update_with_known_symbols, BuildContext, ElementBuilder, SyncedElement,
+    build_synced_update_with_known_symbols, extract_renderers, BuildContext, ElementBuilder,
+    SyncedElement,
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
 use crate::components::{begin_tracking, end_tracking};
-use crate::protocol::ClientEvent;
+use crate::protocol::{ClientEvent, OpcodeBuffer};
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn};
 
@@ -443,31 +444,62 @@ where
         begin_tracking();
         let root_element = (self.root)();
         let mut ctx = BuildContext::new();
-        let placeholder: () = ();
-        ctx.collect_symbols(&root_element, &placeholder);
-        ctx.emit(&root_element, &placeholder);
+
+        // Extract renderers and create default states for proper tree walking
+        let renderers = extract_renderers(&root_element);
+        let mut default_states: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+        for renderer in &renderers {
+            default_states
+                .entry(renderer.state_type_id())
+                .or_insert_with(|| renderer.create_default_state());
+        }
+
+        // Convert to references for collect_symbols_multi
+        let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = default_states
+            .iter()
+            .map(|(k, v)| (*k, v.as_ref()))
+            .collect();
+
+        if states_map.is_empty() {
+            // No renderers - use simple collect_symbols with placeholder
+            let placeholder: () = ();
+            ctx.collect_symbols(&root_element, &placeholder);
+            ctx.emit(&root_element, &placeholder);
+        } else {
+            // Use multi-state collection for proper renderer handling
+            ctx.collect_symbols_multi(&root_element, &states_map);
+            ctx.emit_multi(&root_element, &states_map);
+        }
         let component_registry = end_tracking();
 
         // Generate capsule - styled if config provided, basic otherwise
-        let capsule = if let Some(config) = self.capsule_config {
+        let (capsule, capsule_css) = if let Some(config) = self.capsule_config {
             // Merge tracked components into config
             let config = config
                 .components(component_registry)
                 .has_local_handlers(ctx.has_local_handlers());
-            capsule_gen::generate_styled_capsule(
+
+            // Generate CSS separately for dedicated route
+            let css = capsule_gen::generate_capsule_css(&config);
+            let html = capsule_gen::generate_styled_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
                 &config,
-            )
+            );
+            (html, Some(css))
         } else {
-            capsule_gen::generate_capsule(
+            let html = capsule_gen::generate_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
                 ctx.has_local_handlers(),
-            )
+            );
+            (html, None)
         };
+
         let capsule_size = capsule.len();
+        let css_size = capsule_css.as_ref().map(|s| s.len()).unwrap_or(0);
         let capsule = Arc::new(capsule);
+        let capsule_css = capsule_css.map(Arc::new);
 
         println!("Server listening on http://{}", self.addr);
         println!(
@@ -476,15 +508,19 @@ where
             ctx.used_elements().len(),
             ctx.used_events().len()
         );
+        if css_size > 0 {
+            println!("CSS: {} bytes (injected via WebSocket STYLE_INJECT)", css_size);
+        }
 
         let root = Arc::new(self.root);
 
         while let Ok((stream, peer_addr)) = listener.accept().await {
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
+            let capsule_css = capsule_css.clone();
             let shared = Arc::clone(&shared);
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, shared).await;
+                handle_client(stream, peer_addr, root, capsule, capsule_css, shared).await;
             });
         }
 
@@ -509,6 +545,7 @@ async fn handle_client<F>(
     peer_addr: SocketAddr,
     root: Arc<F>,
     capsule: Arc<String>,
+    capsule_css: Option<Arc<String>>,
     shared: Arc<SharedServerState>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -546,7 +583,7 @@ async fn handle_client<F>(
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, capsule_css).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -556,8 +593,6 @@ async fn handle_client<F>(
         }
         println!("[{}] WebSocket closed", peer_addr);
     } else if peek_str.starts_with("GET ") {
-        println!("[{}] HTTP request - serving capsule", peer_addr);
-
         // Consume the request data first
         let mut request_buf = vec![0u8; n];
         if let Err(e) = stream.read_exact(&mut request_buf).await {
@@ -565,7 +600,8 @@ async fn handle_client<F>(
             return;
         }
 
-        // Serve capsule with session cookie
+        // Serve capsule HTML - CSS is delivered via WebSocket STYLE_INJECT opcode
+        println!("[{}] HTTP request - serving capsule", peer_addr);
         if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
             eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
         }
@@ -588,8 +624,8 @@ struct ConnectionState {
     /// Synced elements that need to re-render on state change.
     synced_elements: Vec<SyncedElement>,
     /// Symbols that have been sent to this client (for incremental symbol updates).
-    /// Maps symbol string -> symbol index (0x80+).
-    sent_symbols: HashMap<String, u8>,
+    /// Maps symbol string -> symbol index (0x80+). Uses u32 for varint encoding.
+    sent_symbols: HashMap<String, u32>,
     /// Keys this connection is subscribed to (for cleanup on disconnect).
     subscribed_keys: HashSet<String>,
 }
@@ -644,6 +680,7 @@ async fn handle_websocket<F>(
     root: Arc<F>,
     shared: Arc<SharedServerState>,
     session_id: SessionId,
+    capsule_css: Option<Arc<String>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -743,15 +780,33 @@ where
         ctx.finish()
     };
 
+    // Build the initial message: CSS (if any) + DOM
+    // CSS is injected via STYLE_INJECT opcode before DOM opcodes
+    let initial_message = if let Some(css) = &capsule_css {
+        let mut buf = OpcodeBuffer::new();
+        buf.style_inject(css);
+        // Concatenate CSS injection + DOM bytes (excluding the BATCH_END from CSS buffer)
+        let css_bytes = buf.finish();
+        let mut combined = Vec::with_capacity(css_bytes.len() + initial_dom.len());
+        combined.extend_from_slice(&css_bytes);
+        combined.extend_from_slice(&initial_dom);
+        combined
+    } else {
+        initial_dom.to_vec()
+    };
+
+    let css_size = capsule_css.as_ref().map(|s| s.len()).unwrap_or(0);
     println!(
-        "[{}] Sending initial DOM ({} bytes, {} handlers, {} synced, {} state types)",
+        "[{}] Sending initial message ({} bytes: {} CSS + {} DOM, {} handlers, {} synced, {} state types)",
         peer_addr,
+        initial_message.len(),
+        css_size,
         initial_dom.len(),
         conn_state.handlers.len(),
         conn_state.synced_elements.len(),
         conn_state.states.len()
     );
-    write.send(Message::Binary(initial_dom.to_vec())).await?;
+    write.send(Message::Binary(initial_message)).await?;
 
     // Handle incoming messages
     while let Some(msg) = read.next().await {

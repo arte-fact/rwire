@@ -26,17 +26,35 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use super::{BADGE_CSS, BUTTON_CSS, CARD_CSS, INPUT_CSS, STACK_CSS};
+use super::{
+    ALERT_CSS, AVATAR_CSS, BADGE_CSS, BREADCRUMB_CSS, BUTTON_CSS, CARD_CSS, CHECKBOX_CSS,
+    FORM_FIELD_CSS, INPUT_CSS, LABEL_CSS, PAGINATION_CSS, PROGRESS_CSS, RADIO_CSS, SELECT_CSS,
+    SPINNER_CSS, STACK_CSS, SWITCH_CSS, TABLE_CSS, TABS_CSS, TEXTAREA_CSS,
+};
 
 /// Component types that have associated CSS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ComponentType {
-    Button,
-    Input,
-    Stack,
-    Card,
+    Alert,
+    Avatar,
     Badge,
-    // Future components will be added here
+    Breadcrumb,
+    Button,
+    Card,
+    Checkbox,
+    FormField,
+    Input,
+    Label,
+    Pagination,
+    Progress,
+    Radio,
+    Select,
+    Spinner,
+    Stack,
+    Switch,
+    Table,
+    Tabs,
+    Textarea,
 }
 
 /// Registry of used components.
@@ -85,23 +103,68 @@ impl ComponentRegistry {
             return String::new();
         }
 
-        let mut css = String::with_capacity(4096);
+        let mut css = String::with_capacity(8192);
 
-        // Generate CSS in a consistent order
+        // Generate CSS in a consistent order (alphabetical)
+        if self.used.contains(&ComponentType::Alert) {
+            css.push_str(ALERT_CSS);
+        }
+        if self.used.contains(&ComponentType::Avatar) {
+            css.push_str(AVATAR_CSS);
+        }
+        if self.used.contains(&ComponentType::Badge) {
+            css.push_str(BADGE_CSS);
+        }
+        if self.used.contains(&ComponentType::Breadcrumb) {
+            css.push_str(BREADCRUMB_CSS);
+        }
         if self.used.contains(&ComponentType::Button) {
             css.push_str(BUTTON_CSS);
-        }
-        if self.used.contains(&ComponentType::Input) {
-            css.push_str(INPUT_CSS);
-        }
-        if self.used.contains(&ComponentType::Stack) {
-            css.push_str(STACK_CSS);
         }
         if self.used.contains(&ComponentType::Card) {
             css.push_str(CARD_CSS);
         }
-        if self.used.contains(&ComponentType::Badge) {
-            css.push_str(BADGE_CSS);
+        if self.used.contains(&ComponentType::Checkbox) {
+            css.push_str(CHECKBOX_CSS);
+        }
+        if self.used.contains(&ComponentType::FormField) {
+            css.push_str(FORM_FIELD_CSS);
+        }
+        if self.used.contains(&ComponentType::Input) {
+            css.push_str(INPUT_CSS);
+        }
+        if self.used.contains(&ComponentType::Label) {
+            css.push_str(LABEL_CSS);
+        }
+        if self.used.contains(&ComponentType::Pagination) {
+            css.push_str(PAGINATION_CSS);
+        }
+        if self.used.contains(&ComponentType::Progress) {
+            css.push_str(PROGRESS_CSS);
+        }
+        if self.used.contains(&ComponentType::Radio) {
+            css.push_str(RADIO_CSS);
+        }
+        if self.used.contains(&ComponentType::Select) {
+            css.push_str(SELECT_CSS);
+        }
+        if self.used.contains(&ComponentType::Spinner) {
+            css.push_str(SPINNER_CSS);
+        }
+        if self.used.contains(&ComponentType::Stack) {
+            css.push_str(STACK_CSS);
+        }
+        if self.used.contains(&ComponentType::Switch) {
+            css.push_str(SWITCH_CSS);
+        }
+        if self.used.contains(&ComponentType::Table) {
+            css.push_str(TABLE_CSS);
+        }
+        if self.used.contains(&ComponentType::Tabs) {
+            css.push_str(TABS_CSS);
+        }
+        if self.used.contains(&ComponentType::Textarea) {
+            css.push_str(TEXTAREA_CSS);
         }
 
         css
@@ -119,34 +182,109 @@ impl ComponentRegistry {
 
         let mut total = 0;
 
-        if self.is_used(ComponentType::Button) {
-            let size = BUTTON_CSS.len();
-            println!("  Button: {:>5} bytes", size);
+        if self.is_used(ComponentType::Alert) {
+            let size = ALERT_CSS.len();
+            println!("  Alert:      {:>5} bytes", size);
             total += size;
         }
-        if self.is_used(ComponentType::Input) {
-            let size = INPUT_CSS.len();
-            println!("  Input:  {:>5} bytes", size);
-            total += size;
-        }
-        if self.is_used(ComponentType::Stack) {
-            let size = STACK_CSS.len();
-            println!("  Stack:  {:>5} bytes", size);
-            total += size;
-        }
-        if self.is_used(ComponentType::Card) {
-            let size = CARD_CSS.len();
-            println!("  Card:   {:>5} bytes", size);
+        if self.is_used(ComponentType::Avatar) {
+            let size = AVATAR_CSS.len();
+            println!("  Avatar:     {:>5} bytes", size);
             total += size;
         }
         if self.is_used(ComponentType::Badge) {
             let size = BADGE_CSS.len();
-            println!("  Badge:  {:>5} bytes", size);
+            println!("  Badge:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Breadcrumb) {
+            let size = BREADCRUMB_CSS.len();
+            println!("  Breadcrumb: {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Button) {
+            let size = BUTTON_CSS.len();
+            println!("  Button:     {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Card) {
+            let size = CARD_CSS.len();
+            println!("  Card:       {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Checkbox) {
+            let size = CHECKBOX_CSS.len();
+            println!("  Checkbox:   {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::FormField) {
+            let size = FORM_FIELD_CSS.len();
+            println!("  FormField:  {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Input) {
+            let size = INPUT_CSS.len();
+            println!("  Input:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Label) {
+            let size = LABEL_CSS.len();
+            println!("  Label:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Pagination) {
+            let size = PAGINATION_CSS.len();
+            println!("  Pagination: {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Progress) {
+            let size = PROGRESS_CSS.len();
+            println!("  Progress:   {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Radio) {
+            let size = RADIO_CSS.len();
+            println!("  Radio:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Select) {
+            let size = SELECT_CSS.len();
+            println!("  Select:     {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Spinner) {
+            let size = SPINNER_CSS.len();
+            println!("  Spinner:    {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Stack) {
+            let size = STACK_CSS.len();
+            println!("  Stack:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Switch) {
+            let size = SWITCH_CSS.len();
+            println!("  Switch:     {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Table) {
+            let size = TABLE_CSS.len();
+            println!("  Table:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Tabs) {
+            let size = TABS_CSS.len();
+            println!("  Tabs:       {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Textarea) {
+            let size = TEXTAREA_CSS.len();
+            println!("  Textarea:   {:>5} bytes", size);
             total += size;
         }
 
         println!("===========================");
-        println!("  Total:  {:>5} bytes", total);
+        println!("  Total:      {:>5} bytes", total);
     }
 }
 
