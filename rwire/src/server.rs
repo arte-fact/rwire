@@ -24,7 +24,7 @@ use crate::builder::{
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
 use crate::components::{begin_tracking, end_tracking};
-use crate::protocol::ClientEvent;
+use crate::protocol::{ClientEvent, OpcodeBuffer};
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn};
 
@@ -509,7 +509,7 @@ where
             ctx.used_events().len()
         );
         if css_size > 0 {
-            println!("Capsule CSS: {} bytes (served from /capsule.css)", css_size);
+            println!("CSS: {} bytes (injected via WebSocket STYLE_INJECT)", css_size);
         }
 
         let root = Arc::new(self.root);
@@ -538,24 +538,6 @@ fn extract_cookie_from_request(request: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Serve CSS with proper headers.
-async fn serve_css(mut stream: TcpStream, css: &str) -> Result<(), Box<dyn Error>> {
-    let response = format!(
-        "HTTP/1.1 200 OK\r\n\
-         Content-Type: text/css; charset=utf-8\r\n\
-         Content-Length: {}\r\n\
-         Cache-Control: public, max-age=31536000, immutable\r\n\
-         \r\n\
-         {}",
-        css.len(),
-        css
-    );
-
-    async_std::io::WriteExt::write_all(&mut stream, response.as_bytes()).await?;
-    async_std::io::WriteExt::flush(&mut stream).await?;
-    Ok(())
 }
 
 async fn handle_client<F>(
@@ -601,7 +583,7 @@ async fn handle_client<F>(
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, capsule_css).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -618,24 +600,10 @@ async fn handle_client<F>(
             return;
         }
 
-        // Parse request path
-        let request_str = String::from_utf8_lossy(&request_buf);
-        let is_css_request = request_str.lines().next()
-            .map(|line| line.contains("GET /capsule.css"))
-            .unwrap_or(false);
-
-        if is_css_request && capsule_css.is_some() {
-            println!("[{}] HTTP request - serving CSS", peer_addr);
-            // Serve CSS with proper content-type
-            if let Err(e) = serve_css(stream, capsule_css.as_ref().unwrap()).await {
-                eprintln!("[{}] Failed to serve CSS: {}", peer_addr, e);
-            }
-        } else {
-            println!("[{}] HTTP request - serving capsule", peer_addr);
-            // Serve capsule with session cookie
-            if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
-                eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
-            }
+        // Serve capsule HTML - CSS is delivered via WebSocket STYLE_INJECT opcode
+        println!("[{}] HTTP request - serving capsule", peer_addr);
+        if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
+            eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
         }
     } else {
         eprintln!("[{}] Unknown request type", peer_addr);
@@ -656,8 +624,8 @@ struct ConnectionState {
     /// Synced elements that need to re-render on state change.
     synced_elements: Vec<SyncedElement>,
     /// Symbols that have been sent to this client (for incremental symbol updates).
-    /// Maps symbol string -> symbol index (0x80+).
-    sent_symbols: HashMap<String, u8>,
+    /// Maps symbol string -> symbol index (0x80+). Uses u32 for varint encoding.
+    sent_symbols: HashMap<String, u32>,
     /// Keys this connection is subscribed to (for cleanup on disconnect).
     subscribed_keys: HashSet<String>,
 }
@@ -712,6 +680,7 @@ async fn handle_websocket<F>(
     root: Arc<F>,
     shared: Arc<SharedServerState>,
     session_id: SessionId,
+    capsule_css: Option<Arc<String>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -811,15 +780,33 @@ where
         ctx.finish()
     };
 
+    // Build the initial message: CSS (if any) + DOM
+    // CSS is injected via STYLE_INJECT opcode before DOM opcodes
+    let initial_message = if let Some(css) = &capsule_css {
+        let mut buf = OpcodeBuffer::new();
+        buf.style_inject(css);
+        // Concatenate CSS injection + DOM bytes (excluding the BATCH_END from CSS buffer)
+        let css_bytes = buf.finish();
+        let mut combined = Vec::with_capacity(css_bytes.len() + initial_dom.len());
+        combined.extend_from_slice(&css_bytes);
+        combined.extend_from_slice(&initial_dom);
+        combined
+    } else {
+        initial_dom.to_vec()
+    };
+
+    let css_size = capsule_css.as_ref().map(|s| s.len()).unwrap_or(0);
     println!(
-        "[{}] Sending initial DOM ({} bytes, {} handlers, {} synced, {} state types)",
+        "[{}] Sending initial message ({} bytes: {} CSS + {} DOM, {} handlers, {} synced, {} state types)",
         peer_addr,
+        initial_message.len(),
+        css_size,
         initial_dom.len(),
         conn_state.handlers.len(),
         conn_state.synced_elements.len(),
         conn_state.states.len()
     );
-    write.send(Message::Binary(initial_dom.to_vec())).await?;
+    write.send(Message::Binary(initial_message)).await?;
 
     // Handle incoming messages
     while let Some(msg) = read.next().await {

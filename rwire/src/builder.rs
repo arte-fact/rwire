@@ -345,7 +345,7 @@ impl ElementBuilder {
 #[derive(Clone, Debug)]
 pub enum TextEncoding {
     /// Use symbol table (traditional approach)
-    Symbol(u8),
+    Symbol(u32),
     /// Use word indices (space-separated words)
     Words(Vec<u8>),
     /// Use integer encoding (for pure numeric strings)
@@ -356,7 +356,7 @@ pub enum TextEncoding {
 pub struct BuildContext {
     buf: OpcodeBuffer,
     symbols: Vec<String>,
-    symbol_map: HashMap<String, u8>,
+    symbol_map: HashMap<String, u32>,
     /// Remote handlers (Memory/Persisted state)
     handlers: Vec<HandlerFn>,
     /// Local handlers with their mutations
@@ -562,17 +562,12 @@ impl BuildContext {
         idx
     }
 
-    fn intern(&mut self, s: &str) -> u8 {
+    fn intern(&mut self, s: &str) -> u32 {
         if let Some(&idx) = self.symbol_map.get(s) {
             return idx;
         }
-        // Check if we'd overflow the symbol table (max 128 session symbols: 0x80-0xFF)
-        if self.symbols.len() >= 128 {
-            // Symbol table full - reuse last symbol as fallback
-            // This is better than panicking, though it may cause incorrect rendering
-            return 0xFF;
-        }
-        let idx = 0x80 + self.symbols.len() as u8;
+        // Symbol indices start at 0x80 and can grow indefinitely with varint encoding
+        let idx = 0x80 + self.symbols.len() as u32;
         self.symbols.push(s.to_string());
         self.symbol_map.insert(s.to_string(), idx);
         idx
@@ -580,7 +575,7 @@ impl BuildContext {
 
     /// Get a symbol from the map, or intern it if not found.
     /// This handles dynamically generated strings that weren't collected during collect_symbols.
-    fn get_or_intern_symbol(&mut self, s: &str) -> u8 {
+    fn get_or_intern_symbol(&mut self, s: &str) -> u32 {
         if let Some(&idx) = self.symbol_map.get(s) {
             idx
         } else {
@@ -726,7 +721,7 @@ impl BuildContext {
 
         // Emit symbol table first (only on first call)
         if !self.symbols.is_empty() {
-            self.buf.begin_symbols(self.symbols.len() as u8);
+            self.buf.begin_symbols(self.symbols.len() as u32);
             for sym in self.symbols.drain(..) {
                 self.buf.add_symbol(&sym);
             }
@@ -757,7 +752,7 @@ impl BuildContext {
 
         // Emit symbol table first (only on first call)
         if !self.symbols.is_empty() {
-            self.buf.begin_symbols(self.symbols.len() as u8);
+            self.buf.begin_symbols(self.symbols.len() as u32);
             for sym in self.symbols.drain(..) {
                 self.buf.add_symbol(&sym);
             }
@@ -1072,7 +1067,7 @@ impl BuildContext {
     /// This returns a clone of the symbol map after rendering, which can be
     /// used to track which symbols were sent to the client for incremental
     /// symbol updates.
-    pub fn take_symbol_map(&self) -> HashMap<String, u8> {
+    pub fn take_symbol_map(&self) -> HashMap<String, u32> {
         self.symbol_map.clone()
     }
 
@@ -1151,24 +1146,24 @@ pub fn build_synced_update_with_known_symbols(
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     handlers: &mut Vec<HandlerFn>,
     changes: ChangeSet,
-    known_symbols: Option<&mut HashMap<String, u8>>,
+    known_symbols: Option<&mut HashMap<String, u32>>,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
     // Collect all symbols first (but NOT synced element IDs - those use GET_SYNCED opcode)
     let mut new_symbols: Vec<String> = Vec::new();
-    let mut symbol_map: HashMap<String, u8> = HashMap::new();
+    let mut symbol_map: HashMap<String, u32> = HashMap::new();
 
     // If we have known symbols, seed the symbol_map with them
-    let next_symbol_idx = if let Some(known) = &known_symbols {
+    let next_symbol_idx: u32 = if let Some(known) = &known_symbols {
         // Copy known symbols into symbol_map
         for (sym, idx) in known.iter() {
             symbol_map.insert(sym.clone(), *idx);
         }
         // Next index is 0x80 + count of known symbols
-        0x80u8.saturating_add(known.len() as u8)
+        0x80u32 + known.len() as u32
     } else {
-        0x80u8
+        0x80u32
     };
 
     let mut current_next_idx = next_symbol_idx;
@@ -1214,10 +1209,10 @@ pub fn build_synced_update_with_known_symbols(
     if !new_symbols.is_empty() {
         if known_symbols.is_some() {
             // Use SYMBOLS_EXTEND for incremental update
-            buf.begin_symbols_extend(new_symbols.len() as u8, next_symbol_idx);
+            buf.begin_symbols_extend(new_symbols.len() as u32, next_symbol_idx);
         } else {
             // Use regular SYMBOLS for full table
-            buf.begin_symbols(new_symbols.len() as u8);
+            buf.begin_symbols(new_symbols.len() as u32);
         }
         for sym in &new_symbols {
             buf.add_symbol(sym);
@@ -1315,7 +1310,7 @@ fn emit_update_element(
     el: &ElementBuilder,
     parent_ref: u8,
     buf: &mut OpcodeBuffer,
-    symbol_map: &HashMap<String, u8>,
+    symbol_map: &HashMap<String, u32>,
     handlers: &mut Vec<HandlerFn>,
     ids_by_type: &HashMap<TypeId, Vec<u32>>,
     next_idx_by_type: &mut HashMap<TypeId, usize>,
@@ -1455,22 +1450,22 @@ fn emit_update_element(
 fn collect_symbols_recursive_with_known(
     el: &ElementBuilder,
     new_symbols: &mut Vec<String>,
-    symbol_map: &mut HashMap<String, u8>,
-    next_idx: &mut u8,
+    symbol_map: &mut HashMap<String, u32>,
+    next_idx: &mut u32,
     synced_counter: &mut u32,
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
 ) {
     fn intern_with_known(
         s: &str,
         new_symbols: &mut Vec<String>,
-        symbol_map: &mut HashMap<String, u8>,
-        next_idx: &mut u8,
+        symbol_map: &mut HashMap<String, u32>,
+        next_idx: &mut u32,
     ) {
         if symbol_map.contains_key(s) {
             return;
         }
         let idx = *next_idx;
-        *next_idx = next_idx.saturating_add(1);
+        *next_idx += 1;
         new_symbols.push(s.to_string());
         symbol_map.insert(s.to_string(), idx);
     }

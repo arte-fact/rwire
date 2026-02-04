@@ -112,19 +112,19 @@ function x(d){
 let r=[],i=0;
 while(i<d.length){
 let o=d[i++];
-if(o===O.S){let n=d[i++];sc=0x80;while(n--){let l=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+l));i+=l}}
-else if(o===O.SE){let n=d[i++];while(n--){let l=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+l));i+=l}}
+if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
+else if(o===O.SE){let[n,l]=rv(d,i);i+=l;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
 else if(o===O.WT){let n=d[i++];wt=[];while(n--){let l=d[i++];wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
-else if(o===O.G){let k=s[d[i++]];let el=document.getElementById(k);r.push(el)}
+else if(o===O.G){let[k,l]=rv(d,i);i+=l;let el=document.getElementById(s[k]);r.push(el)}
 else if(o===O.C){r.push(document.createElement(E[d[i++]]||'div'))}
 else if(o===O.CS){let[id,l]=rv(d,i);i+=l;let e=document.createElement('span');e.id='__synced_'+id;r.push(e)}
 else if(o===O.GS){let[id,l]=rv(d,i);i+=l;r.push(document.getElementById('__synced_'+id))}
-else if(o===O.T){r[d[i++]].textContent=s[d[i++]]||''}
+else if(o===O.T){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].textContent=s[k]||''}
 else if(o===O.TW){let f=d[i++],n=d[i++],ws=[];while(n--)ws.push(wt[d[i++]]||'');r[f].textContent=ws.join(' ')}
 else if(o===O.TI){let f=d[i++],[v,l]=rv(d,i);i+=l;let n=(v>>>1)^-(v&1);r[f].textContent=n.toString()}
-else if(o===O.L){r[d[i++]].className=s[d[i++]]||''}
-else if(o===O.A){let f=d[i++];r[f].setAttribute(A[d[i]]||s[d[i]]||'data',s[d[i+1]]||'');i+=2}
-else if(o===O.D){let f=d[i++];r[f].dataset[s[d[i++]]||'']=s[d[i++]]||''}
+else if(o===O.L){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].className=s[k]||''}
+else if(o===O.A){let f=d[i++],[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';console.log('SET_ATTR: ak='+ak+' vk='+vk+' attr='+an+' val='+s[vk]);r[f].setAttribute(an,s[vk]||'')}
+else if(o===O.D){let f=d[i++],[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
 else if(o===O.P){let p=d[i++],c=d[i++];(p<255?r[p]:document.body).appendChild(r[c])}
 else if(o===O.CC){r[d[i++]].innerHTML=''}
 else if(o===O.B){BL(d,i,r);i+=3}
@@ -132,10 +132,10 @@ else if(o===O.R||o===O.O){let f=d[i++],t=d[i++],h=d[i++];r[f].addEventListener(V
 else if(o===O.DB){let f=d[i++],t=d[i++],h=d[i++],ms=(d[i++]<<8)|d[i++];let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
 else if(o===O.RP){let f=d[i++],t=d[i++],h=d[i++],pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sep(h,t,f,prm,e,r[f])})}
 else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
-else if(o===O.RU){history.pushState(null,'',s[d[i++]])}
-else if(o===O.RR){history.replaceState(null,'',s[d[i++]])}
+else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
+else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
 else if(o===O.SI){let l=(d[i++]<<8)|d[i++];let css=new TextDecoder().decode(d.slice(i,i+l));let st=document.createElement('style');st.textContent=css;document.head.appendChild(st);i+=l}
-else if(o===O.SS){r[d[i++]].style.cssText=s[d[i++]]||''}
+else if(o===O.SS){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
 else if(o===O.E){return}
 }}
 w=new WebSocket('ws://'+location.host);
@@ -337,10 +337,13 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 /// This is the recommended way to generate capsules for styled applications.
 /// Includes:
 /// - Tree-shaken element/event mappings
-/// - Theme CSS variables (loaded from /capsule.css)
-/// - Component CSS (only for used components)
+/// - Theme data attributes on root element
+/// - Component CSS (delivered via WebSocket STYLE_INJECT opcode)
 ///
-/// The CSS is loaded from a separate route for better caching and lighter HTML.
+/// CSS is delivered via the binary WebSocket protocol (STYLE_INJECT opcode)
+/// as the first message, before the DOM. This eliminates the extra HTTP request
+/// and aligns with rwire's philosophy of all rendering data flowing through
+/// the WebSocket.
 pub fn generate_styled_capsule(
     used_elements: &HashSet<u8>,
     used_events: &HashSet<u8>,
@@ -358,7 +361,7 @@ pub fn generate_styled_capsule(
     };
 
     format!(
-        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/capsule.css"></head><body>
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
 <div id="rw" {theme_attrs}></div>
 <script>
 const E={{{elements_js}}};
@@ -426,8 +429,10 @@ mod tests {
 
         // Should have HTML structure
         assert!(capsule.contains("<!DOCTYPE html>"));
-        assert!(capsule.contains("<style>"));
-        assert!(capsule.contains("</style>"));
+
+        // CSS is now delivered via WebSocket STYLE_INJECT, not in HTML
+        assert!(!capsule.contains("<style>"));
+        assert!(!capsule.contains("<link rel=\"stylesheet\""));
 
         // Should have theme data attribute
         assert!(capsule.contains("data-theme=\"dark\""));
@@ -439,10 +444,6 @@ mod tests {
         // Should have element/event mappings
         assert!(capsule.contains("const E="));
         assert!(capsule.contains("const V="));
-
-        // CSS should be in the style tag
-        assert!(capsule.contains("--rw-neutral-1"));
-        assert!(css_appears_before_script(&capsule));
     }
 
     #[test]
@@ -460,22 +461,14 @@ mod tests {
         let config = CapsuleConfig::new().components(registry);
         let capsule = generate_styled_capsule(&elements, &events, &config);
 
-        // Full capsule should be under 15KB
+        // HTML capsule should be small (CSS is delivered via WebSocket)
+        // Should be well under 5KB without inline CSS
         assert!(
-            capsule.len() < 15360,
-            "Styled capsule too large: {} bytes",
+            capsule.len() < 5120,
+            "Styled capsule too large: {} bytes (CSS should be delivered via WebSocket)",
             capsule.len()
         );
         println!("Styled capsule size: {} bytes", capsule.len());
-    }
-
-    fn css_appears_before_script(html: &str) -> bool {
-        let style_pos = html.find("<style>");
-        let script_pos = html.find("<script>");
-        match (style_pos, script_pos) {
-            (Some(s), Some(sc)) => s < sc,
-            _ => false,
-        }
     }
 
     #[test]

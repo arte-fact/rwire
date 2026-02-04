@@ -15,10 +15,13 @@ use super::varint::write_varint;
 ///
 /// Supports both legacy u8 refs (for backward compatibility) and
 /// extended u32 refs using varint encoding (for >255 elements).
+///
+/// Symbol indices also use varint encoding, allowing unlimited symbols
+/// (practical limit ~16K with 2-byte varints).
 pub struct OpcodeBuffer {
     buf: BytesMut,
     next_ref: u32,
-    next_symbol: u8,
+    next_symbol: u32,
 }
 
 impl OpcodeBuffer {
@@ -26,7 +29,7 @@ impl OpcodeBuffer {
         Self {
             buf: BytesMut::with_capacity(256),
             next_ref: 0,
-            next_symbol: SYMBOL_SESSION_START,
+            next_symbol: SYMBOL_SESSION_START as u32,
         }
     }
 
@@ -37,7 +40,7 @@ impl OpcodeBuffer {
         Self {
             buf: BytesMut::with_capacity(256),
             next_ref: 0,
-            next_symbol: SYMBOL_SESSION_START,
+            next_symbol: SYMBOL_SESSION_START as u32,
         }
     }
 
@@ -52,14 +55,18 @@ impl OpcodeBuffer {
     }
 
     /// Start a symbol table. Call `add_symbol` for each symbol, then continue with DOM ops.
-    pub fn begin_symbols(&mut self, count: u8) -> &mut Self {
+    ///
+    /// Count is encoded as varint to support >255 symbols.
+    pub fn begin_symbols(&mut self, count: u32) -> &mut Self {
         self.buf.put_u8(SYMBOLS);
-        self.buf.put_u8(count);
+        write_varint(&mut self.buf, count);
         self
     }
 
     /// Add a symbol to the symbol table. Returns the symbol index.
-    pub fn add_symbol(&mut self, s: &str) -> u8 {
+    ///
+    /// Symbol indices use varint encoding, allowing unlimited symbols.
+    pub fn add_symbol(&mut self, s: &str) -> u32 {
         let idx = self.next_symbol;
         self.buf.put_u8(s.len() as u8);
         self.buf.put_slice(s.as_bytes());
@@ -70,10 +77,12 @@ impl OpcodeBuffer {
     /// Start extending an existing symbol table.
     ///
     /// Use this for updates when some symbols were already sent in the initial render.
-    /// The `start_index` should be 0x80 + count of already-sent symbols.
-    pub fn begin_symbols_extend(&mut self, count: u8, start_index: u8) -> &mut Self {
+    /// The `start_index` should be the next available symbol index.
+    ///
+    /// Both count and start_index use varint encoding.
+    pub fn begin_symbols_extend(&mut self, count: u32, start_index: u32) -> &mut Self {
         self.buf.put_u8(SYMBOLS_EXTEND);
-        self.buf.put_u8(count);
+        write_varint(&mut self.buf, count);
         self.next_symbol = start_index;
         self
     }
@@ -150,18 +159,22 @@ impl OpcodeBuffer {
     }
 
     /// Set class on an element.
-    pub fn set_class(&mut self, ref_idx: u8, symbol_idx: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn set_class(&mut self, ref_idx: u8, symbol_idx: u32) -> &mut Self {
         self.buf.put_u8(SET_CLASS);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(symbol_idx);
+        write_varint(&mut self.buf, symbol_idx);
         self
     }
 
     /// Set text content on an element.
-    pub fn set_text(&mut self, ref_idx: u8, symbol_idx: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn set_text(&mut self, ref_idx: u8, symbol_idx: u32) -> &mut Self {
         self.buf.put_u8(SET_TEXT);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(symbol_idx);
+        write_varint(&mut self.buf, symbol_idx);
         self
     }
 
@@ -193,20 +206,24 @@ impl OpcodeBuffer {
     }
 
     /// Set an attribute on an element.
-    pub fn set_attr(&mut self, ref_idx: u8, attr_symbol: u8, value_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol indices use varint encoding.
+    pub fn set_attr(&mut self, ref_idx: u8, attr_symbol: u32, value_symbol: u32) -> &mut Self {
         self.buf.put_u8(SET_ATTR);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(attr_symbol);
-        self.buf.put_u8(value_symbol);
+        write_varint(&mut self.buf, attr_symbol);
+        write_varint(&mut self.buf, value_symbol);
         self
     }
 
     /// Set a data attribute on an element.
-    pub fn set_data(&mut self, ref_idx: u8, key_symbol: u8, value_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol indices use varint encoding.
+    pub fn set_data(&mut self, ref_idx: u8, key_symbol: u32, value_symbol: u32) -> &mut Self {
         self.buf.put_u8(SET_DATA);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(key_symbol);
-        self.buf.put_u8(value_symbol);
+        write_varint(&mut self.buf, key_symbol);
+        write_varint(&mut self.buf, value_symbol);
         self
     }
 
@@ -284,16 +301,19 @@ impl OpcodeBuffer {
 
     /// Get element by ID (for updates). Returns next ref index.
     ///
+    /// Symbol index uses varint encoding.
     /// Note: Returns u8 for backward compatibility. Use `get_by_id_ext` for >255 elements.
-    pub fn get_by_id(&mut self, symbol_idx: u8) -> u8 {
+    pub fn get_by_id(&mut self, symbol_idx: u32) -> u8 {
         self.get_by_id_ext(symbol_idx) as u8
     }
 
     /// Get element by ID with extended ref support. Returns the ref index as u32.
-    pub fn get_by_id_ext(&mut self, symbol_idx: u8) -> u32 {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn get_by_id_ext(&mut self, symbol_idx: u32) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(GET_BY_ID);
-        self.buf.put_u8(symbol_idx);
+        write_varint(&mut self.buf, symbol_idx);
         self.next_ref += 1;
         ref_idx
     }
@@ -335,18 +355,22 @@ impl OpcodeBuffer {
     // ========================================================================
 
     /// Set validation rules on a form field.
-    pub fn form_set_validation(&mut self, ref_idx: u8, rules_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn form_set_validation(&mut self, ref_idx: u8, rules_symbol: u32) -> &mut Self {
         self.buf.put_u8(FORM_SET_VALIDATION);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(rules_symbol);
+        write_varint(&mut self.buf, rules_symbol);
         self
     }
 
     /// Show validation error on a field.
-    pub fn form_show_error(&mut self, ref_idx: u8, message_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn form_show_error(&mut self, ref_idx: u8, message_symbol: u32) -> &mut Self {
         self.buf.put_u8(FORM_SHOW_ERROR);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(message_symbol);
+        write_varint(&mut self.buf, message_symbol);
         self
     }
 
@@ -370,16 +394,20 @@ impl OpcodeBuffer {
     // ========================================================================
 
     /// Push new URL to history.
-    pub fn route_push(&mut self, url_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn route_push(&mut self, url_symbol: u32) -> &mut Self {
         self.buf.put_u8(ROUTE_PUSH);
-        self.buf.put_u8(url_symbol);
+        write_varint(&mut self.buf, url_symbol);
         self
     }
 
     /// Replace current URL in history.
-    pub fn route_replace(&mut self, url_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn route_replace(&mut self, url_symbol: u32) -> &mut Self {
         self.buf.put_u8(ROUTE_REPLACE);
-        self.buf.put_u8(url_symbol);
+        write_varint(&mut self.buf, url_symbol);
         self
     }
 
@@ -398,10 +426,12 @@ impl OpcodeBuffer {
     }
 
     /// Set inline style on an element.
-    pub fn style_set(&mut self, ref_idx: u8, style_symbol: u8) -> &mut Self {
+    ///
+    /// Symbol index uses varint encoding.
+    pub fn style_set(&mut self, ref_idx: u8, style_symbol: u32) -> &mut Self {
         self.buf.put_u8(STYLE_SET);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(style_symbol);
+        write_varint(&mut self.buf, style_symbol);
         self
     }
 
