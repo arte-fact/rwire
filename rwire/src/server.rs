@@ -18,7 +18,8 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::builder::{
-    build_synced_update_with_known_symbols, BuildContext, ElementBuilder, SyncedElement,
+    build_synced_update_with_known_symbols, extract_renderers, BuildContext, ElementBuilder,
+    SyncedElement,
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
@@ -443,31 +444,62 @@ where
         begin_tracking();
         let root_element = (self.root)();
         let mut ctx = BuildContext::new();
-        let placeholder: () = ();
-        ctx.collect_symbols(&root_element, &placeholder);
-        ctx.emit(&root_element, &placeholder);
+
+        // Extract renderers and create default states for proper tree walking
+        let renderers = extract_renderers(&root_element);
+        let mut default_states: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+        for renderer in &renderers {
+            default_states
+                .entry(renderer.state_type_id())
+                .or_insert_with(|| renderer.create_default_state());
+        }
+
+        // Convert to references for collect_symbols_multi
+        let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = default_states
+            .iter()
+            .map(|(k, v)| (*k, v.as_ref()))
+            .collect();
+
+        if states_map.is_empty() {
+            // No renderers - use simple collect_symbols with placeholder
+            let placeholder: () = ();
+            ctx.collect_symbols(&root_element, &placeholder);
+            ctx.emit(&root_element, &placeholder);
+        } else {
+            // Use multi-state collection for proper renderer handling
+            ctx.collect_symbols_multi(&root_element, &states_map);
+            ctx.emit_multi(&root_element, &states_map);
+        }
         let component_registry = end_tracking();
 
         // Generate capsule - styled if config provided, basic otherwise
-        let capsule = if let Some(config) = self.capsule_config {
+        let (capsule, capsule_css) = if let Some(config) = self.capsule_config {
             // Merge tracked components into config
             let config = config
                 .components(component_registry)
                 .has_local_handlers(ctx.has_local_handlers());
-            capsule_gen::generate_styled_capsule(
+
+            // Generate CSS separately for dedicated route
+            let css = capsule_gen::generate_capsule_css(&config);
+            let html = capsule_gen::generate_styled_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
                 &config,
-            )
+            );
+            (html, Some(css))
         } else {
-            capsule_gen::generate_capsule(
+            let html = capsule_gen::generate_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
                 ctx.has_local_handlers(),
-            )
+            );
+            (html, None)
         };
+
         let capsule_size = capsule.len();
+        let css_size = capsule_css.as_ref().map(|s| s.len()).unwrap_or(0);
         let capsule = Arc::new(capsule);
+        let capsule_css = capsule_css.map(Arc::new);
 
         println!("Server listening on http://{}", self.addr);
         println!(
@@ -476,15 +508,19 @@ where
             ctx.used_elements().len(),
             ctx.used_events().len()
         );
+        if css_size > 0 {
+            println!("Capsule CSS: {} bytes (served from /capsule.css)", css_size);
+        }
 
         let root = Arc::new(self.root);
 
         while let Ok((stream, peer_addr)) = listener.accept().await {
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
+            let capsule_css = capsule_css.clone();
             let shared = Arc::clone(&shared);
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, shared).await;
+                handle_client(stream, peer_addr, root, capsule, capsule_css, shared).await;
             });
         }
 
@@ -504,11 +540,30 @@ fn extract_cookie_from_request(request: &str) -> Option<String> {
     None
 }
 
+/// Serve CSS with proper headers.
+async fn serve_css(mut stream: TcpStream, css: &str) -> Result<(), Box<dyn Error>> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/css; charset=utf-8\r\n\
+         Content-Length: {}\r\n\
+         Cache-Control: public, max-age=31536000, immutable\r\n\
+         \r\n\
+         {}",
+        css.len(),
+        css
+    );
+
+    async_std::io::WriteExt::write_all(&mut stream, response.as_bytes()).await?;
+    async_std::io::WriteExt::flush(&mut stream).await?;
+    Ok(())
+}
+
 async fn handle_client<F>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     root: Arc<F>,
     capsule: Arc<String>,
+    capsule_css: Option<Arc<String>>,
     shared: Arc<SharedServerState>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -556,8 +611,6 @@ async fn handle_client<F>(
         }
         println!("[{}] WebSocket closed", peer_addr);
     } else if peek_str.starts_with("GET ") {
-        println!("[{}] HTTP request - serving capsule", peer_addr);
-
         // Consume the request data first
         let mut request_buf = vec![0u8; n];
         if let Err(e) = stream.read_exact(&mut request_buf).await {
@@ -565,9 +618,24 @@ async fn handle_client<F>(
             return;
         }
 
-        // Serve capsule with session cookie
-        if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
-            eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
+        // Parse request path
+        let request_str = String::from_utf8_lossy(&request_buf);
+        let is_css_request = request_str.lines().next()
+            .map(|line| line.contains("GET /capsule.css"))
+            .unwrap_or(false);
+
+        if is_css_request && capsule_css.is_some() {
+            println!("[{}] HTTP request - serving CSS", peer_addr);
+            // Serve CSS with proper content-type
+            if let Err(e) = serve_css(stream, capsule_css.as_ref().unwrap()).await {
+                eprintln!("[{}] Failed to serve CSS: {}", peer_addr, e);
+            }
+        } else {
+            println!("[{}] HTTP request - serving capsule", peer_addr);
+            // Serve capsule with session cookie
+            if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
+                eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
+            }
         }
     } else {
         eprintln!("[{}] Unknown request type", peer_addr);

@@ -40,12 +40,55 @@
 use bytes::Bytes;
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::item_ref::ItemRef;
 use crate::protocol::{El, Ev, OpcodeBuffer};
 use crate::state::{
     ChangeSet, HandlerFn, HandlerSpec, LocalMutations, Renderer, RendererDeps, StorageType,
 };
+
+/// Global counter for generating unique element IDs.
+static NEXT_ELEMENT_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Generate a unique element ID with the given prefix.
+///
+/// Used for form element associations (label ↔ input).
+///
+/// # Example
+///
+/// ```ignore
+/// let id = generate_element_id("field_");
+/// el(El::Label).attr("for", &id)
+/// el(El::Input).attr("id", &id)
+/// ```
+pub fn generate_element_id(prefix: &str) -> String {
+    let id = NEXT_ELEMENT_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{}{}", prefix, id)
+}
+
+/// Extract all synced renderers from an element tree recursively.
+///
+/// This is used during capsule generation to discover all renderer types
+/// so we can create default state instances for proper tree walking during
+/// symbol collection.
+///
+/// Returns a vector of cloned renderers found in the tree.
+pub fn extract_renderers(el: &ElementBuilder) -> Vec<Box<dyn SyncedRenderer>> {
+    let mut renderers = Vec::new();
+
+    // Check if this element has a synced renderer
+    if let Some(renderer) = &el.synced {
+        renderers.push(renderer.clone_box());
+    }
+
+    // Recursively extract from children
+    for child in &el.children {
+        renderers.extend(extract_renderers(child));
+    }
+
+    renderers
+}
 
 /// Create a new element builder.
 ///
@@ -523,10 +566,28 @@ impl BuildContext {
         if let Some(&idx) = self.symbol_map.get(s) {
             return idx;
         }
+        // Check if we'd overflow the symbol table (max 128 session symbols: 0x80-0xFF)
+        if self.symbols.len() >= 128 {
+            // Symbol table full - reuse last symbol as fallback
+            // This is better than panicking, though it may cause incorrect rendering
+            return 0xFF;
+        }
         let idx = 0x80 + self.symbols.len() as u8;
         self.symbols.push(s.to_string());
         self.symbol_map.insert(s.to_string(), idx);
         idx
+    }
+
+    /// Get a symbol from the map, or intern it if not found.
+    /// This handles dynamically generated strings that weren't collected during collect_symbols.
+    fn get_or_intern_symbol(&mut self, s: &str) -> u8 {
+        if let Some(&idx) = self.symbol_map.get(s) {
+            idx
+        } else {
+            // Symbol wasn't collected - intern it now
+            // This can happen with dynamically generated IDs
+            self.intern(s)
+        }
     }
 
     fn register_remote_handler(&mut self, handler: HandlerFn) -> u8 {
@@ -724,7 +785,7 @@ impl BuildContext {
             }
             _ => {
                 // Fall back to symbol encoding
-                let sym = *self.symbol_map.get(text).unwrap();
+                let sym = self.get_or_intern_symbol(text);
                 self.buf.set_text(ref_idx, sym);
             }
         }
@@ -771,7 +832,7 @@ impl BuildContext {
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
         if let Some(ref class) = el.class {
-            let sym = *self.symbol_map.get(class).unwrap();
+            let sym = self.get_or_intern_symbol(class);
             self.buf.set_class(ref_idx, sym);
         }
 
@@ -780,8 +841,8 @@ impl BuildContext {
         }
 
         for (key, value) in &el.attrs {
-            let key_sym = *self.symbol_map.get(key).unwrap();
-            let val_sym = *self.symbol_map.get(value).unwrap();
+            let key_sym = self.get_or_intern_symbol(key);
+            let val_sym = self.get_or_intern_symbol(value);
             self.buf.set_attr(ref_idx, key_sym, val_sym);
         }
 
@@ -887,7 +948,7 @@ impl BuildContext {
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
         if let Some(ref class) = el.class {
-            let sym = *self.symbol_map.get(class).unwrap();
+            let sym = self.get_or_intern_symbol(class);
             self.buf.set_class(ref_idx, sym);
         }
 
@@ -896,8 +957,8 @@ impl BuildContext {
         }
 
         for (key, value) in &el.attrs {
-            let key_sym = *self.symbol_map.get(key).unwrap();
-            let val_sym = *self.symbol_map.get(value).unwrap();
+            let key_sym = self.get_or_intern_symbol(key);
+            let val_sym = self.get_or_intern_symbol(value);
             self.buf.set_attr(ref_idx, key_sym, val_sym);
         }
 

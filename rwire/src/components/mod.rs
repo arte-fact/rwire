@@ -14,6 +14,21 @@
 //!
 //! - **Button**: Primary, Secondary, Ghost, Destructive buttons
 //! - **Input**: Text, password, email, number inputs
+//! - **Textarea**: Multi-line text input
+//! - **Label**: Form labels
+//! - **Checkbox**: Boolean checkbox input
+//! - **Radio**: Radio button input
+//! - **Switch**: Toggle switch input
+//! - **Select**: Dropdown select with options
+//! - **FormField**: Form field wrapper with label/help/error
+//! - **Avatar**: User avatar with image or fallback
+//! - **Progress**: Progress bar
+//! - **Spinner**: Loading spinner
+//! - **Table**: Div-based table
+//! - **Alert**: Alert messages with intent
+//! - **Breadcrumb**: Navigation breadcrumb trail
+//! - **Tabs**: Tab navigation
+//! - **Pagination**: Page navigation
 //! - **Stack**: Flexbox layout (row/column)
 //! - **Card**: Surface container with padding/shadow
 //! - **Badge**: Status indicators
@@ -47,31 +62,76 @@
 //!     .build()
 //! ```
 
+mod alert;
+mod avatar;
 mod badge;
+mod breadcrumb;
 mod button;
 mod card;
+mod checkbox;
+mod form_field;
 mod input;
+mod label;
+mod pagination;
+mod progress;
+mod radio;
 pub mod registry;
+mod select;
+mod spinner;
 mod stack;
+mod switch;
+mod table;
+mod tabs;
+mod textarea;
 
+pub use alert::{Alert, AlertIntent, ALERT_CSS};
+pub use avatar::{Avatar, AvatarSize, AVATAR_CSS};
 pub use badge::{Badge, BadgeIntent, BADGE_CSS};
+pub use breadcrumb::{Breadcrumb, BreadcrumbItem, BREADCRUMB_CSS};
 pub use button::{Button, ButtonIntent, ButtonSize, BUTTON_CSS};
 pub use card::{Card, CardPadding, CardShadow, CARD_CSS};
+pub use checkbox::{Checkbox, CHECKBOX_CSS};
+pub use form_field::{FormField, FORM_FIELD_CSS};
 pub use input::{Input, InputSize, InputType, INPUT_CSS};
+pub use label::{Label, LABEL_CSS};
+pub use pagination::{Pagination, PAGINATION_CSS};
+pub use progress::{Progress, PROGRESS_CSS};
+pub use radio::{Radio, RADIO_CSS};
 pub use registry::{begin_tracking, end_tracking, ComponentRegistry, ComponentType};
+pub use select::{Select, SelectOption, SELECT_CSS};
+pub use spinner::{Spinner, SpinnerSize, SPINNER_CSS};
 pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify, STACK_CSS};
+pub use switch::{Switch, SWITCH_CSS};
+pub use table::{Table, TableRow, TABLE_CSS};
+pub use tabs::{Tab, Tabs, TABS_CSS};
+pub use textarea::{Textarea, TEXTAREA_CSS};
 
 /// Generate CSS for all components.
 ///
 /// In the future, this will be tree-shaken to only include
 /// CSS for components actually used in the application.
 pub fn generate_components_css() -> String {
-    let mut css = String::with_capacity(4096);
-    css.push_str(BUTTON_CSS);
-    css.push_str(INPUT_CSS);
-    css.push_str(STACK_CSS);
-    css.push_str(CARD_CSS);
+    let mut css = String::with_capacity(8192);
+    css.push_str(ALERT_CSS);
+    css.push_str(AVATAR_CSS);
     css.push_str(BADGE_CSS);
+    css.push_str(BREADCRUMB_CSS);
+    css.push_str(BUTTON_CSS);
+    css.push_str(CARD_CSS);
+    css.push_str(CHECKBOX_CSS);
+    css.push_str(FORM_FIELD_CSS);
+    css.push_str(INPUT_CSS);
+    css.push_str(LABEL_CSS);
+    css.push_str(PAGINATION_CSS);
+    css.push_str(PROGRESS_CSS);
+    css.push_str(RADIO_CSS);
+    css.push_str(SELECT_CSS);
+    css.push_str(SPINNER_CSS);
+    css.push_str(STACK_CSS);
+    css.push_str(SWITCH_CSS);
+    css.push_str(TABLE_CSS);
+    css.push_str(TABS_CSS);
+    css.push_str(TEXTAREA_CSS);
     css
 }
 
@@ -88,14 +148,18 @@ mod tests {
         assert!(css.contains(".rw-stack"));
         assert!(css.contains(".rw-card"));
         assert!(css.contains(".rw-badge"));
+        assert!(css.contains(".rw-alert"));
+        assert!(css.contains(".rw-avatar"));
+        assert!(css.contains(".rw-checkbox"));
+        assert!(css.contains(".rw-select"));
     }
 
     #[test]
     fn test_total_components_css_size() {
         let css = generate_components_css();
-        // Total component CSS should be under 4KB
+        // Total component CSS should be under 15KB (realistic for full component library)
         assert!(
-            css.len() < 4096,
+            css.len() < 15360,
             "Total component CSS too large: {} bytes",
             css.len()
         );

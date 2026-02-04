@@ -16,6 +16,7 @@
 //! ```
 
 use super::primitives::{color, font_size, font_weight, line_height, radius, shadow, space};
+use std::collections::HashSet;
 
 /// Generate CSS custom properties for all primitive tokens.
 ///
@@ -88,6 +89,100 @@ pub fn generate_primitive_css() -> String {
     write_var(&mut css, "shadow-md", shadow::MD);
     write_var(&mut css, "shadow-lg", shadow::LG);
     write_var(&mut css, "shadow-xl", shadow::XL);
+
+    css.push_str("}\n");
+    css
+}
+
+/// Generate CSS custom properties for only the primitive tokens that are actually used.
+///
+/// Takes a set of variable names (with `--rw-` prefix) and only generates CSS
+/// for those variables. This reduces CSS size by tree-shaking unused tokens.
+pub fn generate_primitive_css_filtered(used_vars: &HashSet<String>) -> String {
+    let mut css = String::with_capacity(2048);
+    css.push_str(":root{\n");
+
+    // Helper to conditionally write a variable if it's used
+    let write_if_used = |css: &mut String, name: &str, value: &str| {
+        let var_name = format!("--rw-{}", name);
+        if used_vars.contains(&var_name) {
+            write_var(css, name, value);
+        }
+    };
+
+    // Color scales
+    for (i, color) in NEUTRAL_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("neutral-{}", i + 1), color);
+    }
+    for (i, color) in BLUE_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("blue-{}", i + 1), color);
+    }
+    for (i, color) in RED_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("red-{}", i + 1), color);
+    }
+    for (i, color) in GREEN_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("green-{}", i + 1), color);
+    }
+    for (i, color) in AMBER_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("amber-{}", i + 1), color);
+    }
+
+    // Special colors
+    write_if_used(&mut css, "white", color::WHITE);
+    write_if_used(&mut css, "black", color::BLACK);
+
+    // Spacing
+    write_if_used(&mut css, "space-0", space::_0);
+    write_if_used(&mut css, "space-1", space::_1);
+    write_if_used(&mut css, "space-2", space::_2);
+    write_if_used(&mut css, "space-3", space::_3);
+    write_if_used(&mut css, "space-4", space::_4);
+    write_if_used(&mut css, "space-5", space::_5);
+    write_if_used(&mut css, "space-6", space::_6);
+    write_if_used(&mut css, "space-8", space::_8);
+    write_if_used(&mut css, "space-10", space::_10);
+    write_if_used(&mut css, "space-12", space::_12);
+    write_if_used(&mut css, "space-16", space::_16);
+    write_if_used(&mut css, "space-20", space::_20);
+    write_if_used(&mut css, "space-24", space::_24);
+
+    // Radius
+    write_if_used(&mut css, "radius-none", radius::NONE);
+    write_if_used(&mut css, "radius-sm", radius::SM);
+    write_if_used(&mut css, "radius-md", radius::MD);
+    write_if_used(&mut css, "radius-lg", radius::LG);
+    write_if_used(&mut css, "radius-xl", radius::XL);
+    write_if_used(&mut css, "radius-2xl", radius::_2XL);
+    write_if_used(&mut css, "radius-full", radius::FULL);
+
+    // Font sizes
+    write_if_used(&mut css, "text-xs", font_size::XS);
+    write_if_used(&mut css, "text-sm", font_size::SM);
+    write_if_used(&mut css, "text-base", font_size::BASE);
+    write_if_used(&mut css, "text-lg", font_size::LG);
+    write_if_used(&mut css, "text-xl", font_size::XL);
+    write_if_used(&mut css, "text-2xl", font_size::_2XL);
+    write_if_used(&mut css, "text-3xl", font_size::_3XL);
+    write_if_used(&mut css, "text-4xl", font_size::_4XL);
+
+    // Font weights
+    write_if_used(&mut css, "font-normal", font_weight::NORMAL);
+    write_if_used(&mut css, "font-medium", font_weight::MEDIUM);
+    write_if_used(&mut css, "font-semibold", font_weight::SEMIBOLD);
+    write_if_used(&mut css, "font-bold", font_weight::BOLD);
+
+    // Line heights
+    write_if_used(&mut css, "leading-tight", line_height::TIGHT);
+    write_if_used(&mut css, "leading-snug", line_height::SNUG);
+    write_if_used(&mut css, "leading-normal", line_height::NORMAL);
+    write_if_used(&mut css, "leading-relaxed", line_height::RELAXED);
+    write_if_used(&mut css, "leading-loose", line_height::LOOSE);
+
+    // Shadows
+    write_if_used(&mut css, "shadow-sm", shadow::SM);
+    write_if_used(&mut css, "shadow-md", shadow::MD);
+    write_if_used(&mut css, "shadow-lg", shadow::LG);
+    write_if_used(&mut css, "shadow-xl", shadow::XL);
 
     css.push_str("}\n");
     css

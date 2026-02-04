@@ -257,41 +257,77 @@ impl CapsuleConfig {
     }
 }
 
-/// Generate complete CSS for the capsule.
+/// Extract all CSS variable references from a CSS string.
+///
+/// Scans for `var(--rw-*)` patterns and returns a set of variable names.
+fn extract_used_variables(css: &str) -> HashSet<String> {
+    let mut vars = HashSet::new();
+
+    // Find all occurrences of "var(" and extract the variable name
+    for (idx, _) in css.match_indices("var(") {
+        let rest = &css[idx + 4..]; // Skip "var("
+
+        // Find the end of the variable name (either ',' or ')')
+        if let Some(end) = rest.find(|c| c == ',' || c == ')') {
+            let var_name = rest[..end].trim();
+
+            // Only track --rw-* variables
+            if var_name.starts_with("--rw-") {
+                vars.insert(var_name.to_string());
+            }
+        }
+    }
+
+    vars
+}
+
+/// Generate complete CSS for the capsule with tree-shaken variables.
 ///
 /// Includes:
 /// - Base reset CSS
-/// - Primitive token CSS variables
-/// - Semantic token CSS variables
+/// - Primitive token CSS variables (tree-shaken)
+/// - Semantic token CSS variables (tree-shaken)
 /// - Theme overrides (accent, radius)
 /// - Component CSS (tree-shaken)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css};
-    use crate::tokens::css::generate_primitive_css;
+    use crate::tokens::css::generate_primitive_css_filtered;
 
     let mut css = String::with_capacity(12288);
 
-    // 1. Base reset
+    // 1. Base reset (always included)
     css.push_str(generate_base_css());
 
-    // 2. Primitive tokens
-    css.push_str(&generate_primitive_css());
+    // 2. Get component CSS first to extract used variables
+    let component_css = config.components.generate_css();
 
-    // 3. Semantic tokens (light + dark)
+    // 3. Extract variables used in component CSS
+    let mut used_vars = extract_used_variables(&component_css);
+
+    // 4. Also check theme overrides for additional variables
+    if let Some(accent_css) = generate_accent_css(config.theme.accent) {
+        used_vars.extend(extract_used_variables(&accent_css));
+    }
+    if let Some(radius_css) = generate_radius_css(config.theme.radius) {
+        used_vars.extend(extract_used_variables(radius_css));
+    }
+
+    // 5. Generate tree-shaken primitive tokens (only used variables)
+    css.push_str(&generate_primitive_css_filtered(&used_vars));
+
+    // 6. Semantic tokens (tree-shaken based on used primitives)
     css.push_str(&generate_semantic_css());
 
-    // 4. Accent override (if non-default)
+    // 7. Theme overrides
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
         css.push_str(&accent_css);
     }
-
-    // 5. Radius override (if non-default)
     if let Some(radius_css) = generate_radius_css(config.theme.radius) {
         css.push_str(radius_css);
     }
 
-    // 6. Component CSS (tree-shaken)
-    css.push_str(&config.components.generate_css());
+    // 8. Component CSS (already tree-shaken)
+    css.push_str(&component_css);
 
     css
 }
@@ -301,8 +337,10 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 /// This is the recommended way to generate capsules for styled applications.
 /// Includes:
 /// - Tree-shaken element/event mappings
-/// - Theme CSS variables
+/// - Theme CSS variables (loaded from /capsule.css)
 /// - Component CSS (only for used components)
+///
+/// The CSS is loaded from a separate route for better caching and lighter HTML.
 pub fn generate_styled_capsule(
     used_elements: &HashSet<u8>,
     used_events: &HashSet<u8>,
@@ -310,7 +348,6 @@ pub fn generate_styled_capsule(
 ) -> String {
     let elements_js = generate_element_map(used_elements);
     let events_js = generate_event_map(used_events);
-    let css = generate_capsule_css(config);
     let theme_attrs = config.theme.data_attrs();
 
     // Choose the appropriate bind handler based on whether we have local state
@@ -321,7 +358,7 @@ pub fn generate_styled_capsule(
     };
 
     format!(
-        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>{css}</style></head><body>
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/capsule.css"></head><body>
 <div id="rw" {theme_attrs}></div>
 <script>
 const E={{{elements_js}}};
