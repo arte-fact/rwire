@@ -55,6 +55,7 @@ pub mod capsule_gen;
 pub mod config;
 pub mod form;
 pub mod health;
+pub mod icons;
 pub mod item_ref;
 pub mod metrics;
 pub mod persist;
@@ -131,6 +132,9 @@ pub use theme::{
 
 // Variant exports
 pub use variants::{Variant, VariantComponent};
+
+// Icon exports
+pub use icons::{icon, icon_sized, icon_with_class, Icon};
 
 // Component exports
 pub use components::{

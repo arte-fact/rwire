@@ -28,8 +28,8 @@ use std::collections::HashSet;
 
 use super::{
     ALERT_CSS, AVATAR_CSS, BADGE_CSS, BREADCRUMB_CSS, BUTTON_CSS, CARD_CSS, CHECKBOX_CSS,
-    FORM_FIELD_CSS, INPUT_CSS, LABEL_CSS, PAGINATION_CSS, PROGRESS_CSS, RADIO_CSS, SELECT_CSS,
-    SPINNER_CSS, STACK_CSS, SWITCH_CSS, TABLE_CSS, TABS_CSS, TEXTAREA_CSS,
+    FORM_FIELD_CSS, INPUT_CSS, LABEL_CSS, MODAL_CSS, PAGINATION_CSS, PROGRESS_CSS, RADIO_CSS,
+    SELECT_CSS, SPINNER_CSS, STACK_CSS, SWITCH_CSS, TABLE_CSS, TABS_CSS, TEXTAREA_CSS,
 };
 
 /// Component types that have associated CSS.
@@ -45,6 +45,7 @@ pub enum ComponentType {
     FormField,
     Input,
     Label,
+    Modal,
     Pagination,
     Progress,
     Radio,
@@ -55,6 +56,7 @@ pub enum ComponentType {
     Table,
     Tabs,
     Textarea,
+    ThemeToggle,
 }
 
 /// Registry of used components.
@@ -136,6 +138,9 @@ impl ComponentRegistry {
         if self.used.contains(&ComponentType::Label) {
             css.push_str(LABEL_CSS);
         }
+        if self.used.contains(&ComponentType::Modal) {
+            css.push_str(MODAL_CSS);
+        }
         if self.used.contains(&ComponentType::Pagination) {
             css.push_str(PAGINATION_CSS);
         }
@@ -165,6 +170,9 @@ impl ComponentRegistry {
         }
         if self.used.contains(&ComponentType::Textarea) {
             css.push_str(TEXTAREA_CSS);
+        }
+        if self.used.contains(&ComponentType::ThemeToggle) {
+            css.push_str(super::THEME_TOGGLE_CSS);
         }
 
         css
@@ -232,6 +240,11 @@ impl ComponentRegistry {
             println!("  Label:      {:>5} bytes", size);
             total += size;
         }
+        if self.is_used(ComponentType::Modal) {
+            let size = MODAL_CSS.len();
+            println!("  Modal:      {:>5} bytes", size);
+            total += size;
+        }
         if self.is_used(ComponentType::Pagination) {
             let size = PAGINATION_CSS.len();
             println!("  Pagination: {:>5} bytes", size);
@@ -280,6 +293,11 @@ impl ComponentRegistry {
         if self.is_used(ComponentType::Textarea) {
             let size = TEXTAREA_CSS.len();
             println!("  Textarea:   {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::ThemeToggle) {
+            let size = super::THEME_TOGGLE_CSS.len();
+            println!("  ThemeToggle:{:>5} bytes", size);
             total += size;
         }
 

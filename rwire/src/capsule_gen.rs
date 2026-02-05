@@ -39,6 +39,8 @@ const ELEMENT_MAPPINGS: &[(u8, &str)] = &[
     (21, "footer"),
     (22, "section"),
     (23, "article"),
+    (24, "svg"),
+    (25, "path"),
 ];
 
 /// All supported event types with their byte codes and event names.
@@ -113,7 +115,7 @@ let r=[],i=0;
 while(i<d.length){
 let o=d[i++];
 if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
-else if(o===O.SE){let[n,l]=rv(d,i);i+=l;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
+else if(o===O.SE){let[n,l]=rv(d,i);i+=l;let[si,sl]=rv(d,i);i+=sl;sc=si;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
 else if(o===O.WT){let n=d[i++];wt=[];while(n--){let l=d[i++];wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
 else if(o===O.G){let[k,l]=rv(d,i);i+=l;let el=document.getElementById(s[k]);r.push(el)}
 else if(o===O.C){r.push(document.createElement(E[d[i++]]||'div'))}
@@ -268,7 +270,7 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
         let rest = &css[idx + 4..]; // Skip "var("
 
         // Find the end of the variable name (either ',' or ')')
-        if let Some(end) = rest.find(|c| c == ',' || c == ')') {
+        if let Some(end) = rest.find([',', ')']) {
             let var_name = rest[..end].trim();
 
             // Only track --rw-* variables
@@ -295,14 +297,17 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 
     let mut css = String::with_capacity(12288);
 
-    // 1. Base reset (always included)
-    css.push_str(generate_base_css());
+    // 1. Get base CSS and extract variables used in it
+    let base_css = generate_base_css();
+    let mut used_vars = extract_used_variables(base_css);
 
-    // 2. Get component CSS first to extract used variables
+    // 2. Get component CSS and extract used variables
     let component_css = config.components.generate_css();
+    used_vars.extend(extract_used_variables(&component_css));
 
-    // 3. Extract variables used in component CSS
-    let mut used_vars = extract_used_variables(&component_css);
+    // 3. Generate semantic CSS to extract primitive variables it references
+    let semantic_css = generate_semantic_css();
+    used_vars.extend(extract_used_variables(&semantic_css));
 
     // 4. Also check theme overrides for additional variables
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
@@ -312,13 +317,16 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         used_vars.extend(extract_used_variables(radius_css));
     }
 
-    // 5. Generate tree-shaken primitive tokens (only used variables)
+    // 5. Base reset (must come first)
+    css.push_str(base_css);
+
+    // 6. Generate tree-shaken primitive tokens (only used variables)
     css.push_str(&generate_primitive_css_filtered(&used_vars));
 
-    // 6. Semantic tokens (tree-shaken based on used primitives)
-    css.push_str(&generate_semantic_css());
+    // 7. Semantic tokens
+    css.push_str(&semantic_css);
 
-    // 7. Theme overrides
+    // 8. Theme overrides
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
         css.push_str(&accent_css);
     }
@@ -326,7 +334,7 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         css.push_str(radius_css);
     }
 
-    // 8. Component CSS (already tree-shaken)
+    // 9. Component CSS (already tree-shaken)
     css.push_str(&component_css);
 
     css
@@ -406,6 +414,49 @@ mod tests {
         assert!(css.contains(".rw-btn"));
         // Should NOT contain input CSS (not used)
         assert!(!css.contains(".rw-input"));
+    }
+
+    #[test]
+    fn test_css_variables_not_empty() {
+        // This test verifies the fix for the bug where CSS variables were empty
+        // because primitive tokens referenced by semantic CSS were being tree-shaken out
+        let mut registry = ComponentRegistry::new();
+        registry.mark_used(ComponentType::Button);
+        registry.mark_used(ComponentType::Card);
+
+        let config = CapsuleConfig::new().components(registry);
+        let css = generate_capsule_css(&config);
+
+        // Semantic tokens that reference primitives should all be present
+        assert!(css.contains("--rw-neutral-1:"), "Missing --rw-neutral-1");
+        assert!(css.contains("--rw-neutral-2:"), "Missing --rw-neutral-2");
+        assert!(css.contains("--rw-neutral-11:"), "Missing --rw-neutral-11");
+        assert!(css.contains("--rw-neutral-12:"), "Missing --rw-neutral-12");
+
+        // Blue scale (used by default accent)
+        assert!(css.contains("--rw-blue-9:"), "Missing --rw-blue-9");
+
+        // White (used by text-on-accent)
+        assert!(css.contains("--rw-white:"), "Missing --rw-white");
+
+        // Spacing tokens used by components
+        assert!(css.contains("--rw-space-2:"), "Missing --rw-space-2");
+        assert!(css.contains("--rw-space-4:"), "Missing --rw-space-4");
+
+        // Radius tokens used by components
+        assert!(css.contains("--rw-radius-md:"), "Missing --rw-radius-md");
+        assert!(css.contains("--rw-radius-lg:"), "Missing --rw-radius-lg");
+
+        // Typography tokens used in base CSS
+        assert!(css.contains("--rw-leading-normal:"), "Missing --rw-leading-normal");
+        assert!(css.contains("--rw-font-medium:"), "Missing --rw-font-medium");
+
+        // Shadow tokens used by Card
+        assert!(css.contains("--rw-shadow-sm:"), "Missing --rw-shadow-sm");
+
+        // Verify semantic tokens are defined and reference primitives correctly
+        assert!(css.contains("--rw-bg-app:var(--rw-neutral-1)"), "Semantic token not referencing primitive");
+        assert!(css.contains("--rw-text-default:var(--rw-neutral-11)"), "Semantic token not referencing primitive");
     }
 
     #[test]

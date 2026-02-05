@@ -5,7 +5,7 @@
 use rwire::components::*;
 use rwire::{el, handler, renderer, El, ElementBuilder, Server, State};
 use rwire::capsule_gen::CapsuleConfig;
-use rwire::theme::Theme;
+use rwire::theme::{Theme, ThemeMode};
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -17,6 +17,7 @@ struct DesignSystemState {
     progress_value: u32,
     active_tab: usize,
     current_page: usize,
+    theme_mode: ThemeMode,
 }
 
 #[async_std::main]
@@ -35,25 +36,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
 }
 
-fn root() -> ElementBuilder {
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            render_header(),
-            render_nav(),
-            render_content(),
+#[renderer]
+fn root(state: &DesignSystemState) -> ElementBuilder {
+    el(El::Div)
+        .attr("data-theme", state.theme_mode.as_str())
+        .append([
+            Stack::column()
+                .gap(Gap::Md)
+                .children([
+                    render_header(),
+                    render_nav(),
+                    render_content(),
+                ])
+                .build()
         ])
-        .build()
 }
 
-fn render_header() -> ElementBuilder {
+#[renderer]
+fn render_header(state: &DesignSystemState) -> ElementBuilder {
     Card::new()
         .child(
-            Stack::column()
-                .gap(Gap::Sm)
+            Stack::row()
+                .gap(Gap::Md)
+                .justify(StackJustify::Between)
+                .align(StackAlign::Center)
                 .children([
-                    el(El::H1).text("rwire Design System"),
-                    el(El::P).text("Interactive documentation for all rwire components"),
+                    Stack::column()
+                        .gap(Gap::Sm)
+                        .children([
+                            el(El::H1).text("rwire Design System"),
+                            el(El::P).text("Interactive documentation for all rwire components"),
+                        ])
+                        .build(),
+                    ThemeToggle::new()
+                        .mode(match state.theme_mode {
+                            ThemeMode::Light => ThemeToggleMode::Light,
+                            ThemeMode::Dark => ThemeToggleMode::Dark,
+                        })
+                        .on_toggle(toggle_theme())
+                        .build(),
                 ])
                 .build(),
         )
@@ -97,12 +118,20 @@ fn render_nav(state: &DesignSystemState) -> ElementBuilder {
         .build()
 }
 
+#[handler]
+fn toggle_theme(state: &mut DesignSystemState) {
+    state.theme_mode = match state.theme_mode {
+        ThemeMode::Light => ThemeMode::Dark,
+        ThemeMode::Dark => ThemeMode::Light,
+    };
+}
+
 #[renderer]
 fn render_content(state: &DesignSystemState) -> ElementBuilder {
     match state.active_section {
-        1 => render_data_display_section(state),
-        2 => render_feedback_section(state),
-        _ => render_forms_section(state),
+        1 => render_data_display_section(),
+        2 => render_feedback_section(),
+        _ => render_forms_section(),
     }
 }
 
@@ -110,6 +139,8 @@ fn render_content(state: &DesignSystemState) -> ElementBuilder {
 // Form Components Section
 // ============================================================================
 
+#[renderer]
+#[renderer]
 fn render_forms_section(state: &DesignSystemState) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Lg)
@@ -279,6 +310,8 @@ fn render_radio_examples(state: &DesignSystemState) -> ElementBuilder {
 // Data Display Section
 // ============================================================================
 
+#[renderer]
+#[renderer]
 fn render_data_display_section(state: &DesignSystemState) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Lg)
@@ -387,6 +420,8 @@ fn render_data_display_section(state: &DesignSystemState) -> ElementBuilder {
 // Feedback & Navigation Section
 // ============================================================================
 
+#[renderer]
+#[renderer]
 fn render_feedback_section(state: &DesignSystemState) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Lg)

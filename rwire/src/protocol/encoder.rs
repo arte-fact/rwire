@@ -83,6 +83,7 @@ impl OpcodeBuffer {
     pub fn begin_symbols_extend(&mut self, count: u32, start_index: u32) -> &mut Self {
         self.buf.put_u8(SYMBOLS_EXTEND);
         write_varint(&mut self.buf, count);
+        write_varint(&mut self.buf, start_index);
         self.next_symbol = start_index;
         self
     }

@@ -72,6 +72,7 @@ mod checkbox;
 mod form_field;
 mod input;
 mod label;
+mod modal;
 mod pagination;
 mod progress;
 mod radio;
@@ -83,6 +84,8 @@ mod switch;
 mod table;
 mod tabs;
 mod textarea;
+mod theme_toggle;
+pub mod utils;
 
 pub use alert::{Alert, AlertIntent, ALERT_CSS};
 pub use avatar::{Avatar, AvatarSize, AVATAR_CSS};
@@ -94,6 +97,7 @@ pub use checkbox::{Checkbox, CHECKBOX_CSS};
 pub use form_field::{FormField, FORM_FIELD_CSS};
 pub use input::{Input, InputSize, InputType, INPUT_CSS};
 pub use label::{Label, LABEL_CSS};
+pub use modal::{Modal, ModalSize, MODAL_CSS};
 pub use pagination::{Pagination, PAGINATION_CSS};
 pub use progress::{Progress, PROGRESS_CSS};
 pub use radio::{Radio, RADIO_CSS};
@@ -105,6 +109,12 @@ pub use switch::{Switch, SWITCH_CSS};
 pub use table::{Table, TableRow, TABLE_CSS};
 pub use tabs::{Tab, Tabs, TABS_CSS};
 pub use textarea::{Textarea, TEXTAREA_CSS};
+pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize, THEME_TOGGLE_CSS};
+pub use utils::{
+    backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
+    unique_id, AriaAttrs, TransitionState, UTILS_CSS, Z_DROPDOWN, Z_FIXED, Z_MODAL,
+    Z_MODAL_BACKDROP, Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
+};
 
 /// Generate CSS for all components.
 ///
@@ -112,6 +122,7 @@ pub use textarea::{Textarea, TEXTAREA_CSS};
 /// CSS for components actually used in the application.
 pub fn generate_components_css() -> String {
     let mut css = String::with_capacity(8192);
+    css.push_str(UTILS_CSS);
     css.push_str(ALERT_CSS);
     css.push_str(AVATAR_CSS);
     css.push_str(BADGE_CSS);
@@ -122,6 +133,7 @@ pub fn generate_components_css() -> String {
     css.push_str(FORM_FIELD_CSS);
     css.push_str(INPUT_CSS);
     css.push_str(LABEL_CSS);
+    css.push_str(MODAL_CSS);
     css.push_str(PAGINATION_CSS);
     css.push_str(PROGRESS_CSS);
     css.push_str(RADIO_CSS);
@@ -132,6 +144,7 @@ pub fn generate_components_css() -> String {
     css.push_str(TABLE_CSS);
     css.push_str(TABS_CSS);
     css.push_str(TEXTAREA_CSS);
+    css.push_str(THEME_TOGGLE_CSS);
     css
 }
 
@@ -152,6 +165,8 @@ mod tests {
         assert!(css.contains(".rw-avatar"));
         assert!(css.contains(".rw-checkbox"));
         assert!(css.contains(".rw-select"));
+        assert!(css.contains(".rw-theme-toggle"));
+        assert!(css.contains(".rw-modal"));
     }
 
     #[test]

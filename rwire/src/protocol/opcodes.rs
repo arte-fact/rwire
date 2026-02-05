@@ -133,8 +133,8 @@ pub const STYLE_SET: u8 = 0x81;
 /// Symbol table header. Format: [SYMBOLS, count, ...symbols]
 pub const SYMBOLS: u8 = 0xF0;
 
-/// Extend existing symbol table. Format: [SYMBOLS_EXTEND, count, ...symbols]
-/// New symbols are added starting at next available index (0x80 + existing count).
+/// Extend existing symbol table. Format: [SYMBOLS_EXTEND, count_varint, start_index_varint, ...symbols]
+/// New symbols are added starting at start_index (typically 0x80 + existing count).
 /// Use this for updates when some symbols were already sent in initial render.
 pub const SYMBOLS_EXTEND: u8 = 0xF1;
 
@@ -180,6 +180,8 @@ pub const EL_HEADER: u8 = 0x14;
 pub const EL_FOOTER: u8 = 0x15;
 pub const EL_SECTION: u8 = 0x16;
 pub const EL_ARTICLE: u8 = 0x17;
+pub const EL_SVG: u8 = 0x18;
+pub const EL_PATH: u8 = 0x19;
 
 /// Element type enum for fluent builder API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +208,8 @@ pub enum El {
     Footer,
     Section,
     Article,
+    Svg,
+    Path,
 }
 
 impl El {
@@ -234,6 +238,8 @@ impl El {
             El::Footer => EL_FOOTER,
             El::Section => EL_SECTION,
             El::Article => EL_ARTICLE,
+            El::Svg => EL_SVG,
+            El::Path => EL_PATH,
         }
     }
 }

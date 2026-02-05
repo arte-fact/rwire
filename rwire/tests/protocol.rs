@@ -279,11 +279,14 @@ mod encoder {
 
         let bytes = buf.finish();
         assert_eq!(bytes[0], SYMBOLS_EXTEND);
-        assert_eq!(bytes[1], 2); // count
-        assert_eq!(bytes[2], 4); // len "new1"
-        assert_eq!(&bytes[3..7], b"new1");
-        assert_eq!(bytes[7], 4); // len "new2"
-        assert_eq!(&bytes[8..12], b"new2");
+        assert_eq!(bytes[1], 2); // count (varint)
+        // start_index 130 (0x82) encoded as varint: 0x80 0x02
+        assert_eq!(bytes[2], 0x80); // varint byte 1
+        assert_eq!(bytes[3], 0x02); // varint byte 2
+        assert_eq!(bytes[4], 4); // len "new1"
+        assert_eq!(&bytes[5..9], b"new1");
+        assert_eq!(bytes[9], 4); // len "new2"
+        assert_eq!(&bytes[10..14], b"new2");
     }
 
     #[test]
