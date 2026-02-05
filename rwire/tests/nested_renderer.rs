@@ -95,7 +95,7 @@ fn test_flat_renderer_initial_render() {
     let el = make_parent_renderer_flat();
 
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
 
@@ -121,7 +121,7 @@ fn test_nested_renderer_initial_render() {
     let el = make_parent_renderer_with_nested();
 
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
 
@@ -149,7 +149,7 @@ fn test_nested_renderer_update_creates_wrappers() {
     let el = make_parent_renderer_with_nested();
 
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
     let mut handlers: Vec<HandlerFn> = vec![];
@@ -181,7 +181,7 @@ fn test_collect_symbols_finds_nested_synced() {
 
     // During collect_symbols_multi, nested synced elements should be discovered
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
 
@@ -213,7 +213,7 @@ fn test_nested_update_preserves_structure() {
     let el = make_parent_renderer_with_nested();
 
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
     assert_eq!(synced.len(), 2, "Should have 2 synced elements");
@@ -258,7 +258,7 @@ fn test_nested_update_emits_wrapper_ids() {
     let el = make_parent_renderer_with_nested();
 
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
     let mut handlers: Vec<HandlerFn> = vec![];
@@ -341,7 +341,7 @@ fn test_deeply_nested_synced_elements() {
     let el = make_level1();
 
     ctx.collect_symbols_multi(&el, &states);
-    ctx.emit_multi(&el, &states);
+    ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
 

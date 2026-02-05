@@ -468,7 +468,7 @@ where
         } else {
             // Use multi-state collection for proper renderer handling
             ctx.collect_symbols_multi(&root_element, &states_map);
-            ctx.emit_multi(&root_element, &states_map);
+            ctx.emit_multi(&root_element);
         }
         let component_registry = end_tracking();
 
@@ -761,7 +761,7 @@ where
         } else {
             // Use multi-state methods to render all synced elements correctly
             ctx.collect_symbols_multi(&root_element, &states_map);
-            ctx.emit_multi(&root_element, &states_map);
+            ctx.emit_multi(&root_element);
         }
 
         // Drop cache_guard before continuing (it's automatically dropped at end of scope)

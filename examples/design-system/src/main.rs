@@ -140,7 +140,6 @@ fn render_content(state: &DesignSystemState) -> ElementBuilder {
 // ============================================================================
 
 #[renderer]
-#[renderer]
 fn render_forms_section(state: &DesignSystemState) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Lg)
@@ -311,7 +310,6 @@ fn render_radio_examples(state: &DesignSystemState) -> ElementBuilder {
 // ============================================================================
 
 #[renderer]
-#[renderer]
 fn render_data_display_section(state: &DesignSystemState) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Lg)
@@ -420,7 +418,6 @@ fn render_data_display_section(state: &DesignSystemState) -> ElementBuilder {
 // Feedback & Navigation Section
 // ============================================================================
 
-#[renderer]
 #[renderer]
 fn render_feedback_section(state: &DesignSystemState) -> ElementBuilder {
     Stack::column()

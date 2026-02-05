@@ -168,7 +168,7 @@ pub struct ElementBuilder {
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
     /// Binary-encoded style utility tokens (compact 1-byte each)
-    style_utils: Vec<u8>,
+    style_utils: Vec<u16>,
     /// Binary-encoded style property+value pairs (2 bytes each)
     style_props: Vec<(u8, u8)>,
 }
@@ -278,7 +278,7 @@ impl ElementBuilder {
     /// el(El::Div).st([St::BgApp, St::FlexCenter])
     /// ```
     pub fn style_util(mut self, util: crate::style_tokens::St) -> Self {
-        self.style_utils.push(util.as_u8());
+        self.style_utils.push(util.as_u16());
         self
     }
 
@@ -329,7 +329,7 @@ impl ElementBuilder {
     where
         I: IntoIterator<Item = crate::style_tokens::St>,
     {
-        self.style_utils.extend(utils.into_iter().map(|u| u.as_u8()));
+        self.style_utils.extend(utils.into_iter().map(|u| u.as_u16()));
         self
     }
 
@@ -420,7 +420,7 @@ impl ElementBuilder {
     }
 
     /// Get the style utility tokens.
-    pub fn get_style_utils(&self) -> &[u8] {
+    pub fn get_style_utils(&self) -> &[u16] {
         &self.style_utils
     }
 
@@ -469,13 +469,18 @@ pub struct BuildContext {
     /// Text encoding decisions (text -> encoding)
     text_encodings: HashMap<String, TextEncoding>,
     /// Used style utility tokens (for tree-shaking)
-    used_style_utils: HashSet<u8>,
+    used_style_utils: HashSet<u16>,
     /// Used style property codes (for tree-shaking)
     used_style_props: HashSet<u8>,
     /// Used style value codes (for tree-shaking)
     used_style_values: HashSet<u8>,
     /// Composite style table (pre-analyzed patterns for compression)
     composite_table: crate::style_groups::CompositeTable,
+    /// Cache for synced element renders (single-render path).
+    /// Populated during collect_symbols, consumed during emit.
+    /// This avoids rendering synced elements twice, which would produce
+    /// different generate_element_id() values between passes.
+    synced_render_cache: HashMap<u32, ElementBuilder>,
 }
 
 /// Information about a synced element for later updates.
@@ -551,6 +556,7 @@ impl BuildContext {
             used_style_props: HashSet::new(),
             used_style_values: HashSet::new(),
             composite_table: crate::style_groups::CompositeTable::new(),
+            synced_render_cache: HashMap::new(),
         }
     }
 
@@ -785,18 +791,19 @@ impl BuildContext {
         el: &ElementBuilder,
         states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     ) {
-        // If this is a synced element, render it first with the appropriate state
+        // If this is a synced element, render it once and cache for emit pass
         if let Some(renderer) = &el.synced {
             // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
-            // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
+            let synced_id = self.next_synced_id;
             self.next_synced_id += 1;
 
-            // Find the state for this renderer's state type
+            // Render once, cache result for emit pass (single-render path)
             let state_type_id = renderer.state_type_id();
             if let Some(state) = states.get(&state_type_id) {
                 if let Some(rendered) = renderer.render_with_state(*state) {
                     self.collect_symbols_multi(&rendered, states);
+                    self.synced_render_cache.insert(synced_id, rendered);
                 }
             }
             return;
@@ -862,7 +869,6 @@ impl BuildContext {
     pub fn emit_multi(
         &mut self,
         el: &ElementBuilder,
-        states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     ) -> u8 {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
@@ -891,7 +897,7 @@ impl BuildContext {
             self.buf.composite_table(&self.composite_table);
         }
 
-        self.emit_element_multi(el, None, states)
+        self.emit_element_multi(el, None)
     }
 
     /// Emit text content using the best encoding.
@@ -1048,9 +1054,8 @@ impl BuildContext {
         &mut self,
         el: &ElementBuilder,
         parent_ref: Option<u8>,
-        states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     ) -> u8 {
-        // If this is a synced element, render it and wrap with an ID
+        // If this is a synced element, use the cached render from collect_symbols_multi
         if let Some(renderer) = &el.synced {
             let synced_id = self.next_synced_id;
             self.next_synced_id += 1;
@@ -1063,30 +1068,20 @@ impl BuildContext {
                 deps: renderer.deps(),
             });
 
-            // Find the state for this renderer's state type
-            let state_type_id = renderer.state_type_id();
-            if let Some(state) = states.get(&state_type_id) {
-                if let Some(rendered) = renderer.render_with_state(*state) {
-                    // Track span element usage for synced wrapper
-                    self.used_elements.insert(El::Span.as_u8());
+            // Use cached render from collect_symbols_multi (single-render path)
+            if let Some(rendered) = self.synced_render_cache.remove(&synced_id) {
+                self.used_elements.insert(El::Span.as_u8());
+                let ref_idx = self.buf.create_synced(synced_id);
+                self.emit_element_multi(&rendered, Some(ref_idx));
 
-                    // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
-                    let ref_idx = self.buf.create_synced(synced_id);
-
-                    // Emit the rendered content as a child
-                    self.emit_element_multi(&rendered, Some(ref_idx), states);
-
-                    // Append wrapper to parent
-                    if let Some(parent) = parent_ref {
-                        self.buf.append(parent, ref_idx);
-                    } else {
-                        self.buf.append_to_body(ref_idx);
-                    }
-
-                    return ref_idx;
+                if let Some(parent) = parent_ref {
+                    self.buf.append(parent, ref_idx);
+                } else {
+                    self.buf.append_to_body(ref_idx);
                 }
+
+                return ref_idx;
             }
-            // If state not found or render failed, skip this synced element
             return 0;
         }
 
@@ -1174,7 +1169,7 @@ impl BuildContext {
 
         // Emit children
         for child in &el.children {
-            self.emit_element_multi(child, Some(ref_idx), states);
+            self.emit_element_multi(child, Some(ref_idx));
         }
 
         // Append to parent
@@ -1239,7 +1234,7 @@ impl BuildContext {
     }
 
     /// Get the set of used style utility token codes.
-    pub fn used_style_utils(&self) -> &HashSet<u8> {
+    pub fn used_style_utils(&self) -> &HashSet<u16> {
         &self.used_style_utils
     }
 
@@ -1364,24 +1359,27 @@ pub fn build_synced_update_with_known_symbols(
 
     let mut current_next_idx = next_symbol_idx;
 
-    // First pass: collect symbols (NOT including synced element wrapper IDs anymore)
-    // We need to track synced counter to assign correct IDs to nested synced elements
-    // Only process synced elements that need updating based on the ChangeSet
+    // Single-render path: render each synced element ONCE and cache the result.
+    // This avoids the double-render problem where non-deterministic values
+    // (like generate_element_id()) produce different outputs between symbol
+    // collection and emission passes.
     let mut synced_counter: u32 = 0;
     let mut has_updates = false;
+    let mut rendered_cache: HashMap<u32, ElementBuilder> = HashMap::new();
+
     for se in synced {
         // Track the highest synced ID to know where nested ones start
         if se.id >= synced_counter {
             synced_counter = se.id + 1;
         }
 
-        // Skip elements that don't need updating (zero-cost bitmask check)
+        // Skip elements that don't need updating (bitmask check)
         if !se.deps.needs_update(changes) {
             continue;
         }
         has_updates = true;
 
-        // Find the state for this synced element's state type
+        // Render once, use for both symbol collection and emission
         if let Some(state) = states.get(&se.state_type_id) {
             if let Some(rendered) = se.renderer.render_with_state(*state) {
                 collect_symbols_recursive_with_known(
@@ -1392,6 +1390,7 @@ pub fn build_synced_update_with_known_symbols(
                     &mut synced_counter,
                     states,
                 );
+                rendered_cache.insert(se.id, rendered);
             }
         }
     }
@@ -1422,22 +1421,17 @@ pub fn build_synced_update_with_known_symbols(
         }
     }
 
-    // Second pass: emit updates with full re-render
-    // Track which synced elements have been rendered as nested elements of a parent.
-    // These should be skipped in the main loop since they're already updated.
+    // Emit pass: use cached renders (no second render call)
     let mut rendered_ids: HashSet<u32> = HashSet::new();
 
     // Build a map of state_type_id -> list of synced element IDs (in order)
-    // This allows us to match nested synced elements by type and order
     let mut ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
     for se in synced {
         ids_by_type.entry(se.state_type_id).or_default().push(se.id);
     }
 
-    // Track next index to use for each state type during emit
     let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
 
-    // Counter for any truly new nested synced elements (not in original list)
     let mut emit_synced_counter: u32 = synced
         .iter()
         .map(|se| se.id)
@@ -1446,46 +1440,32 @@ pub fn build_synced_update_with_known_symbols(
         .unwrap_or(0);
 
     for se in synced {
-        // Skip elements that were already rendered as nested elements
+        // Skip elements already rendered as nested or not in cache
         if rendered_ids.contains(&se.id) {
             continue;
         }
 
-        // Skip elements that don't need updating (zero-cost bitmask check)
-        if !se.deps.needs_update(changes) {
-            continue;
-        }
+        // Use the cached render result (rendered exactly once above)
+        if let Some(rendered) = rendered_cache.remove(&se.id) {
+            rendered_ids.insert(se.id);
+            let idx = next_idx_by_type.entry(se.state_type_id).or_insert(0);
+            *idx += 1;
 
-        // Mark this element as being processed (it's a top-level render, not nested)
-        rendered_ids.insert(se.id);
-        // Advance the index for this type since we're rendering it now
-        let idx = next_idx_by_type.entry(se.state_type_id).or_insert(0);
-        *idx += 1;
+            let wrapper_ref = buf.get_synced(se.id);
+            buf.clear_children(wrapper_ref);
 
-        // Find the state for this synced element's state type
-        if let Some(state) = states.get(&se.state_type_id) {
-            if let Some(rendered) = se.renderer.render_with_state(*state) {
-                // Use GET_SYNCED opcode - more compact than GET_BY_ID with symbol
-                let wrapper_ref = buf.get_synced(se.id);
-
-                // Clear all existing children
-                buf.clear_children(wrapper_ref);
-
-                // Emit the full rendered tree as children of wrapper
-                // Pass type->ID mapping so nested elements can find their original IDs
-                emit_update_element(
-                    &rendered,
-                    wrapper_ref,
-                    &mut buf,
-                    &symbol_map,
-                    handlers,
-                    &ids_by_type,
-                    &mut next_idx_by_type,
-                    &mut rendered_ids,
-                    &mut emit_synced_counter,
-                    states,
-                );
-            }
+            emit_update_element(
+                &rendered,
+                wrapper_ref,
+                &mut buf,
+                &symbol_map,
+                handlers,
+                &ids_by_type,
+                &mut next_idx_by_type,
+                &mut rendered_ids,
+                &mut emit_synced_counter,
+                states,
+            );
         }
     }
 
