@@ -14,6 +14,7 @@ use std::collections::HashSet;
 
 use crate::components::ComponentRegistry;
 use crate::theme::Theme;
+use crate::tokens::ColorPalette;
 
 /// All supported element types with their byte codes and tag names.
 const ELEMENT_MAPPINGS: &[(u8, &str)] = &[
@@ -79,6 +80,39 @@ fn generate_event_map(used: &HashSet<u8>) -> String {
     entries.join(",")
 }
 
+/// Generate the JavaScript object literal for style utility mappings.
+fn generate_style_util_map(used: &HashSet<u8>) -> String {
+    use crate::style_tokens::UTIL_MAPPINGS;
+    let entries: Vec<String> = UTIL_MAPPINGS
+        .iter()
+        .filter(|(code, _)| used.contains(code))
+        .map(|(code, css)| format!("{}:'{}'", code, css))
+        .collect();
+    entries.join(",")
+}
+
+/// Generate the JavaScript object literal for style property mappings.
+fn generate_style_prop_map(used: &HashSet<u8>) -> String {
+    use crate::style_tokens::PROP_MAPPINGS;
+    let entries: Vec<String> = PROP_MAPPINGS
+        .iter()
+        .filter(|(code, _)| used.contains(code))
+        .map(|(code, name)| format!("{}:'{}'", code, name))
+        .collect();
+    entries.join(",")
+}
+
+/// Generate the JavaScript object literal for style value mappings.
+fn generate_style_value_map(used: &HashSet<u8>) -> String {
+    use crate::style_tokens::VALUE_MAPPINGS;
+    let entries: Vec<String> = VALUE_MAPPINGS
+        .iter()
+        .filter(|(code, _)| used.contains(code))
+        .map(|(code, value)| format!("{}:'{}'", code, value))
+        .collect();
+    entries.join(",")
+}
+
 /// The runtime JavaScript code (constant part, not affected by tree shaking).
 /// Does NOT include local state handling - that's added separately when needed.
 /// When local state is used, the xi() function must be defined before this.
@@ -98,9 +132,12 @@ fn generate_event_map(used: &HashSet<u8>) -> String {
 /// - WORD_TABLE (0xF2): Define word table for text compression
 /// - SET_TEXT_WORDS (0x13): Set text from word indices
 /// - SET_TEXT_INT (0x15): Set text from zigzag-encoded integer
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,E:0xFF};
+/// - STYLE_UTIL (0x82): Set style from utility token (3 bytes)
+/// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
+/// - STYLE_MULTI (0x84): Set multiple style utilities (3+n bytes)
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,E:0xFF};
 const A={4:'id'};
-let s={},wt=[],w,sc=0;
+let s={},wt=[],w,sc=0,K={};
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
 function gp(e,el){
 let t=el.tagName.toLowerCase();
@@ -138,6 +175,11 @@ else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
 else if(o===O.SI){let l=(d[i++]<<8)|d[i++];let css=new TextDecoder().decode(d.slice(i,i+l));let st=document.createElement('style');st.textContent=css;document.head.appendChild(st);i+=l}
 else if(o===O.SS){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
+else if(o===O.SU){let f=d[i++],u=d[i++];r[f].style.cssText+=';'+U[u]}
+else if(o===O.SP){let f=d[i++],p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
+else if(o===O.SM){let f=d[i++],n=d[i++],css='';while(n--)css+=';'+U[d[i++]];r[f].style.cssText+=css}
+else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++],css='';while(c--)css+=';'+U[d[i++]];K[id]=css}}
+else if(o===O.SC){let f=d[i++],[id,l]=rv(d,i);i+=l;r[f].style.cssText+=K[id]||''}
 else if(o===O.E){return}
 }}
 w=new WebSocket('ws://'+location.host);
@@ -207,6 +249,9 @@ pub fn generate_capsule(
 <script>
 const E={{{elements_js}}};
 const V={{{events_js}}};
+const U={{}};
+const P={{}};
+const Y={{}};
 {bind_and_local_js}
 {RUNTIME_JS}
 </script>
@@ -228,10 +273,18 @@ pub fn generate_capsule_legacy(used_elements: &HashSet<u8>, used_events: &HashSe
 pub struct CapsuleConfig {
     /// Theme configuration for CSS variables
     pub theme: Theme,
+    /// Optional custom color palette (Nord, custom, etc.)
+    pub palette: Option<ColorPalette>,
     /// Registry of used components for tree-shaking CSS
     pub components: ComponentRegistry,
     /// Whether to include local state mutation interpreter
     pub has_local_handlers: bool,
+    /// Used style utility tokens (for tree-shaking)
+    pub used_style_utils: HashSet<u8>,
+    /// Used style property codes (for tree-shaking)
+    pub used_style_props: HashSet<u8>,
+    /// Used style value codes (for tree-shaking)
+    pub used_style_values: HashSet<u8>,
 }
 
 impl CapsuleConfig {
@@ -246,6 +299,26 @@ impl CapsuleConfig {
         self
     }
 
+    /// Set a custom color palette.
+    ///
+    /// When set, the palette's colors will be used instead of the default
+    /// Oklch-based colors. Use presets like `ColorPalette::nord()` or
+    /// create custom palettes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::tokens::ColorPalette;
+    /// use rwire::capsule_gen::CapsuleConfig;
+    ///
+    /// let config = CapsuleConfig::new()
+    ///     .palette(ColorPalette::nord());
+    /// ```
+    pub fn palette(mut self, palette: ColorPalette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
     /// Set the component registry.
     pub fn components(mut self, registry: ComponentRegistry) -> Self {
         self.components = registry;
@@ -256,6 +329,43 @@ impl CapsuleConfig {
     pub fn has_local_handlers(mut self, has: bool) -> Self {
         self.has_local_handlers = has;
         self
+    }
+
+    /// Add a used style utility token.
+    pub fn use_style_util(mut self, util: u8) -> Self {
+        self.used_style_utils.insert(util);
+        self
+    }
+
+    /// Add used style property and value codes.
+    pub fn use_style_prop(mut self, prop: u8, value: u8) -> Self {
+        self.used_style_props.insert(prop);
+        self.used_style_values.insert(value);
+        self
+    }
+
+    /// Set all used style utility tokens (from build context).
+    pub fn with_style_utils(mut self, utils: &HashSet<u8>) -> Self {
+        self.used_style_utils = utils.clone();
+        self
+    }
+
+    /// Set all used style property codes (from build context).
+    pub fn with_style_props(mut self, props: &HashSet<u8>) -> Self {
+        self.used_style_props = props.clone();
+        self
+    }
+
+    /// Set all used style value codes (from build context).
+    pub fn with_style_values(mut self, values: &HashSet<u8>) -> Self {
+        self.used_style_values = values.clone();
+        self
+    }
+
+    /// Check if any style tokens are used.
+    pub fn has_style_tokens(&self) -> bool {
+        !self.used_style_utils.is_empty()
+            || !self.used_style_props.is_empty()
     }
 }
 
@@ -287,13 +397,13 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
 ///
 /// Includes:
 /// - Base reset CSS
-/// - Primitive token CSS variables (tree-shaken)
+/// - Primitive token CSS variables (tree-shaken, or from custom palette)
 /// - Semantic token CSS variables (tree-shaken)
 /// - Theme overrides (accent, radius)
 /// - Component CSS (tree-shaken)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css};
-    use crate::tokens::css::generate_primitive_css_filtered;
+    use crate::tokens::css::{generate_primitive_css_filtered, generate_primitive_css_with_palette};
 
     let mut css = String::with_capacity(12288);
 
@@ -320,8 +430,12 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     // 5. Base reset (must come first)
     css.push_str(base_css);
 
-    // 6. Generate tree-shaken primitive tokens (only used variables)
-    css.push_str(&generate_primitive_css_filtered(&used_vars));
+    // 6. Generate primitive tokens
+    // If a custom palette is set, use it; otherwise use tree-shaken defaults
+    match &config.palette {
+        Some(palette) => css.push_str(&generate_primitive_css_with_palette(palette)),
+        None => css.push_str(&generate_primitive_css_filtered(&used_vars)),
+    }
 
     // 7. Semantic tokens
     css.push_str(&semantic_css);
@@ -361,6 +475,11 @@ pub fn generate_styled_capsule(
     let events_js = generate_event_map(used_events);
     let theme_attrs = config.theme.data_attrs();
 
+    // Generate style token lookup tables (tree-shaken)
+    let utils_js = generate_style_util_map(&config.used_style_utils);
+    let props_js = generate_style_prop_map(&config.used_style_props);
+    let values_js = generate_style_value_map(&config.used_style_values);
+
     // Choose the appropriate bind handler based on whether we have local state
     let bind_and_local_js = if config.has_local_handlers {
         LOCAL_STATE_JS
@@ -368,12 +487,16 @@ pub fn generate_styled_capsule(
         BIND_LOCAL_REMOTE_JS
     };
 
+    // Theme attrs go on <html> so CSS variables cascade properly to body
     format!(
-        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
-<div id="rw" {theme_attrs}></div>
+        r#"<!DOCTYPE html><html {theme_attrs}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<div id="rw"></div>
 <script>
 const E={{{elements_js}}};
 const V={{{events_js}}};
+const U={{{utils_js}}};
+const P={{{props_js}}};
+const Y={{{values_js}}};
 {bind_and_local_js}
 {RUNTIME_JS}
 </script>
@@ -513,9 +636,9 @@ mod tests {
         let capsule = generate_styled_capsule(&elements, &events, &config);
 
         // HTML capsule should be small (CSS is delivered via WebSocket)
-        // Should be well under 5KB without inline CSS
+        // Should be well under 6KB without inline CSS
         assert!(
-            capsule.len() < 5120,
+            capsule.len() < 5500,
             "Styled capsule too large: {} bytes (CSS should be delivered via WebSocket)",
             capsule.len()
         );

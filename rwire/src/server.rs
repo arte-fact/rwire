@@ -474,10 +474,13 @@ where
 
         // Generate capsule - styled if config provided, basic otherwise
         let (capsule, capsule_css) = if let Some(config) = self.capsule_config {
-            // Merge tracked components into config
+            // Merge tracked components and style tokens into config
             let config = config
                 .components(component_registry)
-                .has_local_handlers(ctx.has_local_handlers());
+                .has_local_handlers(ctx.has_local_handlers())
+                .with_style_utils(ctx.used_style_utils())
+                .with_style_props(ctx.used_style_props())
+                .with_style_values(ctx.used_style_values());
 
             // Generate CSS separately for dedicated route
             let css = capsule_gen::generate_capsule_css(&config);

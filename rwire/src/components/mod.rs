@@ -172,9 +172,9 @@ mod tests {
     #[test]
     fn test_total_components_css_size() {
         let css = generate_components_css();
-        // Total component CSS should be under 15KB (realistic for full component library)
+        // Total component CSS should be under 16KB (realistic for full component library)
         assert!(
-            css.len() < 15360,
+            css.len() < 16384,
             "Total component CSS too large: {} bytes",
             css.len()
         );

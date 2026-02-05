@@ -1,7 +1,8 @@
 //! Design tokens for rwire styling system.
 //!
-//! Tokens are organized in two tiers:
+//! Tokens are organized in tiers:
 //! - `primitives`: Raw values (colors, spacing, radius, typography, shadows)
+//! - `palette`: Configurable color palettes for theming (Nord, custom, etc.)
 //! - `css`: CSS custom property generation for the capsule
 //!
 //! # Philosophy
@@ -12,6 +13,18 @@
 //! - Zero runtime cost (no JS token resolution)
 //! - Minimal bandwidth (tokens defined once, referenced by class names)
 //! - Full theming via CSS variable overrides
+//!
+//! # Color Palettes
+//!
+//! ```ignore
+//! use rwire::tokens::palette::ColorPalette;
+//!
+//! // Use the Nord preset
+//! let palette = ColorPalette::nord();
+//!
+//! // Or use the default Oklch-based palette
+//! let palette = ColorPalette::default();
+//! ```
 //!
 //! # Example
 //!
@@ -26,6 +39,8 @@
 //! ```
 
 pub mod css;
+pub mod palette;
 pub mod primitives;
 
+pub use palette::{ColorPalette, ColorScale};
 pub use primitives::*;

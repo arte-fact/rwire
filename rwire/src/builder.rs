@@ -167,6 +167,10 @@ pub struct ElementBuilder {
     events: Vec<(Ev, HandlerSpec)>,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
+    /// Binary-encoded style utility tokens (compact 1-byte each)
+    style_utils: Vec<u8>,
+    /// Binary-encoded style property+value pairs (2 bytes each)
+    style_props: Vec<(u8, u8)>,
 }
 
 impl ElementBuilder {
@@ -180,6 +184,8 @@ impl ElementBuilder {
             events: Vec::new(),
             children: Vec::new(),
             synced: None,
+            style_utils: Vec::new(),
+            style_props: Vec::new(),
         }
     }
 
@@ -212,6 +218,8 @@ impl ElementBuilder {
             events: Vec::new(),
             children: Vec::new(),
             synced: Some(Box::new(SyncedRendererImpl { render, deps })),
+            style_utils: Vec::new(),
+            style_props: Vec::new(),
         }
     }
 
@@ -254,6 +262,77 @@ impl ElementBuilder {
     pub fn style(self, style: crate::style::Style) -> Self {
         self.attr("style", &style.to_css())
     }
+
+    /// Apply a binary-encoded style utility token.
+    ///
+    /// Style utilities are pre-combined property+value pairs encoded as single bytes.
+    /// This is more compact than string-based styles for common patterns.
+    ///
+    /// Wire format: [STYLE_UTIL, ref, util_byte] = 3 bytes
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::St;
+    ///
+    /// el(El::Div).st([St::BgApp, St::FlexCenter])
+    /// ```
+    pub fn style_util(mut self, util: crate::style_tokens::St) -> Self {
+        self.style_utils.push(util.as_u8());
+        self
+    }
+
+    /// Apply a binary-encoded style property+value pair.
+    ///
+    /// More flexible than utility tokens, allowing any property+value combination
+    /// from the predefined sets.
+    ///
+    /// Wire format: [STYLE_PROP, ref, prop_byte, value_byte] = 4 bytes
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::style_tokens::{StyleProp, StyleValue};
+    ///
+    /// el(El::Div)
+    ///     .style_prop(StyleProp::Gap, StyleValue::Space4)
+    ///     .style_prop(StyleProp::Padding, StyleValue::Space2)
+    /// ```
+    pub fn style_prop(
+        mut self,
+        prop: crate::style_tokens::StyleProp,
+        value: crate::style_tokens::StyleValue,
+    ) -> Self {
+        self.style_props.push((prop.as_u8(), value.as_u8()));
+        self
+    }
+
+    /// Apply style utilities (short form).
+    ///
+    /// The preferred way to apply typed styles to elements.
+    /// Uses semantic tokens that adapt to light/dark theme.
+    ///
+    /// Wire format: [STYLE_MULTI, ref, count, util1, util2, ...] = 3+n bytes
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::{el, El, St};
+    ///
+    /// el(El::Div).st([
+    ///     St::BgApp,
+    ///     St::MinHScreen,
+    ///     St::FlexCenter,
+    /// ])
+    /// ```
+    pub fn st<I>(mut self, utils: I) -> Self
+    where
+        I: IntoIterator<Item = crate::style_tokens::St>,
+    {
+        self.style_utils.extend(utils.into_iter().map(|u| u.as_u8()));
+        self
+    }
+
 
     /// Bind an event handler to this element.
     ///
@@ -339,6 +418,16 @@ impl ElementBuilder {
     pub fn events(&self) -> &[(Ev, HandlerSpec)] {
         &self.events
     }
+
+    /// Get the style utility tokens.
+    pub fn get_style_utils(&self) -> &[u8] {
+        &self.style_utils
+    }
+
+    /// Get the style property tokens.
+    pub fn get_style_props(&self) -> &[(u8, u8)] {
+        &self.style_props
+    }
 }
 
 /// Represents how a text string should be encoded.
@@ -379,6 +468,14 @@ pub struct BuildContext {
     words: Vec<String>,
     /// Text encoding decisions (text -> encoding)
     text_encodings: HashMap<String, TextEncoding>,
+    /// Used style utility tokens (for tree-shaking)
+    used_style_utils: HashSet<u8>,
+    /// Used style property codes (for tree-shaking)
+    used_style_props: HashSet<u8>,
+    /// Used style value codes (for tree-shaking)
+    used_style_values: HashSet<u8>,
+    /// Composite style table (pre-analyzed patterns for compression)
+    composite_table: crate::style_groups::CompositeTable,
 }
 
 /// Information about a synced element for later updates.
@@ -450,6 +547,10 @@ impl BuildContext {
             word_indices: HashMap::new(),
             words: Vec::new(),
             text_encodings: HashMap::new(),
+            used_style_utils: HashSet::new(),
+            used_style_props: HashSet::new(),
+            used_style_values: HashSet::new(),
+            composite_table: crate::style_groups::CompositeTable::new(),
         }
     }
 
@@ -486,6 +587,20 @@ impl BuildContext {
 
         // Now decide encoding for each text string
         self.decide_text_encodings();
+    }
+
+    /// Analyze style patterns in the element tree and build composite table.
+    ///
+    /// Call this after collect_symbols and before emit for optimal compression.
+    pub fn analyze_style_patterns(&mut self, root: &ElementBuilder) {
+        let collector = crate::style_groups::collect_patterns(root);
+        let analysis = crate::style_groups::analyze_patterns(&collector);
+        self.composite_table = analysis.composite_table;
+    }
+
+    /// Get the composite table for capsule generation.
+    pub fn composite_table(&self) -> &crate::style_groups::CompositeTable {
+        &self.composite_table
     }
 
     /// Decide optimal encoding for each text string.
@@ -735,6 +850,11 @@ impl BuildContext {
             }
         }
 
+        // Emit composite table if we have composites
+        if !self.composite_table.is_empty() {
+            self.buf.composite_table(&self.composite_table);
+        }
+
         self.emit_element(el, None, state)
     }
 
@@ -764,6 +884,11 @@ impl BuildContext {
             for word in &self.words {
                 self.buf.add_word(word);
             }
+        }
+
+        // Emit composite table if we have composites
+        if !self.composite_table.is_empty() {
+            self.buf.composite_table(&self.composite_table);
         }
 
         self.emit_element_multi(el, None, states)
@@ -839,6 +964,34 @@ impl BuildContext {
             let key_sym = self.get_or_intern_symbol(key);
             let val_sym = self.get_or_intern_symbol(value);
             self.buf.set_attr(ref_idx, key_sym, val_sym);
+        }
+
+        // Emit style tokens (binary-encoded styles)
+        if !el.style_utils.is_empty() {
+            // Track used utilities for tree-shaking
+            for &util in &el.style_utils {
+                self.used_style_utils.insert(util);
+            }
+
+            // Check if this pattern has a composite
+            if let Some(composite_id) = self.composite_table.get_composite_id(&el.style_utils) {
+                self.buf.style_composite(ref_idx, composite_id);
+            } else if el.style_utils.len() >= 3 {
+                // Use STYLE_MULTI for 3+ utilities
+                self.buf.style_multi(ref_idx, &el.style_utils);
+            } else {
+                // Individual STYLE_UTIL for 1-2 utilities
+                for &util in &el.style_utils {
+                    self.buf.style_util(ref_idx, util);
+                }
+            }
+        }
+
+        // Emit style property+value pairs
+        for &(prop, value) in &el.style_props {
+            self.used_style_props.insert(prop);
+            self.used_style_values.insert(value);
+            self.buf.style_prop(ref_idx, prop, value);
         }
 
         // Bind events and track event type usage
@@ -957,6 +1110,34 @@ impl BuildContext {
             self.buf.set_attr(ref_idx, key_sym, val_sym);
         }
 
+        // Emit style tokens (binary-encoded styles)
+        if !el.style_utils.is_empty() {
+            // Track used utilities for tree-shaking
+            for &util in &el.style_utils {
+                self.used_style_utils.insert(util);
+            }
+
+            // Check if this pattern has a composite
+            if let Some(composite_id) = self.composite_table.get_composite_id(&el.style_utils) {
+                self.buf.style_composite(ref_idx, composite_id);
+            } else if el.style_utils.len() >= 3 {
+                // Use STYLE_MULTI for 3+ utilities
+                self.buf.style_multi(ref_idx, &el.style_utils);
+            } else {
+                // Individual STYLE_UTIL for 1-2 utilities
+                for &util in &el.style_utils {
+                    self.buf.style_util(ref_idx, util);
+                }
+            }
+        }
+
+        // Emit style property+value pairs
+        for &(prop, value) in &el.style_props {
+            self.used_style_props.insert(prop);
+            self.used_style_values.insert(value);
+            self.buf.style_prop(ref_idx, prop, value);
+        }
+
         // Bind events and track event type usage
         for (ev, handler_spec) in &el.events {
             self.used_events.insert(ev.as_u8());
@@ -1055,6 +1236,21 @@ impl BuildContext {
     /// Get the set of used event type byte codes.
     pub fn used_events(&self) -> &HashSet<u8> {
         &self.used_events
+    }
+
+    /// Get the set of used style utility token codes.
+    pub fn used_style_utils(&self) -> &HashSet<u8> {
+        &self.used_style_utils
+    }
+
+    /// Get the set of used style property codes.
+    pub fn used_style_props(&self) -> &HashSet<u8> {
+        &self.used_style_props
+    }
+
+    /// Get the set of used style value codes.
+    pub fn used_style_values(&self) -> &HashSet<u8> {
+        &self.used_style_values
     }
 
     /// Get the local state type indices mapping.

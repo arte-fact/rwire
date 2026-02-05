@@ -15,6 +15,7 @@
 //! }
 //! ```
 
+use super::palette::ColorPalette;
 use super::primitives::{color, font_size, font_weight, line_height, radius, shadow, space};
 use std::collections::HashSet;
 
@@ -34,6 +35,78 @@ pub fn generate_primitive_css() -> String {
     write_color_scale(&mut css, "amber", &AMBER_SCALE);
 
     // Special colors
+    write_var(&mut css, "white", color::WHITE);
+    write_var(&mut css, "black", color::BLACK);
+
+    // Spacing
+    write_var(&mut css, "space-0", space::_0);
+    write_var(&mut css, "space-1", space::_1);
+    write_var(&mut css, "space-2", space::_2);
+    write_var(&mut css, "space-3", space::_3);
+    write_var(&mut css, "space-4", space::_4);
+    write_var(&mut css, "space-5", space::_5);
+    write_var(&mut css, "space-6", space::_6);
+    write_var(&mut css, "space-8", space::_8);
+    write_var(&mut css, "space-10", space::_10);
+    write_var(&mut css, "space-12", space::_12);
+    write_var(&mut css, "space-16", space::_16);
+    write_var(&mut css, "space-20", space::_20);
+    write_var(&mut css, "space-24", space::_24);
+
+    // Radius
+    write_var(&mut css, "radius-none", radius::NONE);
+    write_var(&mut css, "radius-sm", radius::SM);
+    write_var(&mut css, "radius-md", radius::MD);
+    write_var(&mut css, "radius-lg", radius::LG);
+    write_var(&mut css, "radius-xl", radius::XL);
+    write_var(&mut css, "radius-2xl", radius::_2XL);
+    write_var(&mut css, "radius-full", radius::FULL);
+
+    // Font sizes
+    write_var(&mut css, "text-xs", font_size::XS);
+    write_var(&mut css, "text-sm", font_size::SM);
+    write_var(&mut css, "text-base", font_size::BASE);
+    write_var(&mut css, "text-lg", font_size::LG);
+    write_var(&mut css, "text-xl", font_size::XL);
+    write_var(&mut css, "text-2xl", font_size::_2XL);
+    write_var(&mut css, "text-3xl", font_size::_3XL);
+    write_var(&mut css, "text-4xl", font_size::_4XL);
+
+    // Font weights
+    write_var(&mut css, "font-normal", font_weight::NORMAL);
+    write_var(&mut css, "font-medium", font_weight::MEDIUM);
+    write_var(&mut css, "font-semibold", font_weight::SEMIBOLD);
+    write_var(&mut css, "font-bold", font_weight::BOLD);
+
+    // Line heights
+    write_var(&mut css, "leading-tight", line_height::TIGHT);
+    write_var(&mut css, "leading-snug", line_height::SNUG);
+    write_var(&mut css, "leading-normal", line_height::NORMAL);
+    write_var(&mut css, "leading-relaxed", line_height::RELAXED);
+    write_var(&mut css, "leading-loose", line_height::LOOSE);
+
+    // Shadows
+    write_var(&mut css, "shadow-sm", shadow::SM);
+    write_var(&mut css, "shadow-md", shadow::MD);
+    write_var(&mut css, "shadow-lg", shadow::LG);
+    write_var(&mut css, "shadow-xl", shadow::XL);
+
+    css.push_str("}\n");
+    css
+}
+
+/// Generate CSS custom properties using a custom color palette.
+///
+/// Uses the provided palette for all color scales while keeping
+/// other primitive tokens (spacing, radius, etc.) from the defaults.
+pub fn generate_primitive_css_with_palette(palette: &ColorPalette) -> String {
+    let mut css = String::with_capacity(4096);
+    css.push_str(":root{\n");
+
+    // Use palette colors instead of hardcoded scales
+    css.push_str(&palette.to_css());
+
+    // Special colors (keep defaults)
     write_var(&mut css, "white", color::WHITE);
     write_var(&mut css, "black", color::BLACK);
 

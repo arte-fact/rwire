@@ -126,6 +126,27 @@ pub const STYLE_INJECT: u8 = 0x80;
 /// Set inline style. Format: [STYLE_SET, ref, style_symbol]
 pub const STYLE_SET: u8 = 0x81;
 
+/// Set style utility token. Format: [STYLE_UTIL, ref, util_byte]
+/// Single-byte utility tokens for common style declarations.
+/// More compact than symbol table for frequently used styles.
+pub const STYLE_UTIL: u8 = 0x82;
+
+/// Set style property+value. Format: [STYLE_PROP, ref, prop_byte, value_byte]
+/// Separate property and value codes for flexible combinations.
+pub const STYLE_PROP: u8 = 0x83;
+
+/// Set multiple style utilities. Format: [STYLE_MULTI, ref, count, util1, util2, ...]
+/// Batch multiple utility tokens in a single opcode.
+pub const STYLE_MULTI: u8 = 0x84;
+
+/// Apply style composite. Format: [STYLE_COMPOSITE, ref, composite_id_varint]
+/// Use pre-analyzed style patterns for maximum compression.
+pub const STYLE_COMPOSITE: u8 = 0x85;
+
+/// Define composite table. Format: [COMPOSITE_TABLE, count_varint, ...entries]
+/// Each entry: [id_varint, util_count, util1, util2, ...]
+pub const COMPOSITE_TABLE: u8 = 0x86;
+
 // ============================================================================
 // Control
 // ============================================================================

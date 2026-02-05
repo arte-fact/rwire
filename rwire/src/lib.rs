@@ -67,6 +67,8 @@ pub mod session;
 pub mod state;
 pub mod store;
 pub mod style;
+pub mod style_groups;
+pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 pub mod variants;
@@ -120,14 +122,18 @@ pub use router::{Link, Route, RoutePattern, Router};
 // Style exports
 pub use style::{ScopedClass, Style};
 
+// Style token exports (binary-encoded styles)
+pub use style_tokens::{St, StyleProp, StyleValue};
+
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
+pub use tokens::{ColorPalette, ColorScale};
 pub use tokens::css::{generate_primitive_css, minify_css};
 
 // Theme exports
 pub use theme::{
     generate_accent_css, generate_base_css, generate_radius_css, generate_semantic_css,
-    generate_theme_css, AccentColor, RadiusScale, Theme, ThemeMode,
+    generate_theme_css, generate_theme_css_with_palette, AccentColor, RadiusScale, Theme, ThemeMode,
 };
 
 // Variant exports

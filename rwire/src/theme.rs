@@ -268,15 +268,40 @@ pub fn generate_radius_css(radius: RadiusScale) -> Option<&'static str> {
 /// Includes base reset, primitive tokens, and semantic tokens.
 /// This is the complete CSS needed for the capsule.
 pub fn generate_theme_css(theme: &Theme) -> String {
-    use crate::tokens::css::generate_primitive_css;
+    generate_theme_css_with_palette(theme, None)
+}
+
+/// Generate complete theme CSS with an optional custom color palette.
+///
+/// If a palette is provided, its colors will be used instead of the default
+/// Oklch-based colors. This allows using presets like Nord or custom palettes.
+///
+/// # Example
+///
+/// ```ignore
+/// use rwire::theme::{Theme, generate_theme_css_with_palette};
+/// use rwire::tokens::ColorPalette;
+///
+/// let theme = Theme::dark();
+/// let palette = ColorPalette::nord();
+/// let css = generate_theme_css_with_palette(&theme, Some(&palette));
+/// ```
+pub fn generate_theme_css_with_palette(
+    theme: &Theme,
+    palette: Option<&crate::tokens::ColorPalette>,
+) -> String {
+    use crate::tokens::css::{generate_primitive_css, generate_primitive_css_with_palette};
 
     let mut css = String::with_capacity(8192);
 
     // 1. Base reset
     css.push_str(generate_base_css());
 
-    // 2. Primitive tokens
-    css.push_str(&generate_primitive_css());
+    // 2. Primitive tokens (use palette if provided)
+    match palette {
+        Some(p) => css.push_str(&generate_primitive_css_with_palette(p)),
+        None => css.push_str(&generate_primitive_css()),
+    }
 
     // 3. Semantic tokens (light + dark)
     css.push_str(&generate_semantic_css());

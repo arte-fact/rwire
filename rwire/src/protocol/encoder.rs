@@ -4,10 +4,11 @@ use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
     APPEND, BATCH_END, BIND_LOCAL, BIND_OPTIMISTIC, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
-    CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
+    COMPOSITE_TABLE, CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
     ROUTE_REPLACE, SET_ATTR, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
-    STYLE_INJECT, STYLE_SET, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    STYLE_COMPOSITE, STYLE_INJECT, STYLE_MULTI, STYLE_PROP, STYLE_SET, STYLE_UTIL, SYMBOLS,
+    SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 
@@ -433,6 +434,68 @@ impl OpcodeBuffer {
         self.buf.put_u8(STYLE_SET);
         self.buf.put_u8(ref_idx);
         write_varint(&mut self.buf, style_symbol);
+        self
+    }
+
+    /// Set a style utility token on an element.
+    ///
+    /// Format: [STYLE_UTIL, ref, util_byte]
+    /// 3 bytes total - most compact for common style patterns.
+    pub fn style_util(&mut self, ref_idx: u8, util: u8) -> &mut Self {
+        self.buf.put_u8(STYLE_UTIL);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(util);
+        self
+    }
+
+    /// Set a style property+value on an element.
+    ///
+    /// Format: [STYLE_PROP, ref, prop_byte, value_byte]
+    /// 4 bytes total - flexible for any property+value combination.
+    pub fn style_prop(&mut self, ref_idx: u8, prop: u8, value: u8) -> &mut Self {
+        self.buf.put_u8(STYLE_PROP);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(prop);
+        self.buf.put_u8(value);
+        self
+    }
+
+    /// Set multiple style utility tokens on an element.
+    ///
+    /// Format: [STYLE_MULTI, ref, count, util1, util2, ...]
+    /// More efficient than multiple STYLE_UTIL calls for >2 utilities.
+    pub fn style_multi(&mut self, ref_idx: u8, utils: &[u8]) -> &mut Self {
+        self.buf.put_u8(STYLE_MULTI);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(utils.len() as u8);
+        for &util in utils {
+            self.buf.put_u8(util);
+        }
+        self
+    }
+
+    /// Apply a style composite by ID.
+    ///
+    /// Format: [STYLE_COMPOSITE, ref, composite_id_varint]
+    pub fn style_composite(&mut self, ref_idx: u8, composite_id: u32) -> &mut Self {
+        self.buf.put_u8(STYLE_COMPOSITE);
+        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, composite_id);
+        self
+    }
+
+    /// Define the composite table.
+    ///
+    /// Format: [COMPOSITE_TABLE, count_varint, ...entries]
+    /// Each entry: [id_varint, util_count, util1, util2, ...]
+    pub fn composite_table(&mut self, table: &crate::style_groups::CompositeTable) -> &mut Self {
+        if table.is_empty() {
+            return self;
+        }
+
+        self.buf.put_u8(COMPOSITE_TABLE);
+        let table_bytes = table.to_bytes();
+        self.buf.extend_from_slice(&table_bytes);
         self
     }
 
