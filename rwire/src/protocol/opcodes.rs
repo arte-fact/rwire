@@ -203,6 +203,9 @@ pub const EL_SECTION: u8 = 0x16;
 pub const EL_ARTICLE: u8 = 0x17;
 pub const EL_SVG: u8 = 0x18;
 pub const EL_PATH: u8 = 0x19;
+pub const EL_H3: u8 = 0x1A;
+pub const EL_HR: u8 = 0x1B;
+pub const EL_OL: u8 = 0x1C;
 
 /// Element type enum for fluent builder API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,6 +234,9 @@ pub enum El {
     Article,
     Svg,
     Path,
+    H3,
+    Hr,
+    Ol,
 }
 
 impl El {
@@ -261,6 +267,9 @@ impl El {
             El::Article => EL_ARTICLE,
             El::Svg => EL_SVG,
             El::Path => EL_PATH,
+            El::H3 => EL_H3,
+            El::Hr => EL_HR,
+            El::Ol => EL_OL,
         }
     }
 }

@@ -28,8 +28,9 @@ use std::collections::HashSet;
 
 use super::{
     ALERT_CSS, AVATAR_CSS, BADGE_CSS, BREADCRUMB_CSS, BUTTON_CSS, CARD_CSS, CHECKBOX_CSS,
-    FORM_FIELD_CSS, INPUT_CSS, LABEL_CSS, MODAL_CSS, PAGINATION_CSS, PROGRESS_CSS, RADIO_CSS,
-    SELECT_CSS, SPINNER_CSS, STACK_CSS, SWITCH_CSS, TABLE_CSS, TABS_CSS, TEXTAREA_CSS,
+    CONTAINER_CSS, DIVIDER_CSS, FORM_FIELD_CSS, INPUT_CSS, LABEL_CSS, LINK_CSS, LIST_CSS,
+    MODAL_CSS, PAGINATION_CSS, PROGRESS_CSS, RADIO_CSS, SELECT_CSS, SPACER_CSS, SPINNER_CSS,
+    STACK_CSS, SWITCH_CSS, TABLE_CSS, TABS_CSS, TEXT_CSS, TEXTAREA_CSS,
 };
 
 /// Component types that have associated CSS.
@@ -42,19 +43,25 @@ pub enum ComponentType {
     Button,
     Card,
     Checkbox,
+    Container,
+    Divider,
     FormField,
     Input,
     Label,
+    Link,
+    List,
     Modal,
     Pagination,
     Progress,
     Radio,
     Select,
+    Spacer,
     Spinner,
     Stack,
     Switch,
     Table,
     Tabs,
+    Text,
     Textarea,
     ThemeToggle,
 }
@@ -129,6 +136,12 @@ impl ComponentRegistry {
         if self.used.contains(&ComponentType::Checkbox) {
             css.push_str(CHECKBOX_CSS);
         }
+        if self.used.contains(&ComponentType::Container) {
+            css.push_str(CONTAINER_CSS);
+        }
+        if self.used.contains(&ComponentType::Divider) {
+            css.push_str(DIVIDER_CSS);
+        }
         if self.used.contains(&ComponentType::FormField) {
             css.push_str(FORM_FIELD_CSS);
         }
@@ -137,6 +150,12 @@ impl ComponentRegistry {
         }
         if self.used.contains(&ComponentType::Label) {
             css.push_str(LABEL_CSS);
+        }
+        if self.used.contains(&ComponentType::Link) {
+            css.push_str(LINK_CSS);
+        }
+        if self.used.contains(&ComponentType::List) {
+            css.push_str(LIST_CSS);
         }
         if self.used.contains(&ComponentType::Modal) {
             css.push_str(MODAL_CSS);
@@ -153,6 +172,9 @@ impl ComponentRegistry {
         if self.used.contains(&ComponentType::Select) {
             css.push_str(SELECT_CSS);
         }
+        if self.used.contains(&ComponentType::Spacer) {
+            css.push_str(SPACER_CSS);
+        }
         if self.used.contains(&ComponentType::Spinner) {
             css.push_str(SPINNER_CSS);
         }
@@ -167,6 +189,9 @@ impl ComponentRegistry {
         }
         if self.used.contains(&ComponentType::Tabs) {
             css.push_str(TABS_CSS);
+        }
+        if self.used.contains(&ComponentType::Text) {
+            css.push_str(TEXT_CSS);
         }
         if self.used.contains(&ComponentType::Textarea) {
             css.push_str(TEXTAREA_CSS);
@@ -225,6 +250,16 @@ impl ComponentRegistry {
             println!("  Checkbox:   {:>5} bytes", size);
             total += size;
         }
+        if self.is_used(ComponentType::Container) {
+            let size = CONTAINER_CSS.len();
+            println!("  Container:  {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Divider) {
+            let size = DIVIDER_CSS.len();
+            println!("  Divider:    {:>5} bytes", size);
+            total += size;
+        }
         if self.is_used(ComponentType::FormField) {
             let size = FORM_FIELD_CSS.len();
             println!("  FormField:  {:>5} bytes", size);
@@ -238,6 +273,16 @@ impl ComponentRegistry {
         if self.is_used(ComponentType::Label) {
             let size = LABEL_CSS.len();
             println!("  Label:      {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Link) {
+            let size = LINK_CSS.len();
+            println!("  Link:       {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::List) {
+            let size = LIST_CSS.len();
+            println!("  List:       {:>5} bytes", size);
             total += size;
         }
         if self.is_used(ComponentType::Modal) {
@@ -265,6 +310,11 @@ impl ComponentRegistry {
             println!("  Select:     {:>5} bytes", size);
             total += size;
         }
+        if self.is_used(ComponentType::Spacer) {
+            let size = SPACER_CSS.len();
+            println!("  Spacer:     {:>5} bytes", size);
+            total += size;
+        }
         if self.is_used(ComponentType::Spinner) {
             let size = SPINNER_CSS.len();
             println!("  Spinner:    {:>5} bytes", size);
@@ -288,6 +338,11 @@ impl ComponentRegistry {
         if self.is_used(ComponentType::Tabs) {
             let size = TABS_CSS.len();
             println!("  Tabs:       {:>5} bytes", size);
+            total += size;
+        }
+        if self.is_used(ComponentType::Text) {
+            let size = TEXT_CSS.len();
+            println!("  Text:       {:>5} bytes", size);
             total += size;
         }
         if self.is_used(ComponentType::Textarea) {

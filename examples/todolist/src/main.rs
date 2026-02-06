@@ -1,31 +1,16 @@
-//! Todolist example - demonstrates local vs remote handlers.
-//!
-//! This example shows a todo list with:
-//! 1. **Local handlers** - UI state mutations, no server round-trip
-//! 2. **Remote handlers** - Server-side mutations with state sync
-//!
-//! Run with: `cargo run -p todolist`
-//! Open: http://127.0.0.1:9000
+//! Todolist example - demonstrates reactive state with lists and filtering.
 
-use rwire::{el, handler, renderer, El, ElementBuilder, Ev, Server, State};
+use rwire::capsule_gen::CapsuleConfig;
+use rwire::components::{
+    Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
+};
+use rwire::{handler, renderer, ElementBuilder, Server, State};
 
-// ============================================================================
-// Unified State - Single state type with all fields
-// ============================================================================
-
-/// Unified state containing both local UI state and todo items.
-///
-/// In a real app, you'd use #[storage(local)] for UI-only fields
-/// and keep data fields on the server. This example demonstrates
-/// the handler patterns.
 #[derive(State, Default)]
 #[storage(memory)]
 struct TodoState {
-    // UI state (would be local in production)
     show_completed: bool,
     filter_mode: i32, // 0=all, 1=active, 2=completed
-
-    // Todo items (server state)
     items: Vec<TodoItem>,
     next_id: i32,
 }
@@ -36,180 +21,101 @@ struct TodoItem {
     completed: bool,
 }
 
-// ============================================================================
 // Handlers
-// ============================================================================
-
-// UI handlers (these would use #[handler(local)] in a full implementation)
-#[handler]
-fn toggle_show_completed(state: &mut TodoState) {
-    state.show_completed = !state.show_completed;
-}
+#[handler] fn toggle_show_completed(s: &mut TodoState) { s.show_completed = !s.show_completed; }
+#[handler] fn set_filter_all(s: &mut TodoState) { s.filter_mode = 0; }
+#[handler] fn set_filter_active(s: &mut TodoState) { s.filter_mode = 1; }
+#[handler] fn set_filter_completed(s: &mut TodoState) { s.filter_mode = 2; }
 
 #[handler]
-fn set_filter_all(state: &mut TodoState) {
-    state.filter_mode = 0;
+fn add_item(s: &mut TodoState) {
+    s.items.push(TodoItem { text: format!("Todo item #{}", s.next_id), completed: false });
+    s.next_id += 1;
 }
 
-#[handler]
-fn set_filter_active(state: &mut TodoState) {
-    state.filter_mode = 1;
+#[handler] fn toggle_first(s: &mut TodoState) { if let Some(i) = s.items.first_mut() { i.completed = !i.completed; } }
+#[handler] fn toggle_second(s: &mut TodoState) { if let Some(i) = s.items.get_mut(1) { i.completed = !i.completed; } }
+#[handler] fn clear_completed(s: &mut TodoState) { s.items.retain(|i| !i.completed); }
+#[handler] fn remove_first(s: &mut TodoState) { if !s.items.is_empty() { s.items.remove(0); } }
+
+#[async_std::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Server::bind("127.0.0.1:9000")?
+        .root(app)
+        .capsule_config(CapsuleConfig::dark_nord())
+        .run()
+        .await
 }
 
-#[handler]
-fn set_filter_completed(state: &mut TodoState) {
-    state.filter_mode = 2;
+fn app() -> ElementBuilder {
+    Container::new().child(
+        Stack::column().gap(Gap::Lg).children([
+            Text::heading1("rwire Todo List").build(),
+            Text::body("Demonstrating reactive state updates").muted().build(),
+            controls(),
+            Divider::horizontal().build(),
+            render_stats(),
+            render_items(),
+        ]).build()
+    ).build()
 }
 
-// Data handlers (always remote, modify server state)
-#[handler]
-fn add_item(state: &mut TodoState) {
-    let item_num = state.next_id;
-    state.next_id += 1;
-    state.items.push(TodoItem {
-        text: format!("Todo item #{}", item_num),
-        completed: false,
-    });
+fn controls() -> ElementBuilder {
+    Card::new().child(
+        Stack::column().gap(Gap::Md).children([
+            Text::label("Actions").build(),
+            Stack::row().gap(Gap::Sm).wrap(true).children([
+                Button::primary("Add Item").on_click(add_item()),
+                Button::secondary("Toggle First").on_click(toggle_first()),
+                Button::secondary("Toggle Second").on_click(toggle_second()),
+                Button::secondary("Remove First").on_click(remove_first()),
+                Button::destructive("Clear Completed").on_click(clear_completed()),
+            ]).build(),
+            Divider::horizontal().build(),
+            Text::label("Filters").build(),
+            Stack::row().gap(Gap::Sm).wrap(true).children([
+                Button::ghost("All").on_click(set_filter_all()),
+                Button::ghost("Active").on_click(set_filter_active()),
+                Button::ghost("Completed").on_click(set_filter_completed()),
+                Button::ghost("Toggle Show Completed").on_click(toggle_show_completed()),
+            ]).build(),
+        ]).build()
+    ).build()
 }
-
-#[handler]
-fn toggle_first(state: &mut TodoState) {
-    if let Some(item) = state.items.first_mut() {
-        item.completed = !item.completed;
-    }
-}
-
-#[handler]
-fn toggle_second(state: &mut TodoState) {
-    if let Some(item) = state.items.get_mut(1) {
-        item.completed = !item.completed;
-    }
-}
-
-#[handler]
-fn clear_completed(state: &mut TodoState) {
-    state.items.retain(|item| !item.completed);
-}
-
-#[handler]
-fn remove_first(state: &mut TodoState) {
-    if !state.items.is_empty() {
-        state.items.remove(0);
-    }
-}
-
-// ============================================================================
-// UI Components
-// ============================================================================
-
-fn build_app() -> ElementBuilder {
-    el(El::Div).class("app").append([
-        el(El::H1).text("rwire Todo List"),
-        el(El::P).text("Demonstrating reactive state updates"),
-        build_controls(),
-        render_stats(),
-        render_items(),
-    ])
-}
-
-fn build_controls() -> ElementBuilder {
-    el(El::Div).class("controls").append([
-        el(El::Div).class("actions").append([
-            el(El::Button).text("Add Item").on(Ev::Click, add_item()),
-            el(El::Button)
-                .text("Toggle First")
-                .on(Ev::Click, toggle_first()),
-            el(El::Button)
-                .text("Toggle Second")
-                .on(Ev::Click, toggle_second()),
-            el(El::Button)
-                .text("Remove First")
-                .on(Ev::Click, remove_first()),
-            el(El::Button)
-                .text("Clear Completed")
-                .on(Ev::Click, clear_completed()),
-        ]),
-        el(El::Div).class("filters").append([
-            el(El::Button).text("All").on(Ev::Click, set_filter_all()),
-            el(El::Button)
-                .text("Active")
-                .on(Ev::Click, set_filter_active()),
-            el(El::Button)
-                .text("Completed")
-                .on(Ev::Click, set_filter_completed()),
-            el(El::Button)
-                .text("Toggle Show Completed")
-                .on(Ev::Click, toggle_show_completed()),
-        ]),
-    ])
-}
-
-// Note: Renderers must return simple elements with text content for updates to work.
-// The current build_synced_update only handles text content changes, not complex children.
 
 #[renderer]
 fn render_stats(state: &TodoState) -> ElementBuilder {
     let total = state.items.len();
     let completed = state.items.iter().filter(|i| i.completed).count();
-    let active = total - completed;
+    let filter = ["all", "active", "completed"][state.filter_mode as usize];
+    let show = if state.show_completed { "show" } else { "hide" };
 
-    let filter_name = match state.filter_mode {
-        0 => "all",
-        1 => "active",
-        2 => "completed",
-        _ => "?",
-    };
-
-    let show_status = if state.show_completed { "show" } else { "hide" };
-
-    // Simple text element for proper updates
-    el(El::Span).text(&format!(
-        "Items: {} total, {} active, {} done | Filter: {} | {}",
-        total, active, completed, filter_name, show_status
-    ))
+    Stack::row().gap(Gap::Sm).align_center().wrap(true).children([
+        Badge::default_badge(format!("{} total", total)).build(),
+        Badge::primary(format!("{} active", total - completed)).build(),
+        Badge::success(format!("{} done", completed)).build(),
+        Badge::new().intent(BadgeIntent::Warning).text(format!("Filter: {}", filter)).build(),
+        Badge::new().text(format!("Completed: {}", show)).build(),
+    ]).build()
 }
 
 #[renderer]
 fn render_items(state: &TodoState) -> ElementBuilder {
-    let filtered_items: Vec<_> = state
-        .items
-        .iter()
-        .filter(|item| match state.filter_mode {
-            1 => !item.completed,
-            2 => item.completed,
-            _ => state.show_completed || !item.completed,
+    let items: Vec<_> = state.items.iter()
+        .filter(|i| match state.filter_mode {
+            1 => !i.completed,
+            2 => i.completed,
+            _ => state.show_completed || !i.completed,
         })
         .take(5)
         .collect();
 
-    if filtered_items.is_empty() {
-        return el(El::Span).text("(no items)");
+    if items.is_empty() {
+        return Text::body("(no items)").muted().build();
     }
 
-    // Build a simple text representation
-    let items_text = filtered_items
-        .iter()
-        .map(|item| {
-            let mark = if item.completed { "[x]" } else { "[ ]" };
-            format!("{} {}", mark, item.text)
-        })
-        .collect::<Vec<_>>()
-        .join(" | ");
-
-    el(El::Span).text(&items_text)
-}
-
-// ============================================================================
-// Main
-// ============================================================================
-
-#[async_std::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("rwire Server - Todo List Example");
-    println!("=================================");
-    println!();
-    println!("Open http://127.0.0.1:9000 in your browser");
-    println!();
-
-    Server::bind("127.0.0.1:9000")?.root(build_app).run().await
+    Stack::column().gap(Gap::Xs).children(items.iter().map(|i| {
+        let (intent, mark) = if i.completed { (BadgeIntent::Success, "[x]") } else { (BadgeIntent::Default, "[ ]") };
+        Badge::new().intent(intent).text(format!("{} {}", mark, i.text)).build()
+    })).build()
 }

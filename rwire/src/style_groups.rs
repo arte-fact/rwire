@@ -52,21 +52,21 @@ pub const MIN_PATTERN_SIZE: usize = 2;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StylePattern {
     /// Sorted utility codes for consistent hashing
-    utils: Vec<u8>,
+    utils: Vec<u16>,
 }
 
 impl StylePattern {
     /// Create a new pattern from utility codes.
     /// Codes are automatically sorted for consistent comparison.
-    pub fn new(utils: impl IntoIterator<Item = u8>) -> Self {
-        let mut utils: Vec<u8> = utils.into_iter().collect();
+    pub fn new(utils: impl IntoIterator<Item = u16>) -> Self {
+        let mut utils: Vec<u16> = utils.into_iter().collect();
         utils.sort_unstable();
         utils.dedup();
         Self { utils }
     }
 
     /// Get the utility codes in this pattern.
-    pub fn utils(&self) -> &[u8] {
+    pub fn utils(&self) -> &[u16] {
         &self.utils
     }
 
@@ -108,9 +108,9 @@ pub struct PatternCollector {
     /// Count of each exact pattern
     exact_patterns: HashMap<StylePattern, usize>,
     /// Count of each individual utility (for itemset mining)
-    utility_counts: HashMap<u8, usize>,
+    utility_counts: HashMap<u16, usize>,
     /// Count of each utility pair (for itemset mining)
-    pair_counts: HashMap<(u8, u8), usize>,
+    pair_counts: HashMap<(u16, u16), usize>,
 }
 
 impl PatternCollector {
@@ -120,7 +120,7 @@ impl PatternCollector {
     }
 
     /// Record a pattern observation.
-    pub fn observe(&mut self, utils: &[u8]) {
+    pub fn observe(&mut self, utils: &[u16]) {
         if utils.len() < MIN_PATTERN_SIZE {
             return;
         }
@@ -134,8 +134,8 @@ impl PatternCollector {
         }
 
         // Track pairs for itemset mining
-        let sorted: Vec<u8> = {
-            let mut v: Vec<u8> = utils.to_vec();
+        let sorted: Vec<u16> = {
+            let mut v: Vec<u16> = utils.to_vec();
             v.sort_unstable();
             v
         };
@@ -153,12 +153,12 @@ impl PatternCollector {
     }
 
     /// Get utility frequencies.
-    pub fn utility_counts(&self) -> &HashMap<u8, usize> {
+    pub fn utility_counts(&self) -> &HashMap<u16, usize> {
         &self.utility_counts
     }
 
     /// Get pair frequencies.
-    pub fn pair_counts(&self) -> &HashMap<(u8, u8), usize> {
+    pub fn pair_counts(&self) -> &HashMap<(u16, u16), usize> {
         &self.pair_counts
     }
 
@@ -197,7 +197,7 @@ pub struct CompositeTable {
     /// Quick lookup: pattern -> composite ID
     pattern_to_id: HashMap<StylePattern, u32>,
     /// Quick lookup: check if a set of utils has a composite
-    utils_to_id: HashMap<Vec<u8>, u32>,
+    utils_to_id: HashMap<Vec<u16>, u32>,
 }
 
 impl CompositeTable {
@@ -254,7 +254,7 @@ impl CompositeTable {
     }
 
     /// Look up composite ID for a pattern.
-    pub fn get_composite_id(&self, utils: &[u8]) -> Option<u32> {
+    pub fn get_composite_id(&self, utils: &[u16]) -> Option<u32> {
         let mut sorted = utils.to_vec();
         sorted.sort_unstable();
         self.utils_to_id.get(&sorted).copied()
@@ -289,8 +289,10 @@ impl CompositeTable {
             write_varint(&mut bytes, composite.id);
             // Util count (u8)
             bytes.push(composite.pattern.len() as u8);
-            // Utils
-            bytes.extend_from_slice(composite.pattern.utils());
+            // Utils (varint encoded for extended token support)
+            for &util in composite.pattern.utils() {
+                write_varint(&mut bytes, util as u32);
+            }
         }
 
         bytes

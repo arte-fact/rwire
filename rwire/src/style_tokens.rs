@@ -51,7 +51,7 @@
 /// Semantic color utilities (BgApp, TextDefault, etc.) use CSS variables
 /// that adapt to light/dark theme automatically.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[repr(u8)]
+#[repr(u16)]
 pub enum St {
     // Display (0x00-0x0F)
     DisplayNone = 0x00,
@@ -257,17 +257,287 @@ pub enum St {
     MaxWXl = 0xDC,      // max-width:36rem (xl breakpoint)
     MaxW2xl = 0xDD,     // max-width:42rem (2xl breakpoint)
 
-    // Transition (0xE0-0xE3)
-    TransitionAll = 0xE0,    // transition:all 0.2s
-    TransitionColors = 0xE1, // transition:color,background-color 0.2s
-    TransitionOpacity = 0xE2, // transition:opacity 0.2s
+    // Transition (0xE0-0xE7)
+    TransitionAll = 0xE0,      // transition:all 0.2s
+    TransitionColors = 0xE1,   // transition:color,background-color 0.2s
+    TransitionOpacity = 0xE2,  // transition:opacity 0.2s
     TransitionTransform = 0xE3, // transition:transform 0.2s
+    TransitionNone = 0xE4,     // transition:none
+    TransitionFast = 0xE5,     // transition:all 0.1s
+    TransitionSlow = 0xE6,     // transition:all 0.3s
+
+    // Shadow (0xE8-0xEF) - Box shadows
+    ShadowNone = 0xE8,   // box-shadow:none
+    ShadowSm = 0xE9,     // box-shadow:var(--rw-shadow-sm)
+    ShadowMd = 0xEA,     // box-shadow:var(--rw-shadow-md)
+    ShadowLg = 0xEB,     // box-shadow:var(--rw-shadow-lg)
+    ShadowXl = 0xEC,     // box-shadow:var(--rw-shadow-xl)
+    ShadowInner = 0xED,  // box-shadow:inset 0 2px 4px rgba(0,0,0,0.1)
+
+    // Outline (0xF0-0xF7) - Focus styles
+    OutlineNone = 0xF0,      // outline:none
+    OutlineAccent = 0xF1,    // outline:2px solid var(--rw-accent-8)
+    OutlineOffset2 = 0xF2,   // outline-offset:2px
+    RingAccent = 0xF3,       // box-shadow:0 0 0 2px var(--rw-accent-8)
+    RingInset = 0xF4,        // box-shadow:inset 0 0 0 1px var(--rw-border-default)
+
+    // ========================================================================
+    // Extended CSS3 (0x100+) - Using two-byte encoding
+    // ========================================================================
+
+    // Text Decoration (0x100-0x107)
+    Underline = 0x100,       // text-decoration:underline
+    LineThrough = 0x101,     // text-decoration:line-through
+    NoUnderline = 0x102,     // text-decoration:none
+
+    // Whitespace & Text (0x108-0x10F)
+    WhitespaceNormal = 0x108,  // white-space:normal
+    WhitespaceNowrap = 0x109,  // white-space:nowrap
+    WhitespacePre = 0x10A,     // white-space:pre
+    WhitespacePreWrap = 0x10B, // white-space:pre-wrap
+    WordBreakNormal = 0x10C,   // word-break:normal
+    WordBreakAll = 0x10D,      // word-break:break-all
+    WordBreakKeep = 0x10E,     // word-break:keep-all
+    BreakWords = 0x10F,        // overflow-wrap:break-word
+
+    // User Interaction (0x110-0x117)
+    SelectNone = 0x110,    // user-select:none
+    SelectText = 0x111,    // user-select:text
+    SelectAll = 0x112,     // user-select:all
+    TouchNone = 0x113,     // touch-action:none
+    TouchPan = 0x114,      // touch-action:pan-x pan-y
+    ScrollSmooth = 0x115,  // scroll-behavior:smooth
+    ScrollAuto = 0x116,    // scroll-behavior:auto
+
+    // Background Extended (0x118-0x11F)
+    BgTransparent = 0x118, // background:transparent
+    BgCurrentColor = 0x119, // background:currentColor
+    BgWhite = 0x11A,       // background:var(--rw-white)
+    BgBlack = 0x11B,       // background:var(--rw-black)
+    BgSuccess = 0x11C,     // background:var(--rw-success)
+    BgWarning = 0x11D,     // background:var(--rw-warning)
+    BgError = 0x11E,       // background:var(--rw-error)
+
+    // Text Extended (0x120-0x127)
+    TextWhite = 0x120,     // color:var(--rw-white)
+    TextBlack = 0x121,     // color:var(--rw-black)
+    TextInherit = 0x122,   // color:inherit
+    TextCurrentColor = 0x123, // color:currentColor
+    Text3xl = 0x124,       // font-size:var(--rw-text-3xl)
+    Text4xl = 0x125,       // font-size:var(--rw-text-4xl)
+
+    // Line Height (0x128-0x12F)
+    LeadingTight = 0x128,   // line-height:var(--rw-leading-tight)
+    LeadingSnug = 0x129,    // line-height:var(--rw-leading-snug)
+    LeadingNormal = 0x12A,  // line-height:var(--rw-leading-normal)
+    LeadingRelaxed = 0x12B, // line-height:var(--rw-leading-relaxed)
+    LeadingLoose = 0x12C,   // line-height:var(--rw-leading-loose)
+    LeadingNone = 0x12D,    // line-height:1
+
+    // Letter Spacing (0x130-0x137)
+    TrackingTighter = 0x130, // letter-spacing:-0.05em
+    TrackingTight = 0x131,   // letter-spacing:-0.025em
+    TrackingNormal = 0x132,  // letter-spacing:0
+    TrackingWide = 0x133,    // letter-spacing:0.025em
+    TrackingWider = 0x134,   // letter-spacing:0.05em
+    TrackingWidest = 0x135,  // letter-spacing:0.1em
+
+    // Aspect Ratio (0x138-0x13F)
+    AspectAuto = 0x138,    // aspect-ratio:auto
+    AspectSquare = 0x139,  // aspect-ratio:1
+    AspectVideo = 0x13A,   // aspect-ratio:16/9
+    AspectPortrait = 0x13B, // aspect-ratio:3/4
+
+    // Object Fit (0x140-0x147)
+    ObjectContain = 0x140, // object-fit:contain
+    ObjectCover = 0x141,   // object-fit:cover
+    ObjectFill = 0x142,    // object-fit:fill
+    ObjectNone = 0x143,    // object-fit:none
+    ObjectScaleDown = 0x144, // object-fit:scale-down
+
+    // Grid (0x148-0x15F) - Note: DisplayGrid already exists at 0x03
+    GridCols1 = 0x149,       // grid-template-columns:repeat(1,minmax(0,1fr))
+    GridCols2 = 0x14A,       // grid-template-columns:repeat(2,minmax(0,1fr))
+    GridCols3 = 0x14B,       // grid-template-columns:repeat(3,minmax(0,1fr))
+    GridCols4 = 0x14C,       // grid-template-columns:repeat(4,minmax(0,1fr))
+    GridColsNone = 0x14D,    // grid-template-columns:none
+    ColSpan2 = 0x14E,        // grid-column:span 2
+    ColSpan3 = 0x14F,        // grid-column:span 3
+    ColSpanFull = 0x150,     // grid-column:1/-1
+
+    // Align Self (0x158-0x15F)
+    SelfAuto = 0x158,      // align-self:auto
+    SelfStart = 0x159,     // align-self:flex-start
+    SelfCenter = 0x15A,    // align-self:center
+    SelfEnd = 0x15B,       // align-self:flex-end
+    SelfStretch = 0x15C,   // align-self:stretch
+
+    // Justify Self (0x160-0x167)
+    JustifySelfAuto = 0x160,   // justify-self:auto
+    JustifySelfStart = 0x161,  // justify-self:start
+    JustifySelfCenter = 0x162, // justify-self:center
+    JustifySelfEnd = 0x163,    // justify-self:end
+    JustifySelfStretch = 0x164, // justify-self:stretch
+
+    // Place Content (0x168-0x16F)
+    PlaceCenter = 0x168,   // place-content:center
+    PlaceStart = 0x169,    // place-content:start
+    PlaceEnd = 0x16A,      // place-content:end
+    PlaceBetween = 0x16B,  // place-content:space-between
+
+    // More Borders (0x170-0x17F)
+    BorderTransparent = 0x170, // border-color:transparent
+    BorderT = 0x171,       // border-top:1px solid var(--rw-border-default)
+    BorderR = 0x172,       // border-right:1px solid var(--rw-border-default)
+    BorderB = 0x173,       // border-bottom:1px solid var(--rw-border-default)
+    BorderL = 0x174,       // border-left:1px solid var(--rw-border-default)
+    Border2 = 0x175,       // border-width:2px
+    DivideY = 0x176,       // & > * + * { border-top:1px solid var(--rw-border-subtle) }
+
+    // Sizing Extended (0x180-0x18F)
+    WMax = 0x180,          // width:max-content
+    WMin = 0x181,          // width:min-content
+    WFit = 0x182,          // width:fit-content
+    HMax = 0x183,          // height:max-content
+    HMin = 0x184,          // height:min-content
+    HFit = 0x185,          // height:fit-content
+    MinHFull = 0x186,      // min-height:100%
+    MaxHScreen = 0x187,    // max-height:100vh
+
+    // Spacing Extended (0x190-0x19F)
+    P2xl = 0x190,          // padding:var(--rw-space-10)
+    PxLg = 0x191,          // padding-inline:var(--rw-space-6)
+    PxXl = 0x192,          // padding-inline:var(--rw-space-8)
+    PyLg = 0x193,          // padding-block:var(--rw-space-6)
+    PyXl = 0x194,          // padding-block:var(--rw-space-8)
+    Mx0 = 0x195,           // margin-inline:0
+    My0 = 0x196,           // margin-block:0
+    MlAuto = 0x197,        // margin-left:auto
+    MrAuto = 0x198,        // margin-right:auto
+
+    // Gap Extended (0x1A0-0x1A7)
+    GapX0 = 0x1A0,         // column-gap:0
+    GapXSm = 0x1A1,        // column-gap:var(--rw-space-2)
+    GapXMd = 0x1A2,        // column-gap:var(--rw-space-4)
+    GapXLg = 0x1A3,        // column-gap:var(--rw-space-6)
+    GapY0 = 0x1A4,         // row-gap:0
+    GapYSm = 0x1A5,        // row-gap:var(--rw-space-2)
+    GapYMd = 0x1A6,        // row-gap:var(--rw-space-4)
+    GapYLg = 0x1A7,        // row-gap:var(--rw-space-6)
+
+    // Appearance (0x1B0-0x1B7)
+    AppearanceNone = 0x1B0, // appearance:none
+    ResizeNone = 0x1B1,     // resize:none
+    ResizeY = 0x1B2,        // resize:vertical
+    ResizeX = 0x1B3,        // resize:horizontal
+    ResizeBoth = 0x1B4,     // resize:both
+
+    // Transform (0x1C0-0x1CF)
+    TransformNone = 0x1C0,    // transform:none
+    Rotate45 = 0x1C1,         // transform:rotate(45deg)
+    Rotate90 = 0x1C2,         // transform:rotate(90deg)
+    Rotate180 = 0x1C3,        // transform:rotate(180deg)
+    ScaleX = 0x1C4,           // transform:scaleX(-1)
+    ScaleY = 0x1C5,           // transform:scaleY(-1)
+    TranslateYFull = 0x1C6,   // transform:translateY(-100%)
+    Scale95 = 0x1C7,          // transform:scale(0.95)
+    Scale100 = 0x1C8,         // transform:scale(1)
+    Scale105 = 0x1C9,         // transform:scale(1.05)
+
+    // Animation (0x1D0-0x1D7)
+    AnimateSpin = 0x1D0,   // animation:rw-spin 1s linear infinite
+    AnimatePing = 0x1D1,   // animation:rw-ping 1s cubic-bezier(0,0,0.2,1) infinite
+    AnimatePulse = 0x1D2,  // animation:rw-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite
+    AnimateBounce = 0x1D3, // animation:rw-bounce 1s infinite
+    AnimateNone = 0x1D4,   // animation:none
+
+    // ========================================================================
+    // Directional Spacing (0x1D5-0x1F4) - Individual margin/padding sides
+    // ========================================================================
+
+    // Margin-top (0x1D5-0x1D8)
+    MtXs = 0x1D5,  // margin-top:var(--rw-space-1)
+    MtSm = 0x1D6,  // margin-top:var(--rw-space-2)
+    MtMd = 0x1D7,  // margin-top:var(--rw-space-4)
+    MtLg = 0x1D8,  // margin-top:var(--rw-space-6)
+
+    // Margin-bottom (0x1D9-0x1DC)
+    MbXs = 0x1D9,  // margin-bottom:var(--rw-space-1)
+    MbSm = 0x1DA,  // margin-bottom:var(--rw-space-2)
+    MbMd = 0x1DB,  // margin-bottom:var(--rw-space-4)
+    MbLg = 0x1DC,  // margin-bottom:var(--rw-space-6)
+
+    // Margin-left (0x1DD-0x1E0)
+    MlXs = 0x1DD,  // margin-left:var(--rw-space-1)
+    MlSm = 0x1DE,  // margin-left:var(--rw-space-2)
+    MlMd = 0x1DF,  // margin-left:var(--rw-space-4)
+    MlLg = 0x1E0,  // margin-left:var(--rw-space-6)
+
+    // Margin-right (0x1E1-0x1E4)
+    MrXs = 0x1E1,  // margin-right:var(--rw-space-1)
+    MrSm = 0x1E2,  // margin-right:var(--rw-space-2)
+    MrMd = 0x1E3,  // margin-right:var(--rw-space-4)
+    MrLg = 0x1E4,  // margin-right:var(--rw-space-6)
+
+    // Padding-top (0x1E5-0x1E8)
+    PtXs = 0x1E5,  // padding-top:var(--rw-space-1)
+    PtSm = 0x1E6,  // padding-top:var(--rw-space-2)
+    PtMd = 0x1E7,  // padding-top:var(--rw-space-4)
+    PtLg = 0x1E8,  // padding-top:var(--rw-space-6)
+
+    // Padding-bottom (0x1E9-0x1EC)
+    PbXs = 0x1E9,  // padding-bottom:var(--rw-space-1)
+    PbSm = 0x1EA,  // padding-bottom:var(--rw-space-2)
+    PbMd = 0x1EB,  // padding-bottom:var(--rw-space-4)
+    PbLg = 0x1EC,  // padding-bottom:var(--rw-space-6)
+
+    // Padding-left (0x1ED-0x1F0)
+    PlXs = 0x1ED,  // padding-left:var(--rw-space-1)
+    PlSm = 0x1EE,  // padding-left:var(--rw-space-2)
+    PlMd = 0x1EF,  // padding-left:var(--rw-space-4)
+    PlLg = 0x1F0,  // padding-left:var(--rw-space-6)
+
+    // Padding-right (0x1F1-0x1F4)
+    PrXs = 0x1F1,  // padding-right:var(--rw-space-1)
+    PrSm = 0x1F2,  // padding-right:var(--rw-space-2)
+    PrMd = 0x1F3,  // padding-right:var(--rw-space-4)
+    PrLg = 0x1F4,  // padding-right:var(--rw-space-6)
+
+    // ========================================================================
+    // Text Transforms & Extended (0x1F5-0x202)
+    // ========================================================================
+
+    // Text transforms (0x1F5-0x1F8)
+    TextUppercase = 0x1F5,   // text-transform:uppercase
+    TextLowercase = 0x1F6,   // text-transform:lowercase
+    TextCapitalize = 0x1F7,  // text-transform:capitalize
+    TextNormalCase = 0x1F8,  // text-transform:none
+
+    // Font style (0x1F9-0x1FA)
+    Italic = 0x1F9,          // font-style:italic
+    NotItalic = 0x1FA,       // font-style:normal
+
+    // Extended sizing (0x1FB-0x202)
+    WFit2 = 0x1FB,           // width:fit-content (alias for clearer API)
+    MinWFit = 0x1FC,         // min-width:fit-content
+    MaxWFit = 0x1FD,         // max-width:fit-content
+    MinWMax = 0x1FE,         // min-width:max-content
+    HFit2 = 0x1FF,           // height:fit-content (alias)
+    MinHFit = 0x200,         // min-height:fit-content
+    MaxHFit = 0x201,         // max-height:fit-content
+    MinHMax = 0x202,         // min-height:max-content
 }
 
 impl St {
-    /// Convert to wire protocol byte.
-    pub fn as_u8(self) -> u8 {
-        self as u8
+    /// Convert to wire protocol value.
+    /// Values 0-255 encode as single byte, 256+ as two bytes.
+    pub fn as_u16(self) -> u16 {
+        self as u16
+    }
+
+    /// Check if this token fits in a single byte.
+    pub fn is_single_byte(self) -> bool {
+        (self as u16) <= 0xFF
     }
 
     /// Get the CSS declaration for this utility.
@@ -478,6 +748,246 @@ impl St {
             Self::TransitionColors => "transition:color,background-color 0.2s",
             Self::TransitionOpacity => "transition:opacity 0.2s",
             Self::TransitionTransform => "transition:transform 0.2s",
+            Self::TransitionNone => "transition:none",
+            Self::TransitionFast => "transition:all 0.1s",
+            Self::TransitionSlow => "transition:all 0.3s",
+
+            // Shadow
+            Self::ShadowNone => "box-shadow:none",
+            Self::ShadowSm => "box-shadow:var(--rw-shadow-sm)",
+            Self::ShadowMd => "box-shadow:var(--rw-shadow-md)",
+            Self::ShadowLg => "box-shadow:var(--rw-shadow-lg)",
+            Self::ShadowXl => "box-shadow:var(--rw-shadow-xl)",
+            Self::ShadowInner => "box-shadow:inset 0 2px 4px rgba(0,0,0,0.1)",
+
+            // Outline
+            Self::OutlineNone => "outline:none",
+            Self::OutlineAccent => "outline:2px solid var(--rw-accent-8)",
+            Self::OutlineOffset2 => "outline-offset:2px",
+            Self::RingAccent => "box-shadow:0 0 0 2px var(--rw-accent-8)",
+            Self::RingInset => "box-shadow:inset 0 0 0 1px var(--rw-border-default)",
+
+            // Text Decoration
+            Self::Underline => "text-decoration:underline",
+            Self::LineThrough => "text-decoration:line-through",
+            Self::NoUnderline => "text-decoration:none",
+
+            // Whitespace & Text
+            Self::WhitespaceNormal => "white-space:normal",
+            Self::WhitespaceNowrap => "white-space:nowrap",
+            Self::WhitespacePre => "white-space:pre",
+            Self::WhitespacePreWrap => "white-space:pre-wrap",
+            Self::WordBreakNormal => "word-break:normal",
+            Self::WordBreakAll => "word-break:break-all",
+            Self::WordBreakKeep => "word-break:keep-all",
+            Self::BreakWords => "overflow-wrap:break-word",
+
+            // User Interaction
+            Self::SelectNone => "user-select:none",
+            Self::SelectText => "user-select:text",
+            Self::SelectAll => "user-select:all",
+            Self::TouchNone => "touch-action:none",
+            Self::TouchPan => "touch-action:pan-x pan-y",
+            Self::ScrollSmooth => "scroll-behavior:smooth",
+            Self::ScrollAuto => "scroll-behavior:auto",
+
+            // Background Extended
+            Self::BgTransparent => "background:transparent",
+            Self::BgCurrentColor => "background:currentColor",
+            Self::BgWhite => "background:var(--rw-white)",
+            Self::BgBlack => "background:var(--rw-black)",
+            Self::BgSuccess => "background:var(--rw-success)",
+            Self::BgWarning => "background:var(--rw-warning)",
+            Self::BgError => "background:var(--rw-error)",
+
+            // Text Extended
+            Self::TextWhite => "color:var(--rw-white)",
+            Self::TextBlack => "color:var(--rw-black)",
+            Self::TextInherit => "color:inherit",
+            Self::TextCurrentColor => "color:currentColor",
+            Self::Text3xl => "font-size:var(--rw-text-3xl)",
+            Self::Text4xl => "font-size:var(--rw-text-4xl)",
+
+            // Line Height
+            Self::LeadingTight => "line-height:var(--rw-leading-tight)",
+            Self::LeadingSnug => "line-height:var(--rw-leading-snug)",
+            Self::LeadingNormal => "line-height:var(--rw-leading-normal)",
+            Self::LeadingRelaxed => "line-height:var(--rw-leading-relaxed)",
+            Self::LeadingLoose => "line-height:var(--rw-leading-loose)",
+            Self::LeadingNone => "line-height:1",
+
+            // Letter Spacing
+            Self::TrackingTighter => "letter-spacing:-0.05em",
+            Self::TrackingTight => "letter-spacing:-0.025em",
+            Self::TrackingNormal => "letter-spacing:0",
+            Self::TrackingWide => "letter-spacing:0.025em",
+            Self::TrackingWider => "letter-spacing:0.05em",
+            Self::TrackingWidest => "letter-spacing:0.1em",
+
+            // Aspect Ratio
+            Self::AspectAuto => "aspect-ratio:auto",
+            Self::AspectSquare => "aspect-ratio:1",
+            Self::AspectVideo => "aspect-ratio:16/9",
+            Self::AspectPortrait => "aspect-ratio:3/4",
+
+            // Object Fit
+            Self::ObjectContain => "object-fit:contain",
+            Self::ObjectCover => "object-fit:cover",
+            Self::ObjectFill => "object-fit:fill",
+            Self::ObjectNone => "object-fit:none",
+            Self::ObjectScaleDown => "object-fit:scale-down",
+
+            // Grid (DisplayGrid already covered above at 0x03)
+            Self::GridCols1 => "grid-template-columns:repeat(1,minmax(0,1fr))",
+            Self::GridCols2 => "grid-template-columns:repeat(2,minmax(0,1fr))",
+            Self::GridCols3 => "grid-template-columns:repeat(3,minmax(0,1fr))",
+            Self::GridCols4 => "grid-template-columns:repeat(4,minmax(0,1fr))",
+            Self::GridColsNone => "grid-template-columns:none",
+            Self::ColSpan2 => "grid-column:span 2",
+            Self::ColSpan3 => "grid-column:span 3",
+            Self::ColSpanFull => "grid-column:1/-1",
+
+            // Align Self
+            Self::SelfAuto => "align-self:auto",
+            Self::SelfStart => "align-self:flex-start",
+            Self::SelfCenter => "align-self:center",
+            Self::SelfEnd => "align-self:flex-end",
+            Self::SelfStretch => "align-self:stretch",
+
+            // Justify Self
+            Self::JustifySelfAuto => "justify-self:auto",
+            Self::JustifySelfStart => "justify-self:start",
+            Self::JustifySelfCenter => "justify-self:center",
+            Self::JustifySelfEnd => "justify-self:end",
+            Self::JustifySelfStretch => "justify-self:stretch",
+
+            // Place Content
+            Self::PlaceCenter => "place-content:center",
+            Self::PlaceStart => "place-content:start",
+            Self::PlaceEnd => "place-content:end",
+            Self::PlaceBetween => "place-content:space-between",
+
+            // More Borders
+            Self::BorderTransparent => "border-color:transparent",
+            Self::BorderT => "border-top:1px solid var(--rw-border-default)",
+            Self::BorderR => "border-right:1px solid var(--rw-border-default)",
+            Self::BorderB => "border-bottom:1px solid var(--rw-border-default)",
+            Self::BorderL => "border-left:1px solid var(--rw-border-default)",
+            Self::Border2 => "border-width:2px",
+            Self::DivideY => "& > * + *{border-top:1px solid var(--rw-border-subtle)}",
+
+            // Sizing Extended
+            Self::WMax => "width:max-content",
+            Self::WMin => "width:min-content",
+            Self::WFit => "width:fit-content",
+            Self::HMax => "height:max-content",
+            Self::HMin => "height:min-content",
+            Self::HFit => "height:fit-content",
+            Self::MinHFull => "min-height:100%",
+            Self::MaxHScreen => "max-height:100vh",
+
+            // Spacing Extended
+            Self::P2xl => "padding:var(--rw-space-10)",
+            Self::PxLg => "padding-inline:var(--rw-space-6)",
+            Self::PxXl => "padding-inline:var(--rw-space-8)",
+            Self::PyLg => "padding-block:var(--rw-space-6)",
+            Self::PyXl => "padding-block:var(--rw-space-8)",
+            Self::Mx0 => "margin-inline:0",
+            Self::My0 => "margin-block:0",
+            Self::MlAuto => "margin-left:auto",
+            Self::MrAuto => "margin-right:auto",
+
+            // Gap Extended
+            Self::GapX0 => "column-gap:0",
+            Self::GapXSm => "column-gap:var(--rw-space-2)",
+            Self::GapXMd => "column-gap:var(--rw-space-4)",
+            Self::GapXLg => "column-gap:var(--rw-space-6)",
+            Self::GapY0 => "row-gap:0",
+            Self::GapYSm => "row-gap:var(--rw-space-2)",
+            Self::GapYMd => "row-gap:var(--rw-space-4)",
+            Self::GapYLg => "row-gap:var(--rw-space-6)",
+
+            // Appearance
+            Self::AppearanceNone => "appearance:none",
+            Self::ResizeNone => "resize:none",
+            Self::ResizeY => "resize:vertical",
+            Self::ResizeX => "resize:horizontal",
+            Self::ResizeBoth => "resize:both",
+
+            // Transform
+            Self::TransformNone => "transform:none",
+            Self::Rotate45 => "transform:rotate(45deg)",
+            Self::Rotate90 => "transform:rotate(90deg)",
+            Self::Rotate180 => "transform:rotate(180deg)",
+            Self::ScaleX => "transform:scaleX(-1)",
+            Self::ScaleY => "transform:scaleY(-1)",
+            Self::TranslateYFull => "transform:translateY(-100%)",
+            Self::Scale95 => "transform:scale(0.95)",
+            Self::Scale100 => "transform:scale(1)",
+            Self::Scale105 => "transform:scale(1.05)",
+
+            // Animation
+            Self::AnimateSpin => "animation:rw-spin 1s linear infinite",
+            Self::AnimatePing => "animation:rw-ping 1s cubic-bezier(0,0,0.2,1) infinite",
+            Self::AnimatePulse => "animation:rw-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
+            Self::AnimateBounce => "animation:rw-bounce 1s infinite",
+            Self::AnimateNone => "animation:none",
+
+            // Directional Spacing - Margins
+            Self::MtXs => "margin-top:var(--rw-space-1)",
+            Self::MtSm => "margin-top:var(--rw-space-2)",
+            Self::MtMd => "margin-top:var(--rw-space-4)",
+            Self::MtLg => "margin-top:var(--rw-space-6)",
+            Self::MbXs => "margin-bottom:var(--rw-space-1)",
+            Self::MbSm => "margin-bottom:var(--rw-space-2)",
+            Self::MbMd => "margin-bottom:var(--rw-space-4)",
+            Self::MbLg => "margin-bottom:var(--rw-space-6)",
+            Self::MlXs => "margin-left:var(--rw-space-1)",
+            Self::MlSm => "margin-left:var(--rw-space-2)",
+            Self::MlMd => "margin-left:var(--rw-space-4)",
+            Self::MlLg => "margin-left:var(--rw-space-6)",
+            Self::MrXs => "margin-right:var(--rw-space-1)",
+            Self::MrSm => "margin-right:var(--rw-space-2)",
+            Self::MrMd => "margin-right:var(--rw-space-4)",
+            Self::MrLg => "margin-right:var(--rw-space-6)",
+
+            // Directional Spacing - Padding
+            Self::PtXs => "padding-top:var(--rw-space-1)",
+            Self::PtSm => "padding-top:var(--rw-space-2)",
+            Self::PtMd => "padding-top:var(--rw-space-4)",
+            Self::PtLg => "padding-top:var(--rw-space-6)",
+            Self::PbXs => "padding-bottom:var(--rw-space-1)",
+            Self::PbSm => "padding-bottom:var(--rw-space-2)",
+            Self::PbMd => "padding-bottom:var(--rw-space-4)",
+            Self::PbLg => "padding-bottom:var(--rw-space-6)",
+            Self::PlXs => "padding-left:var(--rw-space-1)",
+            Self::PlSm => "padding-left:var(--rw-space-2)",
+            Self::PlMd => "padding-left:var(--rw-space-4)",
+            Self::PlLg => "padding-left:var(--rw-space-6)",
+            Self::PrXs => "padding-right:var(--rw-space-1)",
+            Self::PrSm => "padding-right:var(--rw-space-2)",
+            Self::PrMd => "padding-right:var(--rw-space-4)",
+            Self::PrLg => "padding-right:var(--rw-space-6)",
+
+            // Text transforms
+            Self::TextUppercase => "text-transform:uppercase",
+            Self::TextLowercase => "text-transform:lowercase",
+            Self::TextCapitalize => "text-transform:capitalize",
+            Self::TextNormalCase => "text-transform:none",
+
+            // Font style
+            Self::Italic => "font-style:italic",
+            Self::NotItalic => "font-style:normal",
+
+            // Extended sizing
+            Self::WFit2 => "width:fit-content",
+            Self::MinWFit => "min-width:fit-content",
+            Self::MaxWFit => "max-width:fit-content",
+            Self::MinWMax => "min-width:max-content",
+            Self::HFit2 => "height:fit-content",
+            Self::MinHFit => "min-height:fit-content",
+            Self::MaxHFit => "max-height:fit-content",
+            Self::MinHMax => "min-height:max-content",
         }
     }
 }
@@ -847,7 +1357,7 @@ impl StyleValue {
 // ============================================================================
 
 /// All utility token mappings for JS runtime generation.
-pub const UTIL_MAPPINGS: &[(u8, &str)] = &[
+pub const UTIL_MAPPINGS: &[(u16, &str)] = &[
     // Display
     (0x00, "display:none"),
     (0x01, "display:block"),
@@ -1031,6 +1541,219 @@ pub const UTIL_MAPPINGS: &[(u8, &str)] = &[
     (0xE1, "transition:color,background-color 0.2s"),
     (0xE2, "transition:opacity 0.2s"),
     (0xE3, "transition:transform 0.2s"),
+    (0xE4, "transition:none"),
+    (0xE5, "transition:all 0.1s"),
+    (0xE6, "transition:all 0.3s"),
+    // Shadow
+    (0xE8, "box-shadow:none"),
+    (0xE9, "box-shadow:var(--rw-shadow-sm)"),
+    (0xEA, "box-shadow:var(--rw-shadow-md)"),
+    (0xEB, "box-shadow:var(--rw-shadow-lg)"),
+    (0xEC, "box-shadow:var(--rw-shadow-xl)"),
+    (0xED, "box-shadow:inset 0 2px 4px rgba(0,0,0,0.1)"),
+    // Outline
+    (0xF0, "outline:none"),
+    (0xF1, "outline:2px solid var(--rw-accent-8)"),
+    (0xF2, "outline-offset:2px"),
+    (0xF3, "box-shadow:0 0 0 2px var(--rw-accent-8)"),
+    (0xF4, "box-shadow:inset 0 0 0 1px var(--rw-border-default)"),
+    // Extended CSS3 (0x100+)
+    // Text Decoration
+    (0x100, "text-decoration:underline"),
+    (0x101, "text-decoration:line-through"),
+    (0x102, "text-decoration:none"),
+    // Whitespace & Text
+    (0x108, "white-space:normal"),
+    (0x109, "white-space:nowrap"),
+    (0x10A, "white-space:pre"),
+    (0x10B, "white-space:pre-wrap"),
+    (0x10C, "word-break:normal"),
+    (0x10D, "word-break:break-all"),
+    (0x10E, "word-break:keep-all"),
+    (0x10F, "overflow-wrap:break-word"),
+    // User Interaction
+    (0x110, "user-select:none"),
+    (0x111, "user-select:text"),
+    (0x112, "user-select:all"),
+    (0x113, "touch-action:none"),
+    (0x114, "touch-action:pan-x pan-y"),
+    (0x115, "scroll-behavior:smooth"),
+    (0x116, "scroll-behavior:auto"),
+    // Background Extended
+    (0x118, "background:transparent"),
+    (0x119, "background:currentColor"),
+    (0x11A, "background:var(--rw-white)"),
+    (0x11B, "background:var(--rw-black)"),
+    (0x11C, "background:var(--rw-success)"),
+    (0x11D, "background:var(--rw-warning)"),
+    (0x11E, "background:var(--rw-error)"),
+    // Text Extended
+    (0x120, "color:var(--rw-white)"),
+    (0x121, "color:var(--rw-black)"),
+    (0x122, "color:inherit"),
+    (0x123, "color:currentColor"),
+    (0x124, "font-size:var(--rw-text-3xl)"),
+    (0x125, "font-size:var(--rw-text-4xl)"),
+    // Line Height
+    (0x128, "line-height:var(--rw-leading-tight)"),
+    (0x129, "line-height:var(--rw-leading-snug)"),
+    (0x12A, "line-height:var(--rw-leading-normal)"),
+    (0x12B, "line-height:var(--rw-leading-relaxed)"),
+    (0x12C, "line-height:var(--rw-leading-loose)"),
+    (0x12D, "line-height:1"),
+    // Letter Spacing
+    (0x130, "letter-spacing:-0.05em"),
+    (0x131, "letter-spacing:-0.025em"),
+    (0x132, "letter-spacing:0"),
+    (0x133, "letter-spacing:0.025em"),
+    (0x134, "letter-spacing:0.05em"),
+    (0x135, "letter-spacing:0.1em"),
+    // Aspect Ratio
+    (0x138, "aspect-ratio:auto"),
+    (0x139, "aspect-ratio:1"),
+    (0x13A, "aspect-ratio:16/9"),
+    (0x13B, "aspect-ratio:3/4"),
+    // Object Fit
+    (0x140, "object-fit:contain"),
+    (0x141, "object-fit:cover"),
+    (0x142, "object-fit:fill"),
+    (0x143, "object-fit:none"),
+    (0x144, "object-fit:scale-down"),
+    // Grid
+    (0x149, "grid-template-columns:repeat(1,minmax(0,1fr))"),
+    (0x14A, "grid-template-columns:repeat(2,minmax(0,1fr))"),
+    (0x14B, "grid-template-columns:repeat(3,minmax(0,1fr))"),
+    (0x14C, "grid-template-columns:repeat(4,minmax(0,1fr))"),
+    (0x14D, "grid-template-columns:none"),
+    (0x14E, "grid-column:span 2"),
+    (0x14F, "grid-column:span 3"),
+    (0x150, "grid-column:1/-1"),
+    // Align Self
+    (0x158, "align-self:auto"),
+    (0x159, "align-self:flex-start"),
+    (0x15A, "align-self:center"),
+    (0x15B, "align-self:flex-end"),
+    (0x15C, "align-self:stretch"),
+    // Justify Self
+    (0x160, "justify-self:auto"),
+    (0x161, "justify-self:start"),
+    (0x162, "justify-self:center"),
+    (0x163, "justify-self:end"),
+    (0x164, "justify-self:stretch"),
+    // Place Content
+    (0x168, "place-content:center"),
+    (0x169, "place-content:start"),
+    (0x16A, "place-content:end"),
+    (0x16B, "place-content:space-between"),
+    // More Borders
+    (0x170, "border-color:transparent"),
+    (0x171, "border-top:1px solid var(--rw-border-default)"),
+    (0x172, "border-right:1px solid var(--rw-border-default)"),
+    (0x173, "border-bottom:1px solid var(--rw-border-default)"),
+    (0x174, "border-left:1px solid var(--rw-border-default)"),
+    (0x175, "border-width:2px"),
+    // Sizing Extended
+    (0x180, "width:max-content"),
+    (0x181, "width:min-content"),
+    (0x182, "width:fit-content"),
+    (0x183, "height:max-content"),
+    (0x184, "height:min-content"),
+    (0x185, "height:fit-content"),
+    (0x186, "min-height:100%"),
+    (0x187, "max-height:100vh"),
+    // Spacing Extended
+    (0x190, "padding:var(--rw-space-10)"),
+    (0x191, "padding-inline:var(--rw-space-6)"),
+    (0x192, "padding-inline:var(--rw-space-8)"),
+    (0x193, "padding-block:var(--rw-space-6)"),
+    (0x194, "padding-block:var(--rw-space-8)"),
+    (0x195, "margin-inline:0"),
+    (0x196, "margin-block:0"),
+    (0x197, "margin-left:auto"),
+    (0x198, "margin-right:auto"),
+    // Gap Extended
+    (0x1A0, "column-gap:0"),
+    (0x1A1, "column-gap:var(--rw-space-2)"),
+    (0x1A2, "column-gap:var(--rw-space-4)"),
+    (0x1A3, "column-gap:var(--rw-space-6)"),
+    (0x1A4, "row-gap:0"),
+    (0x1A5, "row-gap:var(--rw-space-2)"),
+    (0x1A6, "row-gap:var(--rw-space-4)"),
+    (0x1A7, "row-gap:var(--rw-space-6)"),
+    // Appearance
+    (0x1B0, "appearance:none"),
+    (0x1B1, "resize:none"),
+    (0x1B2, "resize:vertical"),
+    (0x1B3, "resize:horizontal"),
+    (0x1B4, "resize:both"),
+    // Transform
+    (0x1C0, "transform:none"),
+    (0x1C1, "transform:rotate(45deg)"),
+    (0x1C2, "transform:rotate(90deg)"),
+    (0x1C3, "transform:rotate(180deg)"),
+    (0x1C4, "transform:scaleX(-1)"),
+    (0x1C5, "transform:scaleY(-1)"),
+    (0x1C6, "transform:translateY(-100%)"),
+    (0x1C7, "transform:scale(0.95)"),
+    (0x1C8, "transform:scale(1)"),
+    (0x1C9, "transform:scale(1.05)"),
+    // Animation
+    (0x1D0, "animation:rw-spin 1s linear infinite"),
+    (0x1D1, "animation:rw-ping 1s cubic-bezier(0,0,0.2,1) infinite"),
+    (0x1D2, "animation:rw-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite"),
+    (0x1D3, "animation:rw-bounce 1s infinite"),
+    (0x1D4, "animation:none"),
+    // Directional Spacing - Margins
+    (0x1D5, "margin-top:var(--rw-space-1)"),
+    (0x1D6, "margin-top:var(--rw-space-2)"),
+    (0x1D7, "margin-top:var(--rw-space-4)"),
+    (0x1D8, "margin-top:var(--rw-space-6)"),
+    (0x1D9, "margin-bottom:var(--rw-space-1)"),
+    (0x1DA, "margin-bottom:var(--rw-space-2)"),
+    (0x1DB, "margin-bottom:var(--rw-space-4)"),
+    (0x1DC, "margin-bottom:var(--rw-space-6)"),
+    (0x1DD, "margin-left:var(--rw-space-1)"),
+    (0x1DE, "margin-left:var(--rw-space-2)"),
+    (0x1DF, "margin-left:var(--rw-space-4)"),
+    (0x1E0, "margin-left:var(--rw-space-6)"),
+    (0x1E1, "margin-right:var(--rw-space-1)"),
+    (0x1E2, "margin-right:var(--rw-space-2)"),
+    (0x1E3, "margin-right:var(--rw-space-4)"),
+    (0x1E4, "margin-right:var(--rw-space-6)"),
+    // Directional Spacing - Padding
+    (0x1E5, "padding-top:var(--rw-space-1)"),
+    (0x1E6, "padding-top:var(--rw-space-2)"),
+    (0x1E7, "padding-top:var(--rw-space-4)"),
+    (0x1E8, "padding-top:var(--rw-space-6)"),
+    (0x1E9, "padding-bottom:var(--rw-space-1)"),
+    (0x1EA, "padding-bottom:var(--rw-space-2)"),
+    (0x1EB, "padding-bottom:var(--rw-space-4)"),
+    (0x1EC, "padding-bottom:var(--rw-space-6)"),
+    (0x1ED, "padding-left:var(--rw-space-1)"),
+    (0x1EE, "padding-left:var(--rw-space-2)"),
+    (0x1EF, "padding-left:var(--rw-space-4)"),
+    (0x1F0, "padding-left:var(--rw-space-6)"),
+    (0x1F1, "padding-right:var(--rw-space-1)"),
+    (0x1F2, "padding-right:var(--rw-space-2)"),
+    (0x1F3, "padding-right:var(--rw-space-4)"),
+    (0x1F4, "padding-right:var(--rw-space-6)"),
+    // Text transforms
+    (0x1F5, "text-transform:uppercase"),
+    (0x1F6, "text-transform:lowercase"),
+    (0x1F7, "text-transform:capitalize"),
+    (0x1F8, "text-transform:none"),
+    // Font style
+    (0x1F9, "font-style:italic"),
+    (0x1FA, "font-style:normal"),
+    // Extended sizing
+    (0x1FB, "width:fit-content"),
+    (0x1FC, "min-width:fit-content"),
+    (0x1FD, "max-width:fit-content"),
+    (0x1FE, "min-width:max-content"),
+    (0x1FF, "height:fit-content"),
+    (0x200, "min-height:fit-content"),
+    (0x201, "max-height:fit-content"),
+    (0x202, "min-height:max-content"),
 ];
 
 /// All property mappings for JS runtime generation.
@@ -1199,7 +1922,7 @@ mod tests {
             St::TextDefault,
             St::MinHScreen,
         ] {
-            let code = util.as_u8();
+            let code = util.as_u16();
             let mapping = UTIL_MAPPINGS.iter().find(|(c, _)| *c == code);
             assert!(
                 mapping.is_some(),
@@ -1239,28 +1962,28 @@ mod tests {
     fn test_no_duplicate_codes() {
         use std::collections::HashSet;
 
-        let mut seen = HashSet::new();
+        let mut seen_u16: HashSet<u16> = HashSet::new();
         for (code, _) in UTIL_MAPPINGS {
             assert!(
-                seen.insert(code),
+                seen_u16.insert(*code),
                 "Duplicate utility code: 0x{:02X}",
                 code
             );
         }
 
-        seen.clear();
+        let mut seen_u8: HashSet<u8> = HashSet::new();
         for (code, _) in PROP_MAPPINGS {
             assert!(
-                seen.insert(code),
+                seen_u8.insert(*code),
                 "Duplicate property code: 0x{:02X}",
                 code
             );
         }
 
-        seen.clear();
+        seen_u8.clear();
         for (code, _) in VALUE_MAPPINGS {
             assert!(
-                seen.insert(code),
+                seen_u8.insert(*code),
                 "Duplicate value code: 0x{:02X}",
                 code
             );

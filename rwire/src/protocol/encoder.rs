@@ -439,12 +439,12 @@ impl OpcodeBuffer {
 
     /// Set a style utility token on an element.
     ///
-    /// Format: [STYLE_UTIL, ref, util_byte]
-    /// 3 bytes total - most compact for common style patterns.
-    pub fn style_util(&mut self, ref_idx: u8, util: u8) -> &mut Self {
+    /// Format: [STYLE_UTIL, ref, util_varint]
+    /// 3-4 bytes total depending on token value (varint for extended tokens).
+    pub fn style_util(&mut self, ref_idx: u8, util: u16) -> &mut Self {
         self.buf.put_u8(STYLE_UTIL);
         self.buf.put_u8(ref_idx);
-        self.buf.put_u8(util);
+        write_varint(&mut self.buf, util as u32);
         self
     }
 
@@ -462,14 +462,14 @@ impl OpcodeBuffer {
 
     /// Set multiple style utility tokens on an element.
     ///
-    /// Format: [STYLE_MULTI, ref, count, util1, util2, ...]
+    /// Format: [STYLE_MULTI, ref, count, util1_varint, util2_varint, ...]
     /// More efficient than multiple STYLE_UTIL calls for >2 utilities.
-    pub fn style_multi(&mut self, ref_idx: u8, utils: &[u8]) -> &mut Self {
+    pub fn style_multi(&mut self, ref_idx: u8, utils: &[u16]) -> &mut Self {
         self.buf.put_u8(STYLE_MULTI);
         self.buf.put_u8(ref_idx);
         self.buf.put_u8(utils.len() as u8);
         for &util in utils {
-            self.buf.put_u8(util);
+            write_varint(&mut self.buf, util as u32);
         }
         self
     }

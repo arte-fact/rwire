@@ -1,13 +1,13 @@
-//! Counter example - demonstrates rwire reactive state API.
-//!
-//! A simple counter component with increment/decrement buttons.
-//! Only the count display re-renders when state changes.
-//! Uses typed style tokens for compact wire representation.
-//! Styled with Nord theme colors via configurable palette.
+//! Counter example - minimal reactive UI with rwire components.
 
+use std::error::Error;
+
+use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
-use rwire::theme::Theme;
-use rwire::{el, handler, renderer, ColorPalette, El, ElementBuilder, Ev, Server, St, State};
+use rwire::components::{
+    Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack, Text, TextColor,
+};
+use rwire::{handler, renderer, ElementBuilder, Server, St, State};
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -15,68 +15,57 @@ struct Counter {
     count: i32,
 }
 
-#[async_std::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("rwire Server - Counter Example");
-    println!("Open http://127.0.0.1:9000 in your browser");
-    println!();
-
-    // Use Nord palette with dark theme
-    let capsule_config = CapsuleConfig::new()
-        .theme(Theme::dark())
-        .palette(ColorPalette::nord());
-
+#[main]
+async fn main() -> Result<(), Box<dyn Error>> {
     Server::bind("127.0.0.1:9000")?
-        .root(build_counter)
-        .capsule_config(capsule_config)
+        .root(app)
+        .capsule_config(CapsuleConfig::dark_nord())
         .run()
         .await
 }
 
-fn build_counter() -> ElementBuilder {
-    // Full-page container using typed semantic tokens
-    // BgApp maps to neutral-12 in dark mode (Nord Polar Night)
-    el(El::Div)
-        .st([St::BgApp, St::MinHScreen, St::FlexCenter])
-        .append([
-            el(El::Div)
-                .class("counter")
-                .st([St::DisplayFlex, St::ItemsCenter, St::GapLg])
-                .append([
-                    styled_button("-", decrement()),
-                    render_count(),
-                    styled_button("+", increment()),
-                ]),
-        ])
-}
-
-fn styled_button(text: &str, handler: rwire::HandlerSpec) -> ElementBuilder {
-    // Typed semantic tokens:
-    // BgAccent = accent-9 (Nord Frost primary)
-    // TextHigh = high contrast text
-    el(El::Button)
-        .text(text)
-        .st([
-            St::BgAccent,
-            St::TextHigh,
-            St::BorderNone,
-            St::PxMd,
-            St::PySm,
-            St::TextXl,
-            St::RoundedMd,
-            St::CursorPointer,
-            St::TransitionColors,
-        ])
-        .on(Ev::Click, handler)
+fn app() -> ElementBuilder {
+    Container::new()
+        .size(ContainerSize::Full)
+        .padding(true)
+        .child(
+            Stack::centered()
+                .child(
+                    Card::new()
+                        .child(
+                            Stack::column()
+                                .gap(Gap::Lg)
+                                .align_center()
+                                .children([
+                                    Text::heading2("Counter").build(),
+                                    render_count(),
+                                    Stack::row()
+                                        .gap(Gap::Md)
+                                        .children([
+                                            Button::secondary("-")
+                                                .size(ButtonSize::Lg)
+                                                .on_click(decrement()),
+                                            Button::primary("+")
+                                                .size(ButtonSize::Lg)
+                                                .on_click(increment()),
+                                        ])
+                                        .build(),
+                                ])
+                                .build(),
+                        )
+                        .build(),
+                )
+                .build(),
+        )
+        .build()
+        .st([St::BgApp, St::MinHScreen])
 }
 
 #[renderer]
 fn render_count(state: &Counter) -> ElementBuilder {
-    // Typed semantic tokens:
-    // TextDefault = default text color (light in dark mode)
-    el(El::Span)
-        .text(&state.count.to_string())
-        .st([St::TextDefault, St::Text2xl, St::FontBold, St::TextCenter])
+    Text::heading1(state.count.to_string())
+        .color(TextColor::Accent)
+        .build()
 }
 
 #[handler]

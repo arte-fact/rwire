@@ -40,6 +40,7 @@
 use bytes::Bytes;
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::item_ref::ItemRef;
@@ -427,6 +428,33 @@ impl ElementBuilder {
     /// Get the style property tokens.
     pub fn get_style_props(&self) -> &[(u8, u8)] {
         &self.style_props
+    }
+
+    /// Compute a content hash of the element tree for render dedup.
+    ///
+    /// Hashes the deterministic visual content: element type, class, text,
+    /// attributes, style tokens, event types, and children (recursive).
+    /// Skips: synced renderer boxes, handler closures.
+    pub fn content_hash(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash_content(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Hash the visual content of this element into the given hasher.
+    fn hash_content(&self, hasher: &mut impl Hasher) {
+        self.el_type.as_u8().hash(hasher);
+        self.class.hash(hasher);
+        self.text.hash(hasher);
+        self.attrs.hash(hasher);
+        self.style_utils.hash(hasher);
+        self.style_props.hash(hasher);
+        for (ev, _) in &self.events {
+            ev.as_u8().hash(hasher);
+        }
+        for child in &self.children {
+            child.hash_content(hasher);
+        }
     }
 }
 
@@ -1320,7 +1348,7 @@ pub fn build_synced_update_multi(
     handlers: &mut Vec<HandlerFn>,
     changes: ChangeSet,
 ) -> Bytes {
-    build_synced_update_with_known_symbols(synced, states, handlers, changes, None)
+    build_synced_update_with_known_symbols(synced, states, handlers, changes, None, None, None)
 }
 
 /// Build an update for synced elements with incremental symbol support.
@@ -1331,6 +1359,14 @@ pub fn build_synced_update_multi(
 /// - Known symbols use their existing indices
 /// - `known_symbols` is updated with any new symbols after this call
 ///
+/// **TypeId filtering**: If `changed_state_type_id` is provided, only synced elements
+/// bound to that state type are re-rendered. This skips irrelevant renderers when
+/// a handler modifies only one state type.
+///
+/// **Render hash dedup**: If `prev_hashes` is provided, the content hash of each
+/// rendered element is compared with the previous hash. If identical, the element
+/// is skipped (no opcodes emitted). This avoids redundant DOM updates.
+///
 /// This can reduce update message sizes by 50-90% for repeated updates.
 pub fn build_synced_update_with_known_symbols(
     synced: &[SyncedElement],
@@ -1338,6 +1374,8 @@ pub fn build_synced_update_with_known_symbols(
     handlers: &mut Vec<HandlerFn>,
     changes: ChangeSet,
     known_symbols: Option<&mut HashMap<String, u32>>,
+    changed_state_type_id: Option<TypeId>,
+    mut prev_hashes: Option<&mut HashMap<u32, u64>>,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
@@ -1373,15 +1411,30 @@ pub fn build_synced_update_with_known_symbols(
             synced_counter = se.id + 1;
         }
 
+        // Layer 1: Skip elements bound to a different state type
+        if let Some(changed_id) = changed_state_type_id {
+            if se.state_type_id != changed_id {
+                continue;
+            }
+        }
+
         // Skip elements that don't need updating (bitmask check)
         if !se.deps.needs_update(changes) {
             continue;
         }
-        has_updates = true;
 
         // Render once, use for both symbol collection and emission
         if let Some(state) = states.get(&se.state_type_id) {
             if let Some(rendered) = se.renderer.render_with_state(*state) {
+                // Layer 2: Skip if output hash matches previous
+                if let Some(ref mut hashes) = prev_hashes {
+                    let hash = rendered.content_hash();
+                    if hashes.get(&se.id) == Some(&hash) {
+                        continue; // Output unchanged, skip emission
+                    }
+                    hashes.insert(se.id, hash);
+                }
+
                 collect_symbols_recursive_with_known(
                     &rendered,
                     &mut new_symbols,
@@ -1391,6 +1444,7 @@ pub fn build_synced_update_with_known_symbols(
                     states,
                 );
                 rendered_cache.insert(se.id, rendered);
+                has_updates = true;
             }
         }
     }

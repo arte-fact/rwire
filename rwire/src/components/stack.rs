@@ -113,6 +113,15 @@ impl Stack {
         Self::default()
     }
 
+    /// Create a centered stack (centers content both horizontally and vertically).
+    pub fn centered() -> Self {
+        Self {
+            align: StackAlign::Center,
+            justify: StackJustify::Center,
+            ..Self::default()
+        }
+    }
+
     /// Set the stack direction.
     pub fn direction(mut self, direction: StackDirection) -> Self {
         self.direction = direction;
@@ -129,6 +138,11 @@ impl Stack {
     pub fn align(mut self, align: StackAlign) -> Self {
         self.align = align;
         self
+    }
+
+    /// Center items on cross-axis (shorthand for align(StackAlign::Center)).
+    pub fn align_center(self) -> Self {
+        self.align(StackAlign::Center)
     }
 
     /// Set main-axis justification.
@@ -270,6 +284,23 @@ mod tests {
         assert!(class.contains("rw-items-center"));
         assert!(class.contains("rw-justify-between"));
         assert!(class.contains("rw-flex-wrap"));
+    }
+
+    #[test]
+    fn test_stack_centered() {
+        let stack = Stack::centered();
+        assert_eq!(stack.align, StackAlign::Center);
+        assert_eq!(stack.justify, StackJustify::Center);
+        let class = stack.compute_class();
+        assert!(class.contains("rw-items-center"));
+        assert!(class.contains("rw-justify-center"));
+    }
+
+    #[test]
+    fn test_stack_align_center_shorthand() {
+        let stack = Stack::column().align_center();
+        assert_eq!(stack.align, StackAlign::Center);
+        assert!(stack.compute_class().contains("rw-items-center"));
     }
 
     #[test]

@@ -631,6 +631,9 @@ struct ConnectionState {
     sent_symbols: HashMap<String, u32>,
     /// Keys this connection is subscribed to (for cleanup on disconnect).
     subscribed_keys: HashSet<String>,
+    /// Content hashes of last-sent synced element renders (for render dedup).
+    /// Maps synced element ID -> content hash. If identical, skip re-emission.
+    synced_hashes: HashMap<u32, u64>,
 }
 
 impl ConnectionState {
@@ -643,6 +646,7 @@ impl ConnectionState {
             synced_elements: Vec::new(),
             sent_symbols: HashMap::new(),
             subscribed_keys: HashSet::new(),
+            synced_hashes: HashMap::new(),
         }
     }
 
@@ -894,12 +898,16 @@ where
                             }
 
                             // Use incremental symbols - pass known symbols and update them
+                            // TypeId filter: only re-render synced elements for this handler's state type
+                            // Hash dedup: skip emission if rendered output is identical to last send
                             build_synced_update_with_known_symbols(
                                 &conn_state.synced_elements,
                                 &states_map,
                                 &mut conn_state.handlers,
                                 changes,
                                 Some(&mut conn_state.sent_symbols),
+                                Some(state_type_id),
+                                Some(&mut conn_state.synced_hashes),
                             )
                             // cache_guard dropped here at end of block
                         };

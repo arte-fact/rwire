@@ -42,6 +42,9 @@ const ELEMENT_MAPPINGS: &[(u8, &str)] = &[
     (23, "article"),
     (24, "svg"),
     (25, "path"),
+    (26, "h3"),
+    (27, "hr"),
+    (28, "ol"),
 ];
 
 /// All supported event types with their byte codes and event names.
@@ -81,7 +84,7 @@ fn generate_event_map(used: &HashSet<u8>) -> String {
 }
 
 /// Generate the JavaScript object literal for style utility mappings.
-fn generate_style_util_map(used: &HashSet<u8>) -> String {
+fn generate_style_util_map(used: &HashSet<u16>) -> String {
     use crate::style_tokens::UTIL_MAPPINGS;
     let entries: Vec<String> = UTIL_MAPPINGS
         .iter()
@@ -132,9 +135,9 @@ fn generate_style_value_map(used: &HashSet<u8>) -> String {
 /// - WORD_TABLE (0xF2): Define word table for text compression
 /// - SET_TEXT_WORDS (0x13): Set text from word indices
 /// - SET_TEXT_INT (0x15): Set text from zigzag-encoded integer
-/// - STYLE_UTIL (0x82): Set style from utility token (3 bytes)
+/// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
-/// - STYLE_MULTI (0x84): Set multiple style utilities (3+n bytes)
+/// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
 const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={};
@@ -175,10 +178,10 @@ else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
 else if(o===O.SI){let l=(d[i++]<<8)|d[i++];let css=new TextDecoder().decode(d.slice(i,i+l));let st=document.createElement('style');st.textContent=css;document.head.appendChild(st);i+=l}
 else if(o===O.SS){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
-else if(o===O.SU){let f=d[i++],u=d[i++];r[f].style.cssText+=';'+U[u]}
+else if(o===O.SU){let f=d[i++],[u,l]=rv(d,i);i+=l;r[f].style.cssText+=';'+U[u]}
 else if(o===O.SP){let f=d[i++],p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
-else if(o===O.SM){let f=d[i++],n=d[i++],css='';while(n--)css+=';'+U[d[i++]];r[f].style.cssText+=css}
-else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++],css='';while(c--)css+=';'+U[d[i++]];K[id]=css}}
+else if(o===O.SM){let f=d[i++],n=d[i++],css='';while(n--){let[u,l]=rv(d,i);i+=l;css+=';'+U[u]}r[f].style.cssText+=css}
+else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++],css='';while(c--){let[u,ul]=rv(d,i);i+=ul;css+=';'+U[u]}K[id]=css}}
 else if(o===O.SC){let f=d[i++],[id,l]=rv(d,i);i+=l;r[f].style.cssText+=K[id]||''}
 else if(o===O.E){return}
 }}
@@ -280,7 +283,7 @@ pub struct CapsuleConfig {
     /// Whether to include local state mutation interpreter
     pub has_local_handlers: bool,
     /// Used style utility tokens (for tree-shaking)
-    pub used_style_utils: HashSet<u8>,
+    pub used_style_utils: HashSet<u16>,
     /// Used style property codes (for tree-shaking)
     pub used_style_props: HashSet<u8>,
     /// Used style value codes (for tree-shaking)
@@ -291,6 +294,23 @@ impl CapsuleConfig {
     /// Create a new config with defaults.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a dark theme with Nord color palette.
+    pub fn dark_nord() -> Self {
+        Self::default()
+            .theme(Theme::dark())
+            .palette(ColorPalette::nord())
+    }
+
+    /// Create a light theme with default colors.
+    pub fn light() -> Self {
+        Self::default().theme(Theme::light())
+    }
+
+    /// Create a dark theme with default colors.
+    pub fn dark() -> Self {
+        Self::default().theme(Theme::dark())
     }
 
     /// Set the theme.
@@ -332,7 +352,7 @@ impl CapsuleConfig {
     }
 
     /// Add a used style utility token.
-    pub fn use_style_util(mut self, util: u8) -> Self {
+    pub fn use_style_util(mut self, util: u16) -> Self {
         self.used_style_utils.insert(util);
         self
     }
@@ -345,7 +365,7 @@ impl CapsuleConfig {
     }
 
     /// Set all used style utility tokens (from build context).
-    pub fn with_style_utils(mut self, utils: &HashSet<u8>) -> Self {
+    pub fn with_style_utils(mut self, utils: &HashSet<u16>) -> Self {
         self.used_style_utils = utils.clone();
         self
     }
@@ -697,5 +717,26 @@ mod tests {
         // Should contain local state code
         assert!(capsule.contains("let ls={},lh={}"));
         assert!(capsule.contains("function mut"));
+    }
+
+    #[test]
+    fn test_capsule_config_dark_nord() {
+        let config = CapsuleConfig::dark_nord();
+        assert_eq!(config.theme.mode, ThemeMode::Dark);
+        assert!(config.palette.is_some());
+    }
+
+    #[test]
+    fn test_capsule_config_light() {
+        let config = CapsuleConfig::light();
+        assert_eq!(config.theme.mode, ThemeMode::Light);
+        assert!(config.palette.is_none());
+    }
+
+    #[test]
+    fn test_capsule_config_dark() {
+        let config = CapsuleConfig::dark();
+        assert_eq!(config.theme.mode, ThemeMode::Dark);
+        assert!(config.palette.is_none());
     }
 }
