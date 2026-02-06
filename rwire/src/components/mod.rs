@@ -122,38 +122,6 @@ pub use textarea::Textarea;
 pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize};
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
-    unique_id, AriaAttrs, TransitionState, UTILS_CSS, Z_DROPDOWN, Z_FIXED, Z_MODAL,
+    unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL,
     Z_MODAL_BACKDROP, Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
 };
-
-/// Generate CSS for components.
-///
-/// All component CSS is now delivered via St/Ps tokens.
-/// Only utility CSS (icons, sr-only, etc.) remains.
-pub fn generate_components_css() -> String {
-    UTILS_CSS.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_components_css_is_utils_only() {
-        let css = generate_components_css();
-        assert!(!css.is_empty());
-        // Only UTILS_CSS remains (icons, sr-only, etc.)
-        assert_eq!(css, UTILS_CSS);
-    }
-
-    #[test]
-    fn test_total_components_css_size() {
-        let css = generate_components_css();
-        // Only utility CSS now, should be well under 2KB
-        assert!(
-            css.len() < 2048,
-            "Utility CSS too large: {} bytes",
-            css.len()
-        );
-    }
-}

@@ -6,9 +6,10 @@
 //! # Example
 //!
 //! ```ignore
-//! use rwire::{el, El, Ev, ClientState, handler, renderer};
+//! use rwire::{el, El, Ev, State, handler, renderer};
 //!
-//! #[derive(ClientState, Default)]
+//! #[derive(State, Default)]
+//! #[storage(memory)]
 //! struct Counter {
 //!     count: i32,
 //! }
@@ -897,11 +898,20 @@ impl BuildContext {
         idx
     }
 
+    /// Maximum number of unique symbols per render pass.
+    /// Varint supports more, but this prevents unbounded memory growth from buggy renderers.
+    const MAX_SYMBOLS: usize = 16_384;
+
     fn intern(&mut self, s: &str) -> u32 {
         if let Some(&idx) = self.symbol_map.get(s) {
             return idx;
         }
-        // Symbol indices start at 0x80 and can grow indefinitely with varint encoding
+        assert!(
+            self.symbols.len() < Self::MAX_SYMBOLS,
+            "symbol table overflow: exceeded {} unique symbols",
+            Self::MAX_SYMBOLS
+        );
+        // Symbol indices start at 0x80 and can grow with varint encoding
         let idx = 0x80 + self.symbols.len() as u32;
         self.symbols.push(s.to_string());
         self.symbol_map.insert(s.to_string(), idx);
@@ -921,13 +931,10 @@ impl BuildContext {
     }
 
     fn register_remote_handler(&mut self, handler: HandlerFn) -> u8 {
-        // Check if handler is already registered (by comparing function pointers)
+        // Check if handler is already registered (by comparing fn_id)
+        let new_id = handler.fn_id();
         for (i, h) in self.handlers.iter().enumerate() {
-            // Compare the underlying function pointers
-            if std::ptr::eq(
-                h as *const HandlerFn as *const (),
-                &handler as *const HandlerFn as *const (),
-            ) {
+            if h.fn_id() == new_id {
                 return i as u8;
             }
         }

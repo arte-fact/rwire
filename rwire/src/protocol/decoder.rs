@@ -2,6 +2,9 @@
 
 use super::opcodes::*;
 
+/// Maximum allowed payload size (64KB). Prevents memory exhaustion from malicious inputs.
+const MAX_PAYLOAD_SIZE: usize = 65_536;
+
 /// An event received from the client.
 #[derive(Debug, Clone)]
 pub struct ClientEvent {
@@ -48,6 +51,10 @@ impl ClientEvent {
             let payload_start = 4 + param_len;
             let payload_len = data[payload_start] as usize;
 
+            if payload_len > MAX_PAYLOAD_SIZE {
+                return Err(DecodeError::PayloadTooLarge);
+            }
+
             if data.len() < payload_start + 1 + payload_len {
                 return Err(DecodeError::PayloadTruncated);
             }
@@ -64,6 +71,10 @@ impl ClientEvent {
         } else {
             // Legacy format without params
             let payload_len = data[3] as usize;
+
+            if payload_len > MAX_PAYLOAD_SIZE {
+                return Err(DecodeError::PayloadTooLarge);
+            }
 
             if data.len() < 4 + payload_len {
                 return Err(DecodeError::PayloadTruncated);
@@ -105,6 +116,7 @@ impl ClientEvent {
 pub enum DecodeError {
     TooShort,
     PayloadTruncated,
+    PayloadTooLarge,
 }
 
 impl std::fmt::Display for DecodeError {
@@ -112,6 +124,7 @@ impl std::fmt::Display for DecodeError {
         match self {
             DecodeError::TooShort => write!(f, "message too short"),
             DecodeError::PayloadTruncated => write!(f, "payload truncated"),
+            DecodeError::PayloadTooLarge => write!(f, "payload too large"),
         }
     }
 }

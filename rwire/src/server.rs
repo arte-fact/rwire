@@ -23,7 +23,7 @@ use crate::builder::{
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
-use crate::protocol::{ClientEvent, OpcodeBuffer};
+use crate::protocol::ClientEvent;
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn};
 
@@ -68,11 +68,19 @@ pub struct SharedServerState {
 
     /// Persist interval for background task.
     pub persist_interval: Duration,
+
+    /// Capacity of per-connection broadcast channels. Default: 32.
+    pub broadcast_capacity: usize,
 }
 
 impl SharedServerState {
-    /// Create new shared server state.
+    /// Create new shared server state with default broadcast capacity (32).
     pub fn new(persist_interval: Duration) -> Arc<Self> {
+        Self::with_broadcast_capacity(persist_interval, 32)
+    }
+
+    /// Create new shared server state with custom broadcast capacity.
+    pub fn with_broadcast_capacity(persist_interval: Duration, broadcast_capacity: usize) -> Arc<Self> {
         Arc::new(Self {
             shared_cache: RwLock::new(HashMap::new()),
             dirty_keys: RwLock::new(HashSet::new()),
@@ -80,6 +88,7 @@ impl SharedServerState {
             broadcast_senders: RwLock::new(HashMap::new()),
             next_connection_id: AtomicU64::new(1),
             persist_interval,
+            broadcast_capacity,
         })
     }
 
@@ -90,46 +99,71 @@ impl SharedServerState {
 
     /// Check if state exists in cache.
     pub fn has_state(&self, key: &str) -> bool {
-        self.shared_cache.read().unwrap().contains_key(key)
+        self.shared_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(key)
     }
 
     /// Insert state into cache (for hydration).
     pub fn insert_state(&self, key: String, state: Box<dyn Any + Send + Sync>) {
-        self.shared_cache.write().unwrap().insert(key, state);
+        self.shared_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, state);
     }
 
     /// Mark a key as dirty (needs persistence).
     pub fn mark_dirty(&self, key: &str) {
-        self.dirty_keys.write().unwrap().insert(key.to_string());
+        self.dirty_keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.to_string());
     }
 
     /// Check if any keys are dirty.
     pub fn has_dirty(&self) -> bool {
-        !self.dirty_keys.read().unwrap().is_empty()
+        !self.dirty_keys
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Get count of dirty keys.
     pub fn dirty_count(&self) -> usize {
-        self.dirty_keys.read().unwrap().len()
+        self.dirty_keys
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 
     /// Drain all dirty keys for persistence.
     pub fn drain_dirty(&self) -> Vec<String> {
-        let mut dirty = self.dirty_keys.write().unwrap();
+        let mut dirty = self.dirty_keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         dirty.drain().collect()
     }
 
     /// Register connection's broadcast channel.
     pub fn register_connection(&self, conn_id: u64, sender: async_channel::Sender<BroadcastMsg>) {
-        self.broadcast_senders.write().unwrap().insert(conn_id, sender);
+        self.broadcast_senders
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(conn_id, sender);
     }
 
     /// Unregister connection on disconnect.
     pub fn unregister_connection(&self, conn_id: u64) {
-        self.broadcast_senders.write().unwrap().remove(&conn_id);
+        self.broadcast_senders
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&conn_id);
 
         // Remove from all subscriptions
-        let mut subs = self.subscriptions.write().unwrap();
+        let mut subs = self.subscriptions
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         for conn_ids in subs.values_mut() {
             conn_ids.retain(|&id| id != conn_id);
         }
@@ -139,7 +173,7 @@ impl SharedServerState {
     pub fn subscribe(&self, conn_id: u64, key: &str) {
         self.subscriptions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .entry(key.to_string())
             .or_default()
             .push(conn_id);
@@ -157,7 +191,9 @@ impl SharedServerState {
         let states = store.hydrate_all()?;
         let count = states.len();
 
-        let mut cache = self.shared_cache.write().unwrap();
+        let mut cache = self.shared_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         for (key, state) in states {
             cache.insert(key, state);
         }
@@ -179,8 +215,12 @@ impl SharedServerState {
             changes,
         };
 
-        let subs = self.subscriptions.read().unwrap();
-        let senders = self.broadcast_senders.read().unwrap();
+        let subs = self.subscriptions
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let senders = self.broadcast_senders
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
 
         if let Some(conn_ids) = subs.get(key) {
             for &conn_id in conn_ids {
@@ -205,7 +245,7 @@ impl SharedServerState {
         }
 
         let conn = store.connection();
-        let conn = conn.lock().unwrap();
+        let conn = conn.lock().map_err(|_| crate::persist::PersistError::LockPoisoned)?;
 
         // Start transaction
         conn.execute("BEGIN TRANSACTION", [])?;
@@ -254,13 +294,15 @@ impl SharedServerState {
 
         // Get persistable type info from registry
         let registry = store.registry();
-        let registry = registry.lock().unwrap();
+        let registry = registry.lock().map_err(|_| crate::persist::PersistError::LockPoisoned)?;
         let persistable = registry
             .get_by_table(table_name)
             .ok_or_else(|| crate::persist::PersistError::TypeNotFound(table_name.to_string()))?;
 
         // Get state from cache
-        let cache = self.shared_cache.read().unwrap();
+        let cache = self.shared_cache
+            .read()
+            .map_err(|_| crate::persist::PersistError::LockPoisoned)?;
         let state = cache
             .get(key)
             .ok_or_else(|| crate::persist::PersistError::ConnectionError(format!("State not in cache: {}", key)))?;
@@ -461,15 +503,18 @@ where
             // No renderers - use simple collect_symbols with placeholder
             let placeholder: () = ();
             ctx.collect_symbols(&root_element, &placeholder);
+            ctx.analyze_style_patterns(&root_element);
             ctx.emit(&root_element, &placeholder);
         } else {
             // Use multi-state collection for proper renderer handling
             ctx.collect_symbols_multi(&root_element, &states_map);
+            ctx.analyze_style_patterns(&root_element);
             ctx.emit_multi(&root_element);
         }
         // Generate capsule - styled if config provided, basic otherwise
-        let (capsule, capsule_css) = if let Some(config) = self.capsule_config {
+        let capsule = if let Some(config) = self.capsule_config {
             // Merge style tokens and attribute tokens into config
+            let composite_css = ctx.composite_table().generate_css();
             let config = config
                 .has_local_handlers(ctx.has_local_handlers())
                 .with_style_utils(ctx.used_style_utils())
@@ -477,29 +522,27 @@ where
                 .with_style_values(ctx.used_style_values())
                 .with_pseudo_pairs(ctx.used_pseudo_pairs())
                 .with_attr_keys(ctx.used_attr_keys())
-                .with_attr_values(ctx.used_attr_values());
+                .with_attr_values(ctx.used_attr_values())
+                .with_composite_css(composite_css);
 
-            // Generate CSS separately for dedicated route
+            // Generate CSS and embed in capsule HTML <style> tag
             let css = capsule_gen::generate_capsule_css(&config);
-            let html = capsule_gen::generate_styled_capsule(
+            capsule_gen::generate_styled_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
                 &config,
-            );
-            (html, Some(css))
+                &css,
+            )
         } else {
-            let html = capsule_gen::generate_capsule(
+            capsule_gen::generate_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
                 ctx.has_local_handlers(),
-            );
-            (html, None)
+            )
         };
 
         let capsule_size = capsule.len();
-        let css_size = capsule_css.as_ref().map(|s| s.len()).unwrap_or(0);
         let capsule = Arc::new(capsule);
-        let capsule_css = capsule_css.map(Arc::new);
 
         println!("Server listening on http://{}", self.addr);
         println!(
@@ -508,19 +551,15 @@ where
             ctx.used_elements().len(),
             ctx.used_events().len()
         );
-        if css_size > 0 {
-            println!("CSS: {} bytes (injected via WebSocket STYLE_INJECT)", css_size);
-        }
 
         let root = Arc::new(self.root);
 
         while let Ok((stream, peer_addr)) = listener.accept().await {
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
-            let capsule_css = capsule_css.clone();
             let shared = Arc::clone(&shared);
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, capsule_css, shared).await;
+                handle_client(stream, peer_addr, root, capsule, shared).await;
             });
         }
 
@@ -545,7 +584,6 @@ async fn handle_client<F>(
     peer_addr: SocketAddr,
     root: Arc<F>,
     capsule: Arc<String>,
-    capsule_css: Option<Arc<String>>,
     shared: Arc<SharedServerState>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -583,7 +621,7 @@ async fn handle_client<F>(
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, capsule_css).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -600,7 +638,7 @@ async fn handle_client<F>(
             return;
         }
 
-        // Serve capsule HTML - CSS is delivered via WebSocket STYLE_INJECT opcode
+        // Serve capsule HTML (CSS is embedded in <style> tag)
         println!("[{}] HTTP request - serving capsule", peer_addr);
         if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
             eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
@@ -678,13 +716,26 @@ impl ConnectionState {
     }
 }
 
+/// RAII guard that unregisters a connection when dropped.
+///
+/// Ensures cleanup happens even if `handle_websocket` panics.
+struct ConnectionGuard {
+    shared: Arc<SharedServerState>,
+    connection_id: u64,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.shared.unregister_connection(self.connection_id);
+    }
+}
+
 async fn handle_websocket<F>(
     ws_stream: async_tungstenite::WebSocketStream<TcpStream>,
     peer_addr: SocketAddr,
     root: Arc<F>,
     shared: Arc<SharedServerState>,
     session_id: SessionId,
-    capsule_css: Option<Arc<String>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -693,8 +744,14 @@ where
 
     // Allocate connection ID and register broadcast channel
     let connection_id = shared.next_connection_id();
-    let (broadcast_tx, _broadcast_rx) = async_channel::bounded::<BroadcastMsg>(32);
+    let (broadcast_tx, _broadcast_rx) = async_channel::bounded::<BroadcastMsg>(shared.broadcast_capacity);
     shared.register_connection(connection_id, broadcast_tx);
+
+    // RAII guard ensures cleanup on drop (even on panic)
+    let _cleanup = ConnectionGuard {
+        shared: Arc::clone(&shared),
+        connection_id,
+    };
 
     // Create per-connection state with the session ID from cookie
     let mut conn_state = ConnectionState::new(connection_id, session_id);
@@ -736,7 +793,9 @@ where
         let mut ctx = BuildContext::new();
 
         // Acquire read lock on shared cache
-        let cache_guard = shared.shared_cache.read().unwrap();
+        let cache_guard = shared.shared_cache
+            .read()
+            .map_err(|_| "shared cache lock poisoned")?;
 
         // Build states_map with connection state, then override with shared cache
         let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
@@ -758,10 +817,12 @@ where
         if states_map.is_empty() {
             // No states available, use placeholder
             ctx.collect_symbols(&root_element, &placeholder_state);
+            ctx.analyze_style_patterns(&root_element);
             ctx.emit(&root_element, &placeholder_state);
         } else {
             // Use multi-state methods to render all synced elements correctly
             ctx.collect_symbols_multi(&root_element, &states_map);
+            ctx.analyze_style_patterns(&root_element);
             ctx.emit_multi(&root_element);
         }
 
@@ -784,39 +845,26 @@ where
         ctx.finish()
     };
 
-    // Build the initial message: CSS (if any) + DOM
-    // CSS is injected via STYLE_INJECT opcode before DOM opcodes
-    let initial_message = if let Some(css) = &capsule_css {
-        let mut buf = OpcodeBuffer::new();
-        buf.style_inject(css);
-        // Concatenate CSS injection + DOM bytes (excluding the BATCH_END from CSS buffer)
-        let css_bytes = buf.finish();
-        let mut combined = Vec::with_capacity(css_bytes.len() + initial_dom.len());
-        combined.extend_from_slice(&css_bytes);
-        combined.extend_from_slice(&initial_dom);
-        combined
-    } else {
-        initial_dom.to_vec()
-    };
-
-    let css_size = capsule_css.as_ref().map(|s| s.len()).unwrap_or(0);
+    // Send initial DOM message (CSS is already embedded in capsule HTML)
     println!(
-        "[{}] Sending initial message ({} bytes: {} CSS + {} DOM, {} handlers, {} synced, {} state types)",
+        "[{}] Sending initial DOM ({} bytes, {} handlers, {} synced, {} state types)",
         peer_addr,
-        initial_message.len(),
-        css_size,
         initial_dom.len(),
         conn_state.handlers.len(),
         conn_state.synced_elements.len(),
         conn_state.states.len()
     );
-    write.send(Message::Binary(initial_message)).await?;
+    write.send(Message::Binary(initial_dom.to_vec())).await?;
 
     // Handle incoming messages
+    let mut consecutive_decode_errors: u32 = 0;
+    const MAX_CONSECUTIVE_DECODE_ERRORS: u32 = 10;
+
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Binary(data)) => match ClientEvent::decode(&data) {
                 Ok(event) => {
+                    consecutive_decode_errors = 0;
                     println!(
                         "[{}] Event: handler=0x{:02X} type={} target_ref={}",
                         peer_addr,
@@ -844,7 +892,9 @@ where
 
                         if let Some(key) = &cache_key {
                             // Persisted state: get from shared cache, execute, write back
-                            let mut cache = shared.shared_cache.write().unwrap();
+                            let mut cache = shared.shared_cache
+                                .write()
+                                .map_err(|_| "shared cache lock poisoned")?;
                             let state = cache
                                 .entry(key.clone())
                                 .or_insert_with(|| handler.create_state());
@@ -875,7 +925,9 @@ where
                         let update = {
                             // Acquire read lock on shared cache (if needed)
                             let cache_guard = if cache_key.is_some() {
-                                Some(shared.shared_cache.read().unwrap())
+                                Some(shared.shared_cache
+                                    .read()
+                                    .map_err(|_| "shared cache lock poisoned")?)
                             } else {
                                 None
                             };
@@ -920,7 +972,18 @@ where
                     }
                 }
                 Err(e) => {
-                    eprintln!("[{}] Failed to decode event: {}", peer_addr, e);
+                    consecutive_decode_errors += 1;
+                    eprintln!(
+                        "[{}] Failed to decode event: {} ({}/{})",
+                        peer_addr, e, consecutive_decode_errors, MAX_CONSECUTIVE_DECODE_ERRORS
+                    );
+                    if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS {
+                        eprintln!(
+                            "[{}] Too many consecutive decode errors, disconnecting",
+                            peer_addr
+                        );
+                        break;
+                    }
                 }
             },
             Ok(Message::Text(text)) => {
@@ -941,8 +1004,7 @@ where
         }
     }
 
-    // Cleanup: unregister connection
-    shared.unregister_connection(conn_state.connection_id);
+    // Cleanup happens automatically via ConnectionGuard drop
 
     Ok(())
 }

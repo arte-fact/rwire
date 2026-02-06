@@ -322,17 +322,16 @@ fn build_persisted_column() -> ElementBuilder {
                         .text("Memory-first with SQLite background sync"),
                     // Input form for adding items - use Form element for submit handling
                     el(El::Form)
-                        .class("input-row rw-stack rw-stack-row rw-gap-sm")
+                        .st([rwire::St::DisplayFlex, rwire::St::FlexRow, rwire::St::GapSm])
                         .on(Ev::Submit, add_persisted_item())
                         .append([
                             Input::text()
                                 .placeholder("What needs to be done?")
                                 .name("todo")
                                 .build(),
-                            el(El::Button)
-                                .attr("type", "submit")
-                                .text("Add")
-                                .class("rw-btn"),
+                            Button::primary("Add")
+                                .build()
+                                .attr("type", "submit"),
                         ]),
                     Stack::row()
                         .gap(Gap::Sm)

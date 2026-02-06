@@ -21,6 +21,8 @@ pub enum PersistError {
     TypeMismatch,
     /// Connection error.
     ConnectionError(String),
+    /// Lock poisoned (a thread panicked while holding a lock).
+    LockPoisoned,
 }
 
 impl std::fmt::Display for PersistError {
@@ -30,6 +32,7 @@ impl std::fmt::Display for PersistError {
             PersistError::TypeNotFound(name) => write!(f, "Type not found: {}", name),
             PersistError::TypeMismatch => write!(f, "Type mismatch"),
             PersistError::ConnectionError(msg) => write!(f, "Connection error: {}", msg),
+            PersistError::LockPoisoned => write!(f, "Lock poisoned"),
         }
     }
 }
@@ -143,13 +146,16 @@ impl SqliteStore {
 
     /// Register a persistable type.
     pub fn register(&self, persistable: PersistableType) {
-        self.registry.lock().unwrap().register(persistable);
+        self.registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .register(persistable);
     }
 
     /// Ensure all schemas exist in the database.
     pub fn ensure_schema(&self) -> Result<(), PersistError> {
-        let conn = self.conn.lock().unwrap();
-        let registry = self.registry.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| PersistError::LockPoisoned)?;
+        let registry = self.registry.lock().map_err(|_| PersistError::LockPoisoned)?;
 
         for persistable in registry.all() {
             for sql in persistable.schema {
@@ -164,8 +170,8 @@ impl SqliteStore {
     ///
     /// Returns a HashMap of cache key -> state.
     pub fn hydrate_all(&self) -> Result<HashMap<String, Box<dyn Any + Send + Sync>>, PersistError> {
-        let conn = self.conn.lock().unwrap();
-        let registry = self.registry.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| PersistError::LockPoisoned)?;
+        let registry = self.registry.lock().map_err(|_| PersistError::LockPoisoned)?;
         let mut cache = HashMap::new();
 
         for persistable in registry.all() {
@@ -199,8 +205,8 @@ impl SqliteStore {
 
     /// Save a single state to the database.
     pub fn save(&self, key: &str, state: &dyn Any) -> Result<(), PersistError> {
-        let conn = self.conn.lock().unwrap();
-        let registry = self.registry.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| PersistError::LockPoisoned)?;
+        let registry = self.registry.lock().map_err(|_| PersistError::LockPoisoned)?;
 
         // Parse key format: "table:session_id"
         let parts: Vec<&str> = key.splitn(2, ':').collect();

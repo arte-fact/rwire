@@ -290,9 +290,25 @@ async fn test_content_length() {
         .await
         .unwrap();
 
-    let mut response = vec![0u8; 8192];
-    let n = stream.read(&mut response).await.unwrap();
-    let response_str = String::from_utf8_lossy(&response[..n]);
+    let mut response = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = stream.read(&mut buf).await.unwrap();
+        if n == 0 { break; }
+        response.extend_from_slice(&buf[..n]);
+        // Check if we've received the full response (headers + body)
+        if let Some(header_end) = response.windows(4).position(|w| w == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&response[..header_end]);
+            if let Some(cl_line) = headers.lines().find(|l| l.starts_with("Content-Length:")) {
+                if let Ok(cl) = cl_line.split(':').nth(1).unwrap().trim().parse::<usize>() {
+                    if response.len() >= header_end + 4 + cl {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    let response_str = String::from_utf8_lossy(&response);
 
     // Extract Content-Length
     let content_length: usize = response_str

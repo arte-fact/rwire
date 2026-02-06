@@ -12,60 +12,6 @@ use crate::{el, El, ElementBuilder, St};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 // ============================================================================
-// CSS
-// ============================================================================
-
-/// CSS for utility classes (icons, screen reader only, etc.)
-pub const UTILS_CSS: &str = "\
-/* Icon styles */
-.rw-icon {
-  display: inline-block;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
-.rw-icon-sm {
-  width: 16px;
-  height: 16px;
-}
-
-.rw-icon-lg {
-  width: 32px;
-  height: 32px;
-}
-
-/* Screen reader only */
-.rw-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border-width: 0;
-}
-
-/* Hidden utility */
-.rw-hidden {
-  display: none !important;
-}
-
-/* Portal container */
-.rw-portal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-}
-
-.rw-portal > * {
-  pointer-events: auto;
-}
-";
-
-// ============================================================================
 // Z-Index Constants
 // ============================================================================
 
@@ -157,7 +103,7 @@ pub fn aria_live(politeness: &str, relevant: &str) -> String {
 /// ```
 pub fn sr_only(text: &str) -> ElementBuilder {
     el(El::Span)
-        .class("rw-sr-only")
+        .st([St::SrOnly])
         .text(text)
 }
 
@@ -249,15 +195,14 @@ impl AriaAttrs for ElementBuilder {
 /// let modal_backdrop = backdrop("rw-modal-backdrop", Z_MODAL_BACKDROP, true);
 /// ```
 pub fn backdrop(class: &str, z_index: &str, visible: bool) -> ElementBuilder {
-    let mut classes = class.to_string();
-    if !visible {
-        classes.push_str(" rw-hidden");
-    }
-
-    el(El::Div)
-        .class(&classes)
+    let mut builder = el(El::Div)
+        .class(class)
         .attr("style", &format!("z-index:{}", z_index))
-        .aria_hidden(!visible)
+        .aria_hidden(!visible);
+    if !visible {
+        builder = builder.st([St::DisplayNone]);
+    }
+    builder
 }
 
 /// Creates a focus trap container for accessible modals/dialogs.
@@ -352,8 +297,7 @@ pub mod keys {
 pub fn portal_container(id: &str) -> ElementBuilder {
     el(El::Div)
         .at_str(At::Id, id)
-        .class("rw-portal")
-        .st([St::PositionFixed, St::Top0, St::Left0, St::Z9999])
+        .st([St::PositionFixed, St::Top0, St::Left0, St::Z9999, St::PointerEventsNone])
 }
 
 // ============================================================================

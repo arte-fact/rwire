@@ -97,7 +97,6 @@ mod encoder {
         let el = buf.create(El::Button.as_u8());
         buf.bind_local(el, Ev::Click.as_u8(), 0);
         buf.bind_remote(el, Ev::Submit.as_u8(), 1);
-        buf.bind_optimistic(el, Ev::Input.as_u8(), 2);
 
         let bytes = buf.finish();
         assert_eq!(
@@ -113,10 +112,6 @@ mod encoder {
                 0,
                 Ev::Submit.as_u8(),
                 1,
-                0x32,
-                0,
-                Ev::Input.as_u8(),
-                2,
             ]
         );
     }

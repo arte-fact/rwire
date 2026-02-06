@@ -10,9 +10,10 @@
 //! # Example
 //!
 //! ```ignore
-//! use rwire::{el, El, Ev, Server, ClientState, handler, renderer};
+//! use rwire::{el, El, Ev, Server, State, handler, renderer};
 //!
-//! #[derive(ClientState, Default)]
+//! #[derive(State, Default)]
+//! #[storage(memory)]
 //! struct Counter {
 //!     count: i32,
 //! }
@@ -81,8 +82,6 @@ pub use builder::{el, ElementBuilder};
 pub use item_ref::{ItemRef, IterWithRef};
 
 // State exports
-#[allow(deprecated)]
-pub use state::ClientState;
 pub use state::{
     get_local_state_default_json, register_local_state_default, ChangeSet, EventContext,
     EventPayload, HandlerFn, HandlerSpec, LocalMutations, LocalState, LocalStateJson, MemoryState,
@@ -166,8 +165,6 @@ pub use metrics::{Counter, Gauge, Histogram, Metrics};
 pub use session::{Session, SessionId};
 
 // Macro re-exports
-#[allow(deprecated)]
-pub use rwire_macros::ClientState;
 pub use rwire_macros::{handler, renderer, State};
 
 // Re-export common types for convenience

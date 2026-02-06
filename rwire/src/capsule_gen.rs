@@ -7,8 +7,8 @@
 //! interpreter (~150 bytes) that executes mutations on the client without
 //! server round-trips.
 //!
-//! The capsule also includes design token CSS and component CSS, tree-shaken
-//! to include only the styles for components actually used.
+//! For styled capsules, CSS is embedded in a `<style>` tag within `<head>`,
+//! tree-shaken to include only the styles for components actually used.
 
 use std::collections::HashSet;
 
@@ -148,7 +148,7 @@ fn generate_style_value_map(used: &HashSet<u8>) -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={};
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
@@ -184,13 +184,12 @@ else if(o===O.D){let f=d[i++],[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f
 else if(o===O.P){let p=d[i++],c=d[i++];(p<255?r[p]:document.body).appendChild(r[c])}
 else if(o===O.CC){r[d[i++]].innerHTML=''}
 else if(o===O.B){BL(d,i,r);i+=3}
-else if(o===O.R||o===O.O){let f=d[i++],t=d[i++],h=d[i++];r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
+else if(o===O.R){let f=d[i++],t=d[i++],h=d[i++];r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
 else if(o===O.DB){let f=d[i++],t=d[i++],h=d[i++],ms=(d[i++]<<8)|d[i++];let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
 else if(o===O.RP){let f=d[i++],t=d[i++],h=d[i++],pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sep(h,t,f,prm,e,r[f])})}
 else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
 else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
-else if(o===O.SI){let l=(d[i++]<<8)|d[i++];let css=new TextDecoder().decode(d.slice(i,i+l));let st=document.createElement('style');st.textContent=css;document.head.appendChild(st);i+=l}
 else if(o===O.SS){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
 else if(o===O.SU){let f=d[i++],[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
 else if(o===O.SP){let f=d[i++],p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
@@ -309,6 +308,8 @@ pub struct CapsuleConfig {
     pub used_attr_keys: HashSet<u8>,
     /// Used attribute value codes (for tree-shaking)
     pub used_attr_values: HashSet<u8>,
+    /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
+    pub composite_css: String,
 }
 
 impl CapsuleConfig {
@@ -415,6 +416,12 @@ impl CapsuleConfig {
         self
     }
 
+    /// Set pre-generated composite CSS from style grouping analysis.
+    pub fn with_composite_css(mut self, css: String) -> Self {
+        self.composite_css = css;
+        self
+    }
+
     /// Check if any style tokens are used.
     pub fn has_style_tokens(&self) -> bool {
         !self.used_style_utils.is_empty()
@@ -465,11 +472,7 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     let base_css = generate_base_css();
     let mut used_vars = extract_used_variables(base_css);
 
-    // 2. Utility CSS (icons, sr-only, etc.) - still class-based
-    use crate::components::utils::UTILS_CSS;
-    used_vars.extend(extract_used_variables(UTILS_CSS));
-
-    // 3. Generate utility + pseudo token CSS (class-based, tree-shaken)
+    // 2. Generate utility + pseudo token CSS (class-based, tree-shaken)
     let utility_token_css = generate_utility_css(&config.used_style_utils);
     let pseudo_token_css = generate_pseudo_css(&config.used_pseudo_pairs);
 
@@ -477,11 +480,11 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     used_vars.extend(extract_used_variables(&utility_token_css));
     used_vars.extend(extract_used_variables(&pseudo_token_css));
 
-    // 4. Generate semantic CSS to extract primitive variables it references
+    // 3. Generate semantic CSS to extract primitive variables it references
     let semantic_css = generate_semantic_css();
     used_vars.extend(extract_used_variables(&semantic_css));
 
-    // 5. Also check theme overrides for additional variables
+    // 4. Also check theme overrides for additional variables
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
         used_vars.extend(extract_used_variables(&accent_css));
     }
@@ -489,20 +492,19 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         used_vars.extend(extract_used_variables(radius_css));
     }
 
-    // 6. Base reset (must come first)
+    // 5. Base reset (must come first)
     css.push_str(base_css);
 
-    // 7. Generate primitive tokens
-    // If a custom palette is set, use it; otherwise use tree-shaken defaults
+    // 6. Primitive tokens (tree-shaken or from custom palette)
     match &config.palette {
         Some(palette) => css.push_str(&generate_primitive_css_with_palette(palette)),
         None => css.push_str(&generate_primitive_css_filtered(&used_vars)),
     }
 
-    // 8. Semantic tokens
+    // 7. Semantic tokens
     css.push_str(&semantic_css);
 
-    // 9. Theme overrides
+    // 8. Theme overrides
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
         css.push_str(&accent_css);
     }
@@ -510,14 +512,16 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         css.push_str(radius_css);
     }
 
-    // 10. Utility CSS (icons, sr-only, etc.)
-    css.push_str(UTILS_CSS);
-
-    // 11. Utility token CSS classes (.u{code}{declaration})
+    // 9. Utility token CSS classes (.u{code}{declaration})
     css.push_str(&utility_token_css);
 
-    // 12. Pseudo-class token CSS rules (.p{code}:hover{...}, etc.)
+    // 10. Pseudo-class token CSS rules (.h{pc}u{st}:hover{...}, etc.)
     css.push_str(&pseudo_token_css);
+
+    // 11. Composite style CSS classes (.c{id}{declarations})
+    if !config.composite_css.is_empty() {
+        css.push_str(&config.composite_css);
+    }
 
     css
 }
@@ -528,16 +532,16 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 /// Includes:
 /// - Tree-shaken element/event mappings
 /// - Theme data attributes on root element
-/// - Component CSS (delivered via WebSocket STYLE_INJECT opcode)
+/// - CSS embedded in `<style>` tag (tree-shaken utility + semantic + theme CSS)
 ///
-/// CSS is delivered via the binary WebSocket protocol (STYLE_INJECT opcode)
-/// as the first message, before the DOM. This eliminates the extra HTTP request
-/// and aligns with rwire's philosophy of all rendering data flowing through
-/// the WebSocket.
+/// CSS is embedded directly in the capsule HTML `<style>` tag within `<head>`.
+/// This ensures styles are available immediately when the page loads,
+/// without waiting for the WebSocket connection.
 pub fn generate_styled_capsule(
     used_elements: &HashSet<u8>,
     used_events: &HashSet<u8>,
     config: &CapsuleConfig,
+    css: &str,
 ) -> String {
     let elements_js = generate_element_map(used_elements);
     let events_js = generate_event_map(used_events);
@@ -560,8 +564,10 @@ pub fn generate_styled_capsule(
     };
 
     // Theme attrs go on <html> so CSS variables cascade properly to body
+    // CSS is embedded in <style> tag so styles are available before WS connects
     format!(
-        r#"<!DOCTYPE html><html {theme_attrs}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+        r#"<!DOCTYPE html><html {theme_attrs}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>{css}</style></head><body>
 <div id="rw"></div>
 <script>
 const E={{{elements_js}}};
@@ -663,14 +669,15 @@ mod tests {
             .theme(Theme::dark().with_accent(AccentColor::Green))
             .has_local_handlers(false);
 
-        let capsule = generate_styled_capsule(&elements, &events, &config);
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
 
         // Should have HTML structure
         assert!(capsule.contains("<!DOCTYPE html>"));
 
-        // CSS is now delivered via WebSocket STYLE_INJECT, not in HTML
-        assert!(!capsule.contains("<style>"));
-        assert!(!capsule.contains("<link rel=\"stylesheet\""));
+        // CSS should be embedded in <style> tag
+        assert!(capsule.contains("<style>"));
+        assert!(capsule.contains("box-sizing"));
 
         // Should have theme data attribute
         assert!(capsule.contains("data-theme=\"dark\""));
@@ -685,6 +692,31 @@ mod tests {
     }
 
     #[test]
+    fn test_styled_capsule_contains_css() {
+        let mut elements = HashSet::new();
+        elements.insert(0); // div
+
+        let mut events = HashSet::new();
+        events.insert(1); // click
+
+        let mut used_utils = HashSet::new();
+        used_utils.insert(0xC0); // BgApp
+
+        let config = CapsuleConfig::new()
+            .with_style_utils(&used_utils);
+
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        // CSS should be in <style> tag within <head>
+        assert!(capsule.contains("<style>"));
+        assert!(capsule.contains("</style></head>"));
+
+        // Should contain generated CSS content
+        assert!(capsule.contains("--rw-bg-app"));
+    }
+
+    #[test]
     fn test_styled_capsule_size() {
         let mut elements = HashSet::new();
         elements.insert(0); // div
@@ -694,16 +726,11 @@ mod tests {
         events.insert(1); // click
 
         let config = CapsuleConfig::new();
-        let capsule = generate_styled_capsule(&elements, &events, &config);
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
 
-        // HTML capsule should be small (CSS is delivered via WebSocket)
-        // Should be well under 7KB without inline CSS
-        assert!(
-            capsule.len() < 6500,
-            "Styled capsule too large: {} bytes (CSS should be delivered via WebSocket)",
-            capsule.len()
-        );
-        println!("Styled capsule size: {} bytes", capsule.len());
+        // Capsule includes CSS in <style> tag - should be reasonable size
+        println!("Styled capsule size: {} bytes (CSS embedded)", capsule.len());
     }
 
     #[test]
@@ -779,5 +806,50 @@ mod tests {
         let config = CapsuleConfig::dark();
         assert_eq!(config.theme.mode, ThemeMode::Dark);
         assert!(config.palette.is_none());
+    }
+
+    #[test]
+    fn test_composite_css_included_in_capsule() {
+        let mut elements = HashSet::new();
+        elements.insert(0); // div
+
+        let events = HashSet::new();
+
+        let config = CapsuleConfig::new()
+            .with_composite_css(".c256{display:flex;flex-direction:column;gap:var(--rw-space-4)}".to_string());
+
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        // Composite CSS should be embedded in the <style> tag
+        assert!(css.contains(".c256{"), "Composite CSS missing from generated CSS");
+        assert!(capsule.contains(".c256{"), "Composite CSS missing from capsule HTML");
+    }
+
+    #[test]
+    fn test_composite_css_appended_after_utility_css() {
+        let mut used_utils = HashSet::new();
+        used_utils.insert(0x02); // DisplayFlex
+
+        let config = CapsuleConfig::new()
+            .with_style_utils(&used_utils)
+            .with_composite_css(".c256{display:flex;gap:1rem}".to_string());
+
+        let css = generate_capsule_css(&config);
+
+        // Utility CSS for .u2 should come before composite CSS .c256
+        let utility_pos = css.find(".u2{").expect("utility CSS .u2 not found");
+        let composite_pos = css.find(".c256{").expect("composite CSS .c256 not found");
+        assert!(utility_pos < composite_pos, "Composite CSS should come after utility CSS");
+    }
+
+    #[test]
+    fn test_empty_composite_css_not_appended() {
+        let config = CapsuleConfig::new();
+        assert!(config.composite_css.is_empty());
+
+        let css = generate_capsule_css(&config);
+        // Should not contain any composite class patterns
+        assert!(!css.contains(".c256"), "Empty composite CSS should not produce .c256");
     }
 }

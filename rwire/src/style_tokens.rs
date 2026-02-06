@@ -679,6 +679,9 @@ pub enum St {
     TransitionTransformFast = 0x2B9, // transition:transform .2s
     MxSp2 = 0x2BA,                // margin-inline:var(--rw-space-2)
     BorderStyleSolid = 0x2BB,     // border-style:solid
+
+    // Vertical alignment (0x2BC)
+    VerticalAlignMiddle = 0x2BC,   // vertical-align:middle
 }
 
 impl St {
@@ -1278,6 +1281,7 @@ impl St {
             Self::TransitionTransformFast => "transition:transform .2s",
             Self::MxSp2 => "margin-inline:var(--rw-space-2)",
             Self::BorderStyleSolid => "border-style:solid",
+            Self::VerticalAlignMiddle => "vertical-align:middle",
         }
     }
 }
@@ -2165,6 +2169,8 @@ pub const UTIL_MAPPINGS: &[(u16, &str)] = &[
     (0x2B9, "transition:transform .2s"),
     (0x2BA, "margin-inline:var(--rw-space-2)"),
     (0x2BB, "border-style:solid"),
+    // Vertical alignment
+    (0x2BC, "vertical-align:middle"),
 ];
 
 /// All property mappings for JS runtime generation.
@@ -2409,7 +2415,7 @@ pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360d
 /// Generate CSS rules for all used utility tokens.
 ///
 /// Each used token becomes a CSS class rule: `.u{code}{declaration}`
-/// These rules are injected via STYLE_INJECT and replace the JS lookup table.
+/// These rules are embedded in the capsule `<style>` tag and replace the JS lookup table.
 pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
     let mut css = String::with_capacity(used.len() * 30);
     let mut needs_spin_keyframes = false;

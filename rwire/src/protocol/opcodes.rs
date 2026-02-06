@@ -132,9 +132,6 @@ pub const ROUTE_REPLACE: u8 = 0x71;
 // Styling Operations
 // ============================================================================
 
-/// Inject CSS styles. Format: [STYLE_INJECT, len_hi, len_lo, css_bytes...]
-pub const STYLE_INJECT: u8 = 0x80;
-
 /// Set inline style. Format: [STYLE_SET, ref, style_symbol]
 pub const STYLE_SET: u8 = 0x81;
 

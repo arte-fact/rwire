@@ -935,38 +935,6 @@ impl std::fmt::Debug for HandlerSpec {
     }
 }
 
-// ============================================================================
-// ClientState (Deprecated)
-// ============================================================================
-
-/// Marker trait for client state types.
-///
-/// **Deprecated**: Use `#[derive(State)]` with `#[storage(memory)]` instead.
-///
-/// This trait is kept for backwards compatibility and is an alias for `MemoryState`.
-///
-/// # Example
-///
-/// ```ignore
-/// // Old way (deprecated):
-/// #[derive(ClientState, Default)]
-/// struct Counter { count: i32 }
-///
-/// // New way:
-/// #[derive(State, Default)]
-/// #[storage(memory)]  // or omit for default
-/// struct Counter { count: i32 }
-/// ```
-#[deprecated(
-    since = "0.2.0",
-    note = "Use #[derive(State)] with #[storage(memory)] instead"
-)]
-pub trait ClientState: Default + Send + Sync + 'static {}
-
-// Blanket implementation: any MemoryState is also a ClientState (for backwards compatibility)
-#[allow(deprecated)]
-impl<T: MemoryState> ClientState for T {}
-
 /// Type alias for stateful handler functions.
 pub type StatefulHandler<S> = fn(&mut S);
 
@@ -1092,10 +1060,9 @@ impl Clone for HandlerFn {
 }
 
 impl HandlerFn {
-    /// Create a new handler for the given ClientState type (legacy API).
+    /// Create a new handler for the given MemoryState type (legacy API).
     /// Uses `ChangeSet::all()` for backwards compatibility.
-    #[allow(deprecated)]
-    pub fn new<S: ClientState>(handler: fn(&mut S)) -> Self {
+    pub fn new<S: MemoryState>(handler: fn(&mut S)) -> Self {
         Self {
             inner: Box::new(TypedHandler {
                 handler,

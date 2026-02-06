@@ -751,4 +751,198 @@ mod tests {
         assert!(!analysis.composite_table.is_empty());
         assert!(analysis.estimated_savings > 0);
     }
+
+    // ========================================================================
+    // BuildContext Integration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_build_context_analyzes_composites() {
+        use crate::builder::{el, BuildContext};
+        use crate::protocol::El;
+        use crate::style_tokens::St;
+
+        // Build tree with repeated style patterns (3+ uses triggers compositing)
+        let root = el(El::Div).append([
+            el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd]),
+            el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd]),
+            el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd]),
+        ]);
+
+        let mut ctx = BuildContext::new();
+        let placeholder: () = ();
+        ctx.collect_symbols(&root, &placeholder);
+        ctx.analyze_style_patterns(&root);
+
+        // Composite table should be populated
+        let table = ctx.composite_table();
+        assert!(!table.is_empty(), "Composite table should not be empty after analysis");
+
+        // The 4-util pattern used 3 times should have a composite
+        let flex_col_gap_p = [
+            St::DisplayFlex as u16,
+            St::FlexCol as u16,
+            St::GapMd as u16,
+            St::PMd as u16,
+        ];
+        assert!(
+            table.get_composite_id(&flex_col_gap_p).is_some(),
+            "Expected composite for repeated 4-util pattern"
+        );
+    }
+
+    #[test]
+    fn test_build_context_emits_composite_opcode() {
+        use crate::builder::{el, BuildContext};
+        use crate::protocol::{El, opcodes};
+        use crate::style_tokens::St;
+
+        // Build tree with repeated style patterns
+        let root = el(El::Div).append([
+            el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd]),
+            el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd]),
+            el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd]),
+        ]);
+
+        let mut ctx = BuildContext::new();
+        let placeholder: () = ();
+        ctx.collect_symbols(&root, &placeholder);
+        ctx.analyze_style_patterns(&root);
+        ctx.emit(&root, &placeholder);
+        let bytes = ctx.finish();
+
+        // Should contain COMPOSITE_TABLE opcode (0x86)
+        assert!(
+            bytes.contains(&opcodes::COMPOSITE_TABLE),
+            "Emitted bytes should contain COMPOSITE_TABLE opcode (0x86)"
+        );
+
+        // Should contain STYLE_COMPOSITE opcode (0x85) instead of STYLE_MULTI (0x84)
+        assert!(
+            bytes.contains(&opcodes::STYLE_COMPOSITE),
+            "Emitted bytes should contain STYLE_COMPOSITE opcode (0x85)"
+        );
+
+        // Should NOT contain STYLE_MULTI for the composited pattern
+        // (individual STYLE_MULTI opcodes would be replaced by STYLE_COMPOSITE)
+        let multi_count = bytes.iter().filter(|&&b| b == opcodes::STYLE_MULTI).count();
+        let composite_count = bytes.iter().filter(|&&b| b == opcodes::STYLE_COMPOSITE).count();
+        assert!(
+            composite_count >= 3,
+            "Expected at least 3 STYLE_COMPOSITE opcodes, got {}",
+            composite_count
+        );
+        assert_eq!(
+            multi_count, 0,
+            "Expected no STYLE_MULTI opcodes for composited patterns, got {}",
+            multi_count
+        );
+    }
+
+    #[test]
+    fn test_composite_css_generation() {
+        use crate::style_tokens::St;
+
+        let mut collector = PatternCollector::new();
+
+        // Simulate button pattern: flex + center + gap-sm + px-md + py-sm (used 5 times)
+        let button_utils = [
+            St::DisplayFlex as u16,
+            St::ItemsCenter as u16,
+            St::GapSm as u16,
+            St::PxMd as u16,
+            St::PySm as u16,
+        ];
+        for _ in 0..5 {
+            collector.observe(&button_utils);
+        }
+
+        let table = CompositeTable::from_collector(&collector);
+        assert!(!table.is_empty(), "Should create composite for 5-use pattern");
+
+        let css = table.generate_css();
+        assert!(!css.is_empty(), "Composite CSS should not be empty");
+
+        // CSS should contain .c{id} class with declarations
+        assert!(css.contains(".c256{"), "CSS should start with .c256 (COMPOSITE_ID_START)");
+        assert!(css.contains("display:flex"), "CSS should contain display:flex");
+        assert!(css.contains("align-items:center"), "CSS should contain align-items:center");
+    }
+
+    #[test]
+    fn test_no_composites_for_unique_patterns() {
+        use crate::builder::{el, BuildContext};
+        use crate::protocol::El;
+        use crate::style_tokens::St;
+
+        // Build tree where each element has a unique style pattern
+        let root = el(El::Div).append([
+            el(El::Div).st([St::DisplayFlex, St::FlexCol]),
+            el(El::Div).st([St::DisplayGrid, St::GapMd]),
+            el(El::Div).st([St::PMd, St::BgApp]),
+        ]);
+
+        let mut ctx = BuildContext::new();
+        let placeholder: () = ();
+        ctx.collect_symbols(&root, &placeholder);
+        ctx.analyze_style_patterns(&root);
+
+        // No composites should be generated (each pattern unique)
+        assert!(
+            ctx.composite_table().is_empty(),
+            "Should not create composites for patterns used only once"
+        );
+    }
+
+    #[test]
+    fn test_composites_reduce_wire_bytes() {
+        use crate::builder::{el, BuildContext};
+        use crate::protocol::{El, opcodes};
+        use crate::style_tokens::St;
+
+        let pattern = [St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd, St::BgSubtle];
+
+        // Build tree WITHOUT composites (measure baseline)
+        let root_no_composite = el(El::Div).append([
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+        ]);
+
+        let mut ctx_no = BuildContext::new();
+        let placeholder: () = ();
+        ctx_no.collect_symbols(&root_no_composite, &placeholder);
+        // Intentionally NOT calling analyze_style_patterns
+        ctx_no.emit(&root_no_composite, &placeholder);
+        let bytes_no = ctx_no.finish();
+
+        // Build same tree WITH composites
+        let root_composite = el(El::Div).append([
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+            el(El::Div).st(pattern),
+        ]);
+
+        let mut ctx_yes = BuildContext::new();
+        ctx_yes.collect_symbols(&root_composite, &placeholder);
+        ctx_yes.analyze_style_patterns(&root_composite);
+        ctx_yes.emit(&root_composite, &placeholder);
+        let bytes_yes = ctx_yes.finish();
+
+        // Composite version should be smaller
+        assert!(
+            bytes_yes.len() < bytes_no.len(),
+            "Composite bytes ({}) should be less than atomic bytes ({})",
+            bytes_yes.len(),
+            bytes_no.len()
+        );
+
+        // Verify composite opcodes are present
+        assert!(bytes_yes.contains(&opcodes::COMPOSITE_TABLE));
+        assert!(bytes_yes.contains(&opcodes::STYLE_COMPOSITE));
+    }
 }

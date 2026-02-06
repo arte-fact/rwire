@@ -3,11 +3,11 @@
 use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
-    APPEND, BATCH_END, BIND_LOCAL, BIND_OPTIMISTIC, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
+    APPEND, BATCH_END, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
     ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA,
-    SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_COMPOSITE, STYLE_INJECT, STYLE_MULTI, STYLE_PROP,
+    SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP,
     STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START,
     WORD_TABLE,
 };
@@ -69,6 +69,11 @@ impl OpcodeBuffer {
     ///
     /// Symbol indices use varint encoding, allowing unlimited symbols.
     pub fn add_symbol(&mut self, s: &str) -> u32 {
+        assert!(
+            s.len() <= 255,
+            "add_symbol: symbol too long ({} bytes, max 255)",
+            s.len()
+        );
         let idx = self.next_symbol;
         self.buf.put_u8(s.len() as u8);
         self.buf.put_slice(s.as_bytes());
@@ -186,6 +191,11 @@ impl OpcodeBuffer {
     /// More compact than symbol table when words are reused across strings.
     /// Format: [SET_TEXT_WORDS, ref, count, idx0, idx1, ...]
     pub fn set_text_words(&mut self, ref_idx: u8, word_indices: &[u8]) -> &mut Self {
+        assert!(
+            word_indices.len() <= 255,
+            "set_text_words: too many words ({}, max 255)",
+            word_indices.len()
+        );
         self.buf.put_u8(SET_TEXT_WORDS);
         self.buf.put_u8(ref_idx);
         self.buf.put_u8(word_indices.len() as u8);
@@ -271,15 +281,6 @@ impl OpcodeBuffer {
         self
     }
 
-    /// Bind an optimistic handler (local + background sync).
-    pub fn bind_optimistic(&mut self, ref_idx: u8, event_type: u8, handler_idx: u8) -> &mut Self {
-        self.buf.put_u8(BIND_OPTIMISTIC);
-        self.buf.put_u8(ref_idx);
-        self.buf.put_u8(event_type);
-        self.buf.put_u8(handler_idx);
-        self
-    }
-
     /// Bind a remote event handler with parameter bytes.
     ///
     /// The param_bytes are stored on the element and sent back with the event,
@@ -293,6 +294,11 @@ impl OpcodeBuffer {
         handler_idx: u8,
         param_bytes: &[u8],
     ) -> &mut Self {
+        assert!(
+            param_bytes.len() <= 255,
+            "bind_remote_param: param_bytes too large ({} bytes, max 255)",
+            param_bytes.len()
+        );
         self.buf.put_u8(BIND_REMOTE_PARAM);
         self.buf.put_u8(ref_idx);
         self.buf.put_u8(event_type);
@@ -418,16 +424,6 @@ impl OpcodeBuffer {
     // Styling Operations
     // ========================================================================
 
-    /// Inject CSS styles.
-    pub fn style_inject(&mut self, css: &str) -> &mut Self {
-        let bytes = css.as_bytes();
-        self.buf.put_u8(STYLE_INJECT);
-        self.buf.put_u8((bytes.len() >> 8) as u8);
-        self.buf.put_u8(bytes.len() as u8);
-        self.buf.put_slice(bytes);
-        self
-    }
-
     /// Set inline style on an element.
     ///
     /// Symbol index uses varint encoding.
@@ -466,6 +462,11 @@ impl OpcodeBuffer {
     /// Format: [STYLE_MULTI, ref, count, util1_varint, util2_varint, ...]
     /// More efficient than multiple STYLE_UTIL calls for >2 utilities.
     pub fn style_multi(&mut self, ref_idx: u8, utils: &[u16]) -> &mut Self {
+        assert!(
+            utils.len() <= 255,
+            "style_multi: too many tokens ({}, max 255)",
+            utils.len()
+        );
         self.buf.put_u8(STYLE_MULTI);
         self.buf.put_u8(ref_idx);
         self.buf.put_u8(utils.len() as u8);
@@ -489,6 +490,11 @@ impl OpcodeBuffer {
     ///
     /// Format: [STYLE_PSEUDO, ref, pc_code, count, st1_varint, st2_varint, ...]
     pub fn style_pseudo(&mut self, ref_idx: u8, pc: u8, st_tokens: &[u16]) -> &mut Self {
+        assert!(
+            st_tokens.len() <= 255,
+            "style_pseudo: too many tokens ({}, max 255)",
+            st_tokens.len()
+        );
         self.buf.put_u8(STYLE_PSEUDO);
         self.buf.put_u8(ref_idx);
         self.buf.put_u8(pc);

@@ -18,6 +18,7 @@
 //! ```
 
 use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 
 /// Icon identifiers for all available icons.
@@ -145,7 +146,20 @@ impl Icon {
 ///     .append([icon(Icon::Close)]);
 /// ```
 pub fn icon(icon: Icon) -> ElementBuilder {
-    icon_with_class(icon, "rw-icon")
+    el(El::Svg)
+        .st([St::DisplayInlineBlock, St::VerticalAlignMiddle, St::FlexShrink0])
+        .at(At::Xmlns, Av::SvgNs)
+        .at(At::Width, Av::V24)
+        .at(At::Height, Av::V24)
+        .at(At::ViewBox, Av::ViewBox24)
+        .at(At::Fill, Av::None)
+        .at(At::Stroke, Av::CurrentColor)
+        .at(At::StrokeWidth, Av::Stroke2)
+        .at(At::StrokeLinecap, Av::Round)
+        .at(At::StrokeLinejoin, Av::Round)
+        .append([
+            el(El::Path).at_str(At::D, icon.svg_path())
+        ])
 }
 
 /// Creates an icon element with a custom CSS class.
@@ -153,7 +167,7 @@ pub fn icon(icon: Icon) -> ElementBuilder {
 /// # Arguments
 ///
 /// * `icon` - The icon to render
-/// * `class` - CSS class name to apply
+/// * `class` - CSS class name to apply (escape hatch for custom styling)
 ///
 /// # Example
 ///
@@ -161,7 +175,7 @@ pub fn icon(icon: Icon) -> ElementBuilder {
 /// use rwire::{el, El};
 /// use rwire::icons::{icon_with_class, Icon};
 ///
-/// let large_icon = icon_with_class(Icon::Check, "rw-icon rw-icon-lg");
+/// let large_icon = icon_with_class(Icon::Check, "custom-icon");
 /// ```
 pub fn icon_with_class(icon: Icon, class: &str) -> ElementBuilder {
     el(El::Svg)
@@ -198,7 +212,7 @@ pub fn icon_with_class(icon: Icon, class: &str) -> ElementBuilder {
 pub fn icon_sized(icon: Icon, size: u32) -> ElementBuilder {
     let size_str = size.to_string();
     el(El::Svg)
-        .class("rw-icon")
+        .st([St::DisplayInlineBlock, St::VerticalAlignMiddle, St::FlexShrink0])
         .at(At::Xmlns, Av::SvgNs)
         .attr("width", &size_str)
         .attr("height", &size_str)
