@@ -62,13 +62,16 @@
 //!     .build()
 //! ```
 
+mod accordion;
 mod alert;
 mod avatar;
 mod badge;
+mod blockquote;
 mod breadcrumb;
 mod button;
 mod card;
 mod checkbox;
+mod code;
 mod container;
 mod divider;
 mod form_field;
@@ -79,8 +82,10 @@ mod list;
 mod modal;
 mod pagination;
 mod progress;
+mod prose;
 mod radio;
 mod select;
+mod skeleton;
 mod spacer;
 mod spinner;
 mod stack;
@@ -92,13 +97,16 @@ mod textarea;
 mod theme_toggle;
 pub mod utils;
 
+pub use accordion::{Accordion, AccordionItem};
 pub use alert::{Alert, AlertIntent};
 pub use avatar::{Avatar, AvatarSize};
 pub use badge::{Badge, BadgeIntent};
+pub use blockquote::Blockquote;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonIntent, ButtonSize};
 pub use card::{Card, CardPadding, CardShadow};
 pub use checkbox::Checkbox;
+pub use code::{Code, CodeMode};
 pub use container::{Container, ContainerSize};
 pub use divider::{Divider, SpacingSize};
 pub use form_field::FormField;
@@ -109,8 +117,10 @@ pub use list::{List, ListItem};
 pub use modal::{Modal, ModalSize};
 pub use pagination::Pagination;
 pub use progress::Progress;
+pub use prose::{Prose, ProseSize};
 pub use radio::Radio;
 pub use select::{Select, SelectOption};
+pub use skeleton::{Skeleton, SkeletonShape};
 pub use spacer::Spacer;
 pub use spinner::{Spinner, SpinnerSize};
 pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify};

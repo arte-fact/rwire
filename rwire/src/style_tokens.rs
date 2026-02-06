@@ -700,6 +700,21 @@ define_token_enum! {
 
         // Border-left for blockquote (0x2C3)
         BorderL3Accent = 0x2C3 => "border-left:3px solid var(--rw-accent-7)",
+
+        // List style (0x2C4)
+        ListDisc = 0x2C4 => "list-style-type:disc",
+
+        // Max-height 0 for collapsed accordion (0x2C5)
+        MaxH0 = 0x2C5 => "max-height:0",
+
+        // Prose container tokens (0x2C6-0x2CA)
+        LeadingRelaxedProse = 0x2C6 => "line-height:1.75",
+        MaxWProse = 0x2C7 => "max-width:65ch",
+        SpaceYMd = 0x2C8 => "& > * + *{margin-top:var(--rw-space-4)}",
+        SpaceYSm = 0x2C9 => "& > * + *{margin-top:var(--rw-space-2)}",
+
+        // Skeleton shimmer (0x2CA)
+        BgShimmer = 0x2CA => "background:linear-gradient(90deg,var(--rw-bg-muted) 0%,var(--rw-bg-subtle) 50%,var(--rw-bg-muted) 100%);background-size:200% 100%;animation:rw-shimmer 1.5s ease-in-out infinite",
     }
 }
 
@@ -931,7 +946,7 @@ define_token_enum! {
 }
 
 /// Global CSS rules injected alongside pseudo tokens (e.g., @keyframes).
-pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}";
+pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}";
 
 // ============================================================================
 // CSS Generation Functions
@@ -943,17 +958,17 @@ pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360d
 /// These rules are embedded in the capsule `<style>` tag and replace the JS lookup table.
 pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
     let mut css = String::with_capacity(used.len() * 30);
-    let mut needs_spin_keyframes = false;
+    let mut needs_global_keyframes = false;
     for &(code, declaration) in UTIL_MAPPINGS {
         if used.contains(&code) {
             use std::fmt::Write;
             let _ = write!(css, ".u{}{{{}}}", code, declaration);
-            if declaration.contains("rw-spin") {
-                needs_spin_keyframes = true;
+            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") {
+                needs_global_keyframes = true;
             }
         }
     }
-    if needs_spin_keyframes {
+    if needs_global_keyframes {
         css.push_str(PSEUDO_GLOBAL_CSS);
     }
     css
@@ -990,7 +1005,7 @@ pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> Strin
                 ".h{}u{}{}{{{}}}",
                 pc_code, st_code, selector, declaration
             );
-            if declaration.contains("rw-spin") {
+            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") {
                 needs_spin_keyframes = true;
             }
         }
