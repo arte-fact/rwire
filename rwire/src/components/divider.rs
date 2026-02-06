@@ -12,6 +12,7 @@
 //! Divider::horizontal().margin(SpacingSize::Lg).build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -78,47 +79,39 @@ impl Divider {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-divider");
+    /// Compute style tokens for this divider configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![St::BorderNone];
 
         if self.vertical {
-            classes.push_str(" rw-divider-v");
+            tokens.push(St::BorderLSubtle);
+            // Vertical divider needs height:100% and horizontal margin
+            // Using style() for width:1px since it's one-off
+        } else {
+            tokens.push(St::BorderTSubtle);
         }
 
         match self.margin {
-            SpacingSize::None => classes.push_str(" rw-divider-m0"),
-            SpacingSize::Xs => classes.push_str(" rw-divider-mxs"),
-            SpacingSize::Sm => classes.push_str(" rw-divider-msm"),
-            SpacingSize::Md => {}
-            SpacingSize::Lg => classes.push_str(" rw-divider-mlg"),
-            SpacingSize::Xl => classes.push_str(" rw-divider-mxl"),
+            SpacingSize::None => tokens.push(St::My0),
+            SpacingSize::Xs => tokens.push(St::MyXs),
+            SpacingSize::Sm => tokens.push(St::MySm),
+            SpacingSize::Md => tokens.push(St::MyMd),
+            SpacingSize::Lg => tokens.push(St::MyLg),
+            SpacingSize::Xl => tokens.push(St::MyXl),
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the divider into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::Divider);
-
-        let class = self.compute_class();
-        el(El::Hr).class(&class)
+        let mut tokens = self.compute_tokens();
+        if self.vertical {
+            tokens.extend([St::HFull, St::MxMd]);
+        }
+        el(El::Hr).st(tokens)
     }
 }
-
-/// Divider CSS.
-pub const DIVIDER_CSS: &str = "\
-.rw-divider{border:none;border-top:1px solid var(--rw-border-subtle);margin:var(--rw-space-4) 0}\
-.rw-divider-v{border-top:none;border-left:1px solid var(--rw-border-subtle);height:100%;margin:0 var(--rw-space-4)}\
-.rw-divider-m0{margin:0}.rw-divider-mxs{margin:var(--rw-space-1) 0}\
-.rw-divider-msm{margin:var(--rw-space-2) 0}.rw-divider-mlg{margin:var(--rw-space-6) 0}\
-.rw-divider-mxl{margin:var(--rw-space-8) 0}\n";
 
 #[cfg(test)]
 mod tests {
@@ -132,20 +125,20 @@ mod tests {
     }
 
     #[test]
-    fn test_divider_class_default() {
+    fn test_divider_default_tokens() {
         let divider = Divider::new();
-        assert_eq!(divider.compute_class(), "rw-divider");
+        let tokens = divider.compute_tokens();
+        assert!(tokens.contains(&St::BorderNone));
+        assert!(tokens.contains(&St::BorderTSubtle));
+        assert!(tokens.contains(&St::MyMd));
     }
 
     #[test]
-    fn test_divider_class_vertical() {
+    fn test_divider_vertical_tokens() {
         let divider = Divider::vertical().margin(SpacingSize::Lg);
-        assert_eq!(divider.compute_class(), "rw-divider rw-divider-v rw-divider-mlg");
+        let tokens = divider.compute_tokens();
+        assert!(tokens.contains(&St::BorderLSubtle));
+        assert!(tokens.contains(&St::MyLg));
     }
 
-    #[test]
-    fn test_divider_css_size() {
-        assert!(DIVIDER_CSS.len() < 500, "Divider CSS too large: {} bytes", DIVIDER_CSS.len());
-        println!("Divider CSS size: {} bytes", DIVIDER_CSS.len());
-    }
 }

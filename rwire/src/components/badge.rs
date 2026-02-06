@@ -12,6 +12,7 @@
 //! Badge::error("Failed").build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -57,8 +58,6 @@ impl Badge {
         self
     }
 
-    // Convenience constructors
-
     /// Default badge with text.
     pub fn default_badge(text: impl Into<Cow<'static, str>>) -> Self {
         Self::new().text(text)
@@ -90,33 +89,50 @@ impl Badge {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str("rw-badge");
+    /// Compute style tokens for this badge configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::DisplayInlineFlex,
+            St::ItemsCenter,
+            St::PxSm,
+            St::TextXs,
+            St::FontMedium,
+            St::RoundedFull,
+        ];
 
         match self.intent {
-            BadgeIntent::Default => {}
-            BadgeIntent::Primary => classes.push_str(" rw-badge-primary"),
-            BadgeIntent::Success => classes.push_str(" rw-badge-success"),
-            BadgeIntent::Warning => classes.push_str(" rw-badge-warning"),
-            BadgeIntent::Error => classes.push_str(" rw-badge-error"),
+            BadgeIntent::Default => {
+                tokens.push(St::BgEmphasis);
+                tokens.push(St::TextHigh);
+            }
+            BadgeIntent::Primary => {
+                tokens.push(St::BgAccent4);
+                tokens.push(St::TextAccent11);
+            }
+            BadgeIntent::Success => {
+                tokens.push(St::BgGreen4);
+                tokens.push(St::TextGreen11);
+            }
+            BadgeIntent::Warning => {
+                tokens.push(St::BgAmber4);
+                tokens.push(St::TextAmber11);
+            }
+            BadgeIntent::Error => {
+                tokens.push(St::BgRed4);
+                tokens.push(St::TextRed11);
+            }
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the badge into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Badge);
+        let mut builder = el(El::Span).st(self.compute_tokens());
 
-        let class = self.compute_class();
-        let mut builder = el(El::Span).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         if let Some(text) = self.text {
             builder = builder.text(&text);
@@ -125,16 +141,6 @@ impl Badge {
         builder
     }
 }
-
-/// Badge CSS.
-pub const BADGE_CSS: &str = "\
-.rw-badge{display:inline-flex;align-items:center;padding:0 var(--rw-space-2);height:1.25rem;\
-font-size:var(--rw-text-xs);font-weight:var(--rw-font-medium);border-radius:var(--rw-radius-full);\
-background:var(--rw-bg-emphasis);color:var(--rw-text-high)}\
-.rw-badge-primary{background:var(--rw-accent-4);color:var(--rw-accent-11)}\
-.rw-badge-success{background:var(--rw-green-4);color:var(--rw-green-11)}\
-.rw-badge-warning{background:var(--rw-amber-4);color:var(--rw-amber-11)}\
-.rw-badge-error{background:var(--rw-red-4);color:var(--rw-red-11)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -147,20 +153,20 @@ mod tests {
     }
 
     #[test]
-    fn test_badge_class_default() {
+    fn test_badge_default_tokens() {
         let badge = Badge::new();
-        assert_eq!(badge.compute_class(), "rw-badge");
+        let tokens = badge.compute_tokens();
+        assert!(tokens.contains(&St::DisplayInlineFlex));
+        assert!(tokens.contains(&St::BgEmphasis));
+        assert!(tokens.contains(&St::TextHigh));
     }
 
     #[test]
-    fn test_badge_class_success() {
+    fn test_badge_success_tokens() {
         let badge = Badge::success("Active");
-        assert_eq!(badge.compute_class(), "rw-badge rw-badge-success");
+        let tokens = badge.compute_tokens();
+        assert!(tokens.contains(&St::BgGreen4));
+        assert!(tokens.contains(&St::TextGreen11));
     }
 
-    #[test]
-    fn test_badge_css_size() {
-        assert!(BADGE_CSS.len() < 600, "Badge CSS too large: {} bytes", BADGE_CSS.len());
-        println!("Badge CSS size: {} bytes", BADGE_CSS.len());
-    }
 }

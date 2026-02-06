@@ -17,6 +17,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
 
@@ -35,9 +37,6 @@ pub struct Switch {
 }
 
 impl Switch {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-switch";
-
     /// Create a new switch.
     pub fn new() -> Self {
         Self::default()
@@ -97,27 +96,21 @@ impl Switch {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str(Self::BASE_CLASS);
-
+    /// Compute style tokens for this switch configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::PositionRelative, St::RoundedFull, St::BgMuted,
+            St::CursorPointer, St::TransitionAll, St::FlexShrink0,
+            St::AppearanceNone,
+        ];
         if self.invalid {
-            classes.push_str(" rw-switch-invalid");
+            tokens.push(St::BorderRed8);
         }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the switch into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Switch);
-
         // Generate ID if label is provided but no explicit ID
         let element_id = self.id.clone().unwrap_or_else(|| {
             if self.label.is_some() {
@@ -127,46 +120,57 @@ impl Switch {
             }
         });
 
-        let class = self.compute_class();
+        let mut tokens = self.compute_tokens();
+        tokens.extend([St::W2_5rem, St::H1_25rem, St::Border2Default]);
         let mut input = el(El::Input)
-            .class(&class)
-            .attr("type", "checkbox")
-            .attr("role", "switch");
+            .st(tokens)
+            .after([St::ContentEmpty, St::PositionAbsolute, St::W1rem, St::H1rem, St::BgWhite, St::RoundedFull, St::TransitionTransformFast])
+            .checked([St::BgAccent])
+            .checked_after([St::TranslateXFull])
+            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .at(At::Type, Av::Checkbox)
+            .at(At::Role, Av::RoleSwitch);
+
+        if self.disabled {
+            input = input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+        }
 
         if !element_id.is_empty() {
-            input = input.attr("id", &element_id);
+            input = input.at_str(At::Id, &element_id);
         }
 
         if let Some(ref name) = self.name {
-            input = input.attr("name", name);
+            input = input.at_str(At::Name, name);
         }
         if let Some(ref value) = self.value {
-            input = input.attr("value", value);
+            input = input.at_str(At::Value, value);
         }
         if self.checked {
-            input = input.attr("checked", "");
+            input = input.bool_attr(At::Checked);
         }
         if self.disabled {
-            input = input.attr("disabled", "");
+            input = input.bool_attr(At::Disabled);
         }
         if self.required {
-            input = input.attr("required", "");
+            input = input.bool_attr(At::Required);
         }
         if self.invalid {
-            input = input.attr("aria-invalid", "true");
+            input = input.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref extra) = self.extra_class {
+            input = input.class(extra.as_ref());
         }
 
         // If label is provided, wrap in a container with label
         if let Some(label_text) = self.label {
-            // Use Stack for layout
             use crate::components::{Stack, Gap};
             Stack::row()
                 .gap(Gap::Xs)
                 .children([
                     input,
                     el(El::Label)
-                        .class("rw-switch-label")
-                        .attr("for", &element_id)
+                        .st([St::TextSm, St::TextHigh, St::CursorPointer])
+                        .at_str(At::For, &element_id)
                         .text(&label_text),
                 ])
                 .build()
@@ -181,21 +185,6 @@ impl Switch {
     }
 }
 
-/// Switch CSS.
-///
-/// Size: ~340 bytes (under 350 bytes budget)
-pub const SWITCH_CSS: &str = "\
-.rw-switch{position:relative;width:2.5rem;height:1.25rem;border:2px solid var(--rw-border-default);\
-border-radius:1rem;background:var(--rw-bg-muted);cursor:pointer;transition:all .2s;flex-shrink:0;appearance:none}\
-.rw-switch::after{content:\"\";position:absolute;left:2px;top:2px;width:0.75rem;height:0.75rem;\
-background:var(--rw-white);border-radius:50%;transition:transform .2s}\
-.rw-switch:checked{background:var(--rw-accent-9);border-color:var(--rw-accent-9)}\
-.rw-switch:checked::after{transform:translateX(1.25rem)}\
-.rw-switch:focus{outline:2px solid var(--rw-accent-8);outline-offset:2px}\
-.rw-switch:disabled{opacity:.5;cursor:not-allowed}\
-.rw-switch-invalid{border-color:var(--rw-red-8)}\
-.rw-switch-label{font-size:var(--rw-text-sm);color:var(--rw-text-high);cursor:pointer}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,36 +198,37 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_class_default() {
+    fn test_switch_default_tokens() {
         let sw = Switch::new();
-        assert_eq!(sw.compute_class(), "rw-switch");
+        let tokens = sw.compute_tokens();
+        assert!(tokens.contains(&St::PositionRelative));
+        assert!(tokens.contains(&St::RoundedFull));
+        assert!(tokens.contains(&St::BgMuted));
+        assert!(tokens.contains(&St::CursorPointer));
+        assert!(tokens.contains(&St::TransitionAll));
+        assert!(tokens.contains(&St::FlexShrink0));
+        assert!(tokens.contains(&St::AppearanceNone));
     }
 
     #[test]
-    fn test_switch_class_invalid() {
+    fn test_switch_pseudo_groups() {
+        let sw = Switch::new().build();
+        let groups = sw.get_pseudo_groups();
+        assert!(!groups.is_empty());
+    }
+
+    #[test]
+    fn test_switch_invalid_tokens() {
         let sw = Switch::new().invalid(true);
-        let class = sw.compute_class();
-        assert!(class.contains("rw-switch"));
-        assert!(class.contains("rw-switch-invalid"));
+        let tokens = sw.compute_tokens();
+        assert!(tokens.contains(&St::BorderRed8));
     }
 
     #[test]
-    fn test_switch_css_size() {
-        // Switch CSS should be under 350 bytes
-        assert!(
-            SWITCH_CSS.len() < 800,
-            "Switch CSS too large: {} bytes (budget: 800)",
-            SWITCH_CSS.len()
-        );
-        println!("Switch CSS size: {} bytes", SWITCH_CSS.len());
+    fn test_switch_disabled_pseudo_groups() {
+        let sw = Switch::new().disabled(true).build();
+        let groups = sw.get_pseudo_groups();
+        assert!(!groups.is_empty());
     }
 
-    #[test]
-    fn test_switch_css_structure() {
-        assert!(SWITCH_CSS.contains(".rw-switch{"));
-        assert!(SWITCH_CSS.contains(".rw-switch::after"));
-        assert!(SWITCH_CSS.contains(".rw-switch:checked"));
-        assert!(SWITCH_CSS.contains(".rw-switch-label"));
-        assert!(SWITCH_CSS.contains(".rw-switch-invalid"));
-    }
 }

@@ -35,6 +35,8 @@
 //! }
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{
     el, El, Ev, ElementBuilder, HandlerSpec,
     icons::{icon, Icon},
@@ -77,9 +79,6 @@ pub enum ToggleSize {
 }
 
 impl ThemeToggle {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-theme-toggle";
-
     /// Create a new theme toggle.
     pub fn new() -> Self {
         Self::default()
@@ -109,31 +108,22 @@ impl ThemeToggle {
         self
     }
 
-    /// Build the theme toggle component.
-    pub fn build(self) -> ElementBuilder {
-        // Register component for CSS tree-shaking
-        super::registry::mark_component_used(
-            super::registry::ComponentType::ThemeToggle
-        );
+    /// Compute style tokens for the theme toggle button.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![
+            St::DisplayInlineFlex, St::ItemsCenter, St::JustifyCenter,
+            St::BgTransparent, St::BorderDefault, St::RoundedMd,
+            St::TextDefault, St::CursorPointer, St::TransitionColors,
+        ]
+    }
 
-        let class = self.compute_class();
-        let icon_el = self.render_icon();
 
-        let mut button = el(El::Button)
-            .class(&class)
-            .attr("type", "button")
-            .attr("aria-label", "Toggle theme")
-            .append([
-                el(El::Span)
-                    .class("rw-theme-toggle-content")
-                    .append([icon_el])
-            ]);
-
-        if let Some(handler) = self.on_toggle {
-            button = button.on(Ev::Click, handler);
+    fn size_token(&self) -> St {
+        match self.size {
+            ToggleSize::Sm => St::PXs,
+            ToggleSize::Md => St::PSm,
+            ToggleSize::Lg => St::PSp3,
         }
-
-        button
     }
 
     fn render_icon(&self) -> ElementBuilder {
@@ -143,35 +133,28 @@ impl ThemeToggle {
         }
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(64);
-        classes.push_str(Self::BASE_CLASS);
+    /// Build the theme toggle component.
+    pub fn build(self) -> ElementBuilder {
+        let icon_el = self.render_icon();
+        let mut tokens = self.compute_tokens();
+        tokens.push(self.size_token());
 
-        match self.size {
-            ToggleSize::Sm => classes.push_str(" rw-theme-toggle-sm"),
-            ToggleSize::Md => {}
-            ToggleSize::Lg => classes.push_str(" rw-theme-toggle-lg"),
+        let mut button = el(El::Button)
+            .st(tokens)
+            .hover([St::BgHover])
+            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .active([St::Scale98])
+            .at(At::Type, Av::Button)
+            .at_str(At::AriaLabel, "Toggle theme")
+            .append([icon_el]);
+
+        if let Some(handler) = self.on_toggle {
+            button = button.on(Ev::Click, handler);
         }
 
-        classes
+        button
     }
 }
-
-/// ThemeToggle CSS.
-pub const THEME_TOGGLE_CSS: &str = "\
-.rw-theme-toggle{display:inline-flex;align-items:center;justify-content:center;\
-padding:var(--rw-space-2);background:transparent;border:1px solid var(--rw-border-default);\
-border-radius:var(--rw-radius-md);color:var(--rw-text-default);cursor:pointer;\
-transition:var(--rw-transition-fast)}\
-.rw-theme-toggle:hover{background:var(--rw-bg-hover);border-color:var(--rw-border-strong)}\
-.rw-theme-toggle:focus-visible{outline:2px solid var(--rw-accent-9);outline-offset:2px}\
-.rw-theme-toggle:active{background:var(--rw-bg-active)}\
-.rw-theme-toggle-sm{padding:var(--rw-space-1)}\
-.rw-theme-toggle-lg{padding:var(--rw-space-3)}\
-.rw-theme-toggle .rw-icon{width:20px;height:20px}\
-.rw-theme-toggle-sm .rw-icon{width:16px;height:16px}\
-.rw-theme-toggle-lg .rw-icon{width:24px;height:24px}\
-";
 
 #[cfg(test)]
 mod tests {
@@ -187,39 +170,27 @@ mod tests {
     }
 
     #[test]
-    fn test_theme_toggle_class_default() {
+    fn test_theme_toggle_tokens() {
         let toggle = ThemeToggle::new();
-        let class = toggle.compute_class();
-        assert_eq!(class, "rw-theme-toggle");
+        let tokens = toggle.compute_tokens();
+        assert!(tokens.contains(&St::DisplayInlineFlex));
+        assert!(tokens.contains(&St::ItemsCenter));
+        assert!(tokens.contains(&St::JustifyCenter));
+        assert!(tokens.contains(&St::BgTransparent));
+        assert!(tokens.contains(&St::BorderDefault));
+        assert!(tokens.contains(&St::RoundedMd));
+        assert!(tokens.contains(&St::TextDefault));
+        assert!(tokens.contains(&St::CursorPointer));
+        assert!(tokens.contains(&St::TransitionColors));
     }
 
     #[test]
-    fn test_theme_toggle_class_with_size() {
-        let toggle = ThemeToggle::new().size(ToggleSize::Sm);
-        let class = toggle.compute_class();
-        assert!(class.contains("rw-theme-toggle-sm"));
-
-        let toggle = ThemeToggle::new().size(ToggleSize::Lg);
-        let class = toggle.compute_class();
-        assert!(class.contains("rw-theme-toggle-lg"));
-    }
-
-    #[test]
-    fn test_theme_toggle_css_size() {
-        assert!(
-            THEME_TOGGLE_CSS.len() < 800,
-            "ThemeToggle CSS too large: {} bytes",
-            THEME_TOGGLE_CSS.len()
-        );
-        println!("ThemeToggle CSS size: {} bytes", THEME_TOGGLE_CSS.len());
-    }
-
-    #[test]
-    fn test_theme_toggle_css_structure() {
-        assert!(THEME_TOGGLE_CSS.contains(".rw-theme-toggle"));
-        assert!(THEME_TOGGLE_CSS.contains(".rw-theme-toggle:hover"));
-        assert!(THEME_TOGGLE_CSS.contains(".rw-theme-toggle-sm"));
-        assert!(THEME_TOGGLE_CSS.contains(".rw-theme-toggle-lg"));
+    fn test_theme_toggle_pseudo() {
+        let toggle = ThemeToggle::new().build();
+        let groups = toggle.get_pseudo_groups();
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x00)); // Pc::Hover
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x02)); // Pc::FocusVisible
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x03)); // Pc::Active
     }
 
     #[test]
@@ -227,4 +198,5 @@ mod tests {
         let toggle = ThemeToggle::new().mode(ThemeToggleMode::Dark);
         assert_eq!(toggle.current_mode, ThemeToggleMode::Dark);
     }
+
 }

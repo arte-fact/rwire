@@ -19,7 +19,8 @@
 //!     .build()
 //! ```
 
-use crate::variants::Variant;
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -37,17 +38,6 @@ pub enum AlertIntent {
     Error,
 }
 
-impl Variant for AlertIntent {
-    fn class(&self) -> Option<&'static str> {
-        Some(match self {
-            AlertIntent::Info => "rw-alert-info",
-            AlertIntent::Success => "rw-alert-success",
-            AlertIntent::Warning => "rw-alert-warning",
-            AlertIntent::Error => "rw-alert-error",
-        })
-    }
-}
-
 /// Alert builder.
 #[derive(Clone, Debug, Default)]
 pub struct Alert {
@@ -58,9 +48,6 @@ pub struct Alert {
 }
 
 impl Alert {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-alert";
-
     /// Create a new alert.
     pub fn new() -> Self {
         Self::default()
@@ -110,47 +97,62 @@ impl Alert {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(64);
-        classes.push_str(Self::BASE_CLASS);
+    /// Compute style tokens for the alert container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapSm,
+            St::PMd,
+            St::RoundedMd,
+            St::BorderL4,
+            St::TextSm,
+        ];
 
-        if let Some(intent_class) = self.intent.class() {
-            classes.push(' ');
-            classes.push_str(intent_class);
+        match self.intent {
+            AlertIntent::Info => {
+                tokens.push(St::BgBlue2);
+                tokens.push(St::BorderBlue8);
+            }
+            AlertIntent::Success => {
+                tokens.push(St::BgGreen4);
+                tokens.push(St::BorderGreen8);
+            }
+            AlertIntent::Warning => {
+                tokens.push(St::BgYellow2);
+                tokens.push(St::BorderYellow8);
+            }
+            AlertIntent::Error => {
+                tokens.push(St::BgRed4);
+                tokens.push(St::BorderRed8);
+            }
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the alert into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Alert);
-
-        let class = self.compute_class();
         let mut alert = el(El::Div)
-            .class(&class)
-            .attr("role", "alert");
+            .st(self.compute_tokens())
+            .at(At::Role, Av::RoleAlert);
 
-        // Add title if provided
+        if let Some(ref extra) = self.extra_class {
+            alert = alert.class(extra.as_ref());
+        }
+
         if let Some(title_text) = self.title {
             alert = alert.append([
                 el(El::Span)
-                    .class("rw-alert-title")
+                    .st([St::FontMedium, St::TextHigh])
                     .text(&title_text)
             ]);
         }
 
-        // Add message if provided
         if let Some(message_text) = self.message {
             alert = alert.append([
                 el(El::P)
-                    .class("rw-alert-message")
+                    .st([St::M0, St::TextDefault])
                     .text(&message_text)
             ]);
         }
@@ -158,19 +160,6 @@ impl Alert {
         alert
     }
 }
-
-/// Alert CSS.
-///
-/// Size: ~395 bytes (under 400 bytes budget)
-pub const ALERT_CSS: &str = "\
-.rw-alert{display:flex;flex-direction:column;gap:var(--rw-space-2);padding:var(--rw-space-4);\
-border-radius:var(--rw-radius-md);border-left:4px solid;font-size:var(--rw-text-sm)}\
-.rw-alert-title{font-weight:var(--rw-font-medium);color:var(--rw-text-high)}\
-.rw-alert-message{margin:0;color:var(--rw-text-medium)}\
-.rw-alert-info{background:var(--rw-blue-2);border-color:var(--rw-blue-8)}\
-.rw-alert-success{background:var(--rw-green-2);border-color:var(--rw-green-8)}\
-.rw-alert-warning{background:var(--rw-yellow-2);border-color:var(--rw-yellow-8)}\
-.rw-alert-error{background:var(--rw-red-2);border-color:var(--rw-red-8)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -185,40 +174,21 @@ mod tests {
     }
 
     #[test]
-    fn test_alert_class_default() {
+    fn test_alert_info_tokens() {
         let alert = Alert::new();
-        let class = alert.compute_class();
-        assert!(class.contains("rw-alert"));
-        assert!(class.contains("rw-alert-info"));
+        let tokens = alert.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexCol));
+        assert!(tokens.contains(&St::BgBlue2));
+        assert!(tokens.contains(&St::BorderBlue8));
     }
 
     #[test]
-    fn test_alert_class_error() {
+    fn test_alert_error_tokens() {
         let alert = Alert::error();
-        let class = alert.compute_class();
-        assert!(class.contains("rw-alert"));
-        assert!(class.contains("rw-alert-error"));
+        let tokens = alert.compute_tokens();
+        assert!(tokens.contains(&St::BgRed4));
+        assert!(tokens.contains(&St::BorderRed8));
     }
 
-    #[test]
-    fn test_alert_css_size() {
-        // Alert CSS should be under 400 bytes
-        assert!(
-            ALERT_CSS.len() < 650,
-            "Alert CSS too large: {} bytes (budget: 650)",
-            ALERT_CSS.len()
-        );
-        println!("Alert CSS size: {} bytes", ALERT_CSS.len());
-    }
-
-    #[test]
-    fn test_alert_css_structure() {
-        assert!(ALERT_CSS.contains(".rw-alert{"));
-        assert!(ALERT_CSS.contains(".rw-alert-title"));
-        assert!(ALERT_CSS.contains(".rw-alert-message"));
-        assert!(ALERT_CSS.contains(".rw-alert-info"));
-        assert!(ALERT_CSS.contains(".rw-alert-success"));
-        assert!(ALERT_CSS.contains(".rw-alert-warning"));
-        assert!(ALERT_CSS.contains(".rw-alert-error"));
-    }
 }

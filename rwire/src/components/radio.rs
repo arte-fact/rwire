@@ -23,6 +23,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
 
@@ -100,27 +102,20 @@ impl Radio {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-radio");
-
+    /// Compute style tokens for this radio configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::RoundedFull, St::BgApp, St::CursorPointer,
+            St::TransitionAll, St::FlexShrink0, St::AppearanceNone,
+        ];
         if self.invalid {
-            classes.push_str(" rw-radio-invalid");
+            tokens.push(St::BorderRed8);
         }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the radio button into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Radio);
-
         // Generate ID if label is provided but no explicit ID
         let element_id = self.id.clone().unwrap_or_else(|| {
             if self.label.is_some() {
@@ -130,45 +125,55 @@ impl Radio {
             }
         });
 
-        let class = self.compute_class();
+        let mut tokens = self.compute_tokens();
+        tokens.extend([St::W1rem, St::H1rem, St::Border2Default]);
         let mut input = el(El::Input)
-            .class(&class)
-            .attr("type", "radio");
+            .st(tokens)
+            .hover([St::BorderEmphasis])
+            .checked([St::BgAccent])
+            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .at(At::Type, Av::Radio);
+
+        if self.disabled {
+            input = input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+        }
 
         if !element_id.is_empty() {
-            input = input.attr("id", &element_id);
+            input = input.at_str(At::Id, &element_id);
         }
 
         if let Some(ref name) = self.name {
-            input = input.attr("name", name);
+            input = input.at_str(At::Name, name);
         }
         if let Some(ref value) = self.value {
-            input = input.attr("value", value);
+            input = input.at_str(At::Value, value);
         }
         if self.checked {
-            input = input.attr("checked", "");
+            input = input.bool_attr(At::Checked);
         }
         if self.disabled {
-            input = input.attr("disabled", "");
+            input = input.bool_attr(At::Disabled);
         }
         if self.required {
-            input = input.attr("required", "");
+            input = input.bool_attr(At::Required);
         }
         if self.invalid {
-            input = input.attr("aria-invalid", "true");
+            input = input.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref extra) = self.extra_class {
+            input = input.class(extra.as_ref());
         }
 
         // If label is provided, wrap in a container with label
         if let Some(label_text) = self.label {
-            // Use Stack for layout
             use crate::components::{Stack, Gap};
             Stack::row()
                 .gap(Gap::Xs)
                 .children([
                     input,
                     el(El::Label)
-                        .class("rw-radio-label")
-                        .attr("for", &element_id)
+                        .st([St::TextSm, St::TextHigh, St::CursorPointer])
+                        .at_str(At::For, &element_id)
                         .text(&label_text),
                 ])
                 .build()
@@ -183,20 +188,6 @@ impl Radio {
     }
 }
 
-/// Radio CSS.
-///
-/// Size: ~320 bytes (under 350 bytes budget)
-pub const RADIO_CSS: &str = "\
-.rw-radio{width:1rem;height:1rem;border:2px solid var(--rw-border-default);border-radius:50%;\
-background:var(--rw-bg-app);cursor:pointer;transition:all .15s;flex-shrink:0;appearance:none}\
-.rw-radio:hover{border-color:var(--rw-border-emphasis)}\
-.rw-radio:checked{border-color:var(--rw-accent-9);background:var(--rw-bg-app);\
-box-shadow:inset 0 0 0 3px var(--rw-accent-9)}\
-.rw-radio:focus{outline:2px solid var(--rw-accent-8);outline-offset:2px}\
-.rw-radio:disabled{opacity:.5;cursor:not-allowed}\
-.rw-radio-invalid{border-color:var(--rw-red-8)}\
-.rw-radio-label{font-size:var(--rw-text-sm);color:var(--rw-text-high);cursor:pointer}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,34 +201,36 @@ mod tests {
     }
 
     #[test]
-    fn test_radio_class_default() {
+    fn test_radio_default_tokens() {
         let radio = Radio::new();
-        assert_eq!(radio.compute_class(), "rw-radio");
+        let tokens = radio.compute_tokens();
+        assert!(tokens.contains(&St::RoundedFull));
+        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::CursorPointer));
+        assert!(tokens.contains(&St::TransitionAll));
+        assert!(tokens.contains(&St::FlexShrink0));
+        assert!(tokens.contains(&St::AppearanceNone));
     }
 
     #[test]
-    fn test_radio_class_invalid() {
+    fn test_radio_pseudo_groups() {
+        let radio = Radio::new().build();
+        let groups = radio.get_pseudo_groups();
+        assert!(!groups.is_empty());
+    }
+
+    #[test]
+    fn test_radio_invalid_tokens() {
         let radio = Radio::new().invalid(true);
-        let class = radio.compute_class();
-        assert!(class.contains("rw-radio"));
-        assert!(class.contains("rw-radio-invalid"));
+        let tokens = radio.compute_tokens();
+        assert!(tokens.contains(&St::BorderRed8));
     }
 
     #[test]
-    fn test_radio_css_size() {
-        // Radio CSS should be under 350 bytes
-        assert!(
-            RADIO_CSS.len() < 650,
-            "Radio CSS too large: {} bytes (budget: 650)",
-            RADIO_CSS.len()
-        );
-        println!("Radio CSS size: {} bytes", RADIO_CSS.len());
+    fn test_radio_disabled_pseudo_groups() {
+        let radio = Radio::new().disabled(true).build();
+        let groups = radio.get_pseudo_groups();
+        assert!(!groups.is_empty());
     }
 
-    #[test]
-    fn test_radio_css_structure() {
-        assert!(RADIO_CSS.contains(".rw-radio{"));
-        assert!(RADIO_CSS.contains(".rw-radio-label"));
-        assert!(RADIO_CSS.contains(".rw-radio-invalid"));
-    }
 }

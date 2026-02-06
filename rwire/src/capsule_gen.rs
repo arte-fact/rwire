@@ -12,7 +12,6 @@
 
 use std::collections::HashSet;
 
-use crate::components::ComponentRegistry;
 use crate::theme::Theme;
 use crate::tokens::ColorPalette;
 
@@ -83,13 +82,24 @@ fn generate_event_map(used: &HashSet<u8>) -> String {
     entries.join(",")
 }
 
-/// Generate the JavaScript object literal for style utility mappings.
-fn generate_style_util_map(used: &HashSet<u16>) -> String {
-    use crate::style_tokens::UTIL_MAPPINGS;
-    let entries: Vec<String> = UTIL_MAPPINGS
+/// Generate the JavaScript object literal for attribute key mappings.
+fn generate_attr_key_map(used: &HashSet<u8>) -> String {
+    use crate::attr_tokens::AT_MAPPINGS;
+    let entries: Vec<String> = AT_MAPPINGS
         .iter()
         .filter(|(code, _)| used.contains(code))
-        .map(|(code, css)| format!("{}:'{}'", code, css))
+        .map(|(code, name)| format!("{}:'{}'", code, name))
+        .collect();
+    entries.join(",")
+}
+
+/// Generate the JavaScript object literal for attribute value mappings.
+fn generate_attr_value_map(used: &HashSet<u8>) -> String {
+    use crate::attr_tokens::AV_MAPPINGS;
+    let entries: Vec<String> = AV_MAPPINGS
+        .iter()
+        .filter(|(code, _)| used.contains(code))
+        .map(|(code, value)| format!("{}:'{}'", code, value))
         .collect();
     entries.join(",")
 }
@@ -138,7 +148,7 @@ fn generate_style_value_map(used: &HashSet<u8>) -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,O:0x32,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SI:0x80,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={};
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
@@ -151,9 +161,10 @@ return ''}
 function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),msg=new Uint8Array(4+pb.length);msg[0]=h;msg[1]=t;msg[2]=f;msg[3]=pb.length;msg.set(pb,4);w.send(msg)}
 function sep(h,t,f,prm,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),msg=new Uint8Array(5+prm.length+pb.length);msg[0]=h|0x80;msg[1]=t;msg[2]=f;msg[3]=prm.length;msg.set(prm,4);msg[4+prm.length]=pb.length;msg.set(pb,5+prm.length);w.send(msg)}
 function x(d){
-let r=[],i=0;
+let r=[],i=0,_oc=0;
+try{
 while(i<d.length){
-let o=d[i++];
+let _p=i,o=d[i++];_oc++;
 if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
 else if(o===O.SE){let[n,l]=rv(d,i);i+=l;let[si,sl]=rv(d,i);i+=sl;sc=si;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
 else if(o===O.WT){let n=d[i++];wt=[];while(n--){let l=d[i++];wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
@@ -165,7 +176,10 @@ else if(o===O.T){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].textContent=s[k]||''}
 else if(o===O.TW){let f=d[i++],n=d[i++],ws=[];while(n--)ws.push(wt[d[i++]]||'');r[f].textContent=ws.join(' ')}
 else if(o===O.TI){let f=d[i++],[v,l]=rv(d,i);i+=l;let n=(v>>>1)^-(v&1);r[f].textContent=n.toString()}
 else if(o===O.L){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].className=s[k]||''}
-else if(o===O.A){let f=d[i++],[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';console.log('SET_ATTR: ak='+ak+' vk='+vk+' attr='+an+' val='+s[vk]);r[f].setAttribute(an,s[vk]||'')}
+else if(o===O.A){let f=d[i++],[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';r[f].setAttribute(an,s[vk]||'')}
+else if(o===O.AE){let f=d[i++],k=d[i++],v=d[i++];r[f].setAttribute(AT[k]||'data',AV[v]||'')}
+else if(o===O.AB){let f=d[i++],k=d[i++];r[f].setAttribute(AT[k]||'data','')}
+else if(o===O.AK){let f=d[i++],k=d[i++],[v,l]=rv(d,i);i+=l;r[f].setAttribute(AT[k]||'data',s[v]||'')}
 else if(o===O.D){let f=d[i++],[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
 else if(o===O.P){let p=d[i++],c=d[i++];(p<255?r[p]:document.body).appendChild(r[c])}
 else if(o===O.CC){r[d[i++]].innerHTML=''}
@@ -178,13 +192,15 @@ else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
 else if(o===O.SI){let l=(d[i++]<<8)|d[i++];let css=new TextDecoder().decode(d.slice(i,i+l));let st=document.createElement('style');st.textContent=css;document.head.appendChild(st);i+=l}
 else if(o===O.SS){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
-else if(o===O.SU){let f=d[i++],[u,l]=rv(d,i);i+=l;r[f].style.cssText+=';'+U[u]}
+else if(o===O.SU){let f=d[i++],[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
 else if(o===O.SP){let f=d[i++],p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
-else if(o===O.SM){let f=d[i++],n=d[i++],css='';while(n--){let[u,l]=rv(d,i);i+=l;css+=';'+U[u]}r[f].style.cssText+=css}
-else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++],css='';while(c--){let[u,ul]=rv(d,i);i+=ul;css+=';'+U[u]}K[id]=css}}
-else if(o===O.SC){let f=d[i++],[id,l]=rv(d,i);i+=l;r[f].style.cssText+=K[id]||''}
+else if(o===O.SM){let f=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}}
+else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++];while(c--){let[u,ul]=rv(d,i);i+=ul}K[id]='c'+id}}
+else if(o===O.SC){let f=d[i++],[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
+else if(o===O.PD){let f=d[i++],pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
 else if(o===O.E){return}
-}}
+else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
+}}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
 w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
 w.onmessage=e=>x(new Uint8Array(e.data));
@@ -252,9 +268,10 @@ pub fn generate_capsule(
 <script>
 const E={{{elements_js}}};
 const V={{{events_js}}};
-const U={{}};
 const P={{}};
 const Y={{}};
+const AT={{}};
+const AV={{}};
 {bind_and_local_js}
 {RUNTIME_JS}
 </script>
@@ -278,8 +295,6 @@ pub struct CapsuleConfig {
     pub theme: Theme,
     /// Optional custom color palette (Nord, custom, etc.)
     pub palette: Option<ColorPalette>,
-    /// Registry of used components for tree-shaking CSS
-    pub components: ComponentRegistry,
     /// Whether to include local state mutation interpreter
     pub has_local_handlers: bool,
     /// Used style utility tokens (for tree-shaking)
@@ -288,6 +303,12 @@ pub struct CapsuleConfig {
     pub used_style_props: HashSet<u8>,
     /// Used style value codes (for tree-shaking)
     pub used_style_values: HashSet<u8>,
+    /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
+    pub used_pseudo_pairs: HashSet<(u8, u16)>,
+    /// Used attribute key codes (for tree-shaking)
+    pub used_attr_keys: HashSet<u8>,
+    /// Used attribute value codes (for tree-shaking)
+    pub used_attr_values: HashSet<u8>,
 }
 
 impl CapsuleConfig {
@@ -339,12 +360,6 @@ impl CapsuleConfig {
         self
     }
 
-    /// Set the component registry.
-    pub fn components(mut self, registry: ComponentRegistry) -> Self {
-        self.components = registry;
-        self
-    }
-
     /// Set whether local handlers are used.
     pub fn has_local_handlers(mut self, has: bool) -> Self {
         self.has_local_handlers = has;
@@ -379,6 +394,24 @@ impl CapsuleConfig {
     /// Set all used style value codes (from build context).
     pub fn with_style_values(mut self, values: &HashSet<u8>) -> Self {
         self.used_style_values = values.clone();
+        self
+    }
+
+    /// Set all used pseudo-class (Pc, St) pairs (from build context).
+    pub fn with_pseudo_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
+        self.used_pseudo_pairs = pairs.clone();
+        self
+    }
+
+    /// Set all used attribute key codes (from build context).
+    pub fn with_attr_keys(mut self, keys: &HashSet<u8>) -> Self {
+        self.used_attr_keys = keys.clone();
+        self
+    }
+
+    /// Set all used attribute value codes (from build context).
+    pub fn with_attr_values(mut self, values: &HashSet<u8>) -> Self {
+        self.used_attr_values = values.clone();
         self
     }
 
@@ -422,6 +455,7 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
 /// - Theme overrides (accent, radius)
 /// - Component CSS (tree-shaken)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
+    use crate::style_tokens::{generate_utility_css, generate_pseudo_css};
     use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css};
     use crate::tokens::css::{generate_primitive_css_filtered, generate_primitive_css_with_palette};
 
@@ -431,15 +465,23 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     let base_css = generate_base_css();
     let mut used_vars = extract_used_variables(base_css);
 
-    // 2. Get component CSS and extract used variables
-    let component_css = config.components.generate_css();
-    used_vars.extend(extract_used_variables(&component_css));
+    // 2. Utility CSS (icons, sr-only, etc.) - still class-based
+    use crate::components::utils::UTILS_CSS;
+    used_vars.extend(extract_used_variables(UTILS_CSS));
 
-    // 3. Generate semantic CSS to extract primitive variables it references
+    // 3. Generate utility + pseudo token CSS (class-based, tree-shaken)
+    let utility_token_css = generate_utility_css(&config.used_style_utils);
+    let pseudo_token_css = generate_pseudo_css(&config.used_pseudo_pairs);
+
+    // Extract variables used in token CSS rules
+    used_vars.extend(extract_used_variables(&utility_token_css));
+    used_vars.extend(extract_used_variables(&pseudo_token_css));
+
+    // 4. Generate semantic CSS to extract primitive variables it references
     let semantic_css = generate_semantic_css();
     used_vars.extend(extract_used_variables(&semantic_css));
 
-    // 4. Also check theme overrides for additional variables
+    // 5. Also check theme overrides for additional variables
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
         used_vars.extend(extract_used_variables(&accent_css));
     }
@@ -447,20 +489,20 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         used_vars.extend(extract_used_variables(radius_css));
     }
 
-    // 5. Base reset (must come first)
+    // 6. Base reset (must come first)
     css.push_str(base_css);
 
-    // 6. Generate primitive tokens
+    // 7. Generate primitive tokens
     // If a custom palette is set, use it; otherwise use tree-shaken defaults
     match &config.palette {
         Some(palette) => css.push_str(&generate_primitive_css_with_palette(palette)),
         None => css.push_str(&generate_primitive_css_filtered(&used_vars)),
     }
 
-    // 7. Semantic tokens
+    // 8. Semantic tokens
     css.push_str(&semantic_css);
 
-    // 8. Theme overrides
+    // 9. Theme overrides
     if let Some(accent_css) = generate_accent_css(config.theme.accent) {
         css.push_str(&accent_css);
     }
@@ -468,8 +510,14 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         css.push_str(radius_css);
     }
 
-    // 9. Component CSS (already tree-shaken)
-    css.push_str(&component_css);
+    // 10. Utility CSS (icons, sr-only, etc.)
+    css.push_str(UTILS_CSS);
+
+    // 11. Utility token CSS classes (.u{code}{declaration})
+    css.push_str(&utility_token_css);
+
+    // 12. Pseudo-class token CSS rules (.p{code}:hover{...}, etc.)
+    css.push_str(&pseudo_token_css);
 
     css
 }
@@ -496,9 +544,13 @@ pub fn generate_styled_capsule(
     let theme_attrs = config.theme.data_attrs();
 
     // Generate style token lookup tables (tree-shaken)
-    let utils_js = generate_style_util_map(&config.used_style_utils);
+    // Note: U (utility) map removed - utilities now use CSS classes generated server-side
     let props_js = generate_style_prop_map(&config.used_style_props);
     let values_js = generate_style_value_map(&config.used_style_values);
+
+    // Generate attribute lookup tables (tree-shaken)
+    let attr_keys_js = generate_attr_key_map(&config.used_attr_keys);
+    let attr_values_js = generate_attr_value_map(&config.used_attr_values);
 
     // Choose the appropriate bind handler based on whether we have local state
     let bind_and_local_js = if config.has_local_handlers {
@@ -514,9 +566,10 @@ pub fn generate_styled_capsule(
 <script>
 const E={{{elements_js}}};
 const V={{{events_js}}};
-const U={{{utils_js}}};
 const P={{{props_js}}};
 const Y={{{values_js}}};
+const AT={{{attr_keys_js}}};
+const AV={{{attr_values_js}}};
 {bind_and_local_js}
 {RUNTIME_JS}
 </script>
@@ -527,7 +580,6 @@ const Y={{{values_js}}};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::registry::ComponentType;
     use crate::theme::{AccentColor, ThemeMode};
 
     #[test]
@@ -536,15 +588,11 @@ mod tests {
         assert_eq!(config.theme.mode, ThemeMode::Light);
         assert_eq!(config.theme.accent, AccentColor::Blue);
         assert!(!config.has_local_handlers);
-        assert!(config.components.is_empty());
     }
 
     #[test]
     fn test_capsule_css_generation() {
-        let mut registry = ComponentRegistry::new();
-        registry.mark_used(ComponentType::Button);
-
-        let config = CapsuleConfig::new().components(registry);
+        let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
 
         // Should contain base reset
@@ -553,21 +601,24 @@ mod tests {
         assert!(css.contains("--rw-neutral-1"));
         // Should contain semantic tokens
         assert!(css.contains("--rw-bg-app"));
-        // Should contain button CSS
-        assert!(css.contains(".rw-btn"));
-        // Should NOT contain input CSS (not used)
-        assert!(!css.contains(".rw-input"));
     }
 
     #[test]
     fn test_css_variables_not_empty() {
         // This test verifies the fix for the bug where CSS variables were empty
         // because primitive tokens referenced by semantic CSS were being tree-shaken out
-        let mut registry = ComponentRegistry::new();
-        registry.mark_used(ComponentType::Button);
-        registry.mark_used(ComponentType::Card);
 
-        let config = CapsuleConfig::new().components(registry);
+        // Simulate St tokens that components use. These tokens reference CSS
+        // variables that must be included in the primitive CSS output.
+        let mut used_utils = HashSet::new();
+        used_utils.insert(0xC0); // BgApp -> --rw-bg-app
+        used_utils.insert(0x8B); // RoundedLg -> --rw-radius-lg
+        used_utils.insert(0xD1); // BorderSubtle -> --rw-border-subtle
+        used_utils.insert(0x53); // PMd -> --rw-space-4
+        used_utils.insert(0xE9); // ShadowSm -> --rw-shadow-sm
+
+        let config = CapsuleConfig::new()
+            .with_style_utils(&used_utils);
         let css = generate_capsule_css(&config);
 
         // Semantic tokens that reference primitives should all be present
@@ -582,19 +633,16 @@ mod tests {
         // White (used by text-on-accent)
         assert!(css.contains("--rw-white:"), "Missing --rw-white");
 
-        // Spacing tokens used by components
-        assert!(css.contains("--rw-space-2:"), "Missing --rw-space-2");
+        // Spacing tokens used by St utility classes
         assert!(css.contains("--rw-space-4:"), "Missing --rw-space-4");
 
-        // Radius tokens used by components
-        assert!(css.contains("--rw-radius-md:"), "Missing --rw-radius-md");
+        // Radius tokens used by St utility classes
         assert!(css.contains("--rw-radius-lg:"), "Missing --rw-radius-lg");
 
         // Typography tokens used in base CSS
         assert!(css.contains("--rw-leading-normal:"), "Missing --rw-leading-normal");
-        assert!(css.contains("--rw-font-medium:"), "Missing --rw-font-medium");
 
-        // Shadow tokens used by Card
+        // Shadow tokens used by St utility classes
         assert!(css.contains("--rw-shadow-sm:"), "Missing --rw-shadow-sm");
 
         // Verify semantic tokens are defined and reference primitives correctly
@@ -611,12 +659,8 @@ mod tests {
         let mut events = HashSet::new();
         events.insert(1); // click
 
-        let mut registry = ComponentRegistry::new();
-        registry.mark_used(ComponentType::Button);
-
         let config = CapsuleConfig::new()
             .theme(Theme::dark().with_accent(AccentColor::Green))
-            .components(registry)
             .has_local_handlers(false);
 
         let capsule = generate_styled_capsule(&elements, &events, &config);
@@ -649,16 +693,13 @@ mod tests {
         let mut events = HashSet::new();
         events.insert(1); // click
 
-        let mut registry = ComponentRegistry::new();
-        registry.mark_used(ComponentType::Button);
-
-        let config = CapsuleConfig::new().components(registry);
+        let config = CapsuleConfig::new();
         let capsule = generate_styled_capsule(&elements, &events, &config);
 
         // HTML capsule should be small (CSS is delivered via WebSocket)
-        // Should be well under 6KB without inline CSS
+        // Should be well under 7KB without inline CSS
         assert!(
-            capsule.len() < 5500,
+            capsule.len() < 6500,
             "Styled capsule too large: {} bytes (CSS should be delivered via WebSocket)",
             capsule.len()
         );

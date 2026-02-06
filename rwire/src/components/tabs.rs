@@ -15,6 +15,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -44,9 +46,6 @@ pub struct Tabs {
 }
 
 impl Tabs {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-tabs";
-
     /// Create a new tabs component.
     pub fn new() -> Self {
         Self::default()
@@ -70,47 +69,50 @@ impl Tabs {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str(Self::BASE_CLASS);
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the tabs container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayFlex, St::FlexCol, St::GapMd]
     }
 
     /// Build the tabs into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Tabs);
+        let mut container = el(El::Div).st(self.compute_tokens());
 
-        let class = self.compute_class();
-        let mut container = el(El::Div).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            container = container.class(extra.as_ref());
+        }
 
         // Build tab list
         let mut tab_list = el(El::Div)
-            .class("rw-tabs-list")
-            .attr("role", "tablist");
+            .st([St::DisplayFlex, St::GapSm, St::BorderB2Default])
+            .at(At::Role, Av::RoleTablist);
 
         for (idx, tab) in self.tabs.iter().enumerate() {
             let is_active = idx == self.active_index;
+            let mut button_tokens = vec![
+                St::BgTransparent, St::BorderNone, St::TextSm, St::FontMedium,
+                St::CursorPointer, St::TransitionAll,
+                St::PySp3, St::PxMd, St::MbNeg2px,
+            ];
+
+            if is_active {
+                button_tokens.push(St::TextAccent);
+                button_tokens.push(St::BorderB2Accent);
+            } else {
+                button_tokens.push(St::TextMedium);
+                button_tokens.push(St::BorderB2Transparent);
+            }
+
             let mut button = el(El::Button)
-                .class(if is_active {
-                    "rw-tabs-tab rw-tabs-tab-active"
-                } else {
-                    "rw-tabs-tab"
-                })
-                .attr("role", "tab")
-                .attr("aria-selected", if is_active { "true" } else { "false" })
+                .st(button_tokens)
+                .at(At::Role, Av::RoleTab)
+                .at(At::AriaSelected, if is_active { Av::True } else { Av::False })
                 .text(&tab.label);
 
             if is_active {
-                button = button.attr("tabindex", "0");
+                button = button.at(At::Tabindex, Av::Zero);
             } else {
-                button = button.attr("tabindex", "-1");
+                button = button.at(At::Tabindex, Av::MinusOne);
             }
 
             tab_list = tab_list.append([button]);
@@ -121,8 +123,8 @@ impl Tabs {
         // Add active content panel
         if let Some(active_tab) = self.tabs.into_iter().nth(self.active_index) {
             let panel = el(El::Div)
-                .class("rw-tabs-panel")
-                .attr("role", "tabpanel")
+                .st([St::PySm, St::Px0])
+                .at(At::Role, Av::RoleTabpanel)
                 .append([active_tab.content]);
 
             container = container.append([panel]);
@@ -131,19 +133,6 @@ impl Tabs {
         container
     }
 }
-
-/// Tabs CSS.
-///
-/// Size: ~390 bytes (under 400 bytes budget)
-pub const TABS_CSS: &str = "\
-.rw-tabs{display:flex;flex-direction:column;gap:var(--rw-space-4)}\
-.rw-tabs-list{display:flex;gap:var(--rw-space-2);border-bottom:2px solid var(--rw-border-default)}\
-.rw-tabs-tab{background:transparent;border:none;padding:var(--rw-space-3) var(--rw-space-4);\
-font-size:var(--rw-text-sm);font-weight:var(--rw-font-medium);color:var(--rw-text-medium);\
-cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}\
-.rw-tabs-tab:hover{color:var(--rw-text-high)}\
-.rw-tabs-tab-active{color:var(--rw-accent-9);border-bottom-color:var(--rw-accent-9)}\
-.rw-tabs-panel{padding:var(--rw-space-2) 0}\n";
 
 #[cfg(test)]
 mod tests {
@@ -157,9 +146,12 @@ mod tests {
     }
 
     #[test]
-    fn test_tabs_class_default() {
+    fn test_tabs_tokens() {
         let tabs = Tabs::new();
-        assert_eq!(tabs.compute_class(), "rw-tabs");
+        let tokens = tabs.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexCol));
+        assert!(tokens.contains(&St::GapMd));
     }
 
     #[test]
@@ -172,23 +164,4 @@ mod tests {
         assert_eq!(tabs.active_index, 1);
     }
 
-    #[test]
-    fn test_tabs_css_size() {
-        // Tabs CSS should be under 400 bytes
-        assert!(
-            TABS_CSS.len() < 650,
-            "Tabs CSS too large: {} bytes (budget: 650)",
-            TABS_CSS.len()
-        );
-        println!("Tabs CSS size: {} bytes", TABS_CSS.len());
-    }
-
-    #[test]
-    fn test_tabs_css_structure() {
-        assert!(TABS_CSS.contains(".rw-tabs{"));
-        assert!(TABS_CSS.contains(".rw-tabs-list"));
-        assert!(TABS_CSS.contains(".rw-tabs-tab"));
-        assert!(TABS_CSS.contains(".rw-tabs-tab-active"));
-        assert!(TABS_CSS.contains(".rw-tabs-panel"));
-    }
 }

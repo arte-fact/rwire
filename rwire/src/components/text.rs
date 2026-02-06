@@ -12,6 +12,7 @@
 //! Text::caption("Small helper text").muted().build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -94,10 +95,6 @@ impl Text {
         self
     }
 
-    // ========================================================================
-    // Convenience constructors
-    // ========================================================================
-
     /// Body text with content.
     pub fn body(content: impl Into<Cow<'static, str>>) -> Self {
         Self::new().variant(TextVariant::Body).content(content)
@@ -133,10 +130,6 @@ impl Text {
         Self::new().variant(TextVariant::Caption).content(content)
     }
 
-    // ========================================================================
-    // Color shortcuts
-    // ========================================================================
-
     /// Set muted color.
     pub fn muted(self) -> Self {
         self.color(TextColor::Muted)
@@ -162,40 +155,58 @@ impl Text {
         self.color(TextColor::Error)
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-text");
+    /// Compute style tokens for this text configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = Vec::with_capacity(4);
 
         match self.variant {
-            TextVariant::Body => {}
-            TextVariant::BodySmall => classes.push_str(" rw-text-sm"),
-            TextVariant::Heading1 => classes.push_str(" rw-text-h1"),
-            TextVariant::Heading2 => classes.push_str(" rw-text-h2"),
-            TextVariant::Heading3 => classes.push_str(" rw-text-h3"),
-            TextVariant::Label => classes.push_str(" rw-text-label"),
-            TextVariant::Caption => classes.push_str(" rw-text-caption"),
+            TextVariant::Body => {
+                tokens.push(St::TextDefault);
+                tokens.push(St::LeadingNormal);
+            }
+            TextVariant::BodySmall => {
+                tokens.push(St::TextSm);
+            }
+            TextVariant::Heading1 => {
+                tokens.push(St::Text3xl);
+                tokens.push(St::FontBold);
+                tokens.push(St::LeadingTight);
+            }
+            TextVariant::Heading2 => {
+                tokens.push(St::Text2xl);
+                tokens.push(St::FontSemibold);
+                tokens.push(St::LeadingTight);
+            }
+            TextVariant::Heading3 => {
+                tokens.push(St::TextXl);
+                tokens.push(St::FontSemibold);
+                tokens.push(St::LeadingSnug);
+            }
+            TextVariant::Label => {
+                tokens.push(St::TextSm);
+                tokens.push(St::FontMedium);
+            }
+            TextVariant::Caption => {
+                tokens.push(St::TextXs);
+                tokens.push(St::TextMuted);
+            }
         }
 
         match self.color {
             TextColor::Default => {}
-            TextColor::High => classes.push_str(" rw-color-high"),
-            TextColor::Muted => classes.push_str(" rw-color-muted"),
-            TextColor::Accent => classes.push_str(" rw-color-accent"),
-            TextColor::Success => classes.push_str(" rw-color-success"),
-            TextColor::Warning => classes.push_str(" rw-color-warning"),
-            TextColor::Error => classes.push_str(" rw-color-error"),
+            TextColor::High => tokens.push(St::TextHigh),
+            TextColor::Muted => tokens.push(St::TextMuted),
+            TextColor::Accent => tokens.push(St::TextAccent),
+            TextColor::Success => tokens.push(St::TextSuccess),
+            TextColor::Warning => tokens.push(St::TextWarning),
+            TextColor::Error => tokens.push(St::TextError),
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Determine the appropriate HTML element for this variant.
-    fn element(&self) -> El {
+    pub fn element(&self) -> El {
         match self.variant {
             TextVariant::Heading1 => El::H1,
             TextVariant::Heading2 => El::H2,
@@ -207,11 +218,12 @@ impl Text {
 
     /// Build the text into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::Text);
-
-        let class = self.compute_class();
         let element = self.element();
-        let mut builder = el(element).class(&class);
+        let mut builder = el(element).st(self.compute_tokens());
+
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         if let Some(content) = self.content {
             builder = builder.text(&content);
@@ -220,22 +232,6 @@ impl Text {
         builder
     }
 }
-
-/// Text CSS.
-pub const TEXT_CSS: &str = "\
-.rw-text{color:var(--rw-text-default);line-height:var(--rw-leading-normal)}\
-.rw-text-sm{font-size:var(--rw-text-sm)}\
-.rw-text-h1{font-size:var(--rw-text-3xl);font-weight:700;line-height:var(--rw-leading-tight)}\
-.rw-text-h2{font-size:var(--rw-text-2xl);font-weight:600;line-height:var(--rw-leading-tight)}\
-.rw-text-h3{font-size:var(--rw-text-xl);font-weight:600;line-height:var(--rw-leading-snug)}\
-.rw-text-label{font-size:var(--rw-text-sm);font-weight:500}\
-.rw-text-caption{font-size:var(--rw-text-xs);color:var(--rw-text-muted)}\
-.rw-color-high{color:var(--rw-text-high)}\
-.rw-color-muted{color:var(--rw-text-muted)}\
-.rw-color-accent{color:var(--rw-accent-11)}\
-.rw-color-success{color:var(--rw-success)}\
-.rw-color-warning{color:var(--rw-warning)}\
-.rw-color-error{color:var(--rw-error)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -249,21 +245,28 @@ mod tests {
     }
 
     #[test]
-    fn test_text_class_default() {
+    fn test_text_body_tokens() {
         let text = Text::new();
-        assert_eq!(text.compute_class(), "rw-text");
+        let tokens = text.compute_tokens();
+        assert!(tokens.contains(&St::TextDefault));
+        assert!(tokens.contains(&St::LeadingNormal));
     }
 
     #[test]
-    fn test_text_class_heading() {
+    fn test_text_heading_tokens() {
         let text = Text::heading1("Title");
-        assert_eq!(text.compute_class(), "rw-text rw-text-h1");
+        let tokens = text.compute_tokens();
+        assert!(tokens.contains(&St::Text3xl));
+        assert!(tokens.contains(&St::FontBold));
+        assert!(tokens.contains(&St::LeadingTight));
     }
 
     #[test]
-    fn test_text_class_with_color() {
+    fn test_text_caption_muted_tokens() {
         let text = Text::caption("Help").muted();
-        assert_eq!(text.compute_class(), "rw-text rw-text-caption rw-color-muted");
+        let tokens = text.compute_tokens();
+        assert!(tokens.contains(&St::TextXs));
+        assert!(tokens.contains(&St::TextMuted));
     }
 
     #[test]
@@ -275,9 +278,4 @@ mod tests {
         assert_eq!(Text::label("").element(), El::Span);
     }
 
-    #[test]
-    fn test_text_css_size() {
-        assert!(TEXT_CSS.len() < 800, "Text CSS too large: {} bytes", TEXT_CSS.len());
-        println!("Text CSS size: {} bytes", TEXT_CSS.len());
-    }
 }

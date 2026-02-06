@@ -33,9 +33,10 @@
 //! }
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{
     el, El, ElementBuilder, HandlerSpec,
-    components::utils::{Z_MODAL, Z_MODAL_BACKDROP, class_if},
 };
 
 /// Modal/Dialog builder.
@@ -76,9 +77,6 @@ impl Default for Modal {
 }
 
 impl Modal {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-modal";
-
     /// Create a new modal.
     pub fn new() -> Self {
         Self::default()
@@ -126,20 +124,35 @@ impl Modal {
         self
     }
 
+    /// Compute style tokens for the modal inner panel.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![
+            St::BgApp, St::RoundedLg, St::ShadowLg, St::DisplayFlex,
+            St::FlexCol, St::PointerEventsAuto, St::OverflowHidden,
+        ]
+    }
+
+    /// Compute size-specific style tokens.
+    fn size_tokens(&self) -> Vec<St> {
+        match self.size {
+            ModalSize::Sm => vec![St::W400px, St::MaxWFull],
+            ModalSize::Md => vec![St::W600px, St::MaxWFull],
+            ModalSize::Lg => vec![St::W800px, St::MaxWFull],
+            ModalSize::Xl => vec![St::W1000px, St::MaxWFull],
+            ModalSize::Full => vec![St::WFull, St::HFull, St::MaxWFull, St::MaxHFull, St::Rounded0],
+        }
+    }
+
     /// Build the modal component.
     pub fn build(self) -> ElementBuilder {
-        // Register component for CSS tree-shaking
-        super::registry::mark_component_used(
-            super::registry::ComponentType::Modal
-        );
-
         if !self.open {
-            // Modal is closed - return empty container
-            return el(El::Div).class("rw-modal-container rw-hidden");
+            // Modal is closed - return hidden container
+            return el(El::Div).st([St::DisplayNone]);
         }
 
-        let modal_class = self.compute_modal_class();
-        let backdrop_class = self.compute_backdrop_class();
+        let mut tokens = self.compute_tokens();
+        tokens.extend(self.size_tokens());
+        tokens.push(St::MaxH90vh);
 
         // Build modal structure
         let mut modal_children = Vec::new();
@@ -153,7 +166,7 @@ impl Modal {
         if let Some(content) = self.content {
             modal_children.push(
                 el(El::Div)
-                    .class("rw-modal-content")
+                    .st([St::OverflowYAuto, St::TextDefault, St::Flex1, St::PMd])
                     .append([content])
             );
         }
@@ -162,22 +175,21 @@ impl Modal {
         if let Some(footer) = self.footer {
             modal_children.push(
                 el(El::Div)
-                    .class("rw-modal-footer")
+                    .st([St::DisplayFlex, St::ItemsCenter, St::JustifyEnd, St::GapSm, St::PMd, St::BorderT])
                     .append([footer])
             );
         }
 
         let modal_inner = el(El::Div)
-            .class(&modal_class)
-            .attr("role", "dialog")
-            .attr("aria-modal", "true")
-            .attr("tabindex", "-1")
+            .st(tokens)
+            .at(At::Role, Av::RoleDialog)
+            .at(At::AriaModal, Av::True)
+            .at(At::Tabindex, Av::MinusOne)
             .append(modal_children);
 
         // Backdrop
         let mut backdrop_el = el(El::Div)
-            .class(&backdrop_class)
-            .attr("style", &format!("z-index: {}", Z_MODAL_BACKDROP));
+            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50]);
 
         if self.close_on_backdrop_click {
             if let Some(handler) = self.on_close.clone() {
@@ -187,12 +199,11 @@ impl Modal {
 
         // Container with backdrop and modal
         el(El::Div)
-            .class("rw-modal-container")
-            .attr("style", &format!("z-index: {}", Z_MODAL))
+            .st([St::PositionFixed, St::Inset0, St::PointerEventsAuto, St::Z1400])
             .append([
                 backdrop_el,
                 el(El::Div)
-                    .class("rw-modal-positioner")
+                    .st([St::PositionFixed, St::Inset0, St::DisplayFlex, St::ItemsCenter, St::JustifyCenter, St::PointerEventsNone, St::PMd])
                     .append([modal_inner])
             ])
     }
@@ -204,7 +215,7 @@ impl Modal {
         if let Some(ref title) = self.title {
             header_children.push(
                 el(El::H2)
-                    .class("rw-modal-title")
+                    .st([St::M0, St::FontMedium, St::TextLg])
                     .text(title)
             );
         }
@@ -214,71 +225,25 @@ impl Modal {
             use crate::icons::{icon, Icon};
             header_children.push(
                 el(El::Button)
-                    .class("rw-modal-close")
-                    .attr("type", "button")
-                    .attr("aria-label", "Close")
+                    .st([
+                        St::DisplayFlex, St::ItemsCenter, St::JustifyCenter,
+                        St::BgTransparent, St::BorderNone, St::RoundedSm,
+                        St::TextMuted, St::CursorPointer, St::TransitionColors,
+                        St::W2rem, St::H2rem, St::P0,
+                    ])
+                    .hover([St::BgHover])
+                    .at(At::Type, Av::Button)
+                    .at_str(At::AriaLabel, "Close")
                     .on(crate::Ev::Click, handler)
                     .append([icon(Icon::Close)])
             );
         }
 
         el(El::Div)
-            .class("rw-modal-header")
+            .st([St::DisplayFlex, St::ItemsCenter, St::JustifyBetween, St::PMd, St::BorderBDefault])
             .append(header_children)
     }
-
-    fn compute_modal_class(&self) -> String {
-        let mut classes = String::with_capacity(64);
-        classes.push_str(Self::BASE_CLASS);
-
-        match self.size {
-            ModalSize::Sm => classes.push_str(" rw-modal-sm"),
-            ModalSize::Md => {},
-            ModalSize::Lg => classes.push_str(" rw-modal-lg"),
-            ModalSize::Xl => classes.push_str(" rw-modal-xl"),
-            ModalSize::Full => classes.push_str(" rw-modal-full"),
-        }
-
-        classes
-    }
-
-    fn compute_backdrop_class(&self) -> String {
-        format!("rw-modal-backdrop{}", class_if(" rw-modal-backdrop-visible", self.open))
-    }
 }
-
-/// Modal CSS.
-pub const MODAL_CSS: &str = "\
-.rw-modal-container{position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none}\
-.rw-modal-container:not(.rw-hidden){pointer-events:auto}\
-.rw-modal-backdrop{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);\
-opacity:0;transition:opacity 200ms}\
-.rw-modal-backdrop-visible{opacity:1}\
-.rw-modal-positioner{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;\
-align-items:center;justify-content:center;padding:var(--rw-space-4);pointer-events:none}\
-.rw-modal{background:var(--rw-bg-default);border-radius:var(--rw-radius-lg);\
-box-shadow:var(--rw-shadow-lg);max-height:90vh;display:flex;flex-direction:column;\
-pointer-events:auto;transform:scale(0.95);opacity:0;transition:transform 200ms,opacity 200ms}\
-.rw-modal-container:not(.rw-hidden) .rw-modal{transform:scale(1);opacity:1}\
-.rw-modal-sm{width:400px;max-width:100%}\
-.rw-modal,.rw-modal-md{width:600px;max-width:100%}\
-.rw-modal-lg{width:800px;max-width:100%}\
-.rw-modal-xl{width:1000px;max-width:100%}\
-.rw-modal-full{width:100%;height:100%;max-width:100%;max-height:100%;border-radius:0}\
-.rw-modal-header{display:flex;align-items:center;justify-content:space-between;\
-padding:var(--rw-space-4);border-bottom:1px solid var(--rw-border-default)}\
-.rw-modal-title{margin:0;font-size:var(--rw-font-size-lg);font-weight:var(--rw-font-weight-semibold);\
-color:var(--rw-text-strong)}\
-.rw-modal-close{display:flex;align-items:center;justify-content:center;width:32px;\
-height:32px;padding:0;background:transparent;border:none;border-radius:var(--rw-radius-sm);\
-color:var(--rw-text-subtle);cursor:pointer;transition:var(--rw-transition-fast)}\
-.rw-modal-close:hover{background:var(--rw-bg-hover);color:var(--rw-text-default)}\
-.rw-modal-close .rw-icon{width:20px;height:20px}\
-.rw-modal-content{flex:1;overflow-y:auto;padding:var(--rw-space-4);\
-color:var(--rw-text-default)}\
-.rw-modal-footer{display:flex;align-items:center;justify-content:flex-end;gap:var(--rw-space-2);\
-padding:var(--rw-space-4);border-top:1px solid var(--rw-border-default)}\
-";
 
 #[cfg(test)]
 mod tests {
@@ -297,56 +262,34 @@ mod tests {
     }
 
     #[test]
-    fn test_modal_class_default() {
+    fn test_modal_tokens() {
         let modal = Modal::new();
-        let class = modal.compute_modal_class();
-        assert_eq!(class, "rw-modal");
+        let tokens = modal.compute_tokens();
+        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::RoundedLg));
+        assert!(tokens.contains(&St::ShadowLg));
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexCol));
+        assert!(tokens.contains(&St::PointerEventsAuto));
+        assert!(tokens.contains(&St::OverflowHidden));
     }
 
     #[test]
-    fn test_modal_class_with_size() {
+    fn test_modal_size_tokens() {
         let modal = Modal::new().size(ModalSize::Sm);
-        let class = modal.compute_modal_class();
-        assert!(class.contains("rw-modal-sm"));
+        let tokens = modal.size_tokens();
+        assert_eq!(tokens, vec![St::W400px, St::MaxWFull]);
 
         let modal = Modal::new().size(ModalSize::Lg);
-        let class = modal.compute_modal_class();
-        assert!(class.contains("rw-modal-lg"));
+        let tokens = modal.size_tokens();
+        assert_eq!(tokens, vec![St::W800px, St::MaxWFull]);
 
         let modal = Modal::new().size(ModalSize::Full);
-        let class = modal.compute_modal_class();
-        assert!(class.contains("rw-modal-full"));
-    }
-
-    #[test]
-    fn test_modal_backdrop_class() {
-        let modal = Modal::new().open(false);
-        let class = modal.compute_backdrop_class();
-        assert_eq!(class, "rw-modal-backdrop");
-
-        let modal = Modal::new().open(true);
-        let class = modal.compute_backdrop_class();
-        assert!(class.contains("rw-modal-backdrop-visible"));
-    }
-
-    #[test]
-    fn test_modal_css_size() {
-        assert!(
-            MODAL_CSS.len() < 2000,
-            "Modal CSS too large: {} bytes",
-            MODAL_CSS.len()
-        );
-        println!("Modal CSS size: {} bytes", MODAL_CSS.len());
-    }
-
-    #[test]
-    fn test_modal_css_structure() {
-        assert!(MODAL_CSS.contains(".rw-modal"));
-        assert!(MODAL_CSS.contains(".rw-modal-backdrop"));
-        assert!(MODAL_CSS.contains(".rw-modal-header"));
-        assert!(MODAL_CSS.contains(".rw-modal-content"));
-        assert!(MODAL_CSS.contains(".rw-modal-footer"));
-        assert!(MODAL_CSS.contains(".rw-modal-close"));
+        let tokens = modal.size_tokens();
+        assert!(tokens.contains(&St::WFull));
+        assert!(tokens.contains(&St::HFull));
+        assert!(tokens.contains(&St::MaxWFull));
+        assert!(tokens.contains(&St::MaxHFull));
     }
 
     #[test]
@@ -357,4 +300,5 @@ mod tests {
         let modal = Modal::new().open(false);
         assert!(!modal.open);
     }
+
 }

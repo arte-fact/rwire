@@ -526,6 +526,159 @@ pub enum St {
     MinHFit = 0x200,         // min-height:fit-content
     MaxHFit = 0x201,         // max-height:fit-content
     MinHMax = 0x202,         // min-height:max-content
+
+    // ========================================================================
+    // Migration Tokens (0x210+) - Used by component migration
+    // ========================================================================
+
+    // Padding (0x212)
+    Py0 = 0x212,             // padding-block:0
+
+    // Border (0x213)
+    BorderL4 = 0x213,        // border-left:4px solid
+
+    // Palette Backgrounds (0x220-0x226)
+    BgGreen4 = 0x220,        // background:var(--rw-green-4)
+    BgAmber4 = 0x221,        // background:var(--rw-amber-4)
+    BgRed4 = 0x222,          // background:var(--rw-red-4)
+    BgBlue2 = 0x223,         // background:var(--rw-blue-2)
+    BgYellow2 = 0x224,       // background:var(--rw-yellow-2)
+
+    // Palette Text Colors (0x225-0x227)
+    TextGreen11 = 0x225,     // color:var(--rw-green-11)
+    TextAmber11 = 0x226,     // color:var(--rw-amber-11)
+    TextRed11 = 0x227,       // color:var(--rw-red-11)
+
+    // Palette Border Colors (0x228-0x22B)
+    BorderGreen8 = 0x228,    // border-color:var(--rw-green-8)
+    BorderBlue8 = 0x229,     // border-color:var(--rw-blue-8)
+    BorderYellow8 = 0x22A,   // border-color:var(--rw-yellow-8)
+    BorderRed8 = 0x22B,      // border-color:var(--rw-red-8)
+
+    // Margin-block (0x230-0x234) - used by Divider component
+    MyXs = 0x230,            // margin-block:var(--rw-space-1)
+    MySm = 0x231,            // margin-block:var(--rw-space-2)
+    MyMd = 0x232,            // margin-block:var(--rw-space-4)
+    MyLg = 0x233,            // margin-block:var(--rw-space-6)
+    MyXl = 0x234,            // margin-block:var(--rw-space-8)
+
+    // Border variants (0x235-0x236)
+    BorderTSubtle = 0x235,   // border-top:1px solid var(--rw-border-subtle)
+    BorderLSubtle = 0x236,   // border-left:1px solid var(--rw-border-subtle)
+
+    // Palette accents (0x237)
+    BgAccent4 = 0x237,       // background:var(--rw-accent-4)
+    TextAccent11 = 0x238,    // color:var(--rw-accent-11)
+
+    // Flex shrink (0x239)
+    FlexShrink = 0x239,      // flex-shrink:0 (alias kept for Avatar)
+
+    // Phase 3 migration tokens (0x23A+) - Interactive components
+    BgRed9 = 0x23A,          // background:var(--rw-red-9)
+    TextTransparent = 0x23B, // color:transparent
+    ListStyleNone = 0x23C,   // list-style:none
+    ListDecimal = 0x23D,     // list-style-type:decimal
+    TextMedium = 0x23E,      // color:var(--rw-text-medium)
+    TextLow = 0x23F,         // color:var(--rw-text-low)
+    NoDecoration = 0x240,    // text-decoration:none
+    BorderBDefault = 0x241,  // border-bottom:1px solid var(--rw-border-default)
+    BorderBAccent = 0x242,   // border-bottom-color:var(--rw-accent-9)
+
+    // ========================================================================
+    // Component Sizing Tokens (0x250+) - Replaces inline style strings
+    // ========================================================================
+
+    // Fixed-rem heights (0x250-0x258)
+    H1rem = 0x250,       // height:1rem
+    H1_25rem = 0x251,    // height:1.25rem
+    H1_5rem = 0x252,     // height:1.5rem
+    H1_75rem = 0x253,    // height:1.75rem
+    H2rem = 0x254,       // height:2rem
+    H2_25rem = 0x255,    // height:2.25rem
+    H2_5rem = 0x256,     // height:2.5rem
+    H2_75rem = 0x257,    // height:2.75rem
+    H3rem = 0x258,       // height:3rem
+
+    // Spacing-scale heights (0x259-0x25F)
+    HSp0 = 0x259,        // height:0
+    HSp1 = 0x25A,        // height:var(--rw-space-1)
+    HSp2 = 0x25B,        // height:var(--rw-space-2)
+    HSp4 = 0x25C,        // height:var(--rw-space-4)
+    HSp6 = 0x25D,        // height:var(--rw-space-6)
+    HSp8 = 0x25E,        // height:var(--rw-space-8)
+    H05rem = 0x25F,      // height:0.5rem
+
+    // Fixed-rem widths (0x260-0x264)
+    W1rem = 0x260,       // width:1rem
+    W1_5rem = 0x261,     // width:1.5rem
+    W2rem = 0x262,       // width:2rem
+    W2_5rem = 0x263,     // width:2.5rem
+    W3rem = 0x264,       // width:3rem
+
+    // Spacing-scale widths (0x265-0x26A)
+    WSp0 = 0x265,        // width:0
+    WSp1 = 0x266,        // width:var(--rw-space-1)
+    WSp2 = 0x267,        // width:var(--rw-space-2)
+    WSp4 = 0x268,        // width:var(--rw-space-4)
+    WSp6 = 0x269,        // width:var(--rw-space-6)
+    WSp8 = 0x26A,        // width:var(--rw-space-8)
+
+    // Fixed-px widths for modals (0x26B-0x26E)
+    W400px = 0x26B,      // width:400px
+    W600px = 0x26C,      // width:600px
+    W800px = 0x26D,      // width:800px
+    W1000px = 0x26E,     // width:1000px
+
+    // Min/Max sizing (0x270-0x278)
+    MinH4rem = 0x270,    // min-height:4rem
+    MinH5rem = 0x271,    // min-height:5rem
+    MinH6rem = 0x272,    // min-height:6rem
+    MinW05rem = 0x273,   // min-width:0.5rem
+    MaxW40rem = 0x274,   // max-width:40rem
+    MaxW48rem = 0x275,   // max-width:48rem
+    MaxW64rem = 0x276,   // max-width:64rem
+    MaxW80rem = 0x277,   // max-width:80rem
+    MaxH90vh = 0x278,    // max-height:90vh
+
+    // Padding/Margin extended (0x280-0x285)
+    PxSp3 = 0x280,      // padding-inline:var(--rw-space-3)
+    Px0 = 0x281,         // padding-inline:0
+    PySp3 = 0x282,       // padding-block:var(--rw-space-3)
+    PSp3 = 0x283,        // padding:var(--rw-space-3)
+    MxMd = 0x284,        // margin-inline:var(--rw-space-4)
+    MbNeg2px = 0x285,    // margin-bottom:-2px
+
+    // Border extended (0x290-0x295)
+    Bw3 = 0x290,                 // border-width:3px
+    BorderRTransparent = 0x291,  // border-right-color:transparent
+    Border2Default = 0x292,      // border:2px solid var(--rw-border-default)
+    BorderB2Default = 0x293,     // border-bottom:2px solid var(--rw-border-default)
+    BorderB2Accent = 0x294,      // border-bottom:2px solid var(--rw-accent-9)
+    BorderB2Transparent = 0x295, // border-bottom:2px solid transparent
+
+    // Component misc (0x2A0-0x2A7)
+    FontInherit = 0x2A0,    // font-family:inherit
+    AnimateSpinFast = 0x2A1, // animation:rw-spin .6s linear infinite
+    BgSizeCover = 0x2A2,    // background-size:cover
+    BgPosCenter = 0x2A3,    // background-position:center
+    Z1300 = 0x2A4,           // z-index:1300
+    Z1400 = 0x2A5,           // z-index:1400
+    Z9999 = 0x2A6,           // z-index:9999
+    BgOverlay50 = 0x2A7,    // background:rgba(0,0,0,0.5)
+
+    // Pseudo-class decomposition tokens (0x2B0-0x2BF)
+    BgRedHover = 0x2B0,            // background:var(--rw-red-10)
+    BorderColorAccent = 0x2B1,     // border-color:var(--rw-accent-8)
+    Scale98 = 0x2B2,               // transform:scale(0.98)
+    Mb0 = 0x2B3,                   // margin-bottom:0
+    BorderBSubtle = 0x2B4,         // border-bottom:1px solid var(--rw-border-subtle)
+    ContentEmpty = 0x2B5,          // content:""
+    ContentAsterisk = 0x2B6,       // content:" *"
+    ContentSlash = 0x2B7,          // content:"/"
+    TranslateXFull = 0x2B8,        // transform:translateX(100%)
+    TransitionTransformFast = 0x2B9, // transition:transform .2s
+    MxSp2 = 0x2BA,                // margin-inline:var(--rw-space-2)
+    BorderStyleSolid = 0x2BB,     // border-style:solid
 }
 
 impl St {
@@ -988,6 +1141,143 @@ impl St {
             Self::MinHFit => "min-height:fit-content",
             Self::MaxHFit => "max-height:fit-content",
             Self::MinHMax => "min-height:max-content",
+
+            // Migration Tokens
+            Self::Py0 => "padding-block:0",
+            Self::BorderL4 => "border-left:4px solid",
+            Self::BgGreen4 => "background:var(--rw-green-4)",
+            Self::BgAmber4 => "background:var(--rw-amber-4)",
+            Self::BgRed4 => "background:var(--rw-red-4)",
+            Self::BgBlue2 => "background:var(--rw-blue-2)",
+            Self::BgYellow2 => "background:var(--rw-yellow-2)",
+            Self::TextGreen11 => "color:var(--rw-green-11)",
+            Self::TextAmber11 => "color:var(--rw-amber-11)",
+            Self::TextRed11 => "color:var(--rw-red-11)",
+            Self::BorderGreen8 => "border-color:var(--rw-green-8)",
+            Self::BorderBlue8 => "border-color:var(--rw-blue-8)",
+            Self::BorderYellow8 => "border-color:var(--rw-yellow-8)",
+            Self::BorderRed8 => "border-color:var(--rw-red-8)",
+
+            // Margin-block
+            Self::MyXs => "margin-block:var(--rw-space-1)",
+            Self::MySm => "margin-block:var(--rw-space-2)",
+            Self::MyMd => "margin-block:var(--rw-space-4)",
+            Self::MyLg => "margin-block:var(--rw-space-6)",
+            Self::MyXl => "margin-block:var(--rw-space-8)",
+
+            // Border variants
+            Self::BorderTSubtle => "border-top:1px solid var(--rw-border-subtle)",
+            Self::BorderLSubtle => "border-left:1px solid var(--rw-border-subtle)",
+
+            // Palette accents
+            Self::BgAccent4 => "background:var(--rw-accent-4)",
+            Self::TextAccent11 => "color:var(--rw-accent-11)",
+
+            // Flex shrink
+            Self::FlexShrink => "flex-shrink:0",
+
+            // Phase 3 migration tokens
+            Self::BgRed9 => "background:var(--rw-red-9)",
+            Self::TextTransparent => "color:transparent",
+            Self::ListStyleNone => "list-style:none",
+            Self::ListDecimal => "list-style-type:decimal",
+            Self::TextMedium => "color:var(--rw-text-medium)",
+            Self::TextLow => "color:var(--rw-text-low)",
+            Self::NoDecoration => "text-decoration:none",
+            Self::BorderBDefault => "border-bottom:1px solid var(--rw-border-default)",
+            Self::BorderBAccent => "border-bottom-color:var(--rw-accent-9)",
+
+            // Component Sizing - Heights (fixed rem)
+            Self::H1rem => "height:1rem",
+            Self::H1_25rem => "height:1.25rem",
+            Self::H1_5rem => "height:1.5rem",
+            Self::H1_75rem => "height:1.75rem",
+            Self::H2rem => "height:2rem",
+            Self::H2_25rem => "height:2.25rem",
+            Self::H2_5rem => "height:2.5rem",
+            Self::H2_75rem => "height:2.75rem",
+            Self::H3rem => "height:3rem",
+
+            // Component Sizing - Heights (spacing scale)
+            Self::HSp0 => "height:0",
+            Self::HSp1 => "height:var(--rw-space-1)",
+            Self::HSp2 => "height:var(--rw-space-2)",
+            Self::HSp4 => "height:var(--rw-space-4)",
+            Self::HSp6 => "height:var(--rw-space-6)",
+            Self::HSp8 => "height:var(--rw-space-8)",
+            Self::H05rem => "height:0.5rem",
+
+            // Component Sizing - Widths (fixed rem)
+            Self::W1rem => "width:1rem",
+            Self::W1_5rem => "width:1.5rem",
+            Self::W2rem => "width:2rem",
+            Self::W2_5rem => "width:2.5rem",
+            Self::W3rem => "width:3rem",
+
+            // Component Sizing - Widths (spacing scale)
+            Self::WSp0 => "width:0",
+            Self::WSp1 => "width:var(--rw-space-1)",
+            Self::WSp2 => "width:var(--rw-space-2)",
+            Self::WSp4 => "width:var(--rw-space-4)",
+            Self::WSp6 => "width:var(--rw-space-6)",
+            Self::WSp8 => "width:var(--rw-space-8)",
+
+            // Component Sizing - Widths (fixed px, modal)
+            Self::W400px => "width:400px",
+            Self::W600px => "width:600px",
+            Self::W800px => "width:800px",
+            Self::W1000px => "width:1000px",
+
+            // Min/Max sizing
+            Self::MinH4rem => "min-height:4rem",
+            Self::MinH5rem => "min-height:5rem",
+            Self::MinH6rem => "min-height:6rem",
+            Self::MinW05rem => "min-width:0.5rem",
+            Self::MaxW40rem => "max-width:40rem",
+            Self::MaxW48rem => "max-width:48rem",
+            Self::MaxW64rem => "max-width:64rem",
+            Self::MaxW80rem => "max-width:80rem",
+            Self::MaxH90vh => "max-height:90vh",
+
+            // Padding/Margin extended
+            Self::PxSp3 => "padding-inline:var(--rw-space-3)",
+            Self::Px0 => "padding-inline:0",
+            Self::PySp3 => "padding-block:var(--rw-space-3)",
+            Self::PSp3 => "padding:var(--rw-space-3)",
+            Self::MxMd => "margin-inline:var(--rw-space-4)",
+            Self::MbNeg2px => "margin-bottom:-2px",
+
+            // Border extended
+            Self::Bw3 => "border-width:3px",
+            Self::BorderRTransparent => "border-right-color:transparent",
+            Self::Border2Default => "border:2px solid var(--rw-border-default)",
+            Self::BorderB2Default => "border-bottom:2px solid var(--rw-border-default)",
+            Self::BorderB2Accent => "border-bottom:2px solid var(--rw-accent-9)",
+            Self::BorderB2Transparent => "border-bottom:2px solid transparent",
+
+            // Component misc
+            Self::FontInherit => "font-family:inherit",
+            Self::AnimateSpinFast => "animation:rw-spin .6s linear infinite",
+            Self::BgSizeCover => "background-size:cover",
+            Self::BgPosCenter => "background-position:center",
+            Self::Z1300 => "z-index:1300",
+            Self::Z1400 => "z-index:1400",
+            Self::Z9999 => "z-index:9999",
+            Self::BgOverlay50 => "background:rgba(0,0,0,0.5)",
+
+            // Pseudo-class decomposition tokens
+            Self::BgRedHover => "background:var(--rw-red-10)",
+            Self::BorderColorAccent => "border-color:var(--rw-accent-8)",
+            Self::Scale98 => "transform:scale(0.98)",
+            Self::Mb0 => "margin-bottom:0",
+            Self::BorderBSubtle => "border-bottom:1px solid var(--rw-border-subtle)",
+            Self::ContentEmpty => "content:\"\"",
+            Self::ContentAsterisk => "content:\" *\"",
+            Self::ContentSlash => "content:\"/\"",
+            Self::TranslateXFull => "transform:translateX(100%)",
+            Self::TransitionTransformFast => "transition:transform .2s",
+            Self::MxSp2 => "margin-inline:var(--rw-space-2)",
+            Self::BorderStyleSolid => "border-style:solid",
         }
     }
 }
@@ -1754,6 +2044,127 @@ pub const UTIL_MAPPINGS: &[(u16, &str)] = &[
     (0x200, "min-height:fit-content"),
     (0x201, "max-height:fit-content"),
     (0x202, "min-height:max-content"),
+    // Migration Tokens
+    (0x212, "padding-block:0"),
+    (0x213, "border-left:4px solid"),
+    (0x220, "background:var(--rw-green-4)"),
+    (0x221, "background:var(--rw-amber-4)"),
+    (0x222, "background:var(--rw-red-4)"),
+    (0x223, "background:var(--rw-blue-2)"),
+    (0x224, "background:var(--rw-yellow-2)"),
+    (0x225, "color:var(--rw-green-11)"),
+    (0x226, "color:var(--rw-amber-11)"),
+    (0x227, "color:var(--rw-red-11)"),
+    (0x228, "border-color:var(--rw-green-8)"),
+    (0x229, "border-color:var(--rw-blue-8)"),
+    (0x22A, "border-color:var(--rw-yellow-8)"),
+    (0x22B, "border-color:var(--rw-red-8)"),
+    // Margin-block
+    (0x230, "margin-block:var(--rw-space-1)"),
+    (0x231, "margin-block:var(--rw-space-2)"),
+    (0x232, "margin-block:var(--rw-space-4)"),
+    (0x233, "margin-block:var(--rw-space-6)"),
+    (0x234, "margin-block:var(--rw-space-8)"),
+    // Border variants
+    (0x235, "border-top:1px solid var(--rw-border-subtle)"),
+    (0x236, "border-left:1px solid var(--rw-border-subtle)"),
+    // Palette accents
+    (0x237, "background:var(--rw-accent-4)"),
+    (0x238, "color:var(--rw-accent-11)"),
+    // Flex shrink
+    (0x239, "flex-shrink:0"),
+    // Phase 3 migration tokens
+    (0x23A, "background:var(--rw-red-9)"),
+    (0x23B, "color:transparent"),
+    (0x23C, "list-style:none"),
+    (0x23D, "list-style-type:decimal"),
+    (0x23E, "color:var(--rw-text-medium)"),
+    (0x23F, "color:var(--rw-text-low)"),
+    (0x240, "text-decoration:none"),
+    (0x241, "border-bottom:1px solid var(--rw-border-default)"),
+    (0x242, "border-bottom-color:var(--rw-accent-9)"),
+    // Component Sizing - Heights (fixed rem)
+    (0x250, "height:1rem"),
+    (0x251, "height:1.25rem"),
+    (0x252, "height:1.5rem"),
+    (0x253, "height:1.75rem"),
+    (0x254, "height:2rem"),
+    (0x255, "height:2.25rem"),
+    (0x256, "height:2.5rem"),
+    (0x257, "height:2.75rem"),
+    (0x258, "height:3rem"),
+    // Component Sizing - Heights (spacing scale)
+    (0x259, "height:0"),
+    (0x25A, "height:var(--rw-space-1)"),
+    (0x25B, "height:var(--rw-space-2)"),
+    (0x25C, "height:var(--rw-space-4)"),
+    (0x25D, "height:var(--rw-space-6)"),
+    (0x25E, "height:var(--rw-space-8)"),
+    (0x25F, "height:0.5rem"),
+    // Component Sizing - Widths (fixed rem)
+    (0x260, "width:1rem"),
+    (0x261, "width:1.5rem"),
+    (0x262, "width:2rem"),
+    (0x263, "width:2.5rem"),
+    (0x264, "width:3rem"),
+    // Component Sizing - Widths (spacing scale)
+    (0x265, "width:0"),
+    (0x266, "width:var(--rw-space-1)"),
+    (0x267, "width:var(--rw-space-2)"),
+    (0x268, "width:var(--rw-space-4)"),
+    (0x269, "width:var(--rw-space-6)"),
+    (0x26A, "width:var(--rw-space-8)"),
+    // Component Sizing - Widths (fixed px, modal)
+    (0x26B, "width:400px"),
+    (0x26C, "width:600px"),
+    (0x26D, "width:800px"),
+    (0x26E, "width:1000px"),
+    // Min/Max sizing
+    (0x270, "min-height:4rem"),
+    (0x271, "min-height:5rem"),
+    (0x272, "min-height:6rem"),
+    (0x273, "min-width:0.5rem"),
+    (0x274, "max-width:40rem"),
+    (0x275, "max-width:48rem"),
+    (0x276, "max-width:64rem"),
+    (0x277, "max-width:80rem"),
+    (0x278, "max-height:90vh"),
+    // Padding/Margin extended
+    (0x280, "padding-inline:var(--rw-space-3)"),
+    (0x281, "padding-inline:0"),
+    (0x282, "padding-block:var(--rw-space-3)"),
+    (0x283, "padding:var(--rw-space-3)"),
+    (0x284, "margin-inline:var(--rw-space-4)"),
+    (0x285, "margin-bottom:-2px"),
+    // Border extended
+    (0x290, "border-width:3px"),
+    (0x291, "border-right-color:transparent"),
+    (0x292, "border:2px solid var(--rw-border-default)"),
+    (0x293, "border-bottom:2px solid var(--rw-border-default)"),
+    (0x294, "border-bottom:2px solid var(--rw-accent-9)"),
+    (0x295, "border-bottom:2px solid transparent"),
+    // Component misc
+    (0x2A0, "font-family:inherit"),
+    (0x2A1, "animation:rw-spin .6s linear infinite"),
+    (0x2A2, "background-size:cover"),
+    (0x2A3, "background-position:center"),
+    (0x2A4, "z-index:1300"),
+    (0x2A5, "z-index:1400"),
+    (0x2A6, "z-index:9999"),
+    (0x2A7, "background:rgba(0,0,0,0.5)"),
+    // Pseudo-class decomposition tokens
+    (0x2B0, "background:var(--rw-red-10)"),
+    (0x2B1, "border-color:var(--rw-accent-8)"),
+    (0x2B2, "transform:scale(0.98)"),
+    (0x2B3, "margin-bottom:0"),
+    (0x2B4, "border-bottom:1px solid var(--rw-border-subtle)"),
+    (0x2B5, "content:\"\""),
+    (0x2B6, "content:\" *\""),
+    (0x2B7, "content:\"/\""),
+    (0x2B8, "transform:translateX(100%)"),
+    (0x2B9, "transition:transform .2s"),
+    (0x2BA, "margin-inline:var(--rw-space-2)"),
+    (0x2BB, "border-style:solid"),
 ];
 
 /// All property mappings for JS runtime generation.
@@ -1906,9 +2317,169 @@ pub const VALUE_MAPPINGS: &[(u8, &str)] = &[
     (0xA1, "1"),
 ];
 
+// ============================================================================
+// Pseudo-Class/Pseudo-Element Tokens
+// ============================================================================
+
+/// Pseudo-class/pseudo-element selector tokens.
+///
+/// Combined with St tokens to create composable pseudo-class CSS rules.
+/// Any St token can be used under any Pc selector.
+///
+/// # CSS Class Naming
+///
+/// `h{pc_code}u{st_code}` → `.h0u199:hover{background:var(--rw-accent-10)}`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Pc {
+    Hover = 0x00,
+    Focus = 0x01,
+    FocusVisible = 0x02,
+    Active = 0x03,
+    Disabled = 0x04,
+    Checked = 0x05,
+    Placeholder = 0x06,
+    Before = 0x07,
+    After = 0x08,
+    FirstChild = 0x09,
+    LastChild = 0x0A,
+    NthEven = 0x0B,
+    NthOdd = 0x0C,
+    NotLastChild = 0x0D,
+    FocusWithin = 0x0E,
+    CheckedAfter = 0x0F,
+}
+
+impl Pc {
+    /// Convert to wire protocol value.
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// Get the CSS selector for this pseudo-class.
+    pub fn selector(self) -> &'static str {
+        match self {
+            Self::Hover => ":hover",
+            Self::Focus => ":focus",
+            Self::FocusVisible => ":focus-visible",
+            Self::Active => ":active",
+            Self::Disabled => "",
+            Self::Checked => ":checked",
+            Self::Placeholder => "::placeholder",
+            Self::Before => "::before",
+            Self::After => "::after",
+            Self::FirstChild => ":first-child",
+            Self::LastChild => ":last-child",
+            Self::NthEven => ":nth-child(even)",
+            Self::NthOdd => ":nth-child(odd)",
+            Self::NotLastChild => ":not(:last-child)",
+            Self::FocusWithin => ":focus-within",
+            Self::CheckedAfter => ":checked::after",
+        }
+    }
+}
+
+/// All Pc selector mappings for JS runtime generation: (code, css_selector).
+pub const PC_MAPPINGS: &[(u8, &str)] = &[
+    (0x00, ":hover"),
+    (0x01, ":focus"),
+    (0x02, ":focus-visible"),
+    (0x03, ":active"),
+    (0x04, ""),
+    (0x05, ":checked"),
+    (0x06, "::placeholder"),
+    (0x07, "::before"),
+    (0x08, "::after"),
+    (0x09, ":first-child"),
+    (0x0A, ":last-child"),
+    (0x0B, ":nth-child(even)"),
+    (0x0C, ":nth-child(odd)"),
+    (0x0D, ":not(:last-child)"),
+    (0x0E, ":focus-within"),
+    (0x0F, ":checked::after"),
+];
+
+/// Global CSS rules injected alongside pseudo tokens (e.g., @keyframes).
+pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}";
+
+// ============================================================================
+// CSS Generation Functions
+// ============================================================================
+
+/// Generate CSS rules for all used utility tokens.
+///
+/// Each used token becomes a CSS class rule: `.u{code}{declaration}`
+/// These rules are injected via STYLE_INJECT and replace the JS lookup table.
+pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
+    let mut css = String::with_capacity(used.len() * 30);
+    let mut needs_spin_keyframes = false;
+    for &(code, declaration) in UTIL_MAPPINGS {
+        if used.contains(&code) {
+            use std::fmt::Write;
+            let _ = write!(css, ".u{}{{{}}}", code, declaration);
+            if declaration.contains("rw-spin") {
+                needs_spin_keyframes = true;
+            }
+        }
+    }
+    if needs_spin_keyframes {
+        css.push_str(PSEUDO_GLOBAL_CSS);
+    }
+    css
+}
+
+/// Generate CSS rules for all used pseudo (Pc, St) pairs.
+///
+/// Each used pair becomes: `.h{pc}u{st}{selector}{declaration}`
+/// where the selector comes from Pc and the declaration from St.
+pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> String {
+    let mut css = String::with_capacity(used.len() * 50);
+    let mut needs_spin_keyframes = false;
+
+    // Sort for deterministic output
+    let mut pairs: Vec<_> = used.iter().copied().collect();
+    pairs.sort();
+
+    for (pc_code, st_code) in pairs {
+        let selector = PC_MAPPINGS
+            .iter()
+            .find(|(c, _)| *c == pc_code)
+            .map(|(_, s)| *s)
+            .unwrap_or("");
+        let declaration = UTIL_MAPPINGS
+            .iter()
+            .find(|(c, _)| *c == st_code)
+            .map(|(_, d)| *d)
+            .unwrap_or("");
+
+        if !declaration.is_empty() {
+            use std::fmt::Write;
+            let _ = write!(css, ".h{}u{}{}{{{}}}", pc_code, st_code, selector, declaration);
+            if declaration.contains("rw-spin") {
+                needs_spin_keyframes = true;
+            }
+        }
+    }
+
+    if needs_spin_keyframes {
+        css.push_str(PSEUDO_GLOBAL_CSS);
+    }
+
+    css
+}
+
+/// Look up the CSS declaration for a utility token code.
+pub fn lookup_util_css(code: u16) -> Option<&'static str> {
+    UTIL_MAPPINGS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, css)| *css)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_util_mappings_consistent() {
@@ -1986,6 +2557,143 @@ mod tests {
                 seen_u8.insert(*code),
                 "Duplicate value code: 0x{:02X}",
                 code
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_pc_codes() {
+        let mut seen: HashSet<u8> = HashSet::new();
+        for (code, _) in PC_MAPPINGS {
+            assert!(
+                seen.insert(*code),
+                "Duplicate pseudo code: 0x{:02X}",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_utility_css() {
+        let mut used = HashSet::new();
+        used.insert(0x02); // DisplayFlex
+        used.insert(0x11); // FlexCol
+
+        let css = generate_utility_css(&used);
+        assert!(css.contains(".u2{display:flex}"), "Missing DisplayFlex rule: {css}");
+        assert!(css.contains(".u17{flex-direction:column}"), "Missing FlexCol rule: {css}");
+        // Should not contain unused tokens
+        assert!(!css.contains(".u0{"), "Should not contain unused token: {css}");
+    }
+
+    #[test]
+    fn test_generate_pseudo_css() {
+        let mut used = HashSet::new();
+        // (Hover, BgAccentHover=0xC7)
+        used.insert((Pc::Hover.as_u8(), St::BgAccentHover.as_u16()));
+        // (FocusVisible, OutlineAccent=0xF1)
+        used.insert((Pc::FocusVisible.as_u8(), St::OutlineAccent.as_u16()));
+
+        let css = generate_pseudo_css(&used);
+        assert!(css.contains(":hover{"), "Missing hover rule: {css}");
+        assert!(css.contains(":focus-visible{"), "Missing focus rule: {css}");
+    }
+
+    #[test]
+    fn test_generate_pseudo_css_with_keyframes() {
+        let mut used = HashSet::new();
+        // (After, AnimateSpinFast=0x2A1) - contains rw-spin
+        used.insert((Pc::After.as_u8(), St::AnimateSpinFast.as_u16()));
+
+        let css = generate_pseudo_css(&used);
+        assert!(css.contains("rw-spin"), "Missing spinner animation: {css}");
+        assert!(css.contains("@keyframes rw-spin"), "Missing keyframes: {css}");
+    }
+
+    #[test]
+    fn test_generate_pseudo_css_empty() {
+        let used = HashSet::new();
+        let css = generate_pseudo_css(&used);
+        assert!(css.is_empty());
+    }
+
+    #[test]
+    fn test_pc_enum_values() {
+        assert_eq!(Pc::Hover.as_u8(), 0x00);
+        assert_eq!(Pc::FocusVisible.as_u8(), 0x02);
+        assert_eq!(Pc::Disabled.as_u8(), 0x04);
+        assert_eq!(Pc::After.as_u8(), 0x08);
+    }
+
+    #[test]
+    fn test_lookup_util_css() {
+        assert_eq!(lookup_util_css(0x02), Some("display:flex"));
+        assert_eq!(lookup_util_css(0x11), Some("flex-direction:column"));
+        assert_eq!(lookup_util_css(0xFFFF), None);
+    }
+
+    #[test]
+    fn test_new_st_tokens_in_mappings() {
+        for token in [
+            St::Py0,
+            St::BorderL4,
+            St::BgGreen4,
+            St::BgAmber4,
+            St::BgRed4,
+            St::TextGreen11,
+            St::TextAmber11,
+            St::TextRed11,
+            St::BorderGreen8,
+            St::BorderBlue8,
+            St::BorderYellow8,
+            St::BorderRed8,
+            St::MyXs,
+            St::MySm,
+            St::MyMd,
+            St::MyLg,
+            St::MyXl,
+            St::BorderTSubtle,
+            St::BorderLSubtle,
+            St::BgAccent4,
+            St::TextAccent11,
+            St::FlexShrink,
+            St::BgRed9,
+            St::TextTransparent,
+            St::ListStyleNone,
+            St::ListDecimal,
+            St::TextMedium,
+            St::TextLow,
+            St::NoDecoration,
+            St::BorderBDefault,
+            St::BorderBAccent,
+            // Pseudo decomposition tokens
+            St::BgRedHover,
+            St::BorderColorAccent,
+            St::Scale98,
+            St::Mb0,
+            St::BorderBSubtle,
+            St::ContentEmpty,
+            St::ContentAsterisk,
+            St::ContentSlash,
+            St::TranslateXFull,
+            St::TransitionTransformFast,
+            St::MxSp2,
+            St::BorderStyleSolid,
+        ] {
+            let code = token.as_u16();
+            let mapping = UTIL_MAPPINGS.iter().find(|(c, _)| *c == code);
+            assert!(
+                mapping.is_some(),
+                "St::{:?} (0x{:03X}) not in UTIL_MAPPINGS",
+                token,
+                code
+            );
+            let (_, css) = mapping.unwrap();
+            assert_eq!(
+                token.css(),
+                *css,
+                "Mismatch for St::{:?}",
+                token
             );
         }
     }

@@ -13,6 +13,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::At;
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -37,9 +39,6 @@ impl Default for Pagination {
 }
 
 impl Pagination {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-pagination";
-
     /// Create a new pagination component.
     pub fn new() -> Self {
         Self::default()
@@ -69,43 +68,52 @@ impl Pagination {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str(Self::BASE_CLASS);
+    /// Compute style tokens for the pagination list.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayFlex, St::ItemsCenter, St::GapSm, St::ListStyleNone, St::M0, St::P0]
+    }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
+    /// Build a page button with common tokens.
+    fn build_page_button(text: &str, is_active: bool, is_disabled: bool) -> ElementBuilder {
+        let mut tokens = vec![
+            St::BgTransparent, St::BorderDefault, St::RoundedMd,
+            St::TextSm, St::TextHigh, St::CursorPointer, St::TransitionAll,
+        ];
+
+        if is_active {
+            tokens.extend([St::BgAccent, St::TextOnAccent, St::BorderAccent]);
         }
 
-        classes
+        tokens.extend([St::PySm, St::PxSp3]);
+        let mut button = el(El::Button)
+            .st(tokens)
+            .hover([St::BgHover])
+            .text(text);
+
+        if is_disabled {
+            button = button.bool_attr(At::Disabled);
+        }
+
+        button
     }
 
     /// Build the pagination into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Pagination);
+        let mut nav = el(El::Nav).at_str(At::AriaLabel, "Pagination");
 
-        let class = self.compute_class();
-        let nav = el(El::Nav)
-            .class(&class)
-            .attr("aria-label", "Pagination");
+        if let Some(ref extra) = self.extra_class {
+            nav = nav.class(extra.as_ref());
+        }
 
-        let mut list = el(El::Ul).class("rw-pagination-list");
+        let mut list = el(El::Ul).st(self.compute_tokens());
 
         // Previous button
         let has_prev = self.current_page > 1;
-        let mut prev_btn = el(El::Button)
-            .class("rw-pagination-btn rw-pagination-prev")
-            .text("Previous")
-            .attr("aria-label", "Previous page");
-
-        if !has_prev {
-            prev_btn = prev_btn.attr("disabled", "");
-        }
+        let prev_btn = Self::build_page_button("Previous", false, !has_prev)
+            .at_str(At::AriaLabel, "Previous page");
 
         list = list.append([
-            el(El::Li).class("rw-pagination-item").append([prev_btn])
+            el(El::Li).append([prev_btn])
         ]);
 
         // Page numbers (simplified: show current, first, last, and neighbors)
@@ -115,18 +123,18 @@ impl Pagination {
         if total > 0 {
             // Always show page 1
             if current > 2 {
-                let page_btn = el(El::Button)
-                    .class("rw-pagination-btn")
-                    .text("1")
-                    .attr("aria-label", "Page 1");
+                let page_btn = Self::build_page_button("1", false, false)
+                    .at_str(At::AriaLabel, "Page 1");
                 list = list.append([
-                    el(El::Li).class("rw-pagination-item").append([page_btn])
+                    el(El::Li).append([page_btn])
                 ]);
 
                 if current > 3 {
                     list = list.append([
-                        el(El::Li).class("rw-pagination-item").append([
-                            el(El::Span).class("rw-pagination-ellipsis").text("...")
+                        el(El::Li).append([
+                            el(El::Span)
+                                .st([St::TextLow, St::PSm])
+                                .text("...")
                         ])
                     ]);
                 }
@@ -136,21 +144,15 @@ impl Pagination {
             for page in 1..=total {
                 if (page == current || (page >= current.saturating_sub(1) && page <= current + 1)) && page > 1 && page < total {
                     let is_current = page == current;
-                    let mut page_btn = el(El::Button)
-                        .class(if is_current {
-                            "rw-pagination-btn rw-pagination-btn-active"
-                        } else {
-                            "rw-pagination-btn"
-                        })
-                        .text(&page.to_string())
-                        .attr("aria-label", &format!("Page {}", page));
+                    let mut page_btn = Self::build_page_button(&page.to_string(), is_current, false)
+                        .at_str(At::AriaLabel, &format!("Page {}", page));
 
                     if is_current {
                         page_btn = page_btn.attr("aria-current", "page");
                     }
 
                     list = list.append([
-                        el(El::Li).class("rw-pagination-item").append([page_btn])
+                        el(El::Li).append([page_btn])
                     ]);
                 }
             }
@@ -159,62 +161,40 @@ impl Pagination {
             if total > 1 && current < total - 1 {
                 if current < total - 2 {
                     list = list.append([
-                        el(El::Li).class("rw-pagination-item").append([
-                            el(El::Span).class("rw-pagination-ellipsis").text("...")
+                        el(El::Li).append([
+                            el(El::Span)
+                                .st([St::TextLow, St::PSm])
+                                .text("...")
                         ])
                     ]);
                 }
 
                 let is_current = current == total;
-                let mut page_btn = el(El::Button)
-                    .class(if is_current {
-                        "rw-pagination-btn rw-pagination-btn-active"
-                    } else {
-                        "rw-pagination-btn"
-                    })
-                    .text(&total.to_string())
-                    .attr("aria-label", &format!("Page {}", total));
+                let mut page_btn = Self::build_page_button(&total.to_string(), is_current, false)
+                    .at_str(At::AriaLabel, &format!("Page {}", total));
 
                 if is_current {
                     page_btn = page_btn.attr("aria-current", "page");
                 }
 
                 list = list.append([
-                    el(El::Li).class("rw-pagination-item").append([page_btn])
+                    el(El::Li).append([page_btn])
                 ]);
             }
         }
 
         // Next button
         let has_next = self.current_page < self.total_pages;
-        let mut next_btn = el(El::Button)
-            .class("rw-pagination-btn rw-pagination-next")
-            .text("Next")
-            .attr("aria-label", "Next page");
-
-        if !has_next {
-            next_btn = next_btn.attr("disabled", "");
-        }
+        let next_btn = Self::build_page_button("Next", false, !has_next)
+            .at_str(At::AriaLabel, "Next page");
 
         list = list.append([
-            el(El::Li).class("rw-pagination-item").append([next_btn])
+            el(El::Li).append([next_btn])
         ]);
 
         nav.append([list])
     }
 }
-
-/// Pagination CSS.
-///
-/// Size: ~295 bytes (under 300 bytes budget)
-pub const PAGINATION_CSS: &str = "\
-.rw-pagination-list{display:flex;align-items:center;gap:var(--rw-space-2);list-style:none;margin:0;padding:0}\
-.rw-pagination-btn{background:transparent;border:1px solid var(--rw-border-default);border-radius:var(--rw-radius-md);\
-padding:var(--rw-space-2) var(--rw-space-3);font-size:var(--rw-text-sm);color:var(--rw-text-high);cursor:pointer;transition:all .15s}\
-.rw-pagination-btn:hover:not(:disabled){background:var(--rw-bg-hover)}\
-.rw-pagination-btn:disabled{opacity:.5;cursor:not-allowed}\
-.rw-pagination-btn-active{background:var(--rw-accent-9);color:var(--rw-text-on-accent);border-color:var(--rw-accent-9)}\
-.rw-pagination-ellipsis{padding:var(--rw-space-2);color:var(--rw-text-low)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -229,9 +209,15 @@ mod tests {
     }
 
     #[test]
-    fn test_pagination_class_default() {
+    fn test_pagination_tokens() {
         let pagination = Pagination::new();
-        assert_eq!(pagination.compute_class(), "rw-pagination");
+        let tokens = pagination.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::ItemsCenter));
+        assert!(tokens.contains(&St::GapSm));
+        assert!(tokens.contains(&St::ListStyleNone));
+        assert!(tokens.contains(&St::M0));
+        assert!(tokens.contains(&St::P0));
     }
 
     #[test]
@@ -243,22 +229,4 @@ mod tests {
         assert_eq!(pagination.total_pages, 10);
     }
 
-    #[test]
-    fn test_pagination_css_size() {
-        // Pagination CSS should be under 300 bytes
-        assert!(
-            PAGINATION_CSS.len() < 700,
-            "Pagination CSS too large: {} bytes (budget: 700)",
-            PAGINATION_CSS.len()
-        );
-        println!("Pagination CSS size: {} bytes", PAGINATION_CSS.len());
-    }
-
-    #[test]
-    fn test_pagination_css_structure() {
-        assert!(PAGINATION_CSS.contains(".rw-pagination-list"));
-        assert!(PAGINATION_CSS.contains(".rw-pagination-btn"));
-        assert!(PAGINATION_CSS.contains(".rw-pagination-btn-active"));
-        assert!(PAGINATION_CSS.contains(".rw-pagination-ellipsis"));
-    }
 }

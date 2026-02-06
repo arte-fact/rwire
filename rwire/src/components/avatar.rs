@@ -20,7 +20,8 @@
 //!     .build()
 //! ```
 
-use crate::variants::Variant;
+use crate::attr_tokens::At;
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -36,12 +37,13 @@ pub enum AvatarSize {
     Lg,
 }
 
-impl Variant for AvatarSize {
-    fn class(&self) -> Option<&'static str> {
+impl AvatarSize {
+    /// Get size tokens for width/height.
+    fn size_tokens(self) -> Vec<St> {
         match self {
-            AvatarSize::Sm => Some("rw-avatar-sm"),
-            AvatarSize::Md => None,
-            AvatarSize::Lg => Some("rw-avatar-lg"),
+            AvatarSize::Sm => vec![St::W2rem, St::H2rem],
+            AvatarSize::Md => vec![St::W2_5rem, St::H2_5rem],
+            AvatarSize::Lg => vec![St::W3rem, St::H3rem],
         }
     }
 }
@@ -57,9 +59,6 @@ pub struct Avatar {
 }
 
 impl Avatar {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-avatar";
-
     /// Create a new avatar.
     pub fn new() -> Self {
         Self::default()
@@ -95,48 +94,44 @@ impl Avatar {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str(Self::BASE_CLASS);
-
-        if let Some(size_class) = self.size.class() {
-            classes.push(' ');
-            classes.push_str(size_class);
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the avatar container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![
+            St::DisplayInlineFlex,
+            St::ItemsCenter,
+            St::JustifyCenter,
+            St::OverflowHidden,
+            St::RoundedFull,
+            St::BgMuted,
+            St::FlexShrink,
+        ]
     }
 
     /// Build the avatar into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Avatar);
+        let mut tokens = self.compute_tokens();
+        tokens.extend(self.size.size_tokens());
+        let mut container = el(El::Div)
+            .st(tokens);
 
-        let class = self.compute_class();
-        let container = el(El::Div).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            container = container.class(extra.as_ref());
+        }
 
-        // If image source is provided, render image (using div with background-image for now)
         if let Some(src) = self.src {
-            let style = format!("background-image:url({})", src);
             let mut img_div = el(El::Div)
-                .class("rw-avatar-img")
-                .attr("style", &style);
+                .st([St::WFull, St::HFull, St::BgSizeCover, St::BgPosCenter])
+                .attr("style", &format!("background-image:url({})", src));
 
             if let Some(alt) = self.alt {
-                img_div = img_div.attr("aria-label", &alt);
+                img_div = img_div.at_str(At::AriaLabel, &alt);
             }
 
             container.append([img_div])
         } else if let Some(fallback_text) = self.fallback {
-            // Render fallback text
             container.append([
                 el(El::Span)
-                    .class("rw-avatar-fallback")
+                    .st([St::TextSm, St::FontMedium, St::TextHigh])
                     .text(&fallback_text)
             ])
         } else {
@@ -144,18 +139,6 @@ impl Avatar {
         }
     }
 }
-
-/// Avatar CSS.
-///
-/// Size: ~280 bytes (under 300 bytes budget)
-pub const AVATAR_CSS: &str = "\
-.rw-avatar{display:inline-flex;align-items:center;justify-content:center;overflow:hidden;\
-border-radius:50%;background:var(--rw-bg-muted);width:2.5rem;height:2.5rem;flex-shrink:0}\
-.rw-avatar-sm{width:2rem;height:2rem}\
-.rw-avatar-lg{width:3rem;height:3rem}\
-.rw-avatar-img{width:100%;height:100%;background-size:cover;background-position:center}\
-.rw-avatar-fallback{font-size:var(--rw-text-sm);font-weight:var(--rw-font-medium);color:var(--rw-text-high)}\
-.rw-avatar-lg .rw-avatar-fallback{font-size:var(--rw-text-base)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -170,36 +153,20 @@ mod tests {
     }
 
     #[test]
-    fn test_avatar_class_default() {
+    fn test_avatar_default_tokens() {
         let avatar = Avatar::new();
-        assert_eq!(avatar.compute_class(), "rw-avatar");
+        let tokens = avatar.compute_tokens();
+        assert!(tokens.contains(&St::DisplayInlineFlex));
+        assert!(tokens.contains(&St::ItemsCenter));
+        assert!(tokens.contains(&St::RoundedFull));
+        assert!(tokens.contains(&St::BgMuted));
     }
 
     #[test]
-    fn test_avatar_class_with_size() {
-        let avatar = Avatar::new().size(AvatarSize::Lg);
-        let class = avatar.compute_class();
-        assert!(class.contains("rw-avatar"));
-        assert!(class.contains("rw-avatar-lg"));
+    fn test_avatar_size_tokens() {
+        assert_eq!(AvatarSize::Sm.size_tokens(), vec![St::W2rem, St::H2rem]);
+        assert_eq!(AvatarSize::Md.size_tokens(), vec![St::W2_5rem, St::H2_5rem]);
+        assert_eq!(AvatarSize::Lg.size_tokens(), vec![St::W3rem, St::H3rem]);
     }
 
-    #[test]
-    fn test_avatar_css_size() {
-        // Avatar CSS should be under 300 bytes
-        assert!(
-            AVATAR_CSS.len() < 550,
-            "Avatar CSS too large: {} bytes (budget: 550)",
-            AVATAR_CSS.len()
-        );
-        println!("Avatar CSS size: {} bytes", AVATAR_CSS.len());
-    }
-
-    #[test]
-    fn test_avatar_css_structure() {
-        assert!(AVATAR_CSS.contains(".rw-avatar{"));
-        assert!(AVATAR_CSS.contains(".rw-avatar-sm"));
-        assert!(AVATAR_CSS.contains(".rw-avatar-lg"));
-        assert!(AVATAR_CSS.contains(".rw-avatar-img"));
-        assert!(AVATAR_CSS.contains(".rw-avatar-fallback"));
-    }
 }

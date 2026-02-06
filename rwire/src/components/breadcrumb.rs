@@ -14,6 +14,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::At;
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -42,9 +44,6 @@ pub struct Breadcrumb {
 }
 
 impl Breadcrumb {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-breadcrumb";
-
     /// Create a new breadcrumb.
     pub fn new() -> Self {
         Self::default()
@@ -62,35 +61,31 @@ impl Breadcrumb {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str(Self::BASE_CLASS);
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the breadcrumb list.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayFlex, St::ItemsCenter, St::GapSm, St::ListStyleNone, St::M0, St::P0]
     }
 
     /// Build the breadcrumb into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Breadcrumb);
+        let mut nav = el(El::Nav).at_str(At::AriaLabel, "Breadcrumb");
 
-        let class = self.compute_class();
-        let nav = el(El::Nav)
-            .class(&class)
-            .attr("aria-label", "Breadcrumb");
+        if let Some(ref extra) = self.extra_class {
+            nav = nav.class(extra.as_ref());
+        }
 
-        let mut ol = el(El::Ul).class("rw-breadcrumb-list");
+        let mut ol = el(El::Ul).st(self.compute_tokens());
 
         let total = self.items.len();
         for (idx, item) in self.items.into_iter().enumerate() {
             let is_last = idx == total - 1;
 
-            let mut li = el(El::Li).class("rw-breadcrumb-item");
+            let mut li = el(El::Li)
+                .st([St::DisplayFlex, St::ItemsCenter, St::TextSm]);
+
+            if !is_last {
+                li = li.after([St::ContentSlash, St::MxSp2, St::TextMuted]);
+            }
 
             if is_last {
                 li = li.attr("aria-current", "page");
@@ -101,14 +96,15 @@ impl Breadcrumb {
                 if !is_last {
                     li = li.append([
                         el(El::A)
-                            .class("rw-breadcrumb-link")
-                            .attr("href", &link_url)
+                            .st([St::TextAccent, St::NoDecoration])
+                            .hover([St::Underline])
+                            .at_str(At::Href, &link_url)
                             .text(&item.label)
                     ]);
                 } else {
                     li = li.append([
                         el(El::Span)
-                            .class("rw-breadcrumb-current")
+                            .st([St::TextMedium])
                             .text(&item.label)
                     ]);
                 }
@@ -116,7 +112,7 @@ impl Breadcrumb {
                 // No link, just text
                 li = li.append([
                     el(El::Span)
-                        .class("rw-breadcrumb-current")
+                        .st([St::TextMedium])
                         .text(&item.label)
                 ]);
             }
@@ -127,17 +123,6 @@ impl Breadcrumb {
         nav.append([ol])
     }
 }
-
-/// Breadcrumb CSS.
-///
-/// Size: ~295 bytes (under 300 bytes budget)
-pub const BREADCRUMB_CSS: &str = "\
-.rw-breadcrumb-list{display:flex;align-items:center;gap:var(--rw-space-2);list-style:none;margin:0;padding:0}\
-.rw-breadcrumb-item{display:flex;align-items:center;font-size:var(--rw-text-sm)}\
-.rw-breadcrumb-item:not(:last-child)::after{content:\"/\";margin-left:var(--rw-space-2);color:var(--rw-text-low)}\
-.rw-breadcrumb-link{color:var(--rw-accent-9);text-decoration:none}\
-.rw-breadcrumb-link:hover{text-decoration:underline}\
-.rw-breadcrumb-current{color:var(--rw-text-medium)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -150,9 +135,15 @@ mod tests {
     }
 
     #[test]
-    fn test_breadcrumb_class_default() {
+    fn test_breadcrumb_tokens() {
         let bc = Breadcrumb::new();
-        assert_eq!(bc.compute_class(), "rw-breadcrumb");
+        let tokens = bc.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::ItemsCenter));
+        assert!(tokens.contains(&St::GapSm));
+        assert!(tokens.contains(&St::ListStyleNone));
+        assert!(tokens.contains(&St::M0));
+        assert!(tokens.contains(&St::P0));
     }
 
     #[test]
@@ -164,22 +155,4 @@ mod tests {
         assert_eq!(bc.items.len(), 3);
     }
 
-    #[test]
-    fn test_breadcrumb_css_size() {
-        // Breadcrumb CSS should be under 300 bytes
-        assert!(
-            BREADCRUMB_CSS.len() < 500,
-            "Breadcrumb CSS too large: {} bytes (budget: 500)",
-            BREADCRUMB_CSS.len()
-        );
-        println!("Breadcrumb CSS size: {} bytes", BREADCRUMB_CSS.len());
-    }
-
-    #[test]
-    fn test_breadcrumb_css_structure() {
-        assert!(BREADCRUMB_CSS.contains(".rw-breadcrumb-list"));
-        assert!(BREADCRUMB_CSS.contains(".rw-breadcrumb-item"));
-        assert!(BREADCRUMB_CSS.contains(".rw-breadcrumb-link"));
-        assert!(BREADCRUMB_CSS.contains(".rw-breadcrumb-current"));
-    }
 }

@@ -22,6 +22,7 @@
 //!     .build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -76,29 +77,26 @@ impl List {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str("rw-list");
-
+    /// Compute style tokens for the list container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![St::M0, St::TextDefault];
         if self.ordered {
-            classes.push_str(" rw-list-ordered");
+            tokens.push(St::ListDecimal);
         }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the list into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::List);
-
-        let class = self.compute_class();
         let element = if self.ordered { El::Ol } else { El::Ul };
-        let mut builder = el(element).class(&class);
+        let mut tokens = self.compute_tokens();
+        tokens.push(St::PlLg);
+        let mut builder = el(element)
+            .st(tokens);
+
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         for child in self.children {
             builder = builder.append([child]);
@@ -154,24 +152,20 @@ impl ListItem {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(24);
-        classes.push_str("rw-list-item");
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the list item.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::MbSm]
     }
 
     /// Build the list item into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::List);
+        let mut builder = el(El::Li)
+            .st(self.compute_tokens())
+            .last_child([St::Mb0]);
 
-        let class = self.compute_class();
-        let mut builder = el(El::Li).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         if let Some(content) = self.content {
             builder = builder.text(&content);
@@ -185,13 +179,6 @@ impl ListItem {
     }
 }
 
-/// List CSS.
-pub const LIST_CSS: &str = "\
-.rw-list{margin:0;padding-left:var(--rw-space-6);color:var(--rw-text-default)}\
-.rw-list-ordered{list-style-type:decimal}\
-.rw-list-item{margin-bottom:var(--rw-space-2)}\
-.rw-list-item:last-child{margin-bottom:0}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,26 +190,33 @@ mod tests {
     }
 
     #[test]
-    fn test_list_class_default() {
+    fn test_list_tokens_unordered() {
         let list = List::new();
-        assert_eq!(list.compute_class(), "rw-list");
+        let tokens = list.compute_tokens();
+        assert!(tokens.contains(&St::M0));
+        assert!(tokens.contains(&St::TextDefault));
+        assert!(!tokens.contains(&St::ListDecimal));
     }
 
     #[test]
-    fn test_list_class_ordered() {
+    fn test_list_tokens_ordered() {
         let list = List::ordered();
-        assert_eq!(list.compute_class(), "rw-list rw-list-ordered");
+        let tokens = list.compute_tokens();
+        assert!(tokens.contains(&St::ListDecimal));
     }
 
     #[test]
-    fn test_list_item_class() {
+    fn test_list_item_tokens() {
         let item = ListItem::new("Test");
-        assert_eq!(item.compute_class(), "rw-list-item");
+        let tokens = item.compute_tokens();
+        assert!(tokens.contains(&St::MbSm));
     }
 
     #[test]
-    fn test_list_css_size() {
-        assert!(LIST_CSS.len() < 250, "List CSS too large: {} bytes", LIST_CSS.len());
-        println!("List CSS size: {} bytes", LIST_CSS.len());
+    fn test_list_item_pseudo() {
+        let item = ListItem::new("Test").build();
+        let groups = item.get_pseudo_groups();
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x0A)); // Pc::LastChild
     }
+
 }

@@ -20,6 +20,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::At;
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -35,9 +37,6 @@ pub struct FormField {
 }
 
 impl FormField {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-form-field";
-
     /// Create a new form field.
     pub fn new() -> Self {
         Self::default()
@@ -79,43 +78,32 @@ impl FormField {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str(Self::BASE_CLASS);
-
-        if self.error.is_some() {
-            classes.push_str(" rw-form-field-error");
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the form field container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayFlex, St::FlexCol, St::GapSm]
     }
 
     /// Build the form field into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::FormField);
-
         // Generate ID for input-label association
         let field_id = crate::builder::generate_element_id("field_");
 
-        let class = self.compute_class();
-        let mut container = el(El::Div).class(&class);
+        let mut container = el(El::Div).st(self.compute_tokens());
+
+        if let Some(ref extra) = self.extra_class {
+            container = container.class(extra.as_ref());
+        }
 
         // Add label if provided
         if let Some(label_text) = self.label {
             let mut label = el(El::Label)
-                .class("rw-form-field-label")
-                .attr("for", &field_id)
+                .st([St::TextSm, St::FontMedium, St::TextHigh])
+                .at_str(At::For, &field_id)
                 .text(&label_text);
 
             if self.required {
                 label = label.append([
-                    el(El::Span).class("rw-form-field-required").text(" *")
+                    el(El::Span).st([St::TextError]).text(" *")
                 ]);
             }
 
@@ -125,7 +113,7 @@ impl FormField {
         // Add input if provided
         if let Some(mut input) = self.input {
             // Set ID on input for label association
-            input = input.attr("id", &field_id);
+            input = input.at_str(At::Id, &field_id);
             container = container.append([input]);
         }
 
@@ -133,7 +121,7 @@ impl FormField {
         if let Some(help_text) = self.help {
             container = container.append([
                 el(El::Div)
-                    .class("rw-form-field-help")
+                    .st([St::TextXs, St::TextMedium])
                     .text(&help_text)
             ]);
         }
@@ -142,7 +130,7 @@ impl FormField {
         if let Some(error_text) = self.error {
             container = container.append([
                 el(El::Div)
-                    .class("rw-form-field-error-msg")
+                    .st([St::TextXs, St::TextError])
                     .text(&error_text)
             ]);
         }
@@ -150,16 +138,6 @@ impl FormField {
         container
     }
 }
-
-/// FormField CSS.
-///
-/// Size: ~195 bytes (under 200 bytes budget)
-pub const FORM_FIELD_CSS: &str = "\
-.rw-form-field{display:flex;flex-direction:column;gap:var(--rw-space-2)}\
-.rw-form-field-label{font-size:var(--rw-text-sm);font-weight:var(--rw-font-medium);color:var(--rw-text-high)}\
-.rw-form-field-required{color:var(--rw-red-9)}\
-.rw-form-field-help{font-size:var(--rw-text-xs);color:var(--rw-text-medium)}\
-.rw-form-field-error-msg{font-size:var(--rw-text-xs);color:var(--rw-red-9)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -175,36 +153,12 @@ mod tests {
     }
 
     #[test]
-    fn test_form_field_class_default() {
+    fn test_form_field_tokens() {
         let field = FormField::new();
-        assert_eq!(field.compute_class(), "rw-form-field");
+        let tokens = field.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexCol));
+        assert!(tokens.contains(&St::GapSm));
     }
 
-    #[test]
-    fn test_form_field_class_with_error() {
-        let field = FormField::new().error("Invalid input");
-        let class = field.compute_class();
-        assert!(class.contains("rw-form-field"));
-        assert!(class.contains("rw-form-field-error"));
-    }
-
-    #[test]
-    fn test_form_field_css_size() {
-        // FormField CSS should be under 200 bytes
-        assert!(
-            FORM_FIELD_CSS.len() < 400,
-            "FormField CSS too large: {} bytes (budget: 400)",
-            FORM_FIELD_CSS.len()
-        );
-        println!("FormField CSS size: {} bytes", FORM_FIELD_CSS.len());
-    }
-
-    #[test]
-    fn test_form_field_css_structure() {
-        assert!(FORM_FIELD_CSS.contains(".rw-form-field{"));
-        assert!(FORM_FIELD_CSS.contains(".rw-form-field-label"));
-        assert!(FORM_FIELD_CSS.contains(".rw-form-field-required"));
-        assert!(FORM_FIELD_CSS.contains(".rw-form-field-help"));
-        assert!(FORM_FIELD_CSS.contains(".rw-form-field-error-msg"));
-    }
 }

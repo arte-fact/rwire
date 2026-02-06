@@ -10,6 +10,7 @@
 //! Label::new("Password").attr("for", "pwd").build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -22,9 +23,6 @@ pub struct Label {
 }
 
 impl Label {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-label";
-
     /// Create a new label with text.
     pub fn new(text: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -52,30 +50,22 @@ impl Label {
         self
     }
 
-    /// Compute the full class string.
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(64);
-        classes.push_str(Self::BASE_CLASS);
-
-        if self.required {
-            classes.push_str(" rw-label-required");
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the label.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayBlock, St::TextSm, St::FontMedium, St::TextHigh, St::MbXs]
     }
 
     /// Build the label into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Label);
+        let mut builder = el(El::Label).st(self.compute_tokens());
 
-        let class = self.compute_class();
-        let mut builder = el(El::Label).class(&class);
+        if self.required {
+            builder = builder.after([St::ContentAsterisk, St::TextError]);
+        }
+
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         if let Some(text) = self.text {
             builder = builder.text(&text);
@@ -86,14 +76,6 @@ impl Label {
 }
 
 /// Label CSS.
-///
-/// Minified CSS for the label component.
-/// Size: ~150 bytes (under 200 bytes budget)
-pub const LABEL_CSS: &str = "\
-.rw-label{display:block;font-size:var(--rw-text-sm);font-weight:var(--rw-font-medium);\
-color:var(--rw-text-high);margin-bottom:var(--rw-space-1)}\
-.rw-label-required::after{content:' *';color:var(--rw-red-9)}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,39 +88,29 @@ mod tests {
     }
 
     #[test]
-    fn test_label_class_default() {
+    fn test_label_default_tokens() {
         let label = Label::new("Test");
-        assert_eq!(label.compute_class(), "rw-label");
+        let tokens = label.compute_tokens();
+        assert!(tokens.contains(&St::DisplayBlock));
+        assert!(tokens.contains(&St::TextSm));
+        assert!(tokens.contains(&St::FontMedium));
+        assert!(tokens.contains(&St::TextHigh));
+        assert!(tokens.contains(&St::MbXs));
     }
 
     #[test]
-    fn test_label_class_required() {
-        let label = Label::new("Test").required(true);
-        assert_eq!(label.compute_class(), "rw-label rw-label-required");
+    fn test_label_required_pseudo() {
+        let label = Label::new("Test").required(true).build();
+        let groups = label.get_pseudo_groups();
+        // Should have ::after group for asterisk
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x08)); // Pc::After
     }
 
     #[test]
-    fn test_label_class_with_extra() {
-        let label = Label::new("Test").class("custom");
-        let class = label.compute_class();
-        assert!(class.contains("rw-label"));
-        assert!(class.contains("custom"));
+    fn test_label_not_required_no_pseudo() {
+        let label = Label::new("Test").build();
+        let groups = label.get_pseudo_groups();
+        assert!(groups.is_empty());
     }
 
-    #[test]
-    fn test_label_css_size() {
-        // Label CSS should be under 200 bytes
-        assert!(
-            LABEL_CSS.len() < 250,
-            "Label CSS too large: {} bytes (budget: 250)",
-            LABEL_CSS.len()
-        );
-        println!("Label CSS size: {} bytes", LABEL_CSS.len());
-    }
-
-    #[test]
-    fn test_label_css_structure() {
-        assert!(LABEL_CSS.contains(".rw-label{"));
-        assert!(LABEL_CSS.contains(".rw-label-required"));
-    }
 }

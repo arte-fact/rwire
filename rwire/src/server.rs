@@ -23,7 +23,6 @@ use crate::builder::{
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
-use crate::components::{begin_tracking, end_tracking};
 use crate::protocol::{ClientEvent, OpcodeBuffer};
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn};
@@ -440,8 +439,6 @@ where
             .unwrap_or_else(|| SharedServerState::new(self.persist_interval));
 
         // Pre-analyze the root element to determine used types for tree shaking
-        // Wrap in component tracking to detect which styled components are used
-        begin_tracking();
         let root_element = (self.root)();
         let mut ctx = BuildContext::new();
 
@@ -470,17 +467,17 @@ where
             ctx.collect_symbols_multi(&root_element, &states_map);
             ctx.emit_multi(&root_element);
         }
-        let component_registry = end_tracking();
-
         // Generate capsule - styled if config provided, basic otherwise
         let (capsule, capsule_css) = if let Some(config) = self.capsule_config {
-            // Merge tracked components and style tokens into config
+            // Merge style tokens and attribute tokens into config
             let config = config
-                .components(component_registry)
                 .has_local_handlers(ctx.has_local_handlers())
                 .with_style_utils(ctx.used_style_utils())
                 .with_style_props(ctx.used_style_props())
-                .with_style_values(ctx.used_style_values());
+                .with_style_values(ctx.used_style_values())
+                .with_pseudo_pairs(ctx.used_pseudo_pairs())
+                .with_attr_keys(ctx.used_attr_keys())
+                .with_attr_values(ctx.used_attr_values());
 
             // Generate CSS separately for dedicated route
             let css = capsule_gen::generate_capsule_css(&config);

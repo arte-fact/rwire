@@ -15,8 +15,25 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
+
+/// Creates the dropdown arrow SVG for the select component.
+fn select_arrow() -> ElementBuilder {
+    el(El::Svg)
+        .st([St::PositionAbsolute, St::PointerEventsNone, St::TextMuted])
+        .at(At::Xmlns, Av::SvgNs)
+        .at(At::Width, Av::V12)
+        .at(At::Height, Av::V12)
+        .at(At::ViewBox, Av::ViewBox12)
+        .at(At::Fill, Av::CurrentColor)
+        .attr("style", "right:var(--rw-space-3);top:50%;transform:translateY(-50%)")
+        .append([
+            el(El::Path).at_str(At::D, "M6 9L1 4h10z")
+        ])
+}
 
 /// A single option in a select dropdown.
 #[derive(Clone, Debug)]
@@ -49,9 +66,6 @@ pub struct Select {
 }
 
 impl Select {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-select";
-
     /// Create a new select dropdown.
     pub fn new() -> Self {
         Self::default()
@@ -105,63 +119,70 @@ impl Select {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str(Self::BASE_CLASS);
-
+    /// Compute style tokens for this select configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::DisplayBlock, St::WFull, St::TextSm, St::TextHigh,
+            St::BgApp, St::BorderDefault, St::RoundedMd, St::CursorPointer,
+            St::TransitionColors, St::AppearanceNone,
+        ];
         if self.invalid {
-            classes.push_str(" rw-select-invalid");
+            tokens.push(St::BorderRed8);
         }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the select into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Select);
-
-        let class = self.compute_class();
-        let mut select = el(El::Select).class(&class);
+        let mut tokens = self.compute_tokens();
+        tokens.extend([St::H2_25rem, St::Py0, St::PxSp3]);
+        let mut select = el(El::Select)
+            .st(tokens)
+            .hover([St::BorderEmphasis])
+            .focus_visible([St::OutlineAccent, St::OutlineOffset2]);
+        if self.disabled {
+            select = select.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+        }
 
         if let Some(ref id) = self.id {
-            select = select.attr("id", id);
+            select = select.at_str(At::Id, id);
         }
         if let Some(ref name) = self.name {
-            select = select.attr("name", name);
+            select = select.at_str(At::Name, name);
         }
         if self.disabled {
-            select = select.attr("disabled", "");
+            select = select.bool_attr(At::Disabled);
         }
         if self.required {
-            select = select.attr("required", "");
+            select = select.bool_attr(At::Required);
         }
         if self.invalid {
-            select = select.attr("aria-invalid", "true");
+            select = select.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref extra) = self.extra_class {
+            select = select.class(extra.as_ref());
         }
 
         // Add options
         for opt in self.options {
             let mut option = el(El::Option)
-                .attr("value", &opt.value)
+                .at_str(At::Value, &opt.value)
                 .text(&opt.label);
 
             // Check if this option is selected
             if let Some(ref selected_value) = self.value {
                 if opt.value == *selected_value {
-                    option = option.attr("selected", "");
+                    option = option.bool_attr(At::Selected);
                 }
             }
 
             select = select.append([option]);
         }
 
-        select
+        // Wrap select with positioned arrow SVG
+        el(El::Div)
+            .st([St::PositionRelative, St::ItemsCenter, St::WFull])
+            .append([select, select_arrow()])
     }
 
     /// Build with change event handler.
@@ -169,21 +190,6 @@ impl Select {
         self.build().on(Ev::Change, handler)
     }
 }
-
-/// Select CSS.
-///
-/// Size: ~420 bytes (under 450 bytes budget)
-pub const SELECT_CSS: &str = "\
-.rw-select{display:block;width:100%;height:2.25rem;padding:0 var(--rw-space-3);\
-font-size:var(--rw-text-sm);color:var(--rw-text-high);background:var(--rw-bg-app);\
-border:1px solid var(--rw-border-default);border-radius:var(--rw-radius-md);\
-cursor:pointer;transition:border-color .15s;appearance:none;\
-background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 9L1 4h10z'/%3E%3C/svg%3E\");\
-background-repeat:no-repeat;background-position:right var(--rw-space-3) center}\
-.rw-select:hover{border-color:var(--rw-border-emphasis)}\
-.rw-select:focus{outline:2px solid var(--rw-accent-8);outline-offset:2px;border-color:var(--rw-accent-9)}\
-.rw-select:disabled{opacity:.5;cursor:not-allowed}\
-.rw-select-invalid{border-color:var(--rw-red-8)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -198,17 +204,33 @@ mod tests {
     }
 
     #[test]
-    fn test_select_class_default() {
+    fn test_select_default_tokens() {
         let sel = Select::new();
-        assert_eq!(sel.compute_class(), "rw-select");
+        let tokens = sel.compute_tokens();
+        assert!(tokens.contains(&St::DisplayBlock));
+        assert!(tokens.contains(&St::WFull));
+        assert!(tokens.contains(&St::TextSm));
+        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::BorderDefault));
+        assert!(tokens.contains(&St::RoundedMd));
+        assert!(tokens.contains(&St::CursorPointer));
+        assert!(tokens.contains(&St::AppearanceNone));
     }
 
     #[test]
-    fn test_select_class_invalid() {
+    fn test_select_builds_with_arrow() {
+        // build() returns a wrapper div containing the select + SVG arrow
+        let sel = Select::new()
+            .option("a", "Option A")
+            .build();
+        drop(sel); // smoke test: builds without panic
+    }
+
+    #[test]
+    fn test_select_invalid_tokens() {
         let sel = Select::new().invalid(true);
-        let class = sel.compute_class();
-        assert!(class.contains("rw-select"));
-        assert!(class.contains("rw-select-invalid"));
+        let tokens = sel.compute_tokens();
+        assert!(tokens.contains(&St::BorderRed8));
     }
 
     #[test]
@@ -221,23 +243,4 @@ mod tests {
         assert_eq!(sel.value.as_deref(), Some("a"));
     }
 
-    #[test]
-    fn test_select_css_size() {
-        // Select CSS should be under 450 bytes
-        assert!(
-            SELECT_CSS.len() < 850,
-            "Select CSS too large: {} bytes (budget: 850)",
-            SELECT_CSS.len()
-        );
-        println!("Select CSS size: {} bytes", SELECT_CSS.len());
-    }
-
-    #[test]
-    fn test_select_css_structure() {
-        assert!(SELECT_CSS.contains(".rw-select{"));
-        assert!(SELECT_CSS.contains(".rw-select:hover"));
-        assert!(SELECT_CSS.contains(".rw-select:focus"));
-        assert!(SELECT_CSS.contains(".rw-select-invalid"));
-        assert!(SELECT_CSS.contains("background-image"));
-    }
 }

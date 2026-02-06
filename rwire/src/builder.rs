@@ -43,11 +43,23 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::attr_tokens::{At, Av};
 use crate::item_ref::ItemRef;
 use crate::protocol::{El, Ev, OpcodeBuffer};
 use crate::state::{
     ChangeSet, HandlerFn, HandlerSpec, LocalMutations, Renderer, RendererDeps, StorageType,
 };
+
+/// A typed attribute: enum key + enum value, enum key + symbol value, or bool attr.
+#[derive(Clone, Debug)]
+pub enum TypedAttr {
+    /// Enum key + enum value (SET_ATTR_ENUM: 4 bytes)
+    Enum(At, Av),
+    /// Boolean attribute, presence-only (SET_ATTR_BOOL: 3 bytes)
+    Bool(At),
+    /// Enum key + string value (SET_ATTR_KEY_SYM: 4-5 bytes)
+    KeySym(At, String),
+}
 
 /// Global counter for generating unique element IDs.
 static NEXT_ELEMENT_ID: AtomicU32 = AtomicU32::new(0);
@@ -165,6 +177,8 @@ pub struct ElementBuilder {
     text: Option<String>,
     class: Option<String>,
     attrs: Vec<(String, String)>,
+    /// Binary-encoded typed attributes (At/Av enums)
+    typed_attrs: Vec<TypedAttr>,
     events: Vec<(Ev, HandlerSpec)>,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
@@ -172,6 +186,8 @@ pub struct ElementBuilder {
     style_utils: Vec<u16>,
     /// Binary-encoded style property+value pairs (2 bytes each)
     style_props: Vec<(u8, u8)>,
+    /// Pseudo-class/pseudo-element groups: (Pc code, St tokens)
+    pseudo_groups: Vec<(u8, Vec<u16>)>,
 }
 
 impl ElementBuilder {
@@ -182,11 +198,13 @@ impl ElementBuilder {
             text: None,
             class: None,
             attrs: Vec::new(),
+            typed_attrs: Vec::new(),
             events: Vec::new(),
             children: Vec::new(),
             synced: None,
             style_utils: Vec::new(),
             style_props: Vec::new(),
+            pseudo_groups: Vec::new(),
         }
     }
 
@@ -216,11 +234,13 @@ impl ElementBuilder {
             text: None,
             class: None,
             attrs: Vec::new(),
+            typed_attrs: Vec::new(),
             events: Vec::new(),
             children: Vec::new(),
             synced: Some(Box::new(SyncedRendererImpl { render, deps })),
             style_utils: Vec::new(),
             style_props: Vec::new(),
+            pseudo_groups: Vec::new(),
         }
     }
 
@@ -257,6 +277,59 @@ impl ElementBuilder {
     /// ```
     pub fn data(self, key: &str, value: &str) -> Self {
         self.attr(&format!("data-{}", key), value)
+    }
+
+    /// Set a typed attribute with enum key + enum value.
+    ///
+    /// Uses binary encoding: 4 bytes on wire (SET_ATTR_ENUM opcode).
+    /// Much more compact than string-based `.attr()` for common attributes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::{el, El, At, Av};
+    ///
+    /// el(El::Button).at(At::Type, Av::Button)
+    /// el(El::Input).at(At::Type, Av::Email)
+    /// ```
+    pub fn at(mut self, key: At, value: Av) -> Self {
+        self.typed_attrs.push(TypedAttr::Enum(key, value));
+        self
+    }
+
+    /// Set a boolean attribute (presence-only, no value).
+    ///
+    /// Uses binary encoding: 3 bytes on wire (SET_ATTR_BOOL opcode).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::{el, El, At};
+    ///
+    /// el(El::Button).bool_attr(At::Disabled)
+    /// el(El::Input).bool_attr(At::Required)
+    /// ```
+    pub fn bool_attr(mut self, key: At) -> Self {
+        self.typed_attrs.push(TypedAttr::Bool(key));
+        self
+    }
+
+    /// Set a typed attribute with enum key + string value.
+    ///
+    /// Uses binary encoding: 4-5 bytes on wire (SET_ATTR_KEY_SYM opcode).
+    /// The key is a binary enum, the value goes through the symbol table.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::{el, El, At};
+    ///
+    /// el(El::Button).at_str(At::AriaLabel, "Close dialog")
+    /// el(El::Path).at_str(At::D, "M6 9l6 6 6-6")
+    /// ```
+    pub fn at_str(mut self, key: At, value: &str) -> Self {
+        self.typed_attrs.push(TypedAttr::KeySym(key, value.to_string()));
+        self
     }
 
     /// Set inline style on this element.
@@ -334,6 +407,101 @@ impl ElementBuilder {
         self
     }
 
+
+    /// Apply pseudo-class style tokens (hover, focus, disabled, etc.)
+    ///
+    /// Pseudo tokens generate CSS class rules with pseudo-selectors.
+    /// Unlike `.st()` which sets base visual styles, `.ps()` handles
+    /// interactive state changes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Button)
+    ///     .st([St::BgAccent, St::TextOnAccent])
+    ///     .hover([St::BgAccentHover])
+    ///     .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+    /// ```
+    pub fn pseudo<I>(mut self, pc: crate::style_tokens::Pc, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = crate::style_tokens::St>,
+    {
+        let st_codes: Vec<u16> = tokens.into_iter().map(|s| s.as_u16()).collect();
+        if !st_codes.is_empty() {
+            self.pseudo_groups.push((pc.as_u8(), st_codes));
+        }
+        self
+    }
+
+    /// Apply hover styles.
+    pub fn hover<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Hover, tokens)
+    }
+
+    /// Apply focus styles.
+    pub fn focus<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Focus, tokens)
+    }
+
+    /// Apply focus-visible styles.
+    pub fn focus_visible<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::FocusVisible, tokens)
+    }
+
+    /// Apply active styles.
+    pub fn active<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Active, tokens)
+    }
+
+    /// Apply disabled styles.
+    pub fn disabled_style<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Disabled, tokens)
+    }
+
+    /// Apply checked styles.
+    pub fn checked<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Checked, tokens)
+    }
+
+    /// Apply placeholder styles.
+    pub fn placeholder_style<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Placeholder, tokens)
+    }
+
+    /// Apply ::after pseudo-element styles.
+    pub fn after<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::After, tokens)
+    }
+
+    /// Apply ::before pseudo-element styles.
+    pub fn before<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::Before, tokens)
+    }
+
+    /// Apply :last-child styles.
+    pub fn last_child<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::LastChild, tokens)
+    }
+
+    /// Apply :nth-child(even) styles.
+    pub fn nth_even<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::NthEven, tokens)
+    }
+
+    /// Apply :not(:last-child) styles.
+    pub fn not_last_child<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::NotLastChild, tokens)
+    }
+
+    /// Apply :checked::after styles.
+    pub fn checked_after<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.pseudo(crate::style_tokens::Pc::CheckedAfter, tokens)
+    }
+
+    /// Get the pseudo-class groups.
+    pub fn get_pseudo_groups(&self) -> &[(u8, Vec<u16>)] {
+        &self.pseudo_groups
+    }
 
     /// Bind an event handler to this element.
     ///
@@ -447,8 +615,17 @@ impl ElementBuilder {
         self.class.hash(hasher);
         self.text.hash(hasher);
         self.attrs.hash(hasher);
+        // Hash typed attrs
+        for ta in &self.typed_attrs {
+            match ta {
+                TypedAttr::Enum(k, v) => { 0u8.hash(hasher); k.as_u8().hash(hasher); v.as_u8().hash(hasher); }
+                TypedAttr::Bool(k) => { 1u8.hash(hasher); k.as_u8().hash(hasher); }
+                TypedAttr::KeySym(k, v) => { 2u8.hash(hasher); k.as_u8().hash(hasher); v.hash(hasher); }
+            }
+        }
         self.style_utils.hash(hasher);
         self.style_props.hash(hasher);
+        self.pseudo_groups.hash(hasher);
         for (ev, _) in &self.events {
             ev.as_u8().hash(hasher);
         }
@@ -502,6 +679,12 @@ pub struct BuildContext {
     used_style_props: HashSet<u8>,
     /// Used style value codes (for tree-shaking)
     used_style_values: HashSet<u8>,
+    /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
+    used_pseudo_pairs: HashSet<(u8, u16)>,
+    /// Used attribute key codes (for tree-shaking)
+    used_attr_keys: HashSet<u8>,
+    /// Used attribute value codes (for tree-shaking)
+    used_attr_values: HashSet<u8>,
     /// Composite style table (pre-analyzed patterns for compression)
     composite_table: crate::style_groups::CompositeTable,
     /// Cache for synced element renders (single-render path).
@@ -583,6 +766,9 @@ impl BuildContext {
             used_style_utils: HashSet::new(),
             used_style_props: HashSet::new(),
             used_style_values: HashSet::new(),
+            used_pseudo_pairs: HashSet::new(),
+            used_attr_keys: HashSet::new(),
+            used_attr_values: HashSet::new(),
             composite_table: crate::style_groups::CompositeTable::new(),
             synced_render_cache: HashMap::new(),
         }
@@ -795,6 +981,12 @@ impl BuildContext {
             self.intern(key);
             self.intern(value);
         }
+        // Intern string values in typed attrs (Enum/Bool need no interning)
+        for ta in &el.typed_attrs {
+            if let TypedAttr::KeySym(_, value) = ta {
+                self.intern(value);
+            }
+        }
         // Track event type usage
         for (ev, _) in &el.events {
             self.used_events.insert(ev.as_u8());
@@ -850,6 +1042,12 @@ impl BuildContext {
         for (key, value) in &el.attrs {
             self.intern(key);
             self.intern(value);
+        }
+        // Intern string values in typed attrs (Enum/Bool need no interning)
+        for ta in &el.typed_attrs {
+            if let TypedAttr::KeySym(_, value) = ta {
+                self.intern(value);
+            }
         }
         // Track event type usage
         for (ev, _) in &el.events {
@@ -1000,6 +1198,26 @@ impl BuildContext {
             self.buf.set_attr(ref_idx, key_sym, val_sym);
         }
 
+        // Emit typed attributes (binary-encoded)
+        for ta in &el.typed_attrs {
+            match ta {
+                TypedAttr::Enum(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.used_attr_values.insert(value.as_u8());
+                    self.buf.set_attr_enum(ref_idx, key.as_u8(), value.as_u8());
+                }
+                TypedAttr::Bool(key) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.buf.set_attr_bool(ref_idx, key.as_u8());
+                }
+                TypedAttr::KeySym(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    let val_sym = self.get_or_intern_symbol(value);
+                    self.buf.set_attr_key_sym(ref_idx, key.as_u8(), val_sym);
+                }
+            }
+        }
+
         // Emit style tokens (binary-encoded styles)
         if !el.style_utils.is_empty() {
             // Track used utilities for tree-shaking
@@ -1026,6 +1244,14 @@ impl BuildContext {
             self.used_style_props.insert(prop);
             self.used_style_values.insert(value);
             self.buf.style_prop(ref_idx, prop, value);
+        }
+
+        // Emit pseudo-class groups
+        for (pc_code, st_codes) in &el.pseudo_groups {
+            for &st in st_codes {
+                self.used_pseudo_pairs.insert((*pc_code, st));
+            }
+            self.buf.style_pseudo(ref_idx, *pc_code, st_codes);
         }
 
         // Bind events and track event type usage
@@ -1133,6 +1359,26 @@ impl BuildContext {
             self.buf.set_attr(ref_idx, key_sym, val_sym);
         }
 
+        // Emit typed attributes (binary-encoded)
+        for ta in &el.typed_attrs {
+            match ta {
+                TypedAttr::Enum(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.used_attr_values.insert(value.as_u8());
+                    self.buf.set_attr_enum(ref_idx, key.as_u8(), value.as_u8());
+                }
+                TypedAttr::Bool(key) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.buf.set_attr_bool(ref_idx, key.as_u8());
+                }
+                TypedAttr::KeySym(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    let val_sym = self.get_or_intern_symbol(value);
+                    self.buf.set_attr_key_sym(ref_idx, key.as_u8(), val_sym);
+                }
+            }
+        }
+
         // Emit style tokens (binary-encoded styles)
         if !el.style_utils.is_empty() {
             // Track used utilities for tree-shaking
@@ -1159,6 +1405,14 @@ impl BuildContext {
             self.used_style_props.insert(prop);
             self.used_style_values.insert(value);
             self.buf.style_prop(ref_idx, prop, value);
+        }
+
+        // Emit pseudo-class groups
+        for (pc_code, st_codes) in &el.pseudo_groups {
+            for &st in st_codes {
+                self.used_pseudo_pairs.insert((*pc_code, st));
+            }
+            self.buf.style_pseudo(ref_idx, *pc_code, st_codes);
         }
 
         // Bind events and track event type usage
@@ -1274,6 +1528,21 @@ impl BuildContext {
     /// Get the set of used style value codes.
     pub fn used_style_values(&self) -> &HashSet<u8> {
         &self.used_style_values
+    }
+
+    /// Get the set of used pseudo-class tokens.
+    pub fn used_pseudo_pairs(&self) -> &HashSet<(u8, u16)> {
+        &self.used_pseudo_pairs
+    }
+
+    /// Get the set of used attribute key codes.
+    pub fn used_attr_keys(&self) -> &HashSet<u8> {
+        &self.used_attr_keys
+    }
+
+    /// Get the set of used attribute value codes.
+    pub fn used_attr_values(&self) -> &HashSet<u8> {
+        &self.used_attr_values
     }
 
     /// Get the local state type indices mapping.
@@ -1628,6 +1897,23 @@ fn emit_update_element(
         }
     }
 
+    // Set typed attributes (binary-encoded)
+    for ta in &el.typed_attrs {
+        match ta {
+            TypedAttr::Enum(key, value) => {
+                buf.set_attr_enum(ref_idx, key.as_u8(), value.as_u8());
+            }
+            TypedAttr::Bool(key) => {
+                buf.set_attr_bool(ref_idx, key.as_u8());
+            }
+            TypedAttr::KeySym(key, value) => {
+                if let Some(&val_sym) = symbol_map.get(value) {
+                    buf.set_attr_key_sym(ref_idx, key.as_u8(), val_sym);
+                }
+            }
+        }
+    }
+
     // Bind events - look up handler index from existing handlers by function pointer
     // If handler not found, register it as a new handler
     for (ev, spec) in &el.events {
@@ -1732,6 +2018,12 @@ fn collect_symbols_recursive_with_known(
     for (key, value) in &el.attrs {
         intern_with_known(key, new_symbols, symbol_map, next_idx);
         intern_with_known(value, new_symbols, symbol_map, next_idx);
+    }
+    // Intern string values in typed attrs
+    for ta in &el.typed_attrs {
+        if let TypedAttr::KeySym(_, value) = ta {
+            intern_with_known(value, new_symbols, symbol_map, next_idx);
+        }
     }
     for child in &el.children {
         collect_symbols_recursive_with_known(

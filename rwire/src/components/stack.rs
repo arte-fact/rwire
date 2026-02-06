@@ -21,6 +21,7 @@
 //!     .build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -175,57 +176,53 @@ impl Stack {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(64);
-        classes.push_str("rw-stack");
+    /// Compute style tokens for this stack configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![St::DisplayFlex];
 
-        if self.direction == StackDirection::Row {
-            classes.push_str(" rw-stack-row");
-        }
+        tokens.push(match self.direction {
+            StackDirection::Column => St::FlexCol,
+            StackDirection::Row => St::FlexRow,
+        });
 
         match self.gap {
-            Gap::None => classes.push_str(" rw-gap-0"),
-            Gap::Xs => classes.push_str(" rw-gap-xs"),
-            Gap::Sm => classes.push_str(" rw-gap-sm"),
-            Gap::Md => {} // Default
-            Gap::Lg => classes.push_str(" rw-gap-lg"),
-            Gap::Xl => classes.push_str(" rw-gap-xl"),
+            Gap::None => tokens.push(St::Gap0),
+            Gap::Xs => tokens.push(St::GapXs),
+            Gap::Sm => tokens.push(St::GapSm),
+            Gap::Md => tokens.push(St::GapMd),
+            Gap::Lg => tokens.push(St::GapLg),
+            Gap::Xl => tokens.push(St::GapXl),
         }
 
         match self.align {
-            StackAlign::Stretch => {}
-            StackAlign::Start => classes.push_str(" rw-items-start"),
-            StackAlign::Center => classes.push_str(" rw-items-center"),
-            StackAlign::End => classes.push_str(" rw-items-end"),
+            StackAlign::Stretch => {} // CSS default
+            StackAlign::Start => tokens.push(St::ItemsStart),
+            StackAlign::Center => tokens.push(St::ItemsCenter),
+            StackAlign::End => tokens.push(St::ItemsEnd),
         }
 
         match self.justify {
-            StackJustify::Start => {}
-            StackJustify::Center => classes.push_str(" rw-justify-center"),
-            StackJustify::End => classes.push_str(" rw-justify-end"),
-            StackJustify::Between => classes.push_str(" rw-justify-between"),
-            StackJustify::Around => classes.push_str(" rw-justify-around"),
+            StackJustify::Start => {} // CSS default
+            StackJustify::Center => tokens.push(St::JustifyCenter),
+            StackJustify::End => tokens.push(St::JustifyEnd),
+            StackJustify::Between => tokens.push(St::JustifyBetween),
+            StackJustify::Around => tokens.push(St::JustifyAround),
         }
 
         if self.wrap {
-            classes.push_str(" rw-flex-wrap");
+            tokens.push(St::FlexWrap);
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the stack into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Stack);
+        let mut builder = el(El::Div).st(self.compute_tokens());
 
-        let class = self.compute_class();
-        let mut builder = el(El::Div).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         for child in self.children {
             builder = builder.append([child]);
@@ -234,17 +231,6 @@ impl Stack {
         builder
     }
 }
-
-/// Stack CSS.
-pub const STACK_CSS: &str = "\
-.rw-stack{display:flex;flex-direction:column;gap:var(--rw-space-4)}\
-.rw-stack-row{flex-direction:row}\
-.rw-gap-0{gap:0}.rw-gap-xs{gap:var(--rw-space-1)}.rw-gap-sm{gap:var(--rw-space-2)}\
-.rw-gap-lg{gap:var(--rw-space-6)}.rw-gap-xl{gap:var(--rw-space-8)}\
-.rw-items-start{align-items:flex-start}.rw-items-center{align-items:center}.rw-items-end{align-items:flex-end}\
-.rw-justify-center{justify-content:center}.rw-justify-end{justify-content:flex-end}\
-.rw-justify-between{justify-content:space-between}.rw-justify-around{justify-content:space-around}\
-.rw-flex-wrap{flex-wrap:wrap}\n";
 
 #[cfg(test)]
 mod tests {
@@ -258,32 +244,37 @@ mod tests {
     }
 
     #[test]
-    fn test_stack_class_default() {
+    fn test_stack_default_tokens() {
         let stack = Stack::new();
-        assert_eq!(stack.compute_class(), "rw-stack");
+        let tokens = stack.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexCol));
+        assert!(tokens.contains(&St::GapMd));
     }
 
     #[test]
-    fn test_stack_class_row() {
+    fn test_stack_row_tokens() {
         let stack = Stack::row();
-        assert_eq!(stack.compute_class(), "rw-stack rw-stack-row");
+        let tokens = stack.compute_tokens();
+        assert!(tokens.contains(&St::FlexRow));
+        assert!(!tokens.contains(&St::FlexCol));
     }
 
     #[test]
-    fn test_stack_class_full() {
+    fn test_stack_full_tokens() {
         let stack = Stack::row()
             .gap(Gap::Lg)
             .align(StackAlign::Center)
             .justify(StackJustify::Between)
             .wrap(true);
 
-        let class = stack.compute_class();
-        assert!(class.contains("rw-stack"));
-        assert!(class.contains("rw-stack-row"));
-        assert!(class.contains("rw-gap-lg"));
-        assert!(class.contains("rw-items-center"));
-        assert!(class.contains("rw-justify-between"));
-        assert!(class.contains("rw-flex-wrap"));
+        let tokens = stack.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexRow));
+        assert!(tokens.contains(&St::GapLg));
+        assert!(tokens.contains(&St::ItemsCenter));
+        assert!(tokens.contains(&St::JustifyBetween));
+        assert!(tokens.contains(&St::FlexWrap));
     }
 
     #[test]
@@ -291,21 +282,16 @@ mod tests {
         let stack = Stack::centered();
         assert_eq!(stack.align, StackAlign::Center);
         assert_eq!(stack.justify, StackJustify::Center);
-        let class = stack.compute_class();
-        assert!(class.contains("rw-items-center"));
-        assert!(class.contains("rw-justify-center"));
+        let tokens = stack.compute_tokens();
+        assert!(tokens.contains(&St::ItemsCenter));
+        assert!(tokens.contains(&St::JustifyCenter));
     }
 
     #[test]
     fn test_stack_align_center_shorthand() {
         let stack = Stack::column().align_center();
         assert_eq!(stack.align, StackAlign::Center);
-        assert!(stack.compute_class().contains("rw-items-center"));
+        assert!(stack.compute_tokens().contains(&St::ItemsCenter));
     }
 
-    #[test]
-    fn test_stack_css_size() {
-        assert!(STACK_CSS.len() < 600, "Stack CSS too large: {} bytes", STACK_CSS.len());
-        println!("Stack CSS size: {} bytes", STACK_CSS.len());
-    }
 }

@@ -17,6 +17,7 @@
 //!     ]);
 //! ```
 
+use crate::attr_tokens::{At, Av};
 use crate::{el, El, ElementBuilder};
 
 /// Icon identifiers for all available icons.
@@ -126,15 +127,6 @@ impl Icon {
         }
     }
 
-    /// Returns the stroke-linecap style for this icon.
-    fn linecap(&self) -> &'static str {
-        "round"
-    }
-
-    /// Returns the stroke-linejoin style for this icon.
-    fn linejoin(&self) -> &'static str {
-        "round"
-    }
 }
 
 /// Creates an icon element.
@@ -174,17 +166,17 @@ pub fn icon(icon: Icon) -> ElementBuilder {
 pub fn icon_with_class(icon: Icon, class: &str) -> ElementBuilder {
     el(El::Svg)
         .class(class)
-        .attr("xmlns", "http://www.w3.org/2000/svg")
-        .attr("width", "24")
-        .attr("height", "24")
-        .attr("viewBox", "0 0 24 24")
-        .attr("fill", "none")
-        .attr("stroke", "currentColor")
-        .attr("stroke-width", "2")
-        .attr("stroke-linecap", icon.linecap())
-        .attr("stroke-linejoin", icon.linejoin())
+        .at(At::Xmlns, Av::SvgNs)
+        .at(At::Width, Av::V24)
+        .at(At::Height, Av::V24)
+        .at(At::ViewBox, Av::ViewBox24)
+        .at(At::Fill, Av::None)
+        .at(At::Stroke, Av::CurrentColor)
+        .at(At::StrokeWidth, Av::Stroke2)
+        .at(At::StrokeLinecap, Av::Round)
+        .at(At::StrokeLinejoin, Av::Round)
         .append([
-            el(El::Path).attr("d", icon.svg_path())
+            el(El::Path).at_str(At::D, icon.svg_path())
         ])
 }
 
@@ -207,17 +199,17 @@ pub fn icon_sized(icon: Icon, size: u32) -> ElementBuilder {
     let size_str = size.to_string();
     el(El::Svg)
         .class("rw-icon")
-        .attr("xmlns", "http://www.w3.org/2000/svg")
+        .at(At::Xmlns, Av::SvgNs)
         .attr("width", &size_str)
         .attr("height", &size_str)
-        .attr("viewBox", "0 0 24 24")
-        .attr("fill", "none")
-        .attr("stroke", "currentColor")
-        .attr("stroke-width", "2")
-        .attr("stroke-linecap", icon.linecap())
-        .attr("stroke-linejoin", icon.linejoin())
+        .at(At::ViewBox, Av::ViewBox24)
+        .at(At::Fill, Av::None)
+        .at(At::Stroke, Av::CurrentColor)
+        .at(At::StrokeWidth, Av::Stroke2)
+        .at(At::StrokeLinecap, Av::Round)
+        .at(At::StrokeLinejoin, Av::Round)
         .append([
-            el(El::Path).attr("d", icon.svg_path())
+            el(El::Path).at_str(At::D, icon.svg_path())
         ])
 }
 

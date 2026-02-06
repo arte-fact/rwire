@@ -17,6 +17,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
 
@@ -94,27 +96,20 @@ impl Checkbox {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-checkbox");
-
+    /// Compute style tokens for this checkbox configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::RoundedSm, St::BgApp, St::CursorPointer,
+            St::TransitionAll, St::FlexShrink0,
+        ];
         if self.invalid {
-            classes.push_str(" rw-checkbox-invalid");
+            tokens.push(St::BorderRed8);
         }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the checkbox into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Checkbox);
-
         // Generate ID if label is provided but no explicit ID
         let element_id = self.id.clone().unwrap_or_else(|| {
             if self.label.is_some() {
@@ -124,45 +119,55 @@ impl Checkbox {
             }
         });
 
-        let class = self.compute_class();
+        let mut tokens = self.compute_tokens();
+        tokens.extend([St::W1rem, St::H1rem, St::Border2Default]);
         let mut input = el(El::Input)
-            .class(&class)
-            .attr("type", "checkbox");
+            .st(tokens)
+            .hover([St::BorderEmphasis])
+            .checked([St::BgAccent])
+            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .at(At::Type, Av::Checkbox);
+
+        if self.disabled {
+            input = input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+        }
 
         if !element_id.is_empty() {
-            input = input.attr("id", &element_id);
+            input = input.at_str(At::Id, &element_id);
         }
 
         if let Some(ref name) = self.name {
-            input = input.attr("name", name);
+            input = input.at_str(At::Name, name);
         }
         if let Some(ref value) = self.value {
-            input = input.attr("value", value);
+            input = input.at_str(At::Value, value);
         }
         if self.checked {
-            input = input.attr("checked", "");
+            input = input.bool_attr(At::Checked);
         }
         if self.disabled {
-            input = input.attr("disabled", "");
+            input = input.bool_attr(At::Disabled);
         }
         if self.required {
-            input = input.attr("required", "");
+            input = input.bool_attr(At::Required);
         }
         if self.invalid {
-            input = input.attr("aria-invalid", "true");
+            input = input.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref extra) = self.extra_class {
+            input = input.class(extra.as_ref());
         }
 
         // If label is provided, wrap in a container with label
         if let Some(label_text) = self.label {
-            // Use Stack for layout
             use crate::components::{Stack, Gap};
             Stack::row()
                 .gap(Gap::Xs)
                 .children([
                     input,
                     el(El::Label)
-                        .class("rw-checkbox-label")
-                        .attr("for", &element_id)
+                        .st([St::TextSm, St::TextHigh, St::CursorPointer])
+                        .at_str(At::For, &element_id)
                         .text(&label_text),
                 ])
                 .build()
@@ -177,19 +182,6 @@ impl Checkbox {
     }
 }
 
-/// Checkbox CSS.
-///
-/// Size: ~330 bytes (under 350 bytes budget)
-pub const CHECKBOX_CSS: &str = "\
-.rw-checkbox{width:1rem;height:1rem;border:2px solid var(--rw-border-default);border-radius:var(--rw-radius-sm);\
-background:var(--rw-bg-app);cursor:pointer;transition:all .15s;flex-shrink:0}\
-.rw-checkbox:hover{border-color:var(--rw-border-emphasis)}\
-.rw-checkbox:checked{background:var(--rw-accent-9);border-color:var(--rw-accent-9)}\
-.rw-checkbox:focus{outline:2px solid var(--rw-accent-8);outline-offset:2px}\
-.rw-checkbox:disabled{opacity:.5;cursor:not-allowed}\
-.rw-checkbox-invalid{border-color:var(--rw-red-8)}\
-.rw-checkbox-label{font-size:var(--rw-text-sm);color:var(--rw-text-high);cursor:pointer}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,34 +195,35 @@ mod tests {
     }
 
     #[test]
-    fn test_checkbox_class_default() {
+    fn test_checkbox_default_tokens() {
         let cb = Checkbox::new();
-        assert_eq!(cb.compute_class(), "rw-checkbox");
+        let tokens = cb.compute_tokens();
+        assert!(tokens.contains(&St::RoundedSm));
+        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::CursorPointer));
+        assert!(tokens.contains(&St::TransitionAll));
+        assert!(tokens.contains(&St::FlexShrink0));
     }
 
     #[test]
-    fn test_checkbox_class_invalid() {
+    fn test_checkbox_pseudo_groups() {
+        let cb = Checkbox::new().build();
+        let groups = cb.get_pseudo_groups();
+        assert!(!groups.is_empty());
+    }
+
+    #[test]
+    fn test_checkbox_invalid_tokens() {
         let cb = Checkbox::new().invalid(true);
-        let class = cb.compute_class();
-        assert!(class.contains("rw-checkbox"));
-        assert!(class.contains("rw-checkbox-invalid"));
+        let tokens = cb.compute_tokens();
+        assert!(tokens.contains(&St::BorderRed8));
     }
 
     #[test]
-    fn test_checkbox_css_size() {
-        // Checkbox CSS should be under 350 bytes
-        assert!(
-            CHECKBOX_CSS.len() < 650,
-            "Checkbox CSS too large: {} bytes (budget: 650)",
-            CHECKBOX_CSS.len()
-        );
-        println!("Checkbox CSS size: {} bytes", CHECKBOX_CSS.len());
+    fn test_checkbox_disabled_pseudo_groups() {
+        let cb = Checkbox::new().disabled(true).build();
+        let groups = cb.get_pseudo_groups();
+        assert!(!groups.is_empty());
     }
 
-    #[test]
-    fn test_checkbox_css_structure() {
-        assert!(CHECKBOX_CSS.contains(".rw-checkbox{"));
-        assert!(CHECKBOX_CSS.contains(".rw-checkbox-label"));
-        assert!(CHECKBOX_CSS.contains(".rw-checkbox-invalid"));
-    }
 }

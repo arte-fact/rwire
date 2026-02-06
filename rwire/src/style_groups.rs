@@ -275,6 +275,29 @@ impl CompositeTable {
         self.composites.iter().map(|c| c.bytes_saved()).sum()
     }
 
+    /// Generate CSS class rules for all composites.
+    ///
+    /// Each composite gets a CSS class `.c{id}` that combines all its utility declarations.
+    /// This replaces the old JS-side lookup table approach with server-generated CSS.
+    pub fn generate_css(&self) -> String {
+        use crate::style_tokens::lookup_util_css;
+        use std::fmt::Write;
+
+        let mut css = String::with_capacity(self.composites.len() * 60);
+        for composite in &self.composites {
+            let declarations: Vec<&str> = composite
+                .pattern
+                .utils()
+                .iter()
+                .filter_map(|&u| lookup_util_css(u))
+                .collect();
+            if !declarations.is_empty() {
+                let _ = write!(css, ".c{}{{{}}}", composite.id, declarations.join(";"));
+            }
+        }
+        css
+    }
+
     /// Generate the composite table bytes for the wire protocol.
     pub fn to_bytes(&self) -> Vec<u8> {
         use crate::protocol::varint::write_varint;

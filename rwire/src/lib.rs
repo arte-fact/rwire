@@ -49,6 +49,7 @@
 //! }
 //! ```
 
+pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
 pub mod capsule_gen;
@@ -71,7 +72,6 @@ pub mod style_groups;
 pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
-pub mod variants;
 pub mod components;
 
 // Builder API exports
@@ -122,8 +122,11 @@ pub use router::{Link, Route, RoutePattern, Router};
 // Style exports
 pub use style::{ScopedClass, Style};
 
+// Attribute token exports (binary-encoded attributes)
+pub use attr_tokens::{At, Av};
+
 // Style token exports (binary-encoded styles)
-pub use style_tokens::{St, StyleProp, StyleValue};
+pub use style_tokens::{Pc, St, StyleProp, StyleValue};
 
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
@@ -136,15 +139,11 @@ pub use theme::{
     generate_theme_css, generate_theme_css_with_palette, AccentColor, RadiusScale, Theme, ThemeMode,
 };
 
-// Variant exports
-pub use variants::{Variant, VariantComponent};
-
 // Icon exports
 pub use icons::{icon, icon_sized, icon_with_class, Icon};
 
 // Component exports
 pub use components::{
-    generate_components_css,
     // Button
     Button, ButtonIntent, ButtonSize,
     // Input
@@ -155,8 +154,6 @@ pub use components::{
     Card, CardPadding, CardShadow,
     // Badge
     Badge, BadgeIntent,
-    // Registry
-    begin_tracking, end_tracking, ComponentRegistry, ComponentType,
 };
 
 // Capsule styling exports

@@ -13,6 +13,7 @@
 //!     .build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -99,43 +100,38 @@ impl Card {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-card");
+    /// Compute style tokens for this card configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![St::BgApp, St::RoundedLg];
+
+        if self.bordered {
+            tokens.push(St::BorderSubtle);
+        }
 
         match self.padding {
-            CardPadding::None => classes.push_str(" rw-p-0"),
-            CardPadding::Sm => classes.push_str(" rw-p-sm"),
-            CardPadding::Md => {}
-            CardPadding::Lg => classes.push_str(" rw-p-lg"),
+            CardPadding::None => tokens.push(St::P0),
+            CardPadding::Sm => tokens.push(St::PSm),
+            CardPadding::Md => tokens.push(St::PMd),
+            CardPadding::Lg => tokens.push(St::PLg),
         }
 
         match self.shadow {
-            CardShadow::None => classes.push_str(" rw-shadow-none"),
-            CardShadow::Sm => {}
-            CardShadow::Md => classes.push_str(" rw-shadow-md"),
-            CardShadow::Lg => classes.push_str(" rw-shadow-lg"),
+            CardShadow::None => tokens.push(St::ShadowNone),
+            CardShadow::Sm => tokens.push(St::ShadowSm),
+            CardShadow::Md => tokens.push(St::ShadowMd),
+            CardShadow::Lg => tokens.push(St::ShadowLg),
         }
 
-        if !self.bordered {
-            classes.push_str(" rw-border-none");
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
 
     /// Build the card into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Card);
+        let mut builder = el(El::Div).st(self.compute_tokens());
 
-        let class = self.compute_class();
-        let mut builder = el(El::Div).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         for child in self.children {
             builder = builder.append([child]);
@@ -144,14 +140,6 @@ impl Card {
         builder
     }
 }
-
-/// Card CSS.
-pub const CARD_CSS: &str = "\
-.rw-card{background:var(--rw-bg-app);border:1px solid var(--rw-border-subtle);\
-border-radius:var(--rw-radius-lg);padding:var(--rw-space-4);box-shadow:var(--rw-shadow-sm)}\
-.rw-p-0{padding:0}.rw-p-sm{padding:var(--rw-space-2)}.rw-p-lg{padding:var(--rw-space-6)}\
-.rw-shadow-none{box-shadow:none}.rw-shadow-md{box-shadow:var(--rw-shadow-md)}.rw-shadow-lg{box-shadow:var(--rw-shadow-lg)}\
-.rw-border-none{border:none}\n";
 
 #[cfg(test)]
 mod tests {
@@ -166,28 +154,27 @@ mod tests {
     }
 
     #[test]
-    fn test_card_class_default() {
+    fn test_card_default_tokens() {
         let card = Card::new();
-        assert_eq!(card.compute_class(), "rw-card");
+        let tokens = card.compute_tokens();
+        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::RoundedLg));
+        assert!(tokens.contains(&St::BorderSubtle));
+        assert!(tokens.contains(&St::PMd));
+        assert!(tokens.contains(&St::ShadowSm));
     }
 
     #[test]
-    fn test_card_class_full() {
+    fn test_card_full_tokens() {
         let card = Card::new()
             .padding(CardPadding::Lg)
             .shadow(CardShadow::Lg)
             .bordered(false);
 
-        let class = card.compute_class();
-        assert!(class.contains("rw-card"));
-        assert!(class.contains("rw-p-lg"));
-        assert!(class.contains("rw-shadow-lg"));
-        assert!(class.contains("rw-border-none"));
+        let tokens = card.compute_tokens();
+        assert!(tokens.contains(&St::PLg));
+        assert!(tokens.contains(&St::ShadowLg));
+        assert!(!tokens.contains(&St::BorderSubtle));
     }
 
-    #[test]
-    fn test_card_css_size() {
-        assert!(CARD_CSS.len() < 450, "Card CSS too large: {} bytes", CARD_CSS.len());
-        println!("Card CSS size: {} bytes", CARD_CSS.len());
-    }
 }

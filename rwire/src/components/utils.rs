@@ -7,7 +7,8 @@
 //! - Overlay/backdrop utilities
 //! - Animation/transition helpers
 
-use crate::{el, El, ElementBuilder};
+use crate::attr_tokens::{At, Av};
+use crate::{el, El, ElementBuilder, St};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 // ============================================================================
@@ -192,7 +193,7 @@ pub trait AriaAttrs {
 
 impl AriaAttrs for ElementBuilder {
     fn aria_label(self, label: &str) -> Self {
-        self.attr("aria-label", label)
+        self.at_str(At::AriaLabel, label)
     }
 
     fn aria_labelledby(self, id: &str) -> Self {
@@ -204,15 +205,15 @@ impl AriaAttrs for ElementBuilder {
     }
 
     fn aria_hidden(self, hidden: bool) -> Self {
-        self.attr("aria-hidden", if hidden { "true" } else { "false" })
+        self.at(At::AriaHidden, if hidden { Av::True } else { Av::False })
     }
 
     fn aria_expanded(self, expanded: bool) -> Self {
-        self.attr("aria-expanded", if expanded { "true" } else { "false" })
+        self.at(At::AriaExpanded, if expanded { Av::True } else { Av::False })
     }
 
     fn aria_controls(self, id: &str) -> Self {
-        self.attr("aria-controls", id)
+        self.at_str(At::AriaControls, id)
     }
 
     fn aria_pressed(self, pressed: bool) -> Self {
@@ -224,7 +225,7 @@ impl AriaAttrs for ElementBuilder {
     }
 
     fn role(self, role: &str) -> Self {
-        self.attr("role", role)
+        self.at_str(At::Role, role)
     }
 }
 
@@ -255,7 +256,7 @@ pub fn backdrop(class: &str, z_index: &str, visible: bool) -> ElementBuilder {
 
     el(El::Div)
         .class(&classes)
-        .attr("style", &format!("z-index: {}", z_index))
+        .attr("style", &format!("z-index:{}", z_index))
         .aria_hidden(!visible)
 }
 
@@ -275,7 +276,7 @@ pub fn backdrop(class: &str, z_index: &str, visible: bool) -> ElementBuilder {
 pub fn focus_trap(class: &str, children: Vec<ElementBuilder>) -> ElementBuilder {
     el(El::Div)
         .class(class)
-        .attr("tabindex", "-1")
+        .at(At::Tabindex, Av::MinusOne)
         .append(children)
 }
 
@@ -350,9 +351,9 @@ pub mod keys {
 /// ```
 pub fn portal_container(id: &str) -> ElementBuilder {
     el(El::Div)
-        .attr("id", id)
+        .at_str(At::Id, id)
         .class("rw-portal")
-        .attr("style", "position: fixed; top: 0; left: 0; z-index: 9999;")
+        .st([St::PositionFixed, St::Top0, St::Left0, St::Z9999])
 }
 
 // ============================================================================

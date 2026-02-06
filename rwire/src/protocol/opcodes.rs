@@ -35,6 +35,18 @@ pub const APPEND: u8 = 0x20;
 /// Clear all children from element. Format: [CLEAR_CHILDREN, ref]
 pub const CLEAR_CHILDREN: u8 = 0x25;
 
+/// Set attribute with enum key + enum value. Format: [SET_ATTR_ENUM, ref, at, av]
+/// Both key and value are single-byte enum codes. 4 bytes total.
+pub const SET_ATTR_ENUM: u8 = 0x26;
+
+/// Set boolean attribute (presence-only). Format: [SET_ATTR_BOOL, ref, at]
+/// The attribute is set with empty string value. 3 bytes total.
+pub const SET_ATTR_BOOL: u8 = 0x27;
+
+/// Set attribute with enum key + symbol value. Format: [SET_ATTR_KEY_SYM, ref, at, val_sym_varint]
+/// Key is an enum code, value is a symbol table index. 4-5 bytes total.
+pub const SET_ATTR_KEY_SYM: u8 = 0x28;
+
 /// Get element by ID (for updates). Format: [GET_BY_ID, symbol_idx] → ref
 pub const GET_BY_ID: u8 = 0x01;
 
@@ -146,6 +158,11 @@ pub const STYLE_COMPOSITE: u8 = 0x85;
 /// Define composite table. Format: [COMPOSITE_TABLE, count_varint, ...entries]
 /// Each entry: [id_varint, util_count, util1, util2, ...]
 pub const COMPOSITE_TABLE: u8 = 0x86;
+
+/// Apply composable pseudo-class styles.
+/// Format: [STYLE_PSEUDO, ref, pc_code, count, st1_varint, st2_varint, ...]
+/// pc_code is the Pc selector (u8), st tokens are varint-encoded St codes.
+pub const STYLE_PSEUDO: u8 = 0x89;
 
 // ============================================================================
 // Control

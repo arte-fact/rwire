@@ -6,9 +6,10 @@ use super::opcodes::{
     APPEND, BATCH_END, BIND_LOCAL, BIND_OPTIMISTIC, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
-    ROUTE_REPLACE, SET_ATTR, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
-    STYLE_COMPOSITE, STYLE_INJECT, STYLE_MULTI, STYLE_PROP, STYLE_SET, STYLE_UTIL, SYMBOLS,
-    SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA,
+    SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_COMPOSITE, STYLE_INJECT, STYLE_MULTI, STYLE_PROP,
+    STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START,
+    WORD_TABLE,
 };
 use super::varint::write_varint;
 
@@ -484,6 +485,20 @@ impl OpcodeBuffer {
         self
     }
 
+    /// Apply composable pseudo-class styles to an element.
+    ///
+    /// Format: [STYLE_PSEUDO, ref, pc_code, count, st1_varint, st2_varint, ...]
+    pub fn style_pseudo(&mut self, ref_idx: u8, pc: u8, st_tokens: &[u16]) -> &mut Self {
+        self.buf.put_u8(STYLE_PSEUDO);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(pc);
+        self.buf.put_u8(st_tokens.len() as u8);
+        for &token in st_tokens {
+            write_varint(&mut self.buf, token as u32);
+        }
+        self
+    }
+
     /// Define the composite table.
     ///
     /// Format: [COMPOSITE_TABLE, count_varint, ...entries]
@@ -496,6 +511,44 @@ impl OpcodeBuffer {
         self.buf.put_u8(COMPOSITE_TABLE);
         let table_bytes = table.to_bytes();
         self.buf.extend_from_slice(&table_bytes);
+        self
+    }
+
+    // ========================================================================
+    // Binary Attribute Operations
+    // ========================================================================
+
+    /// Set attribute with enum key + enum value.
+    ///
+    /// Format: [SET_ATTR_ENUM, ref, at, av] = 4 bytes total.
+    /// Both key and value are single-byte enum codes from At/Av enums.
+    pub fn set_attr_enum(&mut self, ref_idx: u8, at: u8, av: u8) -> &mut Self {
+        self.buf.put_u8(SET_ATTR_ENUM);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(at);
+        self.buf.put_u8(av);
+        self
+    }
+
+    /// Set boolean attribute (presence-only, e.g. disabled, required).
+    ///
+    /// Format: [SET_ATTR_BOOL, ref, at] = 3 bytes total.
+    pub fn set_attr_bool(&mut self, ref_idx: u8, at: u8) -> &mut Self {
+        self.buf.put_u8(SET_ATTR_BOOL);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(at);
+        self
+    }
+
+    /// Set attribute with enum key + symbol table value.
+    ///
+    /// Format: [SET_ATTR_KEY_SYM, ref, at, val_sym_varint] = 4-5 bytes total.
+    /// Key is an enum code from At, value is a symbol table index.
+    pub fn set_attr_key_sym(&mut self, ref_idx: u8, at: u8, value_symbol: u32) -> &mut Self {
+        self.buf.put_u8(SET_ATTR_KEY_SYM);
+        self.buf.put_u8(ref_idx);
+        self.buf.put_u8(at);
+        write_varint(&mut self.buf, value_symbol);
         self
     }
 
@@ -518,6 +571,11 @@ impl OpcodeBuffer {
     /// Check if buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
+    }
+
+    /// Get the buffer contents as a slice (for debugging).
+    pub fn as_slice(&self) -> &[u8] {
+        &self.buf
     }
 }
 

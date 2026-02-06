@@ -15,7 +15,8 @@
 //!     .build()
 //! ```
 
-use crate::variants::Variant;
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -31,16 +32,6 @@ pub enum SpinnerSize {
     Lg,
 }
 
-impl Variant for SpinnerSize {
-    fn class(&self) -> Option<&'static str> {
-        match self {
-            SpinnerSize::Sm => Some("rw-spinner-sm"),
-            SpinnerSize::Md => None,
-            SpinnerSize::Lg => Some("rw-spinner-lg"),
-        }
-    }
-}
-
 /// Spinner builder.
 #[derive(Clone, Debug, Default)]
 pub struct Spinner {
@@ -50,9 +41,6 @@ pub struct Spinner {
 }
 
 impl Spinner {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-spinner";
-
     /// Create a new spinner.
     pub fn new() -> Self {
         Self::default()
@@ -76,37 +64,36 @@ impl Spinner {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str(Self::BASE_CLASS);
+    /// Compute style tokens for the spinner.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayInlineBlock, St::RoundedFull, St::BorderDefault]
+    }
 
-        if let Some(size_class) = self.size.class() {
-            classes.push(' ');
-            classes.push_str(size_class);
+    /// Compute size-specific style tokens.
+    fn size_tokens(&self) -> Vec<St> {
+        match self.size {
+            SpinnerSize::Sm => vec![St::W1rem, St::H1rem, St::Border2, St::BorderRTransparent, St::AnimateSpinFast],
+            SpinnerSize::Md => vec![St::W1_5rem, St::H1_5rem, St::Border2, St::BorderRTransparent, St::AnimateSpinFast],
+            SpinnerSize::Lg => vec![St::W2rem, St::H2rem, St::Bw3, St::BorderRTransparent, St::AnimateSpinFast],
         }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
     }
 
     /// Build the spinner into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Spinner);
-
-        let class = self.compute_class();
+        let mut tokens = self.compute_tokens();
+        tokens.extend(self.size_tokens());
         let mut spinner = el(El::Span)
-            .class(&class)
-            .attr("role", "status");
+            .st(tokens)
+            .at(At::Role, Av::RoleStatus);
 
         if let Some(label_text) = self.label {
-            spinner = spinner.attr("aria-label", &label_text);
+            spinner = spinner.at_str(At::AriaLabel, &label_text);
         } else {
-            spinner = spinner.attr("aria-label", "Loading");
+            spinner = spinner.at_str(At::AriaLabel, "Loading");
+        }
+
+        if let Some(ref extra) = self.extra_class {
+            spinner = spinner.class(extra.as_ref());
         }
 
         spinner
@@ -114,15 +101,6 @@ impl Spinner {
 }
 
 /// Spinner CSS.
-///
-/// Size: ~245 bytes (under 250 bytes budget)
-pub const SPINNER_CSS: &str = "\
-.rw-spinner{display:inline-block;width:1.5rem;height:1.5rem;border:2px solid var(--rw-border-default);\
-border-right-color:transparent;border-radius:50%;animation:rw-spinner-spin .6s linear infinite}\
-.rw-spinner-sm{width:1rem;height:1rem;border-width:2px}\
-.rw-spinner-lg{width:2rem;height:2rem;border-width:3px}\
-@keyframes rw-spinner-spin{to{transform:rotate(360deg)}}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,35 +113,45 @@ mod tests {
     }
 
     #[test]
-    fn test_spinner_class_default() {
+    fn test_spinner_default_tokens() {
         let spinner = Spinner::new();
-        assert_eq!(spinner.compute_class(), "rw-spinner");
+        let tokens = spinner.compute_tokens();
+        assert!(tokens.contains(&St::DisplayInlineBlock));
+        assert!(tokens.contains(&St::RoundedFull));
+        assert!(tokens.contains(&St::BorderDefault));
     }
 
     #[test]
-    fn test_spinner_class_with_size() {
+    fn test_spinner_size_tokens_sm() {
+        let spinner = Spinner::new().size(SpinnerSize::Sm);
+        let tokens = spinner.size_tokens();
+        assert!(tokens.contains(&St::W1rem));
+        assert!(tokens.contains(&St::H1rem));
+        assert!(tokens.contains(&St::Border2));
+    }
+
+    #[test]
+    fn test_spinner_size_tokens_md() {
+        let spinner = Spinner::new();
+        let tokens = spinner.size_tokens();
+        assert!(tokens.contains(&St::W1_5rem));
+        assert!(tokens.contains(&St::H1_5rem));
+    }
+
+    #[test]
+    fn test_spinner_size_tokens_lg() {
         let spinner = Spinner::new().size(SpinnerSize::Lg);
-        let class = spinner.compute_class();
-        assert!(class.contains("rw-spinner"));
-        assert!(class.contains("rw-spinner-lg"));
+        let tokens = spinner.size_tokens();
+        assert!(tokens.contains(&St::W2rem));
+        assert!(tokens.contains(&St::H2rem));
+        assert!(tokens.contains(&St::Bw3));
     }
 
     #[test]
-    fn test_spinner_css_size() {
-        // Spinner CSS should be under 250 bytes
-        assert!(
-            SPINNER_CSS.len() < 400,
-            "Spinner CSS too large: {} bytes (budget: 400)",
-            SPINNER_CSS.len()
-        );
-        println!("Spinner CSS size: {} bytes", SPINNER_CSS.len());
+    fn test_spinner_size_tokens_have_animation() {
+        let spinner = Spinner::new();
+        let tokens = spinner.size_tokens();
+        assert!(tokens.contains(&St::AnimateSpinFast));
     }
 
-    #[test]
-    fn test_spinner_css_structure() {
-        assert!(SPINNER_CSS.contains(".rw-spinner{"));
-        assert!(SPINNER_CSS.contains(".rw-spinner-sm"));
-        assert!(SPINNER_CSS.contains(".rw-spinner-lg"));
-        assert!(SPINNER_CSS.contains("@keyframes rw-spinner-spin"));
-    }
 }

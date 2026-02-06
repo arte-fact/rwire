@@ -11,6 +11,8 @@
 //! Link::external("https://example.com").text("Example").build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -59,33 +61,27 @@ impl Link {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str("rw-link");
-
-        if self.external {
-            classes.push_str(" rw-link-external");
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the link.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::TextAccent, St::NoDecoration, St::CursorPointer]
     }
 
     /// Build the link into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::Link);
-
-        let class = self.compute_class();
-        let mut builder = el(El::A).class(&class).attr("href", &self.href);
+        let mut builder = el(El::A)
+            .st(self.compute_tokens())
+            .hover([St::Underline])
+            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .at_str(At::Href, &self.href);
 
         if self.external {
             builder = builder
-                .attr("target", "_blank")
-                .attr("rel", "noopener noreferrer");
+                .at(At::Target, Av::Blank)
+                .at(At::Rel, Av::NoopenerNoreferrer);
+        }
+
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
         }
 
         if let Some(content) = self.content {
@@ -97,12 +93,6 @@ impl Link {
 }
 
 /// Link CSS.
-pub const LINK_CSS: &str = "\
-.rw-link{color:var(--rw-accent-11);text-decoration:none;cursor:pointer}\
-.rw-link:hover{text-decoration:underline}\
-.rw-link:focus-visible{outline:2px solid var(--rw-accent-8);outline-offset:2px}\
-.rw-link-external::after{content:\" \\2197\";font-size:0.8em}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,20 +105,27 @@ mod tests {
     }
 
     #[test]
-    fn test_link_class_default() {
+    fn test_link_default_tokens() {
         let link = Link::new("/about");
-        assert_eq!(link.compute_class(), "rw-link");
+        let tokens = link.compute_tokens();
+        assert!(tokens.contains(&St::TextAccent));
+        assert!(tokens.contains(&St::NoDecoration));
+        assert!(tokens.contains(&St::CursorPointer));
     }
 
     #[test]
-    fn test_link_class_external() {
+    fn test_link_pseudo_groups() {
+        let link = Link::new("/about").build();
+        let groups = link.get_pseudo_groups();
+        // Should have hover and focus_visible groups
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x00)); // Pc::Hover
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x02)); // Pc::FocusVisible
+    }
+
+    #[test]
+    fn test_link_external_constructor() {
         let link = Link::external("https://example.com");
-        assert_eq!(link.compute_class(), "rw-link rw-link-external");
+        assert!(link.external);
     }
 
-    #[test]
-    fn test_link_css_size() {
-        assert!(LINK_CSS.len() < 300, "Link CSS too large: {} bytes", LINK_CSS.len());
-        println!("Link CSS size: {} bytes", LINK_CSS.len());
-    }
 }

@@ -19,6 +19,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -43,9 +45,6 @@ impl Default for Progress {
 }
 
 impl Progress {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-progress";
-
     /// Create a new progress bar.
     pub fn new() -> Self {
         Self::default()
@@ -75,25 +74,13 @@ impl Progress {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str(Self::BASE_CLASS);
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the progress container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::BgMuted, St::RoundedFull, St::OverflowHidden]
     }
 
     /// Build the progress bar into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Progress);
-
-        let class = self.compute_class();
-
         // Calculate percentage
         let percentage = if self.max > 0 {
             ((self.value as f64 / self.max as f64) * 100.0).min(100.0)
@@ -101,34 +88,31 @@ impl Progress {
             0.0
         };
 
+        let mut tokens = self.compute_tokens();
+        tokens.push(St::H05rem);
         let mut container = el(El::Div)
-            .class(&class)
-            .attr("role", "progressbar")
-            .attr("aria-valuenow", &self.value.to_string())
-            .attr("aria-valuemin", "0")
-            .attr("aria-valuemax", &self.max.to_string());
+            .st(tokens)
+            .at(At::Role, Av::RoleProgressbar)
+            .at_str(At::AriaValuenow, &self.value.to_string())
+            .at(At::AriaValuemin, Av::Zero)
+            .at_str(At::AriaValuemax, &self.max.to_string());
 
-        if let Some(label_text) = self.label {
-            container = container.attr("aria-label", &label_text);
+        if let Some(ref extra) = self.extra_class {
+            container = container.class(extra.as_ref());
         }
 
-        // Progress bar inner element with width set via inline style
+        if let Some(label_text) = self.label {
+            container = container.at_str(At::AriaLabel, &label_text);
+        }
+
+        // Progress bar inner element - width% must remain dynamic
         let bar = el(El::Div)
-            .class("rw-progress-bar")
+            .st([St::HFull, St::BgAccent, St::RoundedFull, St::TransitionAll, St::MinW05rem])
             .attr("style", &format!("width:{}%", percentage));
 
         container.append([bar])
     }
 }
-
-/// Progress CSS.
-///
-/// Size: ~240 bytes (under 250 bytes budget)
-pub const PROGRESS_CSS: &str = "\
-.rw-progress{height:0.5rem;background:var(--rw-bg-muted);border-radius:var(--rw-radius-full);overflow:hidden}\
-.rw-progress-bar{height:100%;background:var(--rw-accent-9);border-radius:var(--rw-radius-full);\
-transition:width .3s ease;min-width:0.5rem}\
-.rw-progress-bar:empty{min-width:0}\n";
 
 #[cfg(test)]
 mod tests {
@@ -143,9 +127,12 @@ mod tests {
     }
 
     #[test]
-    fn test_progress_class_default() {
+    fn test_progress_tokens() {
         let progress = Progress::new();
-        assert_eq!(progress.compute_class(), "rw-progress");
+        let tokens = progress.compute_tokens();
+        assert!(tokens.contains(&St::BgMuted));
+        assert!(tokens.contains(&St::RoundedFull));
+        assert!(tokens.contains(&St::OverflowHidden));
     }
 
     #[test]
@@ -159,20 +146,4 @@ mod tests {
         assert_eq!(progress.label.as_deref(), Some("Loading"));
     }
 
-    #[test]
-    fn test_progress_css_size() {
-        // Progress CSS should be under 250 bytes
-        assert!(
-            PROGRESS_CSS.len() < 300,
-            "Progress CSS too large: {} bytes (budget: 300)",
-            PROGRESS_CSS.len()
-        );
-        println!("Progress CSS size: {} bytes", PROGRESS_CSS.len());
-    }
-
-    #[test]
-    fn test_progress_css_structure() {
-        assert!(PROGRESS_CSS.contains(".rw-progress{"));
-        assert!(PROGRESS_CSS.contains(".rw-progress-bar"));
-    }
 }

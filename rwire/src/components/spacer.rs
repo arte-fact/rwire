@@ -13,7 +13,7 @@
 //! ```
 
 use super::divider::SpacingSize;
-use crate::{el, El, ElementBuilder};
+use crate::{el, El, ElementBuilder, St};
 use std::borrow::Cow;
 
 /// Spacer component builder.
@@ -76,47 +76,35 @@ impl Spacer {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(32);
-        classes.push_str("rw-spacer");
-
-        let size_suffix = match self.size {
-            SpacingSize::None => "-0",
-            SpacingSize::Xs => "-xs",
-            SpacingSize::Sm => "-sm",
-            SpacingSize::Md => "-md",
-            SpacingSize::Lg => "-lg",
-            SpacingSize::Xl => "-xl",
-        };
-
-        if self.horizontal {
-            classes.push_str("-h");
+    /// Compute the style token for this spacer's dimension.
+    fn compute_token(&self) -> St {
+        match (self.horizontal, self.size) {
+            (false, SpacingSize::None) => St::HSp0,
+            (false, SpacingSize::Xs) => St::HSp1,
+            (false, SpacingSize::Sm) => St::HSp2,
+            (false, SpacingSize::Md) => St::HSp4,
+            (false, SpacingSize::Lg) => St::HSp6,
+            (false, SpacingSize::Xl) => St::HSp8,
+            (true, SpacingSize::None) => St::WSp0,
+            (true, SpacingSize::Xs) => St::WSp1,
+            (true, SpacingSize::Sm) => St::WSp2,
+            (true, SpacingSize::Md) => St::WSp4,
+            (true, SpacingSize::Lg) => St::WSp6,
+            (true, SpacingSize::Xl) => St::WSp8,
         }
-        classes.push_str(size_suffix);
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
     }
 
     /// Build the spacer into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::Spacer);
+        let mut builder = el(El::Div).st([self.compute_token()]);
 
-        let class = self.compute_class();
-        el(El::Div).class(&class)
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
+
+        builder
     }
 }
-
-/// Spacer CSS.
-pub const SPACER_CSS: &str = "\
-.rw-spacer-0{height:0}.rw-spacer-xs{height:var(--rw-space-1)}.rw-spacer-sm{height:var(--rw-space-2)}\
-.rw-spacer-md{height:var(--rw-space-4)}.rw-spacer-lg{height:var(--rw-space-6)}.rw-spacer-xl{height:var(--rw-space-8)}\
-.rw-spacer-h-0{width:0}.rw-spacer-h-xs{width:var(--rw-space-1)}.rw-spacer-h-sm{width:var(--rw-space-2)}\
-.rw-spacer-h-md{width:var(--rw-space-4)}.rw-spacer-h-lg{width:var(--rw-space-6)}.rw-spacer-h-xl{width:var(--rw-space-8)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -130,20 +118,21 @@ mod tests {
     }
 
     #[test]
-    fn test_spacer_class_vertical() {
-        let spacer = Spacer::lg();
-        assert_eq!(spacer.compute_class(), "rw-spacer-lg");
+    fn test_spacer_token_vertical() {
+        assert_eq!(Spacer::xs().compute_token(), St::HSp1);
+        assert_eq!(Spacer::sm().compute_token(), St::HSp2);
+        assert_eq!(Spacer::md().compute_token(), St::HSp4);
+        assert_eq!(Spacer::lg().compute_token(), St::HSp6);
+        assert_eq!(Spacer::xl().compute_token(), St::HSp8);
     }
 
     #[test]
-    fn test_spacer_class_horizontal() {
-        let spacer = Spacer::md().horizontal();
-        assert_eq!(spacer.compute_class(), "rw-spacer-h-md");
+    fn test_spacer_token_horizontal() {
+        assert_eq!(Spacer::xs().horizontal().compute_token(), St::WSp1);
+        assert_eq!(Spacer::sm().horizontal().compute_token(), St::WSp2);
+        assert_eq!(Spacer::md().horizontal().compute_token(), St::WSp4);
+        assert_eq!(Spacer::lg().horizontal().compute_token(), St::WSp6);
+        assert_eq!(Spacer::xl().horizontal().compute_token(), St::WSp8);
     }
 
-    #[test]
-    fn test_spacer_css_size() {
-        assert!(SPACER_CSS.len() < 500, "Spacer CSS too large: {} bytes", SPACER_CSS.len());
-        println!("Spacer CSS size: {} bytes", SPACER_CSS.len());
-    }
 }

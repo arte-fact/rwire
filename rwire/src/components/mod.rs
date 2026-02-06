@@ -80,7 +80,6 @@ mod modal;
 mod pagination;
 mod progress;
 mod radio;
-pub mod registry;
 mod select;
 mod spacer;
 mod spinner;
@@ -93,77 +92,46 @@ mod textarea;
 mod theme_toggle;
 pub mod utils;
 
-pub use alert::{Alert, AlertIntent, ALERT_CSS};
-pub use avatar::{Avatar, AvatarSize, AVATAR_CSS};
-pub use badge::{Badge, BadgeIntent, BADGE_CSS};
-pub use breadcrumb::{Breadcrumb, BreadcrumbItem, BREADCRUMB_CSS};
-pub use button::{Button, ButtonIntent, ButtonSize, BUTTON_CSS};
-pub use card::{Card, CardPadding, CardShadow, CARD_CSS};
-pub use checkbox::{Checkbox, CHECKBOX_CSS};
-pub use container::{Container, ContainerSize, CONTAINER_CSS};
-pub use divider::{Divider, SpacingSize, DIVIDER_CSS};
-pub use form_field::{FormField, FORM_FIELD_CSS};
-pub use input::{Input, InputSize, InputType, INPUT_CSS};
-pub use label::{Label, LABEL_CSS};
-pub use link::{Link, LINK_CSS};
-pub use list::{List, ListItem, LIST_CSS};
-pub use modal::{Modal, ModalSize, MODAL_CSS};
-pub use pagination::{Pagination, PAGINATION_CSS};
-pub use progress::{Progress, PROGRESS_CSS};
-pub use radio::{Radio, RADIO_CSS};
-pub use registry::{begin_tracking, end_tracking, ComponentRegistry, ComponentType};
-pub use select::{Select, SelectOption, SELECT_CSS};
-pub use spacer::{Spacer, SPACER_CSS};
-pub use spinner::{Spinner, SpinnerSize, SPINNER_CSS};
-pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify, STACK_CSS};
-pub use switch::{Switch, SWITCH_CSS};
-pub use table::{Table, TableRow, TABLE_CSS};
-pub use tabs::{Tab, Tabs, TABS_CSS};
-pub use text::{Text, TextColor, TextVariant, TEXT_CSS};
-pub use textarea::{Textarea, TEXTAREA_CSS};
-pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize, THEME_TOGGLE_CSS};
+pub use alert::{Alert, AlertIntent};
+pub use avatar::{Avatar, AvatarSize};
+pub use badge::{Badge, BadgeIntent};
+pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
+pub use button::{Button, ButtonIntent, ButtonSize};
+pub use card::{Card, CardPadding, CardShadow};
+pub use checkbox::Checkbox;
+pub use container::{Container, ContainerSize};
+pub use divider::{Divider, SpacingSize};
+pub use form_field::FormField;
+pub use input::{Input, InputSize, InputType};
+pub use label::Label;
+pub use link::Link;
+pub use list::{List, ListItem};
+pub use modal::{Modal, ModalSize};
+pub use pagination::Pagination;
+pub use progress::Progress;
+pub use radio::Radio;
+pub use select::{Select, SelectOption};
+pub use spacer::Spacer;
+pub use spinner::{Spinner, SpinnerSize};
+pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify};
+pub use switch::Switch;
+pub use table::{Table, TableRow};
+pub use tabs::{Tab, Tabs};
+pub use text::{Text, TextColor, TextVariant};
+pub use textarea::Textarea;
+pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize};
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
     unique_id, AriaAttrs, TransitionState, UTILS_CSS, Z_DROPDOWN, Z_FIXED, Z_MODAL,
     Z_MODAL_BACKDROP, Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
 };
 
-/// Generate CSS for all components.
+/// Generate CSS for components.
 ///
-/// In the future, this will be tree-shaken to only include
-/// CSS for components actually used in the application.
+/// All component CSS is now delivered via St/Ps tokens.
+/// Only utility CSS (icons, sr-only, etc.) remains.
 pub fn generate_components_css() -> String {
-    let mut css = String::with_capacity(12288);
-    css.push_str(UTILS_CSS);
-    css.push_str(ALERT_CSS);
-    css.push_str(AVATAR_CSS);
-    css.push_str(BADGE_CSS);
-    css.push_str(BREADCRUMB_CSS);
-    css.push_str(BUTTON_CSS);
-    css.push_str(CARD_CSS);
-    css.push_str(CHECKBOX_CSS);
-    css.push_str(CONTAINER_CSS);
-    css.push_str(DIVIDER_CSS);
-    css.push_str(FORM_FIELD_CSS);
-    css.push_str(INPUT_CSS);
-    css.push_str(LABEL_CSS);
-    css.push_str(LINK_CSS);
-    css.push_str(LIST_CSS);
-    css.push_str(MODAL_CSS);
-    css.push_str(PAGINATION_CSS);
-    css.push_str(PROGRESS_CSS);
-    css.push_str(RADIO_CSS);
-    css.push_str(SELECT_CSS);
-    css.push_str(SPACER_CSS);
-    css.push_str(SPINNER_CSS);
-    css.push_str(STACK_CSS);
-    css.push_str(SWITCH_CSS);
-    css.push_str(TABLE_CSS);
-    css.push_str(TABS_CSS);
-    css.push_str(TEXT_CSS);
-    css.push_str(TEXTAREA_CSS);
-    css.push_str(THEME_TOGGLE_CSS);
-    css
+    UTILS_CSS.to_string()
 }
 
 #[cfg(test)]
@@ -171,31 +139,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_components_css_not_empty() {
+    fn test_components_css_is_utils_only() {
         let css = generate_components_css();
         assert!(!css.is_empty());
-        assert!(css.contains(".rw-btn"));
-        assert!(css.contains(".rw-input"));
-        assert!(css.contains(".rw-stack"));
-        assert!(css.contains(".rw-card"));
-        assert!(css.contains(".rw-badge"));
-        assert!(css.contains(".rw-alert"));
-        assert!(css.contains(".rw-avatar"));
-        assert!(css.contains(".rw-checkbox"));
-        assert!(css.contains(".rw-select"));
-        assert!(css.contains(".rw-theme-toggle"));
-        assert!(css.contains(".rw-modal"));
+        // Only UTILS_CSS remains (icons, sr-only, etc.)
+        assert_eq!(css, UTILS_CSS);
     }
 
     #[test]
     fn test_total_components_css_size() {
         let css = generate_components_css();
-        // Total component CSS should be under 20KB (realistic for full component library)
+        // Only utility CSS now, should be well under 2KB
         assert!(
-            css.len() < 20480,
-            "Total component CSS too large: {} bytes",
+            css.len() < 2048,
+            "Utility CSS too large: {} bytes",
             css.len()
         );
-        println!("Total component CSS size: {} bytes", css.len());
     }
 }

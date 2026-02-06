@@ -14,6 +14,7 @@
 //!     .build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -56,9 +57,6 @@ pub struct Table {
 }
 
 impl Table {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-table";
-
     /// Create a new table.
     pub fn new() -> Self {
         Self::default()
@@ -92,37 +90,29 @@ impl Table {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str(Self::BASE_CLASS);
-
-        if self.striped {
-            classes.push_str(" rw-table-striped");
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+    /// Compute style tokens for the table container.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        vec![St::DisplayFlex, St::FlexCol, St::BorderSubtle, St::RoundedMd, St::OverflowHidden]
     }
 
     /// Build the table into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Table);
+        let mut table = el(El::Div).st(self.compute_tokens());
 
-        let class = self.compute_class();
-        let mut table = el(El::Div).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            table = table.class(extra.as_ref());
+        }
 
         // Add header row if headers are provided
         if !self.headers.is_empty() {
-            let mut header_row = el(El::Div).class("rw-tr rw-tr-header");
+            let mut header_row = el(El::Div)
+                .st([St::DisplayFlex, St::BgMuted, St::FontMedium]);
 
             for header in &self.headers {
                 header_row = header_row.append([
-                    el(El::Div).class("rw-th").text(header)
+                    el(El::Div)
+                        .st([St::Flex1, St::TextSm, St::TextHigh, St::PSp3])
+                        .text(header)
                 ]);
             }
 
@@ -131,11 +121,19 @@ impl Table {
 
         // Add data rows
         for row in self.rows {
-            let mut row_el = el(El::Div).class("rw-tr");
+            let mut row_el = el(El::Div)
+                .st([St::DisplayFlex])
+                .not_last_child([St::BorderBSubtle]);
+
+            if self.striped {
+                row_el = row_el.nth_even([St::BgSubtle]);
+            }
 
             for cell in row.cells {
                 row_el = row_el.append([
-                    el(El::Div).class("rw-td").text(&cell)
+                    el(El::Div)
+                        .st([St::Flex1, St::TextSm, St::TextHigh, St::PSp3])
+                        .text(&cell)
                 ]);
             }
 
@@ -145,17 +143,6 @@ impl Table {
         table
     }
 }
-
-/// Table CSS.
-///
-/// Size: ~385 bytes (under 400 bytes budget)
-pub const TABLE_CSS: &str = "\
-.rw-table{display:flex;flex-direction:column;border:1px solid var(--rw-border-default);border-radius:var(--rw-radius-md);overflow:hidden}\
-.rw-tr{display:flex;border-bottom:1px solid var(--rw-border-default)}\
-.rw-tr:last-child{border-bottom:none}\
-.rw-tr-header{background:var(--rw-bg-muted);font-weight:var(--rw-font-medium)}\
-.rw-th,.rw-td{flex:1;padding:var(--rw-space-3);font-size:var(--rw-text-sm);color:var(--rw-text-high)}\
-.rw-table-striped .rw-tr:nth-child(even){background:var(--rw-bg-subtle)}\n";
 
 #[cfg(test)]
 mod tests {
@@ -170,17 +157,14 @@ mod tests {
     }
 
     #[test]
-    fn test_table_class_default() {
+    fn test_table_tokens() {
         let table = Table::new();
-        assert_eq!(table.compute_class(), "rw-table");
-    }
-
-    #[test]
-    fn test_table_class_striped() {
-        let table = Table::new().striped(true);
-        let class = table.compute_class();
-        assert!(class.contains("rw-table"));
-        assert!(class.contains("rw-table-striped"));
+        let tokens = table.compute_tokens();
+        assert!(tokens.contains(&St::DisplayFlex));
+        assert!(tokens.contains(&St::FlexCol));
+        assert!(tokens.contains(&St::BorderSubtle));
+        assert!(tokens.contains(&St::RoundedMd));
+        assert!(tokens.contains(&St::OverflowHidden));
     }
 
     #[test]
@@ -193,23 +177,4 @@ mod tests {
         assert_eq!(table.rows.len(), 2);
     }
 
-    #[test]
-    fn test_table_css_size() {
-        // Table CSS should be under 400 bytes
-        assert!(
-            TABLE_CSS.len() < 500,
-            "Table CSS too large: {} bytes (budget: 500)",
-            TABLE_CSS.len()
-        );
-        println!("Table CSS size: {} bytes", TABLE_CSS.len());
-    }
-
-    #[test]
-    fn test_table_css_structure() {
-        assert!(TABLE_CSS.contains(".rw-table{"));
-        assert!(TABLE_CSS.contains(".rw-tr"));
-        assert!(TABLE_CSS.contains(".rw-th"));
-        assert!(TABLE_CSS.contains(".rw-td"));
-        assert!(TABLE_CSS.contains(".rw-table-striped"));
-    }
 }

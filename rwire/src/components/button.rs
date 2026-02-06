@@ -24,7 +24,8 @@
 //!     .build()
 //! ```
 
-use crate::variants::Variant;
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
 
@@ -42,17 +43,6 @@ pub enum ButtonIntent {
     Destructive,
 }
 
-impl Variant for ButtonIntent {
-    fn class(&self) -> Option<&'static str> {
-        match self {
-            ButtonIntent::Primary => None,
-            ButtonIntent::Secondary => Some("rw-btn-secondary"),
-            ButtonIntent::Ghost => Some("rw-btn-ghost"),
-            ButtonIntent::Destructive => Some("rw-btn-destructive"),
-        }
-    }
-}
-
 /// Button size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonSize {
@@ -63,16 +53,6 @@ pub enum ButtonSize {
     Md,
     /// Large: 44px height
     Lg,
-}
-
-impl Variant for ButtonSize {
-    fn class(&self) -> Option<&'static str> {
-        match self {
-            ButtonSize::Sm => Some("rw-btn-sm"),
-            ButtonSize::Md => None,
-            ButtonSize::Lg => Some("rw-btn-lg"),
-        }
-    }
 }
 
 /// Button component builder.
@@ -88,9 +68,6 @@ pub struct Button {
 }
 
 impl Button {
-    /// Base CSS class.
-    pub const BASE_CLASS: &'static str = "rw-btn";
-
     /// Create a new button with default settings.
     pub fn new() -> Self {
         Self::default()
@@ -167,63 +144,113 @@ impl Button {
     }
 
     // ========================================================================
-    // Build
+    // Token computation
     // ========================================================================
 
-    /// Compute the full class string.
-    fn compute_class(&self) -> String {
-        // Pre-allocate enough for typical class strings
-        let mut classes = String::with_capacity(64);
-        classes.push_str(Self::BASE_CLASS);
+    /// Compute style tokens for this button configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::DisplayInlineFlex,
+            St::ItemsCenter,
+            St::JustifyCenter,
+            St::GapSm,
+            St::FontMedium,
+            St::RoundedMd,
+            St::BorderTransparent,
+            St::CursorPointer,
+            St::TransitionColors,
+            St::TextSm,
+        ];
 
-        if let Some(intent_class) = self.intent.class() {
-            classes.push(' ');
-            classes.push_str(intent_class);
+        match self.intent {
+            ButtonIntent::Primary => tokens.extend([St::BgAccent, St::TextOnAccent]),
+            ButtonIntent::Secondary => {
+                tokens.extend([St::BgMuted, St::TextHigh, St::BorderDefault])
+            }
+            ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
+            ButtonIntent::Destructive => tokens.extend([St::BgRed9, St::TextWhite]),
         }
 
-        if let Some(size_class) = self.size.class() {
-            classes.push(' ');
-            classes.push_str(size_class);
-        }
-
-        if self.disabled {
-            classes.push_str(" rw-btn-disabled");
+        match self.size {
+            ButtonSize::Sm => {
+                tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
+                tokens.extend([St::TextXs, St::GapXs]);
+            }
+            ButtonSize::Md => {} // defaults
+            ButtonSize::Lg => {
+                tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
+                tokens.extend([St::TextBase, St::GapMd]);
+            }
         }
 
         if self.loading {
-            classes.push_str(" rw-btn-loading");
+            tokens.extend([St::PositionRelative, St::TextTransparent]);
         }
-
         if self.full_width {
-            classes.push_str(" rw-btn-full");
+            tokens.push(St::WFull);
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
+
+    /// Apply pseudo-class styles to the builder based on button configuration.
+    fn apply_pseudo(&self, mut builder: ElementBuilder) -> ElementBuilder {
+        builder = builder.focus_visible([St::OutlineAccent, St::OutlineOffset2]);
+
+        builder = match self.intent {
+            ButtonIntent::Primary => builder.hover([St::BgAccentHover]),
+            ButtonIntent::Secondary => {
+                builder.hover([St::BgHover, St::BorderEmphasis])
+            }
+            ButtonIntent::Ghost => builder.hover([St::BgHover]),
+            ButtonIntent::Destructive => builder.hover([St::BgRedHover]),
+        };
+
+        if self.disabled {
+            builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+        }
+        if self.loading {
+            builder = builder.after([St::ContentEmpty, St::PositionAbsolute, St::W1rem, St::H1rem, St::Border2, St::BorderRTransparent, St::RoundedFull, St::AnimateSpinFast]);
+        }
+
+        builder
+    }
+
+    /// Compute size-specific style tokens.
+    fn size_tokens(&self) -> Vec<St> {
+        match self.size {
+            ButtonSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSp3],
+            ButtonSize::Md => vec![St::H2_25rem, St::Py0, St::PxMd],
+            ButtonSize::Lg => vec![St::H2_75rem, St::Py0, St::PxLg],
+        }
+    }
+
+    // ========================================================================
+    // Build
+    // ========================================================================
 
     /// Build the button into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Button);
-
-        let class = self.compute_class();
-        let mut builder = el(El::Button).class(&class);
+        let mut tokens = self.compute_tokens();
+        tokens.extend(self.size_tokens());
+        let mut builder = self.apply_pseudo(
+            el(El::Button).st(tokens)
+        );
 
         if let Some(text) = self.text {
             builder = builder.text(&text);
         }
 
         if self.disabled {
-            builder = builder.attr("disabled", "");
+            builder = builder.bool_attr(At::Disabled);
         }
 
         if self.loading {
-            builder = builder.attr("aria-busy", "true");
+            builder = builder.at(At::AriaBusy, Av::True);
+        }
+
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
         }
 
         builder
@@ -234,32 +261,6 @@ impl Button {
         self.build().on(Ev::Click, handler)
     }
 }
-
-/// Button CSS.
-///
-/// Minified CSS for the button component.
-/// Size: ~1.5KB
-pub const BUTTON_CSS: &str = "\
-.rw-btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--rw-space-2);\
-font-weight:var(--rw-font-medium);border-radius:var(--rw-radius-md);border:1px solid transparent;\
-cursor:pointer;transition:background .15s;height:2.25rem;padding:0 var(--rw-space-4);\
-font-size:var(--rw-text-sm);background:var(--rw-accent-9);color:var(--rw-text-on-accent)}\
-.rw-btn:hover{background:var(--rw-accent-10)}\
-.rw-btn:focus-visible{outline:2px solid var(--rw-accent-8);outline-offset:2px}\
-.rw-btn-secondary{background:var(--rw-bg-muted);color:var(--rw-text-high);border-color:var(--rw-border-default)}\
-.rw-btn-secondary:hover{background:var(--rw-bg-hover);border-color:var(--rw-border-emphasis)}\
-.rw-btn-ghost{background:transparent;color:var(--rw-text-high)}\
-.rw-btn-ghost:hover{background:var(--rw-bg-hover)}\
-.rw-btn-destructive{background:var(--rw-red-9);color:var(--rw-white)}\
-.rw-btn-destructive:hover{background:var(--rw-red-10)}\
-.rw-btn-sm{height:1.75rem;padding:0 var(--rw-space-3);font-size:var(--rw-text-xs);gap:var(--rw-space-1)}\
-.rw-btn-lg{height:2.75rem;padding:0 var(--rw-space-6);font-size:var(--rw-text-base);gap:var(--rw-space-3)}\
-.rw-btn-disabled{opacity:.5;cursor:not-allowed;pointer-events:none}\
-.rw-btn-loading{position:relative;color:transparent}\
-.rw-btn-loading::after{content:\"\";position:absolute;width:1em;height:1em;\
-border:2px solid;border-right-color:transparent;border-radius:50%;animation:rw-spin .6s linear infinite}\
-.rw-btn-full{width:100%}\
-@keyframes rw-spin{to{transform:rotate(360deg)}}\n";
 
 #[cfg(test)]
 mod tests {
@@ -274,62 +275,71 @@ mod tests {
     }
 
     #[test]
-    fn test_button_class_default() {
-        let btn = Button::new();
-        assert_eq!(btn.compute_class(), "rw-btn");
+    fn test_button_primary_tokens() {
+        let btn = Button::primary("Save");
+        let tokens = btn.compute_tokens();
+        assert!(tokens.contains(&St::BgAccent));
+        assert!(tokens.contains(&St::TextOnAccent));
+        assert!(tokens.contains(&St::DisplayInlineFlex));
     }
 
     #[test]
-    fn test_button_class_secondary() {
+    fn test_button_secondary_tokens() {
         let btn = Button::secondary("Cancel");
-        assert_eq!(btn.compute_class(), "rw-btn rw-btn-secondary");
+        let tokens = btn.compute_tokens();
+        assert!(tokens.contains(&St::BgMuted));
+        assert!(tokens.contains(&St::TextHigh));
+        assert!(tokens.contains(&St::BorderDefault));
     }
 
     #[test]
-    fn test_button_class_full() {
-        let btn = Button::new()
-            .intent(ButtonIntent::Destructive)
-            .size(ButtonSize::Lg)
-            .disabled(true)
-            .loading(true)
-            .full_width(true);
-
-        let class = btn.compute_class();
-        assert!(class.contains("rw-btn"));
-        assert!(class.contains("rw-btn-destructive"));
-        assert!(class.contains("rw-btn-lg"));
-        assert!(class.contains("rw-btn-disabled"));
-        assert!(class.contains("rw-btn-loading"));
-        assert!(class.contains("rw-btn-full"));
+    fn test_button_destructive_tokens() {
+        let btn = Button::destructive("Delete");
+        let tokens = btn.compute_tokens();
+        assert!(tokens.contains(&St::BgRed9));
+        assert!(tokens.contains(&St::TextWhite));
     }
 
     #[test]
-    fn test_button_class_with_extra() {
-        let btn = Button::primary("Test").class("my-custom-class");
-        let class = btn.compute_class();
-        assert!(class.contains("rw-btn"));
-        assert!(class.contains("my-custom-class"));
+    fn test_button_primary_pseudo() {
+        let btn = Button::primary("Save").build();
+        let groups = btn.get_pseudo_groups();
+        assert!(!groups.is_empty());
     }
 
     #[test]
-    fn test_button_css_size() {
-        // Button CSS should be under 1.5KB
-        assert!(
-            BUTTON_CSS.len() < 1536,
-            "Button CSS too large: {} bytes",
-            BUTTON_CSS.len()
-        );
-        println!("Button CSS size: {} bytes", BUTTON_CSS.len());
+    fn test_button_disabled_pseudo() {
+        let btn = Button::primary("Save").disabled(true).build();
+        let groups = btn.get_pseudo_groups();
+        // Should have disabled_style group
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x04)); // Pc::Disabled
     }
 
     #[test]
-    fn test_button_css_structure() {
-        assert!(BUTTON_CSS.contains(".rw-btn{"));
-        assert!(BUTTON_CSS.contains(".rw-btn-secondary"));
-        assert!(BUTTON_CSS.contains(".rw-btn-ghost"));
-        assert!(BUTTON_CSS.contains(".rw-btn-destructive"));
-        assert!(BUTTON_CSS.contains(".rw-btn-sm"));
-        assert!(BUTTON_CSS.contains(".rw-btn-lg"));
-        assert!(BUTTON_CSS.contains("@keyframes rw-spin"));
+    fn test_button_loading_tokens() {
+        let btn = Button::primary("Save").loading(true);
+        let tokens = btn.compute_tokens();
+        assert!(tokens.contains(&St::PositionRelative));
+        assert!(tokens.contains(&St::TextTransparent));
+        let built = btn.build();
+        let groups = built.get_pseudo_groups();
+        // Should have after group for spinner
+        assert!(groups.iter().any(|(pc, _)| *pc == 0x08)); // Pc::After
     }
+
+    #[test]
+    fn test_button_size_tokens() {
+        let btn = Button::new().size(ButtonSize::Sm);
+        let tokens = btn.size_tokens();
+        assert_eq!(tokens, vec![St::H1_75rem, St::Py0, St::PxSp3]);
+
+        let btn = Button::new().size(ButtonSize::Md);
+        let tokens = btn.size_tokens();
+        assert_eq!(tokens, vec![St::H2_25rem, St::Py0, St::PxMd]);
+
+        let btn = Button::new().size(ButtonSize::Lg);
+        let tokens = btn.size_tokens();
+        assert_eq!(tokens, vec![St::H2_75rem, St::Py0, St::PxLg]);
+    }
+
 }

@@ -18,6 +18,8 @@
 //!     .build()
 //! ```
 
+use crate::attr_tokens::{At, Av};
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
 
@@ -35,15 +37,15 @@ pub enum InputType {
 }
 
 impl InputType {
-    fn as_str(&self) -> &'static str {
+    fn av(self) -> Av {
         match self {
-            InputType::Text => "text",
-            InputType::Password => "password",
-            InputType::Email => "email",
-            InputType::Number => "number",
-            InputType::Search => "search",
-            InputType::Tel => "tel",
-            InputType::Url => "url",
+            InputType::Text => Av::Text,
+            InputType::Password => Av::Password,
+            InputType::Email => Av::Email,
+            InputType::Number => Av::Number,
+            InputType::Search => Av::Search,
+            InputType::Tel => Av::Tel,
+            InputType::Url => Av::Url,
         }
     }
 }
@@ -173,61 +175,96 @@ impl Input {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-input");
+    // ========================================================================
+    // Token computation
+    // ========================================================================
+
+    /// Compute style tokens for this input configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![
+            St::DisplayBlock,
+            St::WFull,
+            St::TextSm,
+            St::LeadingNormal,
+            St::TextHigh,
+            St::BgApp,
+            St::BorderDefault,
+            St::RoundedMd,
+            St::TransitionColors,
+        ];
 
         match self.size {
-            InputSize::Sm => classes.push_str(" rw-input-sm"),
+            InputSize::Sm => {
+                tokens.retain(|t| !matches!(t, St::TextSm));
+                tokens.push(St::TextXs);
+            }
             InputSize::Md => {}
-            InputSize::Lg => classes.push_str(" rw-input-lg"),
+            InputSize::Lg => {
+                tokens.retain(|t| !matches!(t, St::TextSm));
+                tokens.push(St::TextBase);
+            }
         }
 
         if self.invalid {
-            classes.push_str(" rw-input-invalid");
+            tokens.push(St::BorderRed8);
         }
 
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
+        tokens
     }
+
+    /// Compute size-specific style tokens.
+    fn size_tokens(&self) -> Vec<St> {
+        match self.size {
+            InputSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSm],
+            InputSize::Md => vec![St::H2_25rem, St::Py0, St::PxSp3],
+            InputSize::Lg => vec![St::H2_75rem, St::Py0, St::PxMd],
+        }
+    }
+
+    // ========================================================================
+    // Build
+    // ========================================================================
 
     /// Build the input into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Register for CSS tree-shaking
-        super::registry::mark_component_used(super::registry::ComponentType::Input);
-
-        let class = self.compute_class();
+        let mut tokens = self.compute_tokens();
+        tokens.extend(self.size_tokens());
         let mut builder = el(El::Input)
-            .class(&class)
-            .attr("type", self.input_type.as_str());
+            .st(tokens)
+            .placeholder_style([St::TextMuted])
+            .hover([St::BorderEmphasis])
+            .focus([St::BorderColorAccent, St::OutlineNone])
+            .at(At::Type, self.input_type.av());
+        if self.disabled {
+            builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+        }
 
         if let Some(ref placeholder) = self.placeholder {
-            builder = builder.attr("placeholder", placeholder);
+            builder = builder.at_str(At::Placeholder, placeholder);
         }
         if let Some(ref value) = self.value {
-            builder = builder.attr("value", value);
+            builder = builder.at_str(At::Value, value);
         }
         if let Some(ref name) = self.name {
-            builder = builder.attr("name", name);
+            builder = builder.at_str(At::Name, name);
         }
         if let Some(ref id) = self.id {
-            builder = builder.attr("id", id);
+            builder = builder.at_str(At::Id, id);
         }
         if self.disabled {
-            builder = builder.attr("disabled", "");
+            builder = builder.bool_attr(At::Disabled);
         }
         if self.readonly {
-            builder = builder.attr("readonly", "");
+            builder = builder.bool_attr(At::Readonly);
         }
         if self.required {
-            builder = builder.attr("required", "");
+            builder = builder.bool_attr(At::Required);
         }
         if self.invalid {
-            builder = builder.attr("aria-invalid", "true");
+            builder = builder.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
         }
 
         builder
@@ -244,21 +281,6 @@ impl Input {
     }
 }
 
-/// Input CSS.
-pub const INPUT_CSS: &str = "\
-.rw-input{display:block;width:100%;height:2.25rem;padding:0 var(--rw-space-3);\
-font-size:var(--rw-text-sm);line-height:var(--rw-leading-normal);color:var(--rw-text-high);\
-background:var(--rw-bg-app);border:1px solid var(--rw-border-default);border-radius:var(--rw-radius-md);\
-transition:border-color .15s,box-shadow .15s}\
-.rw-input::placeholder{color:var(--rw-text-muted)}\
-.rw-input:hover{border-color:var(--rw-border-emphasis)}\
-.rw-input:focus{outline:none;border-color:var(--rw-accent-8);box-shadow:0 0 0 3px var(--rw-accent-4)}\
-.rw-input:disabled{opacity:.5;cursor:not-allowed;background:var(--rw-bg-muted)}\
-.rw-input-sm{height:1.75rem;padding:0 var(--rw-space-2);font-size:var(--rw-text-xs)}\
-.rw-input-lg{height:2.75rem;padding:0 var(--rw-space-4);font-size:var(--rw-text-base)}\
-.rw-input-invalid{border-color:var(--rw-red-8)}\
-.rw-input-invalid:focus{border-color:var(--rw-red-8);box-shadow:0 0 0 3px var(--rw-red-4)}\n";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,23 +293,34 @@ mod tests {
     }
 
     #[test]
-    fn test_input_class_default() {
+    fn test_input_default_tokens() {
         let input = Input::new();
-        assert_eq!(input.compute_class(), "rw-input");
+        let tokens = input.compute_tokens();
+        assert!(tokens.contains(&St::DisplayBlock));
+        assert!(tokens.contains(&St::WFull));
+        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::BorderDefault));
     }
 
     #[test]
-    fn test_input_class_small_invalid() {
-        let input = Input::new().size(InputSize::Sm).invalid(true);
-        let class = input.compute_class();
-        assert!(class.contains("rw-input"));
-        assert!(class.contains("rw-input-sm"));
-        assert!(class.contains("rw-input-invalid"));
+    fn test_input_small_tokens() {
+        let input = Input::new().size(InputSize::Sm);
+        let tokens = input.compute_tokens();
+        assert!(tokens.contains(&St::TextXs));
+        assert!(!tokens.contains(&St::TextSm));
     }
 
     #[test]
-    fn test_input_css_size() {
-        assert!(INPUT_CSS.len() < 1000, "Input CSS too large: {} bytes", INPUT_CSS.len());
-        println!("Input CSS size: {} bytes", INPUT_CSS.len());
+    fn test_input_invalid_tokens() {
+        let input = Input::new().invalid(true);
+        let tokens = input.compute_tokens();
+        assert!(tokens.contains(&St::BorderRed8));
+    }
+
+    #[test]
+    fn test_input_pseudo_groups() {
+        let input = Input::new().build();
+        let groups = input.get_pseudo_groups();
+        assert!(!groups.is_empty());
     }
 }

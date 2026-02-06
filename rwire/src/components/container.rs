@@ -14,6 +14,7 @@
 //!     .build()
 //! ```
 
+use crate::style_tokens::St;
 use crate::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
@@ -89,40 +90,43 @@ impl Container {
         self
     }
 
-    fn compute_class(&self) -> String {
-        let mut classes = String::with_capacity(48);
-        classes.push_str("rw-container");
+    /// Compute style tokens for this container configuration.
+    pub fn compute_tokens(&self) -> Vec<St> {
+        let mut tokens = vec![St::WFull];
 
+        if self.centered {
+            tokens.push(St::MxAuto);
+        }
+
+        if self.padding {
+            tokens.push(St::PxMd);
+        }
+
+        tokens
+    }
+
+    /// Get the max-width token for this size.
+    fn max_width_token(&self) -> Option<St> {
         match self.size {
-            ContainerSize::Sm => classes.push_str(" rw-container-sm"),
-            ContainerSize::Md => {}
-            ContainerSize::Lg => classes.push_str(" rw-container-lg"),
-            ContainerSize::Xl => classes.push_str(" rw-container-xl"),
-            ContainerSize::Full => classes.push_str(" rw-container-full"),
+            ContainerSize::Sm => Some(St::MaxW40rem),
+            ContainerSize::Md => Some(St::MaxW48rem),
+            ContainerSize::Lg => Some(St::MaxW64rem),
+            ContainerSize::Xl => Some(St::MaxW80rem),
+            ContainerSize::Full => None,
         }
-
-        if !self.centered {
-            classes.push_str(" rw-container-left");
-        }
-
-        if !self.padding {
-            classes.push_str(" rw-container-flush");
-        }
-
-        if let Some(ref extra) = self.extra_class {
-            classes.push(' ');
-            classes.push_str(extra);
-        }
-
-        classes
     }
 
     /// Build the container into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        super::registry::mark_component_used(super::registry::ComponentType::Container);
+        let mut tokens = self.compute_tokens();
+        if let Some(mw) = self.max_width_token() {
+            tokens.push(mw);
+        }
+        let mut builder = el(El::Div).st(tokens);
 
-        let class = self.compute_class();
-        let mut builder = el(El::Div).class(&class);
+        if let Some(ref extra) = self.extra_class {
+            builder = builder.class(extra.as_ref());
+        }
 
         for child in self.children {
             builder = builder.append([child]);
@@ -131,16 +135,6 @@ impl Container {
         builder
     }
 }
-
-/// Container CSS.
-pub const CONTAINER_CSS: &str = "\
-.rw-container{width:100%;max-width:48rem;margin-inline:auto;padding-inline:var(--rw-space-4)}\
-.rw-container-sm{max-width:40rem}\
-.rw-container-lg{max-width:64rem}\
-.rw-container-xl{max-width:80rem}\
-.rw-container-full{max-width:none}\
-.rw-container-left{margin-inline:0}\
-.rw-container-flush{padding-inline:0}\n";
 
 #[cfg(test)]
 mod tests {
@@ -155,28 +149,33 @@ mod tests {
     }
 
     #[test]
-    fn test_container_class_default() {
+    fn test_container_default_tokens() {
         let container = Container::new();
-        assert_eq!(container.compute_class(), "rw-container");
+        let tokens = container.compute_tokens();
+        assert!(tokens.contains(&St::WFull));
+        assert!(tokens.contains(&St::MxAuto));
+        assert!(tokens.contains(&St::PxMd));
     }
 
     #[test]
-    fn test_container_class_full() {
+    fn test_container_no_center_no_padding() {
         let container = Container::new()
-            .size(ContainerSize::Lg)
             .centered(false)
             .padding(false);
 
-        let class = container.compute_class();
-        assert!(class.contains("rw-container"));
-        assert!(class.contains("rw-container-lg"));
-        assert!(class.contains("rw-container-left"));
-        assert!(class.contains("rw-container-flush"));
+        let tokens = container.compute_tokens();
+        assert!(tokens.contains(&St::WFull));
+        assert!(!tokens.contains(&St::MxAuto));
+        assert!(!tokens.contains(&St::PxMd));
     }
 
     #[test]
-    fn test_container_css_size() {
-        assert!(CONTAINER_CSS.len() < 350, "Container CSS too large: {} bytes", CONTAINER_CSS.len());
-        println!("Container CSS size: {} bytes", CONTAINER_CSS.len());
+    fn test_container_max_width_token() {
+        assert_eq!(Container::new().size(ContainerSize::Sm).max_width_token(), Some(St::MaxW40rem));
+        assert_eq!(Container::new().size(ContainerSize::Md).max_width_token(), Some(St::MaxW48rem));
+        assert_eq!(Container::new().size(ContainerSize::Lg).max_width_token(), Some(St::MaxW64rem));
+        assert_eq!(Container::new().size(ContainerSize::Xl).max_width_token(), Some(St::MaxW80rem));
+        assert_eq!(Container::new().size(ContainerSize::Full).max_width_token(), None);
     }
+
 }
