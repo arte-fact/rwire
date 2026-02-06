@@ -41,7 +41,11 @@
       "mcp__plugin_playwright_playwright__browser_network_requests",
       "mcp__plugin_playwright_playwright__browser_wait_for",
       "mcp__plugin_playwright_playwright__browser_evaluate",
-      "mcp__plugin_playwright_playwright__browser_run_code"
+      "mcp__plugin_playwright_playwright__browser_run_code",
+      "Bash(find:*)",
+      "Bash(git -C /home/artefact/Workspace/rwire status)",
+      "Bash(git -C /home/artefact/Workspace/rwire diff --stat)",
+      "Bash(git push:*)"
     ]
   }
 }
