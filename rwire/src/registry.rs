@@ -39,8 +39,9 @@ impl ConnectionRegistry {
     pub fn connections_from_ip(&self, ip: IpAddr) -> usize {
         self.per_ip
             .read()
-            .ok()
-            .and_then(|map| map.get(&ip).copied())
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&ip)
+            .copied()
             .unwrap_or(0)
     }
 
@@ -53,9 +54,11 @@ impl ConnectionRegistry {
         self.total.fetch_add(1, Ordering::Relaxed);
 
         // Increment per-IP count
-        if let Ok(mut map) = self.per_ip.write() {
-            *map.entry(ip).or_insert(0) += 1;
-        }
+        *self.per_ip
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(ip)
+            .or_insert(0) += 1;
 
         ConnectionGuard { registry: self, ip }
     }
@@ -66,13 +69,12 @@ impl ConnectionRegistry {
         self.total.fetch_sub(1, Ordering::Relaxed);
 
         // Decrement per-IP count
-        if let Ok(mut map) = self.per_ip.write() {
-            if let Some(count) = map.get_mut(&ip) {
-                if *count > 1 {
-                    *count -= 1;
-                } else {
-                    map.remove(&ip);
-                }
+        let mut map = self.per_ip.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = map.get_mut(&ip) {
+            if *count > 1 {
+                *count -= 1;
+            } else {
+                map.remove(&ip);
             }
         }
     }

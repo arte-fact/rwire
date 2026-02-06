@@ -1296,7 +1296,9 @@ fn local_state_registry() -> &'static RwLock<HashMap<TypeId, LocalStateDefaultFn
 /// This is called by the `#[derive(State)]` macro for `#[storage(local)]` types.
 /// The serializer function should return the JSON representation of Default::default().
 pub fn register_local_state_default<S: 'static>(serializer: LocalStateDefaultFn) {
-    let mut registry = local_state_registry().write().unwrap();
+    let mut registry = local_state_registry()
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
     registry.insert(TypeId::of::<S>(), serializer);
 }
 
@@ -1304,6 +1306,8 @@ pub fn register_local_state_default<S: 'static>(serializer: LocalStateDefaultFn)
 ///
 /// Returns None if the type is not registered.
 pub fn get_local_state_default_json(type_id: TypeId) -> Option<String> {
-    let registry = local_state_registry().read().unwrap();
+    let registry = local_state_registry()
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
     registry.get(&type_id).map(|f| f())
 }

@@ -570,9 +570,7 @@ where
 /// Extract Cookie header value from HTTP request.
 fn extract_cookie_from_request(request: &str) -> Option<String> {
     for line in request.lines() {
-        let line_lower = line.to_lowercase();
-        if line_lower.starts_with("cookie:") {
-            // Extract value after "Cookie:" (case-insensitive)
+        if line.len() >= 7 && line[..7].eq_ignore_ascii_case("cookie:") {
             return Some(line[7..].trim().to_string());
         }
     }

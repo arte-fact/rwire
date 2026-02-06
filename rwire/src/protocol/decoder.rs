@@ -1,6 +1,6 @@
 //! Decoder for incoming client events.
 
-use super::opcodes::EVENT_MAPPINGS;
+use super::opcodes::Ev;
 
 /// Maximum allowed payload size (64KB). Prevents memory exhaustion from malicious inputs.
 const MAX_PAYLOAD_SIZE: usize = 65_536;
@@ -94,10 +94,8 @@ impl ClientEvent {
 
     /// Get event type as a human-readable string.
     pub fn event_type_name(&self) -> &'static str {
-        EVENT_MAPPINGS
-            .iter()
-            .find(|(code, _)| *code == self.event_type)
-            .map(|(_, name)| *name)
+        Ev::try_from(self.event_type)
+            .map(|ev| ev.name())
             .unwrap_or("unknown")
     }
 }

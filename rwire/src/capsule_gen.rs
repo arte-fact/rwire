@@ -16,66 +16,18 @@ use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS};
 use crate::theme::Theme;
 use crate::tokens::ColorPalette;
 
-/// Generate the JavaScript object literal for element mappings.
-fn generate_element_map(used: &HashSet<u8>) -> String {
-    let entries: Vec<String> = ELEMENT_MAPPINGS
+/// Generate a tree-shaken JS object literal from a mappings array.
+///
+/// Filters `mappings` to include only entries whose code is in `used`,
+/// then formats as `{code:'string', ...}` entries joined by commas.
+fn generate_js_map<T: std::fmt::Display + std::hash::Hash + Eq>(
+    mappings: &[(T, &str)],
+    used: &HashSet<T>,
+) -> String {
+    let entries: Vec<String> = mappings
         .iter()
         .filter(|(code, _)| used.contains(code))
         .map(|(code, name)| format!("{}:'{}'", code, name))
-        .collect();
-    entries.join(",")
-}
-
-/// Generate the JavaScript object literal for event mappings.
-fn generate_event_map(used: &HashSet<u8>) -> String {
-    let entries: Vec<String> = EVENT_MAPPINGS
-        .iter()
-        .filter(|(code, _)| used.contains(code))
-        .map(|(code, name)| format!("{}:'{}'", code, name))
-        .collect();
-    entries.join(",")
-}
-
-/// Generate the JavaScript object literal for attribute key mappings.
-fn generate_attr_key_map(used: &HashSet<u8>) -> String {
-    use crate::attr_tokens::AT_MAPPINGS;
-    let entries: Vec<String> = AT_MAPPINGS
-        .iter()
-        .filter(|(code, _)| used.contains(code))
-        .map(|(code, name)| format!("{}:'{}'", code, name))
-        .collect();
-    entries.join(",")
-}
-
-/// Generate the JavaScript object literal for attribute value mappings.
-fn generate_attr_value_map(used: &HashSet<u8>) -> String {
-    use crate::attr_tokens::AV_MAPPINGS;
-    let entries: Vec<String> = AV_MAPPINGS
-        .iter()
-        .filter(|(code, _)| used.contains(code))
-        .map(|(code, value)| format!("{}:'{}'", code, value))
-        .collect();
-    entries.join(",")
-}
-
-/// Generate the JavaScript object literal for style property mappings.
-fn generate_style_prop_map(used: &HashSet<u8>) -> String {
-    use crate::style_tokens::PROP_MAPPINGS;
-    let entries: Vec<String> = PROP_MAPPINGS
-        .iter()
-        .filter(|(code, _)| used.contains(code))
-        .map(|(code, name)| format!("{}:'{}'", code, name))
-        .collect();
-    entries.join(",")
-}
-
-/// Generate the JavaScript object literal for style value mappings.
-fn generate_style_value_map(used: &HashSet<u8>) -> String {
-    use crate::style_tokens::VALUE_MAPPINGS;
-    let entries: Vec<String> = VALUE_MAPPINGS
-        .iter()
-        .filter(|(code, _)| used.contains(code))
-        .map(|(code, value)| format!("{}:'{}'", code, value))
         .collect();
     entries.join(",")
 }
@@ -206,8 +158,8 @@ pub fn generate_capsule(
     used_events: &HashSet<u8>,
     has_local_handlers: bool,
 ) -> String {
-    let elements_js = generate_element_map(used_elements);
-    let events_js = generate_event_map(used_events);
+    let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
+    let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
 
     // Choose the appropriate bind handler based on whether we have local state
     let bind_and_local_js = if has_local_handlers {
@@ -230,15 +182,6 @@ const AV={{}};
 </script>
 </body></html>"#
     )
-}
-
-/// Generate a minimal capsule HTML with only the used element and event types (legacy API).
-///
-/// This is for backwards compatibility. New code should use `generate_capsule` with
-/// the `has_local_handlers` parameter.
-#[deprecated(note = "Use generate_capsule with has_local_handlers parameter")]
-pub fn generate_capsule_legacy(used_elements: &HashSet<u8>, used_events: &HashSet<u8>) -> String {
-    generate_capsule(used_elements, used_events, false)
 }
 
 /// Configuration for capsule generation with styling.
@@ -497,18 +440,21 @@ pub fn generate_styled_capsule(
     config: &CapsuleConfig,
     css: &str,
 ) -> String {
-    let elements_js = generate_element_map(used_elements);
-    let events_js = generate_event_map(used_events);
+    use crate::attr_tokens::{AT_MAPPINGS, AV_MAPPINGS};
+    use crate::style_tokens::{PROP_MAPPINGS, VALUE_MAPPINGS};
+
+    let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
+    let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
     let theme_attrs = config.theme.data_attrs();
 
     // Generate style token lookup tables (tree-shaken)
     // Note: U (utility) map removed - utilities now use CSS classes generated server-side
-    let props_js = generate_style_prop_map(&config.used_style_props);
-    let values_js = generate_style_value_map(&config.used_style_values);
+    let props_js = generate_js_map(PROP_MAPPINGS, &config.used_style_props);
+    let values_js = generate_js_map(VALUE_MAPPINGS, &config.used_style_values);
 
     // Generate attribute lookup tables (tree-shaken)
-    let attr_keys_js = generate_attr_key_map(&config.used_attr_keys);
-    let attr_values_js = generate_attr_value_map(&config.used_attr_values);
+    let attr_keys_js = generate_js_map(AT_MAPPINGS, &config.used_attr_keys);
+    let attr_values_js = generate_js_map(AV_MAPPINGS, &config.used_attr_values);
 
     // Choose the appropriate bind handler based on whether we have local state
     let bind_and_local_js = if config.has_local_handlers {
@@ -693,7 +639,7 @@ mod tests {
         used.insert(0); // div
         used.insert(2); // button
 
-        let map = generate_element_map(&used);
+        let map = generate_js_map(ELEMENT_MAPPINGS, &used);
         assert!(map.contains("0:'div'"));
         assert!(map.contains("2:'button'"));
         assert!(!map.contains("span"));
@@ -704,7 +650,7 @@ mod tests {
         let mut used = HashSet::new();
         used.insert(1); // click
 
-        let map = generate_event_map(&used);
+        let map = generate_js_map(EVENT_MAPPINGS, &used);
         assert_eq!(map, "1:'click'");
     }
 

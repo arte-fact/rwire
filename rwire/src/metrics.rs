@@ -213,22 +213,23 @@ impl Metrics {
 
     /// Add a label to all metrics.
     pub fn add_label(&self, key: &str, value: &str) {
-        if let Ok(mut labels) = self.labels.write() {
-            labels.push((key.to_string(), value.to_string()));
-        }
+        self.labels
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((key.to_string(), value.to_string()));
     }
 
     /// Get labels as a string for Prometheus format.
     fn labels_str(&self) -> String {
-        let labels = self.labels.read().ok();
-        match labels {
-            Some(l) if !l.is_empty() => {
-                let pairs: Vec<String> =
-                    l.iter().map(|(k, v)| format!("{}=\"{}\"", k, v)).collect();
-                format!("{{{}}}", pairs.join(","))
-            }
-            _ => String::new(),
+        let labels = self.labels.read().unwrap_or_else(|e| e.into_inner());
+        if labels.is_empty() {
+            return String::new();
         }
+        let pairs: Vec<String> = labels
+            .iter()
+            .map(|(k, v)| format!("{}=\"{}\"", k, v))
+            .collect();
+        format!("{{{}}}", pairs.join(","))
     }
 
     /// Export metrics in Prometheus text format.

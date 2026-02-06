@@ -7,6 +7,8 @@
 /// - An `as_u8()` or `as_u16()` method (based on repr type)
 /// - A configurable string method (e.g. `css()`, `name()`, `selector()`)
 /// - A `pub const MAPPINGS` array of `(repr_type, &str)` pairs
+/// - `From<Enum>` for the repr type
+/// - `TryFrom<repr_type>` for the enum (returns `Err(value)` if unknown)
 ///
 /// # Example
 ///
@@ -21,6 +23,9 @@
 ///         Baz = 0x01 => "baz",
 ///     }
 /// }
+/// assert_eq!(u8::from(Foo::Bar), 0x00);
+/// assert_eq!(Foo::try_from(0x01), Ok(Foo::Baz));
+/// assert!(Foo::try_from(0xFF).is_err());
 /// ```
 macro_rules! define_token_enum {
     (
@@ -54,6 +59,20 @@ macro_rules! define_token_enum {
             pub fn $str_method(self) -> &'static str {
                 match self {
                     $( Self::$variant => $str, )+
+                }
+            }
+        }
+
+        impl From<$name> for u8 {
+            fn from(v: $name) -> u8 { v as u8 }
+        }
+
+        impl TryFrom<u8> for $name {
+            type Error = u8;
+            fn try_from(v: u8) -> Result<Self, u8> {
+                match v {
+                    $( $code => Ok(Self::$variant), )+
+                    _ => Err(v),
                 }
             }
         }
@@ -94,6 +113,20 @@ macro_rules! define_token_enum {
             pub fn $str_method(self) -> &'static str {
                 match self {
                     $( Self::$variant => $str, )+
+                }
+            }
+        }
+
+        impl From<$name> for u16 {
+            fn from(v: $name) -> u16 { v as u16 }
+        }
+
+        impl TryFrom<u16> for $name {
+            type Error = u16;
+            fn try_from(v: u16) -> Result<Self, u16> {
+                match v {
+                    $( $code => Ok(Self::$variant), )+
+                    _ => Err(v),
                 }
             }
         }
