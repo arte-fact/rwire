@@ -12,55 +12,9 @@
 
 use std::collections::HashSet;
 
+use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS};
 use crate::theme::Theme;
 use crate::tokens::ColorPalette;
-
-/// All supported element types with their byte codes and tag names.
-const ELEMENT_MAPPINGS: &[(u8, &str)] = &[
-    (0, "div"),
-    (1, "span"),
-    (2, "button"),
-    (3, "input"),
-    (4, "p"),
-    (5, "h1"),
-    (6, "h2"),
-    (7, "a"),
-    (8, "textarea"),
-    (9, "select"),
-    (10, "option"),
-    (11, "label"),
-    (12, "fieldset"),
-    (13, "legend"),
-    (16, "form"),
-    (17, "ul"),
-    (18, "li"),
-    (19, "nav"),
-    (20, "header"),
-    (21, "footer"),
-    (22, "section"),
-    (23, "article"),
-    (24, "svg"),
-    (25, "path"),
-    (26, "h3"),
-    (27, "hr"),
-    (28, "ol"),
-];
-
-/// All supported event types with their byte codes and event names.
-const EVENT_MAPPINGS: &[(u8, &str)] = &[
-    (1, "click"),
-    (2, "dblclick"),
-    (3, "mousedown"),
-    (4, "mouseup"),
-    (5, "mousemove"),
-    (6, "submit"),
-    (7, "input"),
-    (8, "change"),
-    (9, "keydown"),
-    (10, "keyup"),
-    (11, "focus"),
-    (12, "blur"),
-];
 
 /// Generate the JavaScript object literal for element mappings.
 fn generate_element_map(used: &HashSet<u8>) -> String {

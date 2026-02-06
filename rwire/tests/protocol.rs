@@ -275,7 +275,7 @@ mod encoder {
         let bytes = buf.finish();
         assert_eq!(bytes[0], SYMBOLS_EXTEND);
         assert_eq!(bytes[1], 2); // count (varint)
-        // start_index 130 (0x82) encoded as varint: 0x80 0x02
+                                 // start_index 130 (0x82) encoded as varint: 0x80 0x02
         assert_eq!(bytes[2], 0x80); // varint byte 1
         assert_eq!(bytes[3], 0x02); // varint byte 2
         assert_eq!(bytes[4], 4); // len "new1"
@@ -363,7 +363,7 @@ mod encoder {
         let bytes = buf.finish();
         assert_eq!(bytes[2], SET_TEXT_INT);
         assert_eq!(bytes[3], 0); // ref
-        // 42 as zigzag: (42 << 1) ^ (42 >> 31) = 84
+                                 // 42 as zigzag: (42 << 1) ^ (42 >> 31) = 84
         assert_eq!(bytes[4], 84); // varint for 84 is single byte
 
         // Test negative number
@@ -492,6 +492,7 @@ mod decoder {
             (Ev::KeyUp, "keyup"),
             (Ev::Focus, "focus"),
             (Ev::Blur, "blur"),
+            (Ev::Scroll, "scroll"),
         ];
 
         for (ev, expected_name) in events {
@@ -594,6 +595,7 @@ mod opcodes {
             Ev::KeyUp.as_u8(),
             Ev::Focus.as_u8(),
             Ev::Blur.as_u8(),
+            Ev::Scroll.as_u8(),
         ];
         let mut sorted = codes.clone();
         sorted.sort();

@@ -193,98 +193,53 @@ pub const BATCH_END: u8 = 0xFF;
 // Element Types
 // ============================================================================
 
-pub const EL_DIV: u8 = 0x00;
-pub const EL_SPAN: u8 = 0x01;
-pub const EL_BUTTON: u8 = 0x02;
-pub const EL_INPUT: u8 = 0x03;
-pub const EL_P: u8 = 0x04;
-pub const EL_H1: u8 = 0x05;
-pub const EL_H2: u8 = 0x06;
-pub const EL_A: u8 = 0x07;
-pub const EL_TEXTAREA: u8 = 0x08;
-pub const EL_SELECT: u8 = 0x09;
-pub const EL_OPTION: u8 = 0x0A;
-pub const EL_LABEL: u8 = 0x0B;
-pub const EL_FIELDSET: u8 = 0x0C;
-pub const EL_LEGEND: u8 = 0x0D;
-pub const EL_FORM: u8 = 0x10;
-pub const EL_UL: u8 = 0x11;
-pub const EL_LI: u8 = 0x12;
-pub const EL_NAV: u8 = 0x13;
-pub const EL_HEADER: u8 = 0x14;
-pub const EL_FOOTER: u8 = 0x15;
-pub const EL_SECTION: u8 = 0x16;
-pub const EL_ARTICLE: u8 = 0x17;
-pub const EL_SVG: u8 = 0x18;
-pub const EL_PATH: u8 = 0x19;
-pub const EL_H3: u8 = 0x1A;
-pub const EL_HR: u8 = 0x1B;
-pub const EL_OL: u8 = 0x1C;
+define_token_enum! {
+    /// Element type enum for fluent builder API.
+    pub enum El(u8) {
+        str_method = name;
+        mappings = ELEMENT_MAPPINGS;
 
-/// Element type enum for fluent builder API.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum El {
-    Div,
-    Span,
-    Button,
-    Input,
-    P,
-    H1,
-    H2,
-    A,
-    Textarea,
-    Select,
-    Option,
-    Label,
-    Fieldset,
-    Legend,
-    Form,
-    Ul,
-    Li,
-    Nav,
-    Header,
-    Footer,
-    Section,
-    Article,
-    Svg,
-    Path,
-    H3,
-    Hr,
-    Ol,
-}
-
-impl El {
-    /// Convert to the wire protocol byte value.
-    pub fn as_u8(self) -> u8 {
-        match self {
-            El::Div => EL_DIV,
-            El::Span => EL_SPAN,
-            El::Button => EL_BUTTON,
-            El::Input => EL_INPUT,
-            El::P => EL_P,
-            El::H1 => EL_H1,
-            El::H2 => EL_H2,
-            El::A => EL_A,
-            El::Textarea => EL_TEXTAREA,
-            El::Select => EL_SELECT,
-            El::Option => EL_OPTION,
-            El::Label => EL_LABEL,
-            El::Fieldset => EL_FIELDSET,
-            El::Legend => EL_LEGEND,
-            El::Form => EL_FORM,
-            El::Ul => EL_UL,
-            El::Li => EL_LI,
-            El::Nav => EL_NAV,
-            El::Header => EL_HEADER,
-            El::Footer => EL_FOOTER,
-            El::Section => EL_SECTION,
-            El::Article => EL_ARTICLE,
-            El::Svg => EL_SVG,
-            El::Path => EL_PATH,
-            El::H3 => EL_H3,
-            El::Hr => EL_HR,
-            El::Ol => EL_OL,
-        }
+        Div = 0x00 => "div",
+        Span = 0x01 => "span",
+        Button = 0x02 => "button",
+        Input = 0x03 => "input",
+        P = 0x04 => "p",
+        H1 = 0x05 => "h1",
+        H2 = 0x06 => "h2",
+        A = 0x07 => "a",
+        Textarea = 0x08 => "textarea",
+        Select = 0x09 => "select",
+        Option = 0x0A => "option",
+        Label = 0x0B => "label",
+        Fieldset = 0x0C => "fieldset",
+        Legend = 0x0D => "legend",
+        Form = 0x10 => "form",
+        Ul = 0x11 => "ul",
+        Li = 0x12 => "li",
+        Nav = 0x13 => "nav",
+        Header = 0x14 => "header",
+        Footer = 0x15 => "footer",
+        Section = 0x16 => "section",
+        Article = 0x17 => "article",
+        Svg = 0x18 => "svg",
+        Path = 0x19 => "path",
+        H3 = 0x1A => "h3",
+        Hr = 0x1B => "hr",
+        Ol = 0x1C => "ol",
+        Pre = 0x1D => "pre",
+        Code = 0x1E => "code",
+        Blockquote = 0x1F => "blockquote",
+        Strong = 0x20 => "strong",
+        Em = 0x21 => "em",
+        Img = 0x22 => "img",
+        Table = 0x23 => "table",
+        Thead = 0x24 => "thead",
+        Tbody = 0x25 => "tbody",
+        Tr = 0x26 => "tr",
+        Th = 0x27 => "th",
+        Td = 0x28 => "td",
+        Aside = 0x29 => "aside",
+        Main = 0x2A => "main",
     }
 }
 
@@ -292,53 +247,25 @@ impl El {
 // Event Types
 // ============================================================================
 
-pub const EV_CLICK: u8 = 0x01;
-pub const EV_DBLCLICK: u8 = 0x02;
-pub const EV_MOUSEDOWN: u8 = 0x03;
-pub const EV_MOUSEUP: u8 = 0x04;
-pub const EV_MOUSEMOVE: u8 = 0x05;
-pub const EV_SUBMIT: u8 = 0x06;
-pub const EV_INPUT: u8 = 0x07;
-pub const EV_CHANGE: u8 = 0x08;
-pub const EV_KEYDOWN: u8 = 0x09;
-pub const EV_KEYUP: u8 = 0x0A;
-pub const EV_FOCUS: u8 = 0x0B;
-pub const EV_BLUR: u8 = 0x0C;
+define_token_enum! {
+    /// Event type enum for fluent builder API.
+    pub enum Ev(u8) {
+        str_method = name;
+        mappings = EVENT_MAPPINGS;
 
-/// Event type enum for fluent builder API.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ev {
-    Click,
-    DblClick,
-    MouseDown,
-    MouseUp,
-    MouseMove,
-    Submit,
-    Input,
-    Change,
-    KeyDown,
-    KeyUp,
-    Focus,
-    Blur,
-}
-
-impl Ev {
-    /// Convert to the wire protocol byte value.
-    pub fn as_u8(self) -> u8 {
-        match self {
-            Ev::Click => EV_CLICK,
-            Ev::DblClick => EV_DBLCLICK,
-            Ev::MouseDown => EV_MOUSEDOWN,
-            Ev::MouseUp => EV_MOUSEUP,
-            Ev::MouseMove => EV_MOUSEMOVE,
-            Ev::Submit => EV_SUBMIT,
-            Ev::Input => EV_INPUT,
-            Ev::Change => EV_CHANGE,
-            Ev::KeyDown => EV_KEYDOWN,
-            Ev::KeyUp => EV_KEYUP,
-            Ev::Focus => EV_FOCUS,
-            Ev::Blur => EV_BLUR,
-        }
+        Click = 0x01 => "click",
+        DblClick = 0x02 => "dblclick",
+        MouseDown = 0x03 => "mousedown",
+        MouseUp = 0x04 => "mouseup",
+        MouseMove = 0x05 => "mousemove",
+        Submit = 0x06 => "submit",
+        Input = 0x07 => "input",
+        Change = 0x08 => "change",
+        KeyDown = 0x09 => "keydown",
+        KeyUp = 0x0A => "keyup",
+        Focus = 0x0B => "focus",
+        Blur = 0x0C => "blur",
+        Scroll = 0x0D => "scroll",
     }
 }
 

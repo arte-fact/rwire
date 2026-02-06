@@ -8,5 +8,4 @@ pub mod varint;
 pub use decoder::{ClientEvent, DecodeError};
 pub use encoder::OpcodeBuffer;
 pub use opcodes::*;
-pub use opcodes::{El, Ev};
 pub use varint::{read_varint, write_varint, VARINT_JS, VARINT_MAX};

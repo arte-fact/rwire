@@ -50,6 +50,9 @@
 //! }
 //! ```
 
+#[macro_use]
+mod token_macro;
+
 pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
