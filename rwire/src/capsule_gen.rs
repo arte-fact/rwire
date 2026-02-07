@@ -121,8 +121,8 @@ else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_o
 w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
 w.onmessage=e=>x(new Uint8Array(e.data));
-document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send(new TextEncoder().encode('R'+h))}});
-window.addEventListener('popstate',()=>{w.send(new TextEncoder().encode('R'+location.pathname))});"#;
+document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h)}});
+window.addEventListener('popstate',()=>{w.send('R'+location.pathname)});"#;
 
 /// Bind handler without local state support (sends to server).
 /// Also includes a stub xi() since the main runtime references it.

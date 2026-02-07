@@ -290,6 +290,15 @@ impl EventContext {
         }
     }
 
+    /// Create an EventContext with a text payload (e.g., a route path).
+    ///
+    /// This is used internally by the server to deliver route change messages
+    /// to route handlers via `ctx.text()`.
+    pub fn from_text(text: &str) -> Self {
+        let json = serde_json::json!({"t": "text", "v": text});
+        Self::new(json.to_string().into_bytes())
+    }
+
     /// Get the parsed payload, parsing lazily if needed.
     pub fn payload(&self) -> &EventPayload {
         self.parsed.get_or_init(|| self.parse_payload())

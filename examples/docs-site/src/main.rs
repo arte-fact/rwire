@@ -45,6 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Server::bind("0.0.0.0:9000")?
         .root(root)
+        .on_route(on_route_change())
         .capsule_config(capsule_config)
         .run()
         .await
@@ -368,6 +369,19 @@ fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
 // ============================================================================
 // Handlers
 // ============================================================================
+
+#[handler]
+fn on_route_change(state: &mut DocState, ctx: &rwire::EventContext) {
+    if let Some(path) = ctx.text() {
+        if path == "/" {
+            state.current_path.clear();
+        } else {
+            state.current_path = path.to_string();
+        }
+        state.searching = false;
+        state.search_query.clear();
+    }
+}
 
 #[handler]
 fn navigate_home(state: &mut DocState) {

@@ -25,7 +25,7 @@ use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
 use crate::protocol::ClientEvent;
 use crate::session::SessionId;
-use crate::state::{ChangeSet, EventContext, HandlerFn};
+use crate::state::{ChangeSet, EventContext, HandlerFn, HandlerSpec};
 
 // ============================================================================
 // Shared Server State
@@ -396,6 +396,7 @@ pub struct ServerWithRoot<F> {
     root: F,
     shared: Option<Arc<SharedServerState>>,
     capsule_config: Option<CapsuleConfig>,
+    route_handler: Option<HandlerFn>,
 }
 
 impl Server {
@@ -433,6 +434,7 @@ impl ServerBuilder {
             root: f,
             shared: None,
             capsule_config: None,
+            route_handler: None,
         }
     }
 }
@@ -457,6 +459,33 @@ where
     /// The capsule will include tree-shaken CSS for only the components used.
     pub fn capsule_config(mut self, config: CapsuleConfig) -> Self {
         self.capsule_config = Some(config);
+        self
+    }
+
+    /// Register a handler for client-side route changes.
+    ///
+    /// When the browser URL changes (via link click or back/forward button),
+    /// the client sends a route message to the server. This handler receives
+    /// the new path via `ctx.text()` and can update state accordingly.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[handler]
+    /// fn on_route(state: &mut AppState, ctx: &EventContext) {
+    ///     if let Some(path) = ctx.text() {
+    ///         state.current_path = path.to_string();
+    ///     }
+    /// }
+    ///
+    /// Server::bind("0.0.0.0:9000")?
+    ///     .root(root)
+    ///     .on_route(on_route())
+    ///     .run()
+    ///     .await
+    /// ```
+    pub fn on_route(mut self, handler: HandlerSpec) -> Self {
+        self.route_handler = handler.remote_handler;
         self
     }
 
@@ -553,13 +582,15 @@ where
         );
 
         let root = Arc::new(self.root);
+        let route_handler = self.route_handler.map(Arc::new);
 
         while let Ok((stream, peer_addr)) = listener.accept().await {
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
             let shared = Arc::clone(&shared);
+            let route_handler = route_handler.clone();
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, shared).await;
+                handle_client(stream, peer_addr, root, capsule, shared, route_handler).await;
             });
         }
 
@@ -583,6 +614,7 @@ async fn handle_client<F>(
     root: Arc<F>,
     capsule: Arc<String>,
     shared: Arc<SharedServerState>,
+    route_handler: Option<Arc<HandlerFn>>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -619,7 +651,7 @@ async fn handle_client<F>(
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, route_handler).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -734,6 +766,7 @@ async fn handle_websocket<F>(
     root: Arc<F>,
     shared: Arc<SharedServerState>,
     session_id: SessionId,
+    route_handler: Option<Arc<HandlerFn>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -985,7 +1018,47 @@ where
                 }
             },
             Ok(Message::Text(text)) => {
-                println!("[{}] Text message (unexpected): {}", peer_addr, text);
+                if let Some(path) = text.strip_prefix('R') {
+                    if let Some(ref handler) = route_handler {
+                        println!("[{}] Route: {}", peer_addr, path);
+
+                        let ctx = EventContext::from_text(path);
+                        let state_type_id = handler.state_type_id();
+
+                        // Ensure state is initialized for the route handler
+                        conn_state.ensure_state_initialized_for(handler);
+                        if let Some(state) = conn_state.get_state_mut(state_type_id) {
+                            handler.call_with_context(state, &ctx);
+                        }
+
+                        // Re-render synced elements
+                        let changes = handler.changes();
+                        let update = {
+                            let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                                conn_state
+                                    .states
+                                    .iter()
+                                    .map(|(k, v)| (*k, v.as_ref()))
+                                    .collect();
+
+                            build_synced_update_with_known_symbols(
+                                &conn_state.synced_elements,
+                                &states_map,
+                                &mut conn_state.handlers,
+                                changes,
+                                Some(&mut conn_state.sent_symbols),
+                                Some(state_type_id),
+                                Some(&mut conn_state.synced_hashes),
+                            )
+                        };
+
+                        if !update.is_empty() {
+                            write.send(Message::Binary(update.to_vec())).await?;
+                        }
+                    }
+                } else {
+                    println!("[{}] Text message (unexpected): {}", peer_addr, text);
+                }
             }
             Ok(Message::Ping(data)) => {
                 write.send(Message::Pong(data)).await?;
