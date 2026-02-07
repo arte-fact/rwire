@@ -1926,6 +1926,27 @@ fn emit_update_element(
         }
     }
 
+    // Emit style tokens (binary-encoded styles)
+    if !el.style_utils.is_empty() {
+        if el.style_utils.len() >= 3 {
+            buf.style_multi(ref_idx, &el.style_utils);
+        } else {
+            for &util in &el.style_utils {
+                buf.style_util(ref_idx, util);
+            }
+        }
+    }
+
+    // Emit style property+value pairs
+    for &(prop, value) in &el.style_props {
+        buf.style_prop(ref_idx, prop, value);
+    }
+
+    // Emit pseudo-class groups
+    for (pc_code, st_codes) in &el.pseudo_groups {
+        buf.style_pseudo(ref_idx, *pc_code, st_codes);
+    }
+
     // Bind events - look up handler index from existing handlers by function pointer
     // If handler not found, register it as a new handler
     for (ev, spec) in &el.events {

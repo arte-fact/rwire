@@ -71,9 +71,9 @@ let r=[],i=0,_oc=0;
 try{
 while(i<d.length){
 let _p=i,o=d[i++];_oc++;
-if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
-else if(o===O.SE){let[n,l]=rv(d,i);i+=l;let[si,sl]=rv(d,i);i+=sl;sc=si;while(n--){let sl=d[i++];s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
-else if(o===O.WT){let n=d[i++];wt=[];while(n--){let l=d[i++];wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
+if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let[sl,ll]=rv(d,i);i+=ll;s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
+else if(o===O.SE){let[n,l]=rv(d,i);i+=l;let[si,sl]=rv(d,i);i+=sl;sc=si;while(n--){let[sl2,ll]=rv(d,i);i+=ll;s[sc++]=new TextDecoder().decode(d.slice(i,i+sl2));i+=sl2}}
+else if(o===O.WT){let n=d[i++];wt=[];while(n--){let[l,ll]=rv(d,i);i+=ll;wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
 else if(o===O.G){let[k,l]=rv(d,i);i+=l;let el=document.getElementById(s[k]);r.push(el)}
 else if(o===O.C){r.push(document.createElement(E[d[i++]]||'div'))}
 else if(o===O.CS){let[id,l]=rv(d,i);i+=l;let e=document.createElement('span');e.id='__synced_'+id;r.push(e)}

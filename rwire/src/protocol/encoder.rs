@@ -68,13 +68,8 @@ impl OpcodeBuffer {
     ///
     /// Symbol indices use varint encoding, allowing unlimited symbols.
     pub fn add_symbol(&mut self, s: &str) -> u32 {
-        assert!(
-            s.len() <= 255,
-            "add_symbol: symbol too long ({} bytes, max 255)",
-            s.len()
-        );
         let idx = self.next_symbol;
-        self.buf.put_u8(s.len() as u8);
+        write_varint(&mut self.buf, s.len() as u32);
         self.buf.put_slice(s.as_bytes());
         self.next_symbol += 1;
         idx

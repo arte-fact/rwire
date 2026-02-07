@@ -1,7 +1,7 @@
 //! rwire Documentation Site
 //!
 //! A full documentation site built with rwire components and the docs module.
-//! Demonstrates AppShell, DocsSidebar, TableOfContents, Prose, and search.
+//! Demonstrates AppShell, TableOfContents, Prose, and search.
 
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::components::*;
@@ -32,8 +32,8 @@ struct DocState {
 // ============================================================================
 
 /// Load docs from the docs/ directory at startup.
-/// In a real app this would use include_str! or embed at compile time.
-static DOCS_DIR: &str = "docs";
+/// Uses CARGO_MANIFEST_DIR to resolve relative to the crate, not the CWD.
+static DOCS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docs");
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let capsule_config = CapsuleConfig::new().theme(Theme::default());
 
-    Server::bind("127.0.0.1:9000")?
+    Server::bind("0.0.0.0:9000")?
         .root(root)
         .capsule_config(capsule_config)
         .run()
@@ -56,7 +56,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[renderer]
 fn root(state: &DocState) -> ElementBuilder {
-    // Load docs on every render (in production, cache this)
     let site = DocSite::load(DOCS_DIR);
 
     let sidebar = build_sidebar(&site, &state.current_path);
@@ -91,8 +90,8 @@ fn build_header() -> ElementBuilder {
         .align(StackAlign::Center)
         .children([
             // Logo / title
-            el(El::A)
-                .st([St::FontBold, St::TextLg, St::NoDecoration, St::TextDefault])
+            el(El::Span)
+                .st([St::FontBold, St::TextLg, St::CursorPointer, St::TextDefault])
                 .text("rwire Docs")
                 .on(Ev::Click, navigate_home()),
             // Right side: search + theme toggle
@@ -129,30 +128,62 @@ fn render_theme_toggle(state: &DocState) -> ElementBuilder {
 }
 
 // ============================================================================
-// Sidebar
+// Sidebar (click-handler based, not <a href>)
 // ============================================================================
 
 fn build_sidebar(site: &DocSite, active_path: &str) -> ElementBuilder {
-    let mut sidebar = DocsSidebar::new();
+    let mut nav = el(El::Nav)
+        .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::PxSm, St::TextSm]);
 
     for (section_name, page_paths) in site.sections() {
-        let title = section_name.replace('-', " ");
-        let mut section = SidebarSection::new(title);
+        let title = el(El::Div)
+            .st([
+                St::TextXsMuted,
+                St::FontSemibold,
+                St::TextUppercase,
+                St::TrackingWider,
+                St::PxSm,
+                St::PySm,
+            ])
+            .text(&section_name.replace('-', " "));
+
+        let mut link_list = el(El::Div).st([St::DisplayFlex, St::FlexCol]);
 
         for page_path in page_paths {
             if let Some(page) = site.page(page_path) {
-                section = section.link(page_path.clone(), page.title.clone());
+                let is_active = active_path == page_path;
+
+                let tokens = if is_active {
+                    vec![
+                        St::DisplayBlock, St::PxSm, St::PySm, St::RoundedSm,
+                        St::NoDecoration, St::BgAccentSubtle, St::TextAccent12,
+                        St::FontMedium, St::CursorPointer,
+                    ]
+                } else {
+                    vec![
+                        St::DisplayBlock, St::PxSm, St::PySm, St::RoundedSm,
+                        St::TextDefault, St::CursorPointer, St::TransitionColors,
+                    ]
+                };
+
+                let mut link = el(El::Div)
+                    .st(tokens)
+                    .text(&page.title)
+                    .data("path", page_path)
+                    .on(Ev::Click, navigate_to());
+
+                if !is_active {
+                    link = link.hover([St::BgHover]);
+                }
+
+                link_list = link_list.append([link]);
             }
         }
 
-        sidebar = sidebar.section(section);
+        nav = nav.append([el(El::Div).append([title, link_list])]);
     }
 
-    if !active_path.is_empty() {
-        sidebar = sidebar.active_path(active_path.to_string());
-    }
-
-    sidebar.build()
+    nav
 }
 
 // ============================================================================
@@ -160,6 +191,35 @@ fn build_sidebar(site: &DocSite, active_path: &str) -> ElementBuilder {
 // ============================================================================
 
 fn build_landing_page(site: &DocSite) -> ElementBuilder {
+    let cards: Vec<ElementBuilder> = site
+        .sections()
+        .iter()
+        .flat_map(|(_, paths)| paths.first().cloned())
+        .filter_map(|path| {
+            site.page(&path).map(|page| {
+                Card::new()
+                    .child(
+                        Stack::column()
+                            .gap(Gap::Sm)
+                            .children([
+                                el(El::H3)
+                                    .st([St::FontSemibold])
+                                    .text(&page.title),
+                                el(El::P)
+                                    .st([St::TextSm, St::TextMuted])
+                                    .text(page.description.as_deref().unwrap_or("")),
+                            ])
+                            .build(),
+                    )
+                    .build()
+                    .st([St::CursorPointer])
+                    .data("path", &path)
+                    .on(Ev::Click, navigate_to())
+                    .hover([St::BgHover])
+            })
+        })
+        .collect();
+
     Stack::column()
         .gap(Gap::Lg)
         .children([
@@ -178,35 +238,7 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
             Stack::row()
                 .gap(Gap::Md)
                 .justify(StackJustify::Center)
-                .children(
-                    site.sections()
-                        .iter()
-                        .flat_map(|(_, paths)| paths.first().cloned())
-                        .filter_map(|path| {
-                            site.page(&path).map(|page| {
-                                Card::new()
-                                    .child(
-                                        Stack::column()
-                                            .gap(Gap::Sm)
-                                            .children([
-                                                el(El::H3)
-                                                    .st([St::FontSemibold])
-                                                    .text(&page.title),
-                                                el(El::P)
-                                                    .st([St::TextSm, St::TextMuted])
-                                                    .text(
-                                                        page.description
-                                                            .as_deref()
-                                                            .unwrap_or(""),
-                                                    ),
-                                            ])
-                                            .build(),
-                                    )
-                                    .build()
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                )
+                .children(cards)
                 .build(),
             // Stats
             el(El::P)
@@ -253,16 +285,22 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
             el(El::Div)
                 .st([St::Flex1, St::MinW0])
                 .append([
-                    // Breadcrumb
-                    Breadcrumb::new()
-                        .item("Docs", Some("/"))
-                        .item(page.section.clone(), None::<&str>)
-                        .item(page.title.clone(), None::<&str>)
-                        .build(),
-                    // Rendered markdown
+                    // Breadcrumb navigation (clickable)
                     el(El::Div)
-                        .st([St::MtMd])
-                        .append([parsed.content]),
+                        .st([St::DisplayFlex, St::ItemsCenter, St::GapXs, St::TextSm, St::TextMuted, St::MbMd])
+                        .append([
+                            el(El::Span)
+                                .st([St::CursorPointer])
+                                .hover([St::TextDefault])
+                                .text("Docs")
+                                .on(Ev::Click, navigate_home()),
+                            el(El::Span).text("/"),
+                            el(El::Span).text(&page.section.replace('-', " ")),
+                            el(El::Span).text("/"),
+                            el(El::Span).st([St::TextDefault]).text(&page.title),
+                        ]),
+                    // Rendered markdown
+                    parsed.content,
                 ]),
             // TOC (right side)
             el(El::Div)
@@ -285,19 +323,17 @@ fn build_search_results(site: &DocSite, query: &str) -> ElementBuilder {
         .children([
             el(El::H2)
                 .st([St::TextXl, St::FontSemibold])
-                .text(&format!("Search results for \"{}\"", query)),
+                .text(&format!("Search results for \"{query}\"")),
             if results.is_empty() {
-                el(El::P)
-                    .st([St::TextMuted])
-                    .text("No results found. Try a different search term.")
+                EmptyState::new()
+                    .title("No results found")
+                    .description("Try adjusting your search terms.")
+                    .build()
             } else {
                 el(El::Div)
                     .st([St::SpaceYSm])
                     .append(
-                        results
-                            .iter()
-                            .map(build_search_result_card)
-                            .collect::<Vec<_>>(),
+                        results.iter().map(build_search_result_card).collect::<Vec<_>>(),
                     )
             },
         ])
@@ -323,6 +359,10 @@ fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
                 .build(),
         )
         .build()
+        .st([St::CursorPointer])
+        .data("path", &result.path)
+        .on(Ev::Click, navigate_to())
+        .hover([St::BgHover])
 }
 
 // ============================================================================
@@ -334,6 +374,15 @@ fn navigate_home(state: &mut DocState) {
     state.current_path.clear();
     state.searching = false;
     state.search_query.clear();
+}
+
+#[handler]
+fn navigate_to(state: &mut DocState, ctx: &rwire::EventContext) {
+    if let Some(path) = ctx.data("path") {
+        state.current_path = path.to_string();
+        state.searching = false;
+        state.search_query.clear();
+    }
 }
 
 #[handler]
