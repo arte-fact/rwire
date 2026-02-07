@@ -12,7 +12,7 @@
 
 use std::collections::HashSet;
 
-use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS};
+use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
 use crate::theme::Theme;
 use crate::tokens::ColorPalette;
 
@@ -28,6 +28,18 @@ fn generate_js_map<T: std::fmt::Display + std::hash::Hash + Eq>(
         .iter()
         .filter(|(code, _)| used.contains(code))
         .map(|(code, name)| format!("{}:'{}'", code, name))
+        .collect();
+    entries.join(",")
+}
+
+/// Generate a tree-shaken SVG element type set `{code:1, ...}`.
+///
+/// Only includes SVG element codes that are in `used_elements`.
+fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
+    let entries: Vec<String> = SVG_ELEMENT_CODES
+        .iter()
+        .filter(|code| used_elements.contains(code))
+        .map(|code| format!("{}:1", code))
         .collect();
     entries.join(",")
 }
@@ -75,7 +87,7 @@ if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let[sl,ll]=rv(d,i);i+=ll;s[
 else if(o===O.SE){let[n,l]=rv(d,i);i+=l;let[si,sl]=rv(d,i);i+=sl;sc=si;while(n--){let[sl2,ll]=rv(d,i);i+=ll;s[sc++]=new TextDecoder().decode(d.slice(i,i+sl2));i+=sl2}}
 else if(o===O.WT){let n=d[i++];wt=[];while(n--){let[l,ll]=rv(d,i);i+=ll;wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
 else if(o===O.G){let[k,l]=rv(d,i);i+=l;let el=document.getElementById(s[k]);r.push(el)}
-else if(o===O.C){r.push(document.createElement(E[d[i++]]||'div'))}
+else if(o===O.C){let t=d[i++];r.push(SE[t]?document.createElementNS('http://www.w3.org/2000/svg',E[t]||'svg'):document.createElement(E[t]||'div'))}
 else if(o===O.CS){let[id,l]=rv(d,i);i+=l;let e=document.createElement('span');e.id='__synced_'+id;r.push(e)}
 else if(o===O.GS){let[id,l]=rv(d,i);i+=l;r.push(document.getElementById('__synced_'+id))}
 else if(o===O.T){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].textContent=s[k]||''}
@@ -160,6 +172,7 @@ pub fn generate_capsule(
 ) -> String {
     let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
     let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
+    let svg_js = generate_svg_set(used_elements);
 
     // Choose the appropriate bind handler based on whether we have local state
     let bind_and_local_js = if has_local_handlers {
@@ -177,6 +190,7 @@ const P={{}};
 const Y={{}};
 const AT={{}};
 const AV={{}};
+const SE={{{svg_js}}};
 {bind_and_local_js}
 {RUNTIME_JS}
 </script>
@@ -445,6 +459,7 @@ pub fn generate_styled_capsule(
 
     let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
     let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
+    let svg_js = generate_svg_set(used_elements);
     let theme_attrs = config.theme.data_attrs();
 
     // Generate style token lookup tables (tree-shaken)
@@ -476,6 +491,7 @@ const P={{{props_js}}};
 const Y={{{values_js}}};
 const AT={{{attr_keys_js}}};
 const AV={{{attr_values_js}}};
+const SE={{{svg_js}}};
 {bind_and_local_js}
 {RUNTIME_JS}
 </script>

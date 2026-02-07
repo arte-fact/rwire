@@ -274,6 +274,13 @@ define_token_enum! {
 // Symbol Index Range
 // ============================================================================
 
+/// SVG element type codes — these require `createElementNS` in the browser.
+/// Used by capsule_gen to produce a tree-shaken SVG type set for the JS runtime.
+pub const SVG_ELEMENT_CODES: &[u8] = &[
+    0x18, // Svg
+    0x19, // Path
+];
+
 /// Symbols 0x00-0x7F are reserved/built-in
 /// Symbols 0x80-0xFF are session-specific (defined via SYMBOLS opcode)
 pub const SYMBOL_SESSION_START: u8 = 0x80;
