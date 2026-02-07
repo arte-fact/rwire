@@ -257,6 +257,11 @@ impl ElementBuilder {
         self
     }
 
+    /// Set the `id` attribute on this element.
+    pub fn id(self, id: &str) -> Self {
+        self.attr("id", id)
+    }
+
     /// Set an attribute on this element.
     pub fn attr(mut self, key: &str, value: &str) -> Self {
         self.attrs.push((key.to_string(), value.to_string()));
