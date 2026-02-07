@@ -168,7 +168,9 @@ pub fn generate_base_css() -> &'static str {
     "*,*::before,*::after{box-sizing:border-box}\
      body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;\
      line-height:var(--rw-leading-normal);color:var(--rw-text-default);background:var(--rw-bg-app)}\
-     button,input,select,textarea{font:inherit}\n"
+     button,input,select,textarea{font:inherit}\
+     table{border-collapse:collapse}\
+     img{max-width:100%;height:auto}\n"
 }
 
 /// Generate semantic token CSS for light and dark themes.
@@ -360,9 +362,9 @@ mod tests {
     #[test]
     fn test_base_css_size() {
         let css = generate_base_css();
-        // Base CSS should be under 300 bytes
+        // Base CSS should be under 400 bytes
         assert!(
-            css.len() < 300,
+            css.len() < 400,
             "Base CSS too large: {} bytes",
             css.len()
         );

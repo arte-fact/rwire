@@ -554,10 +554,14 @@ where
                 .with_attr_values(ctx.used_attr_values())
                 .with_composite_css(composite_css);
 
+            // Merge extra elements from config into used elements
+            let mut all_elements = ctx.used_elements().clone();
+            all_elements.extend(&config.extra_elements);
+
             // Generate CSS and embed in capsule HTML <style> tag
             let css = capsule_gen::generate_capsule_css(&config);
             capsule_gen::generate_styled_capsule(
-                ctx.used_elements(),
+                &all_elements,
                 ctx.used_events(),
                 &config,
                 &css,

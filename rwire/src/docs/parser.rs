@@ -58,8 +58,12 @@ struct MarkdownBuilder {
     heading_text: Option<(u8, String)>,
     /// Current code block language.
     code_lang: Option<String>,
-    /// Text accumulator for inline elements.
+    /// Whether we're inside a code block.
+    in_code_block: bool,
+    /// Text accumulator for code blocks.
     text_buf: String,
+    /// Whether we're inside a <thead>.
+    in_thead: bool,
 }
 
 impl MarkdownBuilder {
@@ -70,7 +74,9 @@ impl MarkdownBuilder {
             headings: Vec::new(),
             heading_text: None,
             code_lang: None,
+            in_code_block: false,
             text_buf: String::new(),
+            in_thead: false,
         }
     }
 
@@ -82,7 +88,7 @@ impl MarkdownBuilder {
                 if let Some((_, ref mut buf)) = self.heading_text {
                     buf.push_str(&text);
                 }
-                if self.code_lang.is_some() {
+                if self.in_code_block {
                     self.text_buf.push_str(&text);
                 } else {
                     self.push_text(&text);
@@ -145,6 +151,7 @@ impl MarkdownBuilder {
                     _ => None,
                 };
                 self.code_lang = lang;
+                self.in_code_block = true;
                 self.text_buf.clear();
             }
             Tag::List(Some(_)) => {
@@ -192,15 +199,15 @@ impl MarkdownBuilder {
                 );
             }
             Tag::TableHead => {
+                self.in_thead = true;
                 self.stack.push(el(El::Thead));
             }
             Tag::TableRow => {
                 self.stack.push(el(El::Tr).st([St::BorderBSubtle]));
             }
             Tag::TableCell => {
-                let in_head = self.stack.iter().any(|_| false); // simplified
-                if in_head {
-                    self.stack.push(el(El::Th).st([St::PMd, St::TextLeft, St::FontSemibold]));
+                if self.in_thead {
+                    self.stack.push(el(El::Th).st([St::PMd, St::TextLeft, St::FontSemibold, St::BgSubtle]));
                 } else {
                     self.stack.push(el(El::Td).st([St::PMd]));
                 }
@@ -212,6 +219,7 @@ impl MarkdownBuilder {
     fn close_tag(&mut self, tag: TagEnd) {
         match tag {
             TagEnd::CodeBlock => {
+                self.in_code_block = false;
                 let code_content = std::mem::take(&mut self.text_buf);
                 let lang = self.code_lang.take();
 
@@ -251,6 +259,10 @@ impl MarkdownBuilder {
                     self.close_current();
                 }
             }
+            TagEnd::TableHead => {
+                self.in_thead = false;
+                self.close_current();
+            }
             TagEnd::Image => {
                 // Image was already pushed in open_tag
             }
@@ -261,11 +273,11 @@ impl MarkdownBuilder {
     }
 
     fn push_text(&mut self, text: &str) {
-        if let Some(current) = self.stack.pop() {
-            self.stack.push(current.text(text));
-        } else {
-            self.children.push(el(El::Span).text(text));
-        }
+        // Wrap text in a span so it becomes a child node alongside inline elements
+        // like <code>, <strong>, <em>. Using .text() on the parent would set
+        // textContent which overwrites other children.
+        let text_node = el(El::Span).text(text);
+        self.push_child(text_node);
     }
 
     fn push_child(&mut self, child: ElementBuilder) {

@@ -13,6 +13,7 @@
 use std::collections::HashSet;
 
 use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
+use crate::protocol::El;
 use crate::theme::Theme;
 use crate::tokens::ColorPalette;
 
@@ -222,6 +223,10 @@ pub struct CapsuleConfig {
     pub used_attr_values: HashSet<u8>,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
     pub composite_css: String,
+    /// Extra element types to include in the capsule beyond what tree-shaking discovers.
+    /// Use this when dynamic content (e.g., markdown) creates element types not present
+    /// in the initial render.
+    pub extra_elements: HashSet<u8>,
 }
 
 impl CapsuleConfig {
@@ -331,6 +336,19 @@ impl CapsuleConfig {
     /// Set pre-generated composite CSS from style grouping analysis.
     pub fn with_composite_css(mut self, css: String) -> Self {
         self.composite_css = css;
+        self
+    }
+
+    /// Declare extra element types that should be included in the capsule
+    /// beyond what tree-shaking discovers from the initial render.
+    ///
+    /// Use this when your app creates element types dynamically (e.g.,
+    /// markdown rendering uses `<table>`, `<pre>`, `<code>` etc. that
+    /// aren't present on the initial page).
+    pub fn extra_elements(mut self, elements: &[El]) -> Self {
+        for el in elements {
+            self.extra_elements.insert(el.as_u8());
+        }
         self
     }
 

@@ -42,7 +42,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
 
-    let capsule_config = CapsuleConfig::new().theme(Theme::default());
+    // Declare markdown element types that aren't present in the initial render
+    // (landing page) but are needed when navigating to doc pages.
+    let capsule_config = CapsuleConfig::new()
+        .theme(Theme::default())
+        .extra_elements(&[
+            El::Pre, El::Code, El::Blockquote, El::Strong, El::Em,
+            El::Ul, El::Ol, El::Li, El::Hr, El::Img, El::Kbd,
+            El::Table, El::Thead, El::Tbody, El::Tr, El::Th, El::Td,
+        ]);
 
     Server::bind("0.0.0.0:9000")?
         .root(root)
