@@ -241,6 +241,11 @@ define_token_enum! {
         Aside = 0x29 => "aside",
         Main = 0x2A => "main",
         Kbd = 0x2B => "kbd",
+        Circle = 0x2C => "circle",
+        Line = 0x2D => "line",
+        Polyline = 0x2E => "polyline",
+        Rect = 0x2F => "rect",
+        G = 0x30 => "g",
     }
 }
 
@@ -279,6 +284,11 @@ define_token_enum! {
 pub const SVG_ELEMENT_CODES: &[u8] = &[
     0x18, // Svg
     0x19, // Path
+    0x2C, // Circle
+    0x2D, // Line
+    0x2E, // Polyline
+    0x2F, // Rect
+    0x30, // G
 ];
 
 /// Symbols 0x00-0x7F are reserved/built-in
