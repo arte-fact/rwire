@@ -37,6 +37,8 @@ define_token_enum! {
         Rel = 0x07 => "rel",
         Placeholder = 0x08 => "placeholder",
         Rows = 0x09 => "rows",
+        Src = 0x0A => "src",
+        Alt = 0x0B => "alt",
 
         // Booleans (0x10-0x14)
         Disabled = 0x10 => "disabled",

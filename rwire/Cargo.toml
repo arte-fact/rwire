@@ -3,12 +3,17 @@ name = "rwire"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+docs = ["pulldown-cmark"]
+
 [dependencies]
 async-channel = "2.3"
 async-std = { version = "1.12", features = ["attributes"] }
 async-tungstenite = { version = "0.25", features = ["async-std-runtime"] }
 bytes = "1.5"
 futures = "0.3"
+pulldown-cmark = { version = "0.12", optional = true }
 rusqlite = { version = "0.34", features = ["bundled"] }
 rwire-macros = { path = "../rwire-macros" }
 serde = { version = "1.0", features = ["derive"] }

@@ -78,6 +78,9 @@ pub mod theme;
 pub mod tokens;
 pub mod components;
 
+#[cfg(feature = "docs")]
+pub mod docs;
+
 // Builder API exports
 pub use builder::{el, ElementBuilder};
 
