@@ -756,6 +756,38 @@ define_token_enum! {
         AnimateSlideIn = 0x2E0 => "animation:rw-slide-in .3s ease-out",
         FixedBottomRight = 0x2E1 => "position:fixed;bottom:var(--rw-space-4);right:var(--rw-space-4)",
         MaxW360px = 0x2E2 => "max-width:360px",
+
+        // Tier 3 components (0x2E3-0x2F8)
+        // Kbd
+        KbdBg = 0x2E3 => "background:var(--rw-bg-subtle);border:1px solid var(--rw-border-default);border-bottom:2px solid var(--rw-border-default)",
+        KbdShadow = 0x2E4 => "box-shadow:0 1px 0 var(--rw-border-default)",
+        MinWKbd = 0x2E5 => "min-width:1.5em;text-align:center",
+        // (GapXs already at 0x29)
+        // AvatarGroup (negative overlap)
+        NegMlOverlap = 0x2E7 => "margin-left:-8px",
+        AvatarRing = 0x2E8 => "outline:2px solid var(--rw-bg-app);outline-offset:-1px",
+        // EmptyState
+        Py2xl = 0x2E9 => "padding-top:var(--rw-space-10);padding-bottom:var(--rw-space-10)",
+        // Timeline
+        TimelineLine = 0x2EA => "border-left:2px solid var(--rw-border-default)",
+        TimelineDot = 0x2EB => "width:12px;height:12px;border-radius:50%;border:2px solid var(--rw-border-default);background:var(--rw-bg-app)",
+        TimelineDotActive = 0x2EC => "width:12px;height:12px;border-radius:50%;border:2px solid var(--rw-accent-8);background:var(--rw-accent-3)",
+        NegMl7px = 0x2ED => "margin-left:-7px",
+        // Stat (Text4xl already at 0x125)
+        Text5xl = 0x2EF => "font-size:var(--rw-text-5xl)",
+        TextGreen12 = 0x2F0 => "color:var(--rw-green-12)",
+        TextRed12 = 0x2F1 => "color:var(--rw-red-12)",
+        // Slider
+        SliderTrack = 0x2F2 => "width:100%;height:6px;border-radius:3px;background:var(--rw-bg-emphasis)",
+        SliderFill = 0x2F3 => "height:100%;border-radius:3px;background:var(--rw-accent-8)",
+        SliderInput = 0x2F4 => "-webkit-appearance:none;appearance:none;background:transparent;width:100%;cursor:pointer",
+        SliderThumb = 0x2F5 => "&::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--rw-accent-9);cursor:pointer}",
+        // Stepper
+        StepLine = 0x2F6 => "flex:1;height:2px;background:var(--rw-border-default)",
+        StepLineActive = 0x2F7 => "flex:1;height:2px;background:var(--rw-accent-8)",
+        StepCircle = 0x2F8 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-border-default);background:var(--rw-bg-app);font-size:var(--rw-text-sm);font-weight:500",
+        StepCircleActive = 0x2F9 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-accent-8);background:var(--rw-accent-3);color:var(--rw-accent-11);font-size:var(--rw-text-sm);font-weight:500",
+        StepCircleDone = 0x2FA => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-accent-8);background:var(--rw-accent-9);color:white;font-size:var(--rw-text-sm);font-weight:500",
     }
 }
 

@@ -240,6 +240,7 @@ define_token_enum! {
         Td = 0x28 => "td",
         Aside = 0x29 => "aside",
         Main = 0x2A => "main",
+        Kbd = 0x2B => "kbd",
     }
 }
 
