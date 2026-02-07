@@ -544,9 +544,11 @@ where
         let capsule = if let Some(config) = self.capsule_config {
             // Merge style tokens and attribute tokens into config
             let composite_css = ctx.composite_table().generate_css();
+            let mut all_style_utils = ctx.used_style_utils().clone();
+            all_style_utils.extend(&config.extra_style_utils);
             let config = config
                 .has_local_handlers(ctx.has_local_handlers())
-                .with_style_utils(ctx.used_style_utils())
+                .with_style_utils(&all_style_utils)
                 .with_style_props(ctx.used_style_props())
                 .with_style_values(ctx.used_style_values())
                 .with_pseudo_pairs(ctx.used_pseudo_pairs())

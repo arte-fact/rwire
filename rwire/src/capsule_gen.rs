@@ -14,6 +14,7 @@ use std::collections::HashSet;
 
 use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
 use crate::protocol::El;
+use crate::style_tokens::St;
 use crate::theme::Theme;
 use crate::tokens::ColorPalette;
 
@@ -227,6 +228,9 @@ pub struct CapsuleConfig {
     /// Use this when dynamic content (e.g., markdown) creates element types not present
     /// in the initial render.
     pub extra_elements: HashSet<u8>,
+    /// Extra style utility tokens to include beyond what tree-shaking discovers.
+    /// Same purpose as extra_elements but for CSS utility classes.
+    pub extra_style_utils: HashSet<u16>,
 }
 
 impl CapsuleConfig {
@@ -348,6 +352,19 @@ impl CapsuleConfig {
     pub fn extra_elements(mut self, elements: &[El]) -> Self {
         for el in elements {
             self.extra_elements.insert(el.as_u8());
+        }
+        self
+    }
+
+    /// Declare extra style utility tokens that should be included in the capsule
+    /// beyond what tree-shaking discovers from the initial render.
+    ///
+    /// Use this when your app uses St tokens in conditional code paths
+    /// (e.g., active sidebar links, markdown styling) that aren't exercised
+    /// during the initial render.
+    pub fn extra_styles(mut self, styles: &[St]) -> Self {
+        for st in styles {
+            self.extra_style_utils.insert(st.as_u16());
         }
         self
     }

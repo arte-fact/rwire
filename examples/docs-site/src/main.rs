@@ -42,14 +42,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
 
-    // Declare markdown element types that aren't present in the initial render
-    // (landing page) but are needed when navigating to doc pages.
+    // Declare element types and style tokens that aren't present in the initial
+    // render (landing page) but are needed when navigating to doc pages.
+    // These are used by the markdown parser and conditional UI (active sidebar links).
     let capsule_config = CapsuleConfig::new()
         .theme(Theme::default())
         .extra_elements(&[
             El::Pre, El::Code, El::Blockquote, El::Strong, El::Em,
             El::Ul, El::Ol, El::Li, El::Hr, El::Img, El::Kbd,
             El::Table, El::Thead, El::Tbody, El::Tr, El::Th, El::Td,
+        ])
+        .extra_styles(&[
+            // Markdown prose container
+            St::LeadingRelaxedProse, St::MaxWProse, St::SpaceYMd,
+            // Headings
+            St::Text2xl, St::TextXl, St::TextBase, St::FontMedium,
+            St::MtLg, St::Mt2xl, St::MtXl, St::MtMd, St::MbXs, St::MbSm,
+            // Paragraphs
+            St::M0,
+            // Code blocks
+            St::FontMono, St::BgCode, St::WhitespacePre, St::OverflowXAuto,
+            // Lists
+            St::ListDisc, St::ListDecimal, St::PlLg, St::PlMd, St::PlSm, St::MySm, St::MyMd,
+            // Tables
+            St::BgSubtle, St::TextLeft, St::BorderBSubtle,
+            // Blockquotes
+            St::BorderL, St::BorderTransparent,
+            // Misc
+            St::MinW0, St::GapXs, St::TopHeader,
+            // Active sidebar link (conditional)
+            St::BgAccentSubtle, St::TextAccent12,
         ]);
 
     Server::bind("0.0.0.0:9000")?
