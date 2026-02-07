@@ -788,6 +788,11 @@ define_token_enum! {
         StepCircle = 0x2F8 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-border-default);background:var(--rw-bg-app);font-size:var(--rw-text-sm);font-weight:500",
         StepCircleActive = 0x2F9 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-accent-8);background:var(--rw-accent-3);color:var(--rw-accent-11);font-size:var(--rw-text-sm);font-weight:500",
         StepCircleDone = 0x2FA => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-accent-8);background:var(--rw-accent-9);color:white;font-size:var(--rw-text-sm);font-weight:500",
+
+        // Prose heading spacing (0x2FB-0x2FE)
+        MtXl = 0x2FB => "margin-top:var(--rw-space-8)",
+        Mt2xl = 0x2FC => "margin-top:var(--rw-space-12)",
+        TopHeader = 0x2FE => "top:var(--rw-header-h,3.5rem)",
     }
 }
 

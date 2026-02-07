@@ -123,9 +123,9 @@ impl MarkdownBuilder {
 
                 let tokens = match level {
                     HeadingLevel::H1 => vec![St::Text2xl, St::FontBold, St::MtLg, St::MbSm],
-                    HeadingLevel::H2 => vec![St::TextXl, St::FontSemibold, St::MtLg, St::MbXs],
-                    HeadingLevel::H3 => vec![St::TextLg, St::FontMedium, St::MtMd, St::MbXs],
-                    _ => vec![St::TextBase, St::FontMedium, St::MtSm],
+                    HeadingLevel::H2 => vec![St::TextXl, St::FontSemibold, St::Mt2xl, St::MbSm],
+                    HeadingLevel::H3 => vec![St::TextLg, St::FontMedium, St::MtXl, St::MbXs],
+                    _ => vec![St::TextBase, St::FontMedium, St::MtMd],
                 };
 
                 self.stack.push(el(el_type).st(tokens));
