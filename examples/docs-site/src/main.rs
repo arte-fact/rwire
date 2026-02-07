@@ -8,7 +8,8 @@ use rwire::components::*;
 use rwire::docs::{parse_markdown, DocSite, SearchResult};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode};
-use rwire::{el, handler, renderer, El, ElementBuilder, Ev, Server, State};
+use rwire::router::Link;
+use rwire::{el, handler, renderer, El, ElementBuilder, Server, State};
 
 // ============================================================================
 // State
@@ -91,10 +92,8 @@ fn build_header() -> ElementBuilder {
         .align(StackAlign::Center)
         .children([
             // Logo / title
-            el(El::Span)
-                .st([St::FontBold, St::TextLg, St::CursorPointer, St::TextDefault])
-                .text("rwire Docs")
-                .on(Ev::Click, navigate_home()),
+            Link::to("/", "rwire Docs")
+                .st([St::FontBold, St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration]),
             // Right side: search + theme toggle
             Stack::row()
                 .gap(Gap::Sm)
@@ -129,7 +128,7 @@ fn render_theme_toggle(state: &DocState) -> ElementBuilder {
 }
 
 // ============================================================================
-// Sidebar (click-handler based, not <a href>)
+// Sidebar
 // ============================================================================
 
 fn build_sidebar(site: &DocSite, active_path: &str) -> ElementBuilder {
@@ -163,15 +162,11 @@ fn build_sidebar(site: &DocSite, active_path: &str) -> ElementBuilder {
                 } else {
                     vec![
                         St::DisplayBlock, St::PxSm, St::PySm, St::RoundedSm,
-                        St::TextDefault, St::CursorPointer, St::TransitionColors,
+                        St::NoDecoration, St::TextDefault, St::CursorPointer, St::TransitionColors,
                     ]
                 };
 
-                let mut link = el(El::Div)
-                    .st(tokens)
-                    .text(&page.title)
-                    .data("path", page_path)
-                    .on(Ev::Click, navigate_to());
+                let mut link = Link::to(page_path, &page.title).st(tokens);
 
                 if !is_active {
                     link = link.hover([St::BgHover]);
@@ -198,7 +193,7 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
         .flat_map(|(_, paths)| paths.first().cloned())
         .filter_map(|path| {
             site.page(&path).map(|page| {
-                Card::new()
+                let card = Card::new()
                     .child(
                         Stack::column()
                             .gap(Gap::Sm)
@@ -212,10 +207,10 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
                             ])
                             .build(),
                     )
-                    .build()
-                    .st([St::CursorPointer])
-                    .data("path", &path)
-                    .on(Ev::Click, navigate_to())
+                    .build();
+
+                Link::to_with_content(&path, card)
+                    .st([St::NoDecoration, St::CursorPointer])
                     .hover([St::BgHover])
             })
         })
@@ -286,15 +281,13 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
             el(El::Div)
                 .st([St::Flex1, St::MinW0])
                 .append([
-                    // Breadcrumb navigation (clickable)
+                    // Breadcrumb navigation
                     el(El::Div)
                         .st([St::DisplayFlex, St::ItemsCenter, St::GapXs, St::TextSm, St::TextMuted, St::MbLg])
                         .append([
-                            el(El::Span)
-                                .st([St::CursorPointer])
-                                .hover([St::TextDefault])
-                                .text("Docs")
-                                .on(Ev::Click, navigate_home()),
+                            Link::to("/", "Docs")
+                                .st([St::NoDecoration, St::CursorPointer, St::TextMuted])
+                                .hover([St::TextDefault]),
                             el(El::Span).text("/"),
                             el(El::Span).text(&page.section.replace('-', " ")),
                             el(El::Span).text("/"),
@@ -342,7 +335,7 @@ fn build_search_results(site: &DocSite, query: &str) -> ElementBuilder {
 }
 
 fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
-    Card::new()
+    let card = Card::new()
         .child(
             Stack::column()
                 .gap(Gap::Xs)
@@ -359,10 +352,10 @@ fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
                 ])
                 .build(),
         )
-        .build()
-        .st([St::CursorPointer])
-        .data("path", &result.path)
-        .on(Ev::Click, navigate_to())
+        .build();
+
+    Link::to_with_content(&result.path, card)
+        .st([St::NoDecoration, St::CursorPointer])
         .hover([St::BgHover])
 }
 
@@ -378,22 +371,6 @@ fn on_route_change(state: &mut DocState, ctx: &rwire::EventContext) {
         } else {
             state.current_path = path.to_string();
         }
-        state.searching = false;
-        state.search_query.clear();
-    }
-}
-
-#[handler]
-fn navigate_home(state: &mut DocState) {
-    state.current_path.clear();
-    state.searching = false;
-    state.search_query.clear();
-}
-
-#[handler]
-fn navigate_to(state: &mut DocState, ctx: &rwire::EventContext) {
-    if let Some(path) = ctx.data("path") {
-        state.current_path = path.to_string();
         state.searching = false;
         state.search_query.clear();
     }
