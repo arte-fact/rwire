@@ -120,6 +120,7 @@ else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_o
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
 w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
+w.onopen=()=>{if(location.pathname!=='/')w.send('R'+location.pathname)};
 w.onmessage=e=>x(new Uint8Array(e.data));
 document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h)}});
 window.addEventListener('popstate',()=>{w.send('R'+location.pathname)});"#;
