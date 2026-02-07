@@ -124,6 +124,8 @@ define_token_enum! {
         RoleListitem = 0x2D => "listitem",
         RoleNavigation = 0x2E => "navigation",
         RoleSeparator = 0x2F => "separator",
+        RoleMenu = 0x32 => "menu",
+        RoleMenuItem = 0x33 => "menuitem",
 
         // Tabindex (0x30-0x31)
         Zero = 0x30 => "0",

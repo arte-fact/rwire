@@ -715,6 +715,47 @@ define_token_enum! {
 
         // Skeleton shimmer (0x2CA)
         BgShimmer = 0x2CA => "background:linear-gradient(90deg,var(--rw-bg-muted) 0%,var(--rw-bg-subtle) 50%,var(--rw-bg-muted) 100%);background-size:200% 100%;animation:rw-shimmer 1.5s ease-in-out infinite",
+
+        // ====================================================================
+        // Phase 2: Layout & Navigation Tokens (0x2CB+)
+        // ====================================================================
+
+        // AppShell layout (0x2CB-0x2CF)
+        GridTemplateShell = 0x2CB => "display:grid;grid-template-rows:auto 1fr;grid-template-columns:auto 1fr;min-height:100vh",
+        GridColFull = 0x2CC => "grid-column:1/-1",
+        OverflowYScroll = 0x2CD => "overflow-y:auto;-webkit-overflow-scrolling:touch",
+        BgSidebar = 0x2CE => "background:var(--rw-bg-sidebar,var(--rw-bg-subtle))",
+        BorderRDefault = 0x2CF => "border-right:1px solid var(--rw-border-default)",
+
+        // Sidebar/TOC navigation (0x2D0-0x2D3)
+        TextXsMuted = 0x2D0 => "font-size:var(--rw-text-xs);color:var(--rw-text-muted)",
+        BgAccentSubtle = 0x2D1 => "background:var(--rw-accent-3)",
+        TextAccent12 = 0x2D2 => "color:var(--rw-accent-12)",
+        PlMdIndent = 0x2D3 => "padding-left:var(--rw-space-6)",
+
+        // ====================================================================
+        // Phase 4: Tier 2 Component Tokens (0x2D4+)
+        // ====================================================================
+
+        // Tooltip (0x2D4-0x2D8)
+        TooltipBg = 0x2D4 => "background:var(--rw-bg-emphasis)",
+        TextOnEmphasis = 0x2D5 => "color:var(--rw-text-on-emphasis,#fff)",
+        WhitespaceNowrapInline = 0x2D6 => "white-space:nowrap;max-width:20rem",
+        TransformCenterX = 0x2D7 => "transform:translateX(-50%)",
+        TransformCenterY = 0x2D8 => "transform:translateY(-50%)",
+
+        // Drawer (0x2D9-0x2DB)
+        TranslateXNegFull = 0x2D9 => "transform:translateX(-100%)",
+        TransitionTransformMd = 0x2DA => "transition:transform .3s ease-in-out",
+        W320px = 0x2DB => "width:320px",
+
+        // Tooltip hover-show pattern (0x2DC... shifted toast)
+        HoverShowChild = 0x2DF => "&:hover>[data-tip],&:focus-within>[data-tip]{opacity:1}",
+
+        // Toast (0x2E0-0x2E2)
+        AnimateSlideIn = 0x2E0 => "animation:rw-slide-in .3s ease-out",
+        FixedBottomRight = 0x2E1 => "position:fixed;bottom:var(--rw-space-4);right:var(--rw-space-4)",
+        MaxW360px = 0x2E2 => "max-width:360px",
     }
 }
 
@@ -946,7 +987,7 @@ define_token_enum! {
 }
 
 /// Global CSS rules injected alongside pseudo tokens (e.g., @keyframes).
-pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}";
+pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}@keyframes rw-slide-in{from{transform:translateY(1rem);opacity:0}to{transform:translateY(0);opacity:1}}";
 
 // ============================================================================
 // CSS Generation Functions
@@ -963,7 +1004,7 @@ pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
         if used.contains(&code) {
             use std::fmt::Write;
             let _ = write!(css, ".u{}{{{}}}", code, declaration);
-            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") {
+            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") {
                 needs_global_keyframes = true;
             }
         }
@@ -1005,7 +1046,7 @@ pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> Strin
                 ".h{}u{}{}{{{}}}",
                 pc_code, st_code, selector, declaration
             );
-            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") {
+            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") {
                 needs_spin_keyframes = true;
             }
         }

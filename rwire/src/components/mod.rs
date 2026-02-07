@@ -64,6 +64,7 @@
 
 mod accordion;
 mod alert;
+mod app_shell;
 mod avatar;
 mod badge;
 mod blockquote;
@@ -74,6 +75,9 @@ mod checkbox;
 mod code;
 mod container;
 mod divider;
+mod docs_sidebar;
+mod drawer;
+mod dropdown;
 mod form_field;
 mod input;
 mod label;
@@ -95,10 +99,14 @@ mod tabs;
 mod text;
 mod textarea;
 mod theme_toggle;
+mod toast;
+mod toc;
+mod tooltip;
 pub mod utils;
 
 pub use accordion::{Accordion, AccordionItem};
 pub use alert::{Alert, AlertIntent};
+pub use app_shell::AppShell;
 pub use avatar::{Avatar, AvatarSize};
 pub use badge::{Badge, BadgeIntent};
 pub use blockquote::Blockquote;
@@ -109,6 +117,9 @@ pub use checkbox::Checkbox;
 pub use code::{Code, CodeMode};
 pub use container::{Container, ContainerSize};
 pub use divider::{Divider, SpacingSize};
+pub use docs_sidebar::{DocsSidebar, SidebarSection};
+pub use drawer::{Drawer, DrawerPosition};
+pub use dropdown::{DropdownItem, DropdownMenu};
 pub use form_field::FormField;
 pub use input::{Input, InputSize, InputType};
 pub use label::Label;
@@ -130,6 +141,9 @@ pub use tabs::{Tab, Tabs};
 pub use text::{Text, TextColor, TextVariant};
 pub use textarea::Textarea;
 pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize};
+pub use toast::{Toast, ToastContainer, ToastIntent};
+pub use toc::TableOfContents;
+pub use tooltip::{Tooltip, TooltipPosition};
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
     unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL,
