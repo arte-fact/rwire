@@ -216,15 +216,15 @@ impl MarkdownBuilder {
                 let lang = self.code_lang.take();
 
                 let code_el = el(El::Code)
-                    .st([St::FontMono, St::TextSm, St::WhitespacePre, St::DisplayBlock])
+                    .st([St::FontMono, St::TextSm, St::WhitespacePre, St::DisplayBlock, St::LeadingRelaxed])
                     .text(&code_content);
 
                 let mut pre = el(El::Pre)
-                    .st([St::BgCode, St::RoundedMd, St::OverflowXAuto, St::PSm, St::BorderSubtle, St::MyMd]);
+                    .st([St::BgCode, St::RoundedLg, St::OverflowXAuto, St::PMd, St::BorderSubtle, St::MyMd]);
 
                 if let Some(lang) = lang {
                     let label = el(El::Span)
-                        .st([St::TextXs, St::TextMuted, St::DisplayBlock, St::MbXs])
+                        .st([St::TextXs, St::TextMuted, St::DisplayBlock, St::MbSm, St::TextUppercase, St::TrackingWider, St::FontMedium])
                         .text(&lang);
                     let wrapper = el(El::Div)
                         .st([St::PositionRelative])
