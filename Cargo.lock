@@ -292,6 +292,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "docs-site"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "rwire",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
