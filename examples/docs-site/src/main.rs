@@ -221,22 +221,22 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
         .collect();
 
     Stack::column()
-        .gap(Gap::Lg)
+        .gap(Gap::Xl)
         .children([
             // Hero section
             el(El::Div)
                 .st([St::PyXl, St::TextCenter])
                 .append([
                     el(El::H1)
-                        .st([St::Text2xl, St::FontBold, St::MbMd])
+                        .st([St::Text3xl, St::FontBold, St::MbMd])
                         .text("rwire Documentation"),
                     el(El::P)
-                        .st([St::TextLg, St::TextMuted, St::MbLg])
+                        .st([St::TextLg, St::TextMuted, St::MbLg, St::LeadingRelaxed])
                         .text("Server-side UI framework with a binary protocol and ~1.5KB JS runtime."),
                 ]),
             // Quick links
             Stack::row()
-                .gap(Gap::Md)
+                .gap(Gap::Lg)
                 .justify(StackJustify::Center)
                 .children(cards)
                 .build(),
@@ -279,7 +279,7 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
 
     // Layout: content + TOC sidebar
     Stack::row()
-        .gap(Gap::Lg)
+        .gap(Gap::Xl)
         .children([
             // Main content
             el(El::Div)
@@ -287,7 +287,7 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
                 .append([
                     // Breadcrumb navigation (clickable)
                     el(El::Div)
-                        .st([St::DisplayFlex, St::ItemsCenter, St::GapXs, St::TextSm, St::TextMuted, St::MbMd])
+                        .st([St::DisplayFlex, St::ItemsCenter, St::GapXs, St::TextSm, St::TextMuted, St::MbLg])
                         .append([
                             el(El::Span)
                                 .st([St::CursorPointer])
@@ -302,10 +302,10 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
                     // Rendered markdown
                     parsed.content,
                 ]),
-            // TOC (right side)
+            // TOC (right side, sticky below header)
             el(El::Div)
-                .st([St::FlexShrink0])
-                .attr("style", "width:200px")
+                .st([St::FlexShrink0, St::PositionSticky, St::TopHeader])
+                .attr("style", "width:220px;align-self:start")
                 .append([toc.build()]),
         ])
         .build()
