@@ -124,7 +124,7 @@ w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
 w.onopen=()=>{if(location.pathname!=='/')w.send('R'+location.pathname)};
 w.onmessage=e=>x(new Uint8Array(e.data));
-document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h)}});
+document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
 window.addEventListener('popstate',()=>{w.send('R'+location.pathname)});"#;
 
 /// Bind handler without local state support (sends to server).

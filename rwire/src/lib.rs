@@ -160,6 +160,12 @@ pub use components::{
     Card, CardPadding, CardShadow,
     // Badge
     Badge, BadgeIntent,
+    // Grid
+    Grid, GridColumns,
+    // Footer
+    Footer, FooterColumn,
+    // CopyButton
+    CopyButton, COPY_BUTTON_CSS,
 };
 
 // Capsule styling exports

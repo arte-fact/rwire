@@ -847,6 +847,15 @@ define_token_enum! {
         // Full accent scale — border variants (0x31E-0x31F)
         BorderAccent6 = 0x31E => "border:1px solid var(--rw-accent-6)",
         BorderAccent8 = 0x31F => "border:1px solid var(--rw-accent-8)",
+
+        // ====================================================================
+        // Website Foundation Tokens (0x320+)
+        // ====================================================================
+
+        Text6xl = 0x320 => "font-size:var(--rw-text-6xl)",
+        GridColsAuto = 0x321 => "grid-template-columns:repeat(auto-fill,minmax(280px,1fr))",
+        Grayscale = 0x322 => "filter:grayscale(1)",
+        MaxW56rem = 0x323 => "max-width:56rem",
     }
 }
 

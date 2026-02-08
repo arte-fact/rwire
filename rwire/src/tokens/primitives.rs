@@ -204,6 +204,10 @@ pub mod font_size {
     pub const _3XL: &str = "1.875rem";
     /// 36px
     pub const _4XL: &str = "2.25rem";
+    /// 48px
+    pub const _5XL: &str = "3rem";
+    /// 60px
+    pub const _6XL: &str = "3.75rem";
 }
 
 /// Font weight scale.

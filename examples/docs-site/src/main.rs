@@ -109,6 +109,7 @@ fn root(state: &DocState) -> ElementBuilder {
                 .sidebar(sidebar)
                 .main(main_content)
                 .build(),
+            build_footer(),
         ])
 }
 
@@ -278,9 +279,8 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
                         .text("Server-side UI framework with a binary protocol and ~1.5KB JS runtime."),
                 ]),
             // Quick links
-            Stack::row()
+            Grid::auto()
                 .gap(Gap::Md)
-                .justify(StackJustify::Center)
                 .children(cards)
                 .build(),
             // Stats
@@ -448,4 +448,32 @@ fn on_search_input(state: &mut DocState, ctx: &rwire::EventContext) {
         state.search_query = text.to_string();
         state.searching = !state.search_query.is_empty();
     }
+}
+
+// ============================================================================
+// Footer
+// ============================================================================
+
+fn build_footer() -> ElementBuilder {
+    Footer::new()
+        .logo(
+            el(El::Span)
+                .attr("style", "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em")
+                .st([St::TextLg, St::TextDefault])
+                .text("rwire"),
+        )
+        .tagline("Server-side UI framework with a binary protocol.")
+        .column(
+            FooterColumn::new("Documentation")
+                .link("Getting Started", "/docs/getting-started/install")
+                .link("Protocol", "/docs/architecture/protocol")
+                .link("Components", "/docs/architecture/components"),
+        )
+        .column(
+            FooterColumn::new("Community")
+                .external_link("GitHub", "https://github.com")
+                .external_link("Discord", "https://discord.gg"),
+        )
+        .copyright("\u{00a9} 2026 rwire contributors. MIT License.")
+        .build()
 }

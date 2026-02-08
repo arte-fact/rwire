@@ -71,6 +71,8 @@ pub fn generate_primitive_css() -> String {
     write_var(&mut css, "text-2xl", font_size::_2XL);
     write_var(&mut css, "text-3xl", font_size::_3XL);
     write_var(&mut css, "text-4xl", font_size::_4XL);
+    write_var(&mut css, "text-5xl", font_size::_5XL);
+    write_var(&mut css, "text-6xl", font_size::_6XL);
 
     // Font weights
     write_var(&mut css, "font-normal", font_weight::NORMAL);
@@ -143,6 +145,8 @@ pub fn generate_primitive_css_with_palette(palette: &ColorPalette) -> String {
     write_var(&mut css, "text-2xl", font_size::_2XL);
     write_var(&mut css, "text-3xl", font_size::_3XL);
     write_var(&mut css, "text-4xl", font_size::_4XL);
+    write_var(&mut css, "text-5xl", font_size::_5XL);
+    write_var(&mut css, "text-6xl", font_size::_6XL);
 
     // Font weights
     write_var(&mut css, "font-normal", font_weight::NORMAL);
@@ -237,6 +241,8 @@ pub fn generate_primitive_css_filtered(used_vars: &HashSet<String>) -> String {
     write_if_used(&mut css, "text-2xl", font_size::_2XL);
     write_if_used(&mut css, "text-3xl", font_size::_3XL);
     write_if_used(&mut css, "text-4xl", font_size::_4XL);
+    write_if_used(&mut css, "text-5xl", font_size::_5XL);
+    write_if_used(&mut css, "text-6xl", font_size::_6XL);
 
     // Font weights
     write_if_used(&mut css, "font-normal", font_weight::NORMAL);
