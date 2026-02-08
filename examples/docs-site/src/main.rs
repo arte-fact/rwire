@@ -3,12 +3,13 @@
 //! A full documentation site built with rwire components and the docs module.
 //! Demonstrates AppShell, TableOfContents, Prose, and search.
 
-use rwire::capsule_gen::CapsuleConfig;
+use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::components::*;
 use rwire::docs::{parse_markdown, DocSite, SearchResult};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode};
-use rwire::router::Link;
+use rwire::tokens::ColorPalette;
+use rwire::router::{Link, Router};
 use rwire::{el, handler, renderer, El, ElementBuilder, Server, State};
 
 // ============================================================================
@@ -42,41 +43,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
 
-    // Declare element types and style tokens that aren't present in the initial
-    // render (landing page) but are needed when navigating to doc pages.
-    // These are used by the markdown parser and conditional UI (active sidebar links).
+    // Register all view functions with the router so tree-shaking discovers
+    // every element type, style token, and event across all pages.
+    let router = Router::new()
+        .page("/", |_| build_landing_page(&DocSite::load(DOCS_DIR)))
+        .page("/docs/*", |_| {
+            let site = DocSite::load(DOCS_DIR);
+            // Use first real page to get representative markdown tokens
+            let path = site.sections().first()
+                .and_then(|(_, paths)| paths.first())
+                .cloned()
+                .unwrap_or_default();
+            // Include sidebar with active link so active-state tokens
+            // (BgAccentSubtle, TextAccent12) are discovered
+            let sidebar = build_sidebar(&site, &path);
+            el(El::Div).append([sidebar, build_doc_page(&site, &path)])
+        })
+        .page("/search", |_| {
+            build_search_results(&DocSite::load(DOCS_DIR), "example")
+        });
+
     let capsule_config = CapsuleConfig::new()
         .theme(Theme::default())
-        .extra_elements(&[
-            El::Pre, El::Code, El::Blockquote, El::Strong, El::Em,
-            El::Ul, El::Ol, El::Li, El::Hr, El::Img, El::Kbd,
-            El::Table, El::Thead, El::Tbody, El::Tr, El::Th, El::Td,
-        ])
-        .extra_styles(&[
-            // Markdown prose container
-            St::LeadingRelaxedProse, St::MaxWProse, St::SpaceYMd,
-            // Headings
-            St::Text2xl, St::TextXl, St::TextBase, St::FontMedium,
-            St::MtLg, St::Mt2xl, St::MtXl, St::MtMd, St::MbXs, St::MbSm,
-            // Paragraphs
-            St::M0,
-            // Code blocks
-            St::FontMono, St::BgCode, St::WhitespacePre, St::OverflowXAuto,
-            // Lists
-            St::ListDisc, St::ListDecimal, St::PlLg, St::PlMd, St::PlSm, St::MySm, St::MyMd,
-            // Tables
-            St::BgSubtle, St::TextLeft, St::BorderBSubtle,
-            // Blockquotes
-            St::BorderL, St::BorderTransparent,
-            // Misc
-            St::MinW0, St::GapXs, St::TopHeader,
-            // Active sidebar link (conditional)
-            St::BgAccentSubtle, St::TextAccent12,
-        ]);
+        .palette(ColorPalette::nord())
+        .font(FontFace::google("Quicksand", &[300, 400]));
 
     Server::bind("0.0.0.0:9000")?
         .root(root)
         .on_route(on_route_change())
+        .routes(router)
         .capsule_config(capsule_config)
         .run()
         .await
@@ -122,8 +117,9 @@ fn build_header() -> ElementBuilder {
         .align(StackAlign::Center)
         .children([
             // Logo / title
-            Link::to("/", "rwire Docs")
-                .st([St::FontBold, St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration]),
+            Link::to("/", "rwire")
+                .attr("style", "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em")
+                .st([St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration]),
             // Right side: search + theme toggle
             Stack::row()
                 .gap(Gap::Sm)
@@ -224,6 +220,7 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
         .filter_map(|path| {
             site.page(&path).map(|page| {
                 let card = Card::new()
+                    .shadow(CardShadow::None)
                     .child(
                         Stack::column()
                             .gap(Gap::Sm)
@@ -240,7 +237,7 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
                     .build();
 
                 Link::to_with_content(&path, card)
-                    .st([St::NoDecoration, St::CursorPointer])
+                    .st([St::NoDecoration, St::CursorPointer, St::RoundedLg, St::TransitionColors])
                     .hover([St::BgHover])
             })
         })
@@ -254,7 +251,7 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
                 .st([St::PyXl, St::TextCenter])
                 .append([
                     el(El::H1)
-                        .st([St::Text3xl, St::FontBold, St::MbMd])
+                        .st([St::Text3xl, St::FontBold, St::MbSm, St::TextHigh])
                         .text("rwire Documentation"),
                     el(El::P)
                         .st([St::TextLg, St::TextMuted, St::MbLg, St::LeadingRelaxed])
@@ -262,7 +259,7 @@ fn build_landing_page(site: &DocSite) -> ElementBuilder {
                 ]),
             // Quick links
             Stack::row()
-                .gap(Gap::Lg)
+                .gap(Gap::Md)
                 .justify(StackJustify::Center)
                 .children(cards)
                 .build(),
@@ -366,6 +363,7 @@ fn build_search_results(site: &DocSite, query: &str) -> ElementBuilder {
 
 fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
     let card = Card::new()
+        .shadow(CardShadow::None)
         .child(
             Stack::column()
                 .gap(Gap::Xs)
@@ -385,7 +383,7 @@ fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
         .build();
 
     Link::to_with_content(&result.path, card)
-        .st([St::NoDecoration, St::CursorPointer])
+        .st([St::NoDecoration, St::CursorPointer, St::RoundedLg, St::TransitionColors])
         .hover([St::BgHover])
 }
 

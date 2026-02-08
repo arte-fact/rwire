@@ -397,6 +397,7 @@ pub struct ServerWithRoot<F> {
     shared: Option<Arc<SharedServerState>>,
     capsule_config: Option<CapsuleConfig>,
     route_handler: Option<HandlerFn>,
+    router: Option<crate::router::Router>,
 }
 
 impl Server {
@@ -435,6 +436,7 @@ impl ServerBuilder {
             shared: None,
             capsule_config: None,
             route_handler: None,
+            router: None,
         }
     }
 }
@@ -489,6 +491,17 @@ where
         self
     }
 
+    /// Register a router for view tree-shaking.
+    ///
+    /// At startup, all registered view functions are called with default params
+    /// to discover element types, style tokens, events, and attributes. This
+    /// eliminates the need for `extra_elements` / `extra_styles` in the capsule
+    /// config.
+    pub fn routes(mut self, router: crate::router::Router) -> Self {
+        self.router = Some(router);
+        self
+    }
+
     /// Get the shared server state, creating it if needed.
     ///
     /// Call this before `run()` to get a reference to the shared state for
@@ -540,6 +553,15 @@ where
             ctx.analyze_style_patterns(&root_element);
             ctx.emit_multi(&root_element);
         }
+
+        // Tree-shake router views: call every registered view with default
+        // params and collect their tokens (El, Ev, St, At, Av, Pc).
+        if let Some(ref router) = self.router {
+            for view_tree in router.tree_shake_views() {
+                ctx.collect_tokens_from(&view_tree);
+            }
+        }
+
         // Generate capsule - styled if config provided, basic otherwise
         let capsule = if let Some(config) = self.capsule_config {
             // Merge style tokens and attribute tokens into config

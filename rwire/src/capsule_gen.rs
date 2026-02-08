@@ -201,6 +201,133 @@ const SE={{{svg_js}}};
     )
 }
 
+/// How the browser should display text while the font loads.
+#[derive(Clone, Debug, Default)]
+pub enum FontDisplay {
+    /// Show fallback immediately, swap when loaded (recommended).
+    #[default]
+    Swap,
+    /// Brief invisible period, then fallback.
+    Fallback,
+    /// Use font only if already cached.
+    Optional,
+}
+
+/// A font face definition that generates CSS at capsule build time.
+///
+/// Supports Google Fonts (via `@import`) and self-hosted fonts (via `@font-face`).
+///
+/// # Example
+///
+/// ```ignore
+/// // Google Fonts
+/// FontFace::google("Inter", &[400, 600])
+/// FontFace::google("Fira Code", &[400])
+///
+/// // Self-hosted
+/// FontFace::custom("MyFont")
+///     .src("/fonts/myfont.woff2", "woff2")
+///     .weight(400)
+/// ```
+#[derive(Clone, Debug)]
+pub struct FontFace {
+    family: String,
+    source: FontSource,
+    display: FontDisplay,
+}
+
+#[derive(Clone, Debug)]
+enum FontSource {
+    /// Google Fonts CDN import.
+    Google { weights: Vec<u16> },
+    /// Self-hosted font file.
+    Custom { url: String, format: String, weight: u16 },
+}
+
+impl FontFace {
+    /// Create a Google Fonts import.
+    ///
+    /// Generates `@import url('https://fonts.googleapis.com/css2?family=...')`.
+    pub fn google(family: &str, weights: &[u16]) -> Self {
+        Self {
+            family: family.to_string(),
+            source: FontSource::Google { weights: weights.to_vec() },
+            display: FontDisplay::Swap,
+        }
+    }
+
+    /// Create a self-hosted font face definition.
+    pub fn custom(family: &str) -> Self {
+        Self {
+            family: family.to_string(),
+            source: FontSource::Custom {
+                url: String::new(),
+                format: "woff2".to_string(),
+                weight: 400,
+            },
+            display: FontDisplay::Swap,
+        }
+    }
+
+    /// Set the font source URL and format (for self-hosted fonts).
+    pub fn src(mut self, url: &str, format: &str) -> Self {
+        if let FontSource::Custom { url: ref mut u, format: ref mut f, .. } = self.source {
+            *u = url.to_string();
+            *f = format.to_string();
+        }
+        self
+    }
+
+    /// Set the font weight (for self-hosted fonts).
+    pub fn weight(mut self, weight: u16) -> Self {
+        if let FontSource::Custom { weight: ref mut w, .. } = self.source {
+            *w = weight;
+        }
+        self
+    }
+
+    /// Set the font-display strategy.
+    pub fn display(mut self, display: FontDisplay) -> Self {
+        self.display = display;
+        self
+    }
+
+    /// Get the font family name.
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    /// Generate CSS for this font face.
+    pub fn to_css(&self) -> String {
+        let display = match self.display {
+            FontDisplay::Swap => "swap",
+            FontDisplay::Fallback => "fallback",
+            FontDisplay::Optional => "optional",
+        };
+
+        match &self.source {
+            FontSource::Google { weights } => {
+                let encoded_family = self.family.replace(' ', "+");
+                let wght = weights
+                    .iter()
+                    .map(|w| w.to_string())
+                    .collect::<Vec<_>>()
+                    .join(";");
+                format!(
+                    "@import url('https://fonts.googleapis.com/css2?family={}:wght@{}&display={}');\n",
+                    encoded_family, wght, display
+                )
+            }
+            FontSource::Custom { url, format, weight } => {
+                format!(
+                    "@font-face{{font-family:'{}';src:url('{}') format('{}');font-weight:{};font-display:{}}}\n",
+                    self.family, url, format, weight, display
+                )
+            }
+        }
+    }
+}
+
 /// Configuration for capsule generation with styling.
 #[derive(Clone, Debug, Default)]
 pub struct CapsuleConfig {
@@ -231,6 +358,8 @@ pub struct CapsuleConfig {
     /// Extra style utility tokens to include beyond what tree-shaking discovers.
     /// Same purpose as extra_elements but for CSS utility classes.
     pub extra_style_utils: HashSet<u16>,
+    /// Registered font faces for the capsule.
+    pub fonts: Vec<FontFace>,
 }
 
 impl CapsuleConfig {
@@ -369,6 +498,23 @@ impl CapsuleConfig {
         self
     }
 
+    /// Register a font face for the capsule.
+    ///
+    /// The font's CSS (`@import` or `@font-face`) is generated at capsule
+    /// build time. Reference the font via inline `style` attributes.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// CapsuleConfig::new()
+    ///     .font(FontFace::google("Inter", &[400, 600]))
+    ///     .font(FontFace::google("Fira Code", &[400]))
+    /// ```
+    pub fn font(mut self, face: FontFace) -> Self {
+        self.fonts.push(face);
+        self
+    }
+
     /// Check if any style tokens are used.
     pub fn has_style_tokens(&self) -> bool {
         !self.used_style_utils.is_empty()
@@ -468,6 +614,28 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     // 11. Composite style CSS classes (.c{id}{declarations})
     if !config.composite_css.is_empty() {
         css.push_str(&config.composite_css);
+    }
+
+    // 12. Font face CSS (@import and @font-face rules)
+    if !config.fonts.is_empty() {
+        // @import rules must appear before all other rules in CSS.
+        // Collect them separately and prepend to the output.
+        let mut imports = String::new();
+        let mut font_faces = String::new();
+        for font in &config.fonts {
+            let font_css = font.to_css();
+            if font_css.starts_with("@import") {
+                imports.push_str(&font_css);
+            } else {
+                font_faces.push_str(&font_css);
+            }
+        }
+        if !font_faces.is_empty() {
+            css.push_str(&font_faces);
+        }
+        if !imports.is_empty() {
+            css.insert_str(0, &imports);
+        }
     }
 
     css

@@ -122,7 +122,7 @@ pub use health::{HealthResponse, HealthStatus, ReadyResponse};
 pub use form::{Field, FieldType, Form, ValidationRule};
 
 // Router exports
-pub use router::{Link, Route, RoutePattern, Router};
+pub use router::{Link, RouteParams, RoutePattern, Router};
 
 // Style exports
 pub use style::{ScopedClass, Style};

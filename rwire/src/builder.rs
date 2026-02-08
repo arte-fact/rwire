@@ -1071,6 +1071,45 @@ impl BuildContext {
         }
     }
 
+    /// Collect only used token sets from an element tree (no symbol interning).
+    ///
+    /// Used for tree-shaking view functions registered via Router. Walks the
+    /// tree and records which El/Ev/St/At/Av/Pc codes are used, so the capsule
+    /// includes all necessary lookup tables and CSS.
+    pub fn collect_tokens_from(&mut self, el: &ElementBuilder) {
+        self.used_elements.insert(el.el_type.as_u8());
+
+        for &util in &el.style_utils {
+            self.used_style_utils.insert(util);
+        }
+        for &(prop, value) in &el.style_props {
+            self.used_style_props.insert(prop);
+            self.used_style_values.insert(value);
+        }
+        for (pc_code, st_codes) in &el.pseudo_groups {
+            for &st in st_codes {
+                self.used_pseudo_pairs.insert((*pc_code, st));
+            }
+        }
+        for ta in &el.typed_attrs {
+            match ta {
+                TypedAttr::Enum(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.used_attr_values.insert(value.as_u8());
+                }
+                TypedAttr::Bool(key) | TypedAttr::KeySym(key, _) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                }
+            }
+        }
+        for (ev, _) in &el.events {
+            self.used_events.insert(ev.as_u8());
+        }
+        for child in &el.children {
+            self.collect_tokens_from(child);
+        }
+    }
+
     /// Emit opcodes for an element tree (second pass).
     pub fn emit(&mut self, el: &ElementBuilder, state: &dyn Any) -> u8 {
         // Reset synced_id counter - we increment again during emit
