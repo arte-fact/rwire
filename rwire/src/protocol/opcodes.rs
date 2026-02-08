@@ -161,6 +161,12 @@ pub const COMPOSITE_TABLE: u8 = 0x86;
 /// pc_code is the Pc selector (u8), st tokens are varint-encoded St codes.
 pub const STYLE_PSEUDO: u8 = 0x89;
 
+/// Apply responsive breakpoint styles.
+/// Format: [STYLE_BREAKPOINT, ref, bp_code, count, st1_varint, st2_varint, ...]
+/// bp_code is the Bp breakpoint (u8), st tokens are varint-encoded St codes.
+/// CSS: `@media(min-width:{px}px){.b{bp}u{st}{declaration}}`
+pub const STYLE_BREAKPOINT: u8 = 0x8A;
+
 // ============================================================================
 // Control
 // ============================================================================

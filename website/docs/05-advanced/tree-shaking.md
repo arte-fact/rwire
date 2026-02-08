@@ -25,6 +25,7 @@ The capsule contains lookup tables that map binary opcodes to DOM operations. Tr
 | Style Props (P) | `u8` code | CSS property |
 | Style Values (Y) | `u8` code | CSS value |
 | Pseudo Classes | `(u8, u16)` pair | Pseudo CSS rule |
+| Breakpoints | `(u8, u16)` pair | `@media` CSS rule |
 | Attributes (AT/AV) | `u8` code | Attribute key/value |
 
 ## How It Works

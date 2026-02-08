@@ -856,6 +856,19 @@ define_token_enum! {
         GridColsAuto = 0x321 => "grid-template-columns:repeat(auto-fill,minmax(280px,1fr))",
         Grayscale = 0x322 => "filter:grayscale(1)",
         MaxW56rem = 0x323 => "max-width:56rem",
+
+        // Extended spacing: padding-top/bottom xl+ (0x324-0x32B)
+        PtXl = 0x324 => "padding-top:var(--rw-space-8)",
+        PbXl = 0x325 => "padding-bottom:var(--rw-space-8)",
+        Pt3xl = 0x326 => "padding-top:var(--rw-space-12)",
+        Pb3xl = 0x327 => "padding-bottom:var(--rw-space-12)",
+        Py3xl = 0x328 => "padding-block:var(--rw-space-12)",
+        Py4xl = 0x329 => "padding-block:var(--rw-space-16)",
+
+        // Layout-specific tokens (0x32A-0x32D)
+        HHeader = 0x32A => "height:var(--rw-header-h,3.5rem)",
+        W220px = 0x32B => "width:220px",
+        MaxW280px = 0x32C => "max-width:280px",
     }
 }
 
@@ -1086,6 +1099,30 @@ define_token_enum! {
     }
 }
 
+// ============================================================================
+// Responsive Breakpoint Tokens
+// ============================================================================
+
+define_token_enum! {
+    /// Responsive breakpoint tokens (mobile-first, min-width).
+    ///
+    /// Combined with St tokens to create responsive CSS rules.
+    /// Any St token can be used under any Bp breakpoint.
+    ///
+    /// # CSS Class Naming
+    ///
+    /// `b{bp_code}u{st_code}` -> `@media(min-width:768px){.b1u2{display:flex}}`
+    pub enum Bp(u8) {
+        str_method = min_width;
+        mappings = BP_MAPPINGS;
+
+        Sm = 0x00 => "640",
+        Md = 0x01 => "768",
+        Lg = 0x02 => "1024",
+        Xl = 0x03 => "1280",
+    }
+}
+
 /// Global CSS rules injected alongside pseudo tokens (e.g., @keyframes).
 pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}@keyframes rw-slide-in{from{transform:translateY(1rem);opacity:0}to{transform:translateY(0);opacity:1}}";
 
@@ -1154,6 +1191,64 @@ pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> Strin
 
     if needs_spin_keyframes {
         css.push_str(PSEUDO_GLOBAL_CSS);
+    }
+
+    css
+}
+
+/// Generate CSS rules for all used breakpoint (Bp, St) pairs.
+///
+/// Each breakpoint groups its rules into a single `@media` block:
+/// `@media(min-width:{px}px){.b{bp}u{st1}{decl1}.b{bp}u{st2}{decl2}...}`
+pub fn generate_breakpoint_css(used: &std::collections::HashSet<(u8, u16)>) -> String {
+    if used.is_empty() {
+        return String::new();
+    }
+
+    let mut css = String::with_capacity(used.len() * 60);
+
+    // Sort pairs and group by bp_code
+    let mut pairs: Vec<_> = used.iter().copied().collect();
+    pairs.sort();
+
+    // Group by breakpoint
+    let mut current_bp: Option<u8> = None;
+
+    for (bp_code, st_code) in pairs {
+        let min_width = BP_MAPPINGS
+            .iter()
+            .find(|(c, _)| *c == bp_code)
+            .map(|(_, s)| *s)
+            .unwrap_or("0");
+        let declaration = UTIL_MAPPINGS
+            .iter()
+            .find(|(c, _)| *c == st_code)
+            .map(|(_, d)| *d)
+            .unwrap_or("");
+
+        if declaration.is_empty() {
+            continue;
+        }
+
+        use std::fmt::Write;
+
+        // Close previous group if switching breakpoint
+        if current_bp.is_some() && current_bp != Some(bp_code) {
+            css.push('}');
+        }
+
+        // Open new group if needed
+        if current_bp != Some(bp_code) {
+            let _ = write!(css, "@media(min-width:{}px){{", min_width);
+            current_bp = Some(bp_code);
+        }
+
+        let _ = write!(css, ".b{}u{}{{{}}}", bp_code, st_code, declaration);
+    }
+
+    // Close final group
+    if current_bp.is_some() {
+        css.push('}');
     }
 
     css
@@ -1281,5 +1376,45 @@ mod tests {
         assert_eq!(lookup_util_css(0x02), Some("display:flex"));
         assert_eq!(lookup_util_css(0x11), Some("flex-direction:column"));
         assert_eq!(lookup_util_css(0xFFFF), None);
+    }
+
+    #[test]
+    fn test_no_duplicate_bp_codes() {
+        let mut seen: HashSet<u8> = HashSet::new();
+        for (code, _) in BP_MAPPINGS {
+            assert!(seen.insert(*code), "Duplicate breakpoint code: 0x{:02X}", code);
+        }
+    }
+
+    #[test]
+    fn test_bp_enum_values() {
+        assert_eq!(Bp::Sm.as_u8(), 0x00);
+        assert_eq!(Bp::Md.as_u8(), 0x01);
+        assert_eq!(Bp::Lg.as_u8(), 0x02);
+        assert_eq!(Bp::Xl.as_u8(), 0x03);
+    }
+
+    #[test]
+    fn test_generate_breakpoint_css() {
+        let mut used = HashSet::new();
+        // (Md, DisplayFlex=0x02)
+        used.insert((Bp::Md.as_u8(), St::DisplayFlex.as_u16()));
+        // (Md, FlexRow=0x10)
+        used.insert((Bp::Md.as_u8(), St::FlexRow.as_u16()));
+        // (Lg, GridCols3=0x14B)
+        used.insert((Bp::Lg.as_u8(), St::GridCols3.as_u16()));
+
+        let css = generate_breakpoint_css(&used);
+        assert!(css.contains("@media(min-width:768px)"), "Missing md breakpoint: {css}");
+        assert!(css.contains("@media(min-width:1024px)"), "Missing lg breakpoint: {css}");
+        assert!(css.contains(".b1u2{display:flex}"), "Missing md flex rule: {css}");
+        assert!(css.contains(".b2u331{"), "Missing lg grid rule: {css}");
+    }
+
+    #[test]
+    fn test_generate_breakpoint_css_empty() {
+        let used = HashSet::new();
+        let css = generate_breakpoint_css(&used);
+        assert!(css.is_empty());
     }
 }

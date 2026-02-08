@@ -574,6 +574,7 @@ where
                 .with_style_props(ctx.used_style_props())
                 .with_style_values(ctx.used_style_values())
                 .with_pseudo_pairs(ctx.used_pseudo_pairs())
+                .with_breakpoint_pairs(ctx.used_breakpoint_pairs())
                 .with_attr_keys(ctx.used_attr_keys())
                 .with_attr_values(ctx.used_attr_values())
                 .with_composite_css(composite_css);

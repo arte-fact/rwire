@@ -88,7 +88,8 @@ mod encoder {
         buf.append_to_body(el);
 
         let bytes = buf.finish();
-        assert_eq!(bytes.as_ref(), &[0x02, 0x00, 0x20, 0xFF, 0]);
+        // BODY_REF (0xFFFF) varint-encoded as 3 bytes: [0xC0, 0xBF, 0x7F]
+        assert_eq!(bytes.as_ref(), &[0x02, 0x00, 0x20, 0xC0, 0xBF, 0x7F, 0x00]);
     }
 
     #[test]
@@ -173,8 +174,10 @@ mod encoder {
                 Ev::Click.as_u8(),
                 0, // BIND_LOCAL
                 0x20,
-                0xFF,
-                0,    // APPEND to body
+                0xC0,
+                0xBF,
+                0x7F,
+                0,    // APPEND to body (BODY_REF varint)
                 0xFF, // END
             ]
         );
@@ -437,7 +440,8 @@ mod decoder {
 
     #[test]
     fn test_decode_minimal_event() {
-        let data = [0, Ev::Click.as_u8(), 1, 0];
+        // New format: [flags, handler_varint, event_type, target_ref, payload_len]
+        let data = [0x00, 0, Ev::Click.as_u8(), 1, 0];
         let event = ClientEvent::decode(&data).unwrap();
 
         assert_eq!(event.handler_idx, 0);
@@ -448,7 +452,8 @@ mod decoder {
 
     #[test]
     fn test_decode_with_payload() {
-        let data = [5, Ev::Input.as_u8(), 2, 3, b'a', b'b', b'c'];
+        // New format: [flags, handler_varint, event_type, target_ref, payload_len, ...payload]
+        let data = [0x00, 5, Ev::Input.as_u8(), 2, 3, b'a', b'b', b'c'];
         let event = ClientEvent::decode(&data).unwrap();
 
         assert_eq!(event.handler_idx, 5);

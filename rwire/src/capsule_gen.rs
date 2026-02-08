@@ -68,18 +68,19 @@ fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,BP:0x8A,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={};
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
+function wv(a,v){if(v<128)a.push(v);else if(v<16512){v-=128;a.push(128|(v>>8),v&255)}else{v-=16512;a.push(192|(v>>16),(v>>8)&255,v&255)}}
 function gp(e,el){
 let t=el.tagName.toLowerCase();
 if(e.type==='submit'&&t==='form'){e.preventDefault();let fd=new FormData(el),obj={};fd.forEach((v,k)=>obj[k]=v);return JSON.stringify({t:'form',v:obj})}
 if((e.type==='input'||e.type==='change')&&(t==='input'||t==='textarea'||t==='select')){return JSON.stringify({t:'text',v:el.value})}
 if(e.type==='click'){let tg=e.target.closest('[data-id]')||el,dt={};for(let k in tg.dataset)dt[k]=tg.dataset[k];if(Object.keys(dt).length)return JSON.stringify({t:'data',v:dt})}
 return ''}
-function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),msg=new Uint8Array(4+pb.length);msg[0]=h;msg[1]=t;msg[2]=f;msg[3]=pb.length;msg.set(pb,4);w.send(msg)}
-function sep(h,t,f,prm,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),msg=new Uint8Array(5+prm.length+pb.length);msg[0]=h|0x80;msg[1]=t;msg[2]=f;msg[3]=prm.length;msg.set(prm,4);msg[4+prm.length]=pb.length;msg.set(pb,5+prm.length);w.send(msg)}
+function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0];wv(a,h);a.push(t,f&255,pb.length);let msg=new Uint8Array(a.length+pb.length);for(let j=0;j<a.length;j++)msg[j]=a[j];msg.set(pb,a.length);w.send(msg)}
+function sep(h,t,f,prm,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0x80];wv(a,h);a.push(t,f&255,prm.length);let msg=new Uint8Array(a.length+prm.length+1+pb.length);let j=0;for(let b of a)msg[j++]=b;msg.set(prm,j);j+=prm.length;msg[j++]=pb.length;msg.set(pb,j);w.send(msg)}
 function x(d){
 let r=[],i=0,_oc=0;
 try{
@@ -92,31 +93,32 @@ else if(o===O.G){let[k,l]=rv(d,i);i+=l;let el=document.getElementById(s[k]);r.pu
 else if(o===O.C){let t=d[i++];r.push(SE[t]?document.createElementNS('http://www.w3.org/2000/svg',E[t]||'svg'):document.createElement(E[t]||'div'))}
 else if(o===O.CS){let[id,l]=rv(d,i);i+=l;let e=document.createElement('span');e.id='__synced_'+id;r.push(e)}
 else if(o===O.GS){let[id,l]=rv(d,i);i+=l;r.push(document.getElementById('__synced_'+id))}
-else if(o===O.T){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].textContent=s[k]||''}
-else if(o===O.TW){let f=d[i++],n=d[i++],ws=[];while(n--)ws.push(wt[d[i++]]||'');r[f].textContent=ws.join(' ')}
-else if(o===O.TI){let f=d[i++],[v,l]=rv(d,i);i+=l;let n=(v>>>1)^-(v&1);r[f].textContent=n.toString()}
-else if(o===O.L){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].className=s[k]||''}
-else if(o===O.A){let f=d[i++],[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';r[f].setAttribute(an,s[vk]||'')}
-else if(o===O.AE){let f=d[i++],k=d[i++],v=d[i++];r[f].setAttribute(AT[k]||'data',AV[v]||'')}
-else if(o===O.AB){let f=d[i++],k=d[i++];r[f].setAttribute(AT[k]||'data','')}
-else if(o===O.AK){let f=d[i++],k=d[i++],[v,l]=rv(d,i);i+=l;r[f].setAttribute(AT[k]||'data',s[v]||'')}
-else if(o===O.D){let f=d[i++],[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
-else if(o===O.P){let p=d[i++],c=d[i++];(p<255?r[p]:document.body).appendChild(r[c])}
-else if(o===O.CC){r[d[i++]].innerHTML=''}
-else if(o===O.B){BL(d,i,r);i+=3}
-else if(o===O.R){let f=d[i++],t=d[i++],h=d[i++];r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
-else if(o===O.DB){let f=d[i++],t=d[i++],h=d[i++],ms=(d[i++]<<8)|d[i++];let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
-else if(o===O.RP){let f=d[i++],t=d[i++],h=d[i++],pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sep(h,t,f,prm,e,r[f])})}
+else if(o===O.T){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].textContent=s[k]||''}
+else if(o===O.TW){let[f,fl]=rv(d,i);i+=fl;let n=d[i++],ws=[];while(n--)ws.push(wt[d[i++]]||'');r[f].textContent=ws.join(' ')}
+else if(o===O.TI){let[f,fl]=rv(d,i);i+=fl;let[v,l]=rv(d,i);i+=l;let n=(v>>>1)^-(v&1);r[f].textContent=n.toString()}
+else if(o===O.L){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].className=s[k]||''}
+else if(o===O.A){let[f,fl]=rv(d,i);i+=fl;let[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';r[f].setAttribute(an,s[vk]||'')}
+else if(o===O.AE){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],v=d[i++];r[f].setAttribute(AT[k]||'data',AV[v]||'')}
+else if(o===O.AB){let[f,fl]=rv(d,i);i+=fl;let k=d[i++];r[f].setAttribute(AT[k]||'data','')}
+else if(o===O.AK){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],[v,l]=rv(d,i);i+=l;r[f].setAttribute(AT[k]||'data',s[v]||'')}
+else if(o===O.D){let[f,fl]=rv(d,i);i+=fl;let[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
+else if(o===O.P){let[p,pl]=rv(d,i);i+=pl;let[c,cl]=rv(d,i);i+=cl;(p<0xFFFF?r[p]:document.body).appendChild(r[c])}
+else if(o===O.CC){let[f,fl]=rv(d,i);i+=fl;r[f].innerHTML=''}
+else if(o===O.B){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;BL(f,t,h,r)}
+else if(o===O.R){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
+else if(o===O.DB){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let ms=(d[i++]<<8)|d[i++];let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
+else if(o===O.RP){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sep(h,t,f,prm,e,r[f])})}
 else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
 else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
-else if(o===O.SS){let f=d[i++],[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
-else if(o===O.SU){let f=d[i++],[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
-else if(o===O.SP){let f=d[i++],p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
-else if(o===O.SM){let f=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}}
+else if(o===O.SS){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
+else if(o===O.SU){let[f,fl]=rv(d,i);i+=fl;let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
+else if(o===O.SP){let[f,fl]=rv(d,i);i+=fl;let p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
+else if(o===O.SM){let[f,fl]=rv(d,i);i+=fl;let n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}}
 else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++];while(c--){let[u,ul]=rv(d,i);i+=ul}K[id]='c'+id}}
-else if(o===O.SC){let f=d[i++],[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
-else if(o===O.PD){let f=d[i++],pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
+else if(o===O.SC){let[f,fl]=rv(d,i);i+=fl;let[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
+else if(o===O.PD){let[f,fl]=rv(d,i);i+=fl;let pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
+else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('b'+bp+'u'+u)}}
 else if(o===O.E){return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
@@ -129,7 +131,7 @@ window.addEventListener('popstate',()=>{w.send('R'+location.pathname)});"#;
 
 /// Bind handler without local state support (sends to server).
 /// Also includes a stub xi() since the main runtime references it.
-const BIND_LOCAL_REMOTE_JS: &str = r#"function BL(d,i,r){let f=d[i],t=d[i+1],h=d[i+2];r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
+const BIND_LOCAL_REMOTE_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
 function xi(d,i){return i}"#;
 
 /// Local state mutation interpreter (~200 bytes).
@@ -153,7 +155,7 @@ else if(o===0x52)st[k]+=(m[i++]<<24|m[i++]<<16|m[i++]<<8|m[i++]);
 else if(o===0x53)st[k]=!!m[i++];
 else if(o===0x54)st[k]=(m[i++]<<24|m[i++]<<16|m[i++]<<8|m[i++]);
 else if(o===0x55){let l=m[i++];st[k]=new TextDecoder().decode(new Uint8Array(m.slice(i,i+l)));i+=l}}}
-function BL(d,i,r){let f=d[i],t=d[i+1],h=d[i+2];
+function BL(f,t,h,r){
 r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();let hd=lh[h];if(hd){mut(ls[hd.si],hd.ms)}else{se(h,t,f,e,r[f])}})}
 function xi(d,i){
 if(d[i]===0x40){let si=d[i+1],l=(d[i+2]<<8)|d[i+3];ls[si]=JSON.parse(new TextDecoder().decode(d.slice(i+4,i+4+l)));return i+4+l}
@@ -345,6 +347,8 @@ pub struct CapsuleConfig {
     pub used_style_values: HashSet<u8>,
     /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
     pub used_pseudo_pairs: HashSet<(u8, u16)>,
+    /// Used breakpoint (Bp, St) pairs (for tree-shaking)
+    pub used_breakpoint_pairs: HashSet<(u8, u16)>,
     /// Used attribute key codes (for tree-shaking)
     pub used_attr_keys: HashSet<u8>,
     /// Used attribute value codes (for tree-shaking)
@@ -454,6 +458,12 @@ impl CapsuleConfig {
         self
     }
 
+    /// Set all used breakpoint (Bp, St) pairs (from build context).
+    pub fn with_breakpoint_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
+        self.used_breakpoint_pairs = pairs.clone();
+        self
+    }
+
     /// Set all used attribute key codes (from build context).
     pub fn with_attr_keys(mut self, keys: &HashSet<u8>) -> Self {
         self.used_attr_keys = keys.clone();
@@ -555,7 +565,7 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
 /// - Theme overrides (accent, radius)
 /// - Component CSS (tree-shaken)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
-    use crate::style_tokens::{generate_utility_css, generate_pseudo_css};
+    use crate::style_tokens::{generate_utility_css, generate_pseudo_css, generate_breakpoint_css};
     use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css, generate_style_css};
     use crate::tokens::css::{generate_primitive_css_filtered, generate_primitive_css_with_palette};
 
@@ -565,13 +575,15 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     let base_css = generate_base_css();
     let mut used_vars = extract_used_variables(base_css);
 
-    // 2. Generate utility + pseudo token CSS (class-based, tree-shaken)
+    // 2. Generate utility + pseudo + breakpoint token CSS (class-based, tree-shaken)
     let utility_token_css = generate_utility_css(&config.used_style_utils);
     let pseudo_token_css = generate_pseudo_css(&config.used_pseudo_pairs);
+    let breakpoint_token_css = generate_breakpoint_css(&config.used_breakpoint_pairs);
 
     // Extract variables used in token CSS rules
     used_vars.extend(extract_used_variables(&utility_token_css));
     used_vars.extend(extract_used_variables(&pseudo_token_css));
+    used_vars.extend(extract_used_variables(&breakpoint_token_css));
 
     // 3. Generate semantic CSS to extract primitive variables it references
     let semantic_css = generate_semantic_css();
@@ -626,6 +638,9 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 
     // 10. Pseudo-class token CSS rules (.h{pc}u{st}:hover{...}, etc.)
     css.push_str(&pseudo_token_css);
+
+    // 10b. Breakpoint token CSS rules (@media(min-width:...){.b{bp}u{st}{...}})
+    css.push_str(&breakpoint_token_css);
 
     // 11. Composite style CSS classes (.c{id}{declarations})
     if !config.composite_css.is_empty() {

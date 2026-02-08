@@ -11,7 +11,7 @@ use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::tokens::ColorPalette;
 use rwire::router::{Link, Router};
-use rwire::{el, handler, renderer, El, ElementBuilder, Server, State};
+use rwire::{el, handler, renderer, El, Ev, ElementBuilder, Server, State};
 
 // ============================================================================
 // State
@@ -23,6 +23,7 @@ struct SiteState {
     current_path: String,
     search_query: String,
     searching: bool,
+    sidebar_open: bool,
     theme_mode: ThemeMode,
     theme_style: ThemeStyle,
 }
@@ -48,7 +49,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .cloned()
                 .unwrap_or_default();
             let sidebar = build_sidebar(&site, &path);
-            el(El::Div).append([sidebar, build_doc_page(&site, &path)])
+            // Include responsive header + layout for tree-shaking
+            el(El::Div).append([
+                build_header(true),
+                sidebar,
+                build_doc_page(&site, &path),
+            ])
         })
         .page("/search", |_| {
             build_search_results(&DocSite::load(DOCS_DIR), "example")
@@ -95,19 +101,46 @@ fn root(state: &SiteState) -> ElementBuilder {
     if is_landing {
         // Landing page: no sidebar, full-width layout
         root_el.append([
-            build_header(),
+            build_header(false),
             main_content,
             build_footer(),
         ])
     } else {
-        // Docs pages: AppShell with sidebar
+        // Docs pages: custom responsive layout
         let sidebar = build_sidebar(&site, &state.current_path);
+
+        // Mobile drawer (visible only when sidebar_open on small screens)
+        let mobile_drawer = Drawer::new()
+            .title("Navigation")
+            .position(DrawerPosition::Left)
+            .open(state.sidebar_open)
+            .on_close(toggle_sidebar())
+            .content(build_sidebar(&site, &state.current_path))
+            .build();
+
+        // Desktop sidebar: hidden on mobile, visible at md+
+        let desktop_sidebar = el(El::Aside)
+            .st([
+                St::DisplayNone, St::BgSidebar, St::BorderRDefault,
+                St::OverflowYScroll, St::PyMd,
+            ])
+            .md([St::DisplayBlock])
+            .attr("style", "position:sticky;top:56px;height:calc(100vh - 56px);width:260px;flex-shrink:0")
+            .append([sidebar]);
+
+        let body = el(El::Div)
+            .st([St::DisplayFlex, St::MinHScreen])
+            .append([
+                desktop_sidebar,
+                el(El::Main)
+                    .st([St::Flex1, St::MinW0, St::PMd])
+                    .append([main_content]),
+            ]);
+
         root_el.append([
-            AppShell::new()
-                .header(build_header())
-                .sidebar(sidebar)
-                .main(main_content)
-                .build(),
+            build_header(true),
+            mobile_drawer,
+            body,
             build_footer(),
         ])
     }
@@ -117,31 +150,62 @@ fn root(state: &SiteState) -> ElementBuilder {
 // Header
 // ============================================================================
 
-fn build_header() -> ElementBuilder {
+fn build_header(show_hamburger: bool) -> ElementBuilder {
+    // Hamburger button: only on docs pages, visible on mobile, hidden at md+
+    let hamburger = if show_hamburger {
+        el(El::Button)
+            .st([
+                St::DisplayFlex, St::ItemsCenter, St::JustifyCenter,
+                St::BgTransparent, St::BorderNone, St::CursorPointer,
+                St::TextMuted, St::P0,
+            ])
+            .md([St::DisplayNone])
+            .on(Ev::Click, toggle_sidebar())
+            .append([icon(Icon::Menu)])
+    } else {
+        el(El::Span).st([St::DisplayNone])
+    };
+
+    // Left side: hamburger + logo
+    let left = Stack::row()
+        .gap(Gap::Sm)
+        .align(StackAlign::Center)
+        .children([
+            hamburger,
+            Link::to("/", "rwire")
+                .attr("style", "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em")
+                .st([St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration]),
+        ])
+        .build();
+
+    // Right side: search + nav (search hidden on mobile)
+    let right = Stack::row()
+        .gap(Gap::Sm)
+        .align(StackAlign::Center)
+        .children([
+            el(El::Div)
+                .st([St::DisplayNone])
+                .md([St::DisplayBlock])
+                .append([render_search_input()]),
+            Link::to("/docs/01-getting-started/install", "Docs")
+                .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                .hover([St::TextDefault]),
+            el(El::Div)
+                .st([St::DisplayNone])
+                .md([St::DisplayFlex])
+                .append([render_style_switcher()]),
+            render_theme_toggle(),
+        ])
+        .build();
+
     el(El::Header)
         .st([
             St::PositionSticky, St::Top0, St::Z50, St::BgApp,
             St::BorderBDefault, St::DisplayFlex, St::ItemsCenter,
             St::JustifyBetween, St::PxMd,
         ])
-        .attr("style", "height:56px")
-        .append([
-            Link::to("/", "rwire")
-                .attr("style", "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em")
-                .st([St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration]),
-            Stack::row()
-                .gap(Gap::Sm)
-                .align(StackAlign::Center)
-                .children([
-                    render_search_input(),
-                    Link::to("/docs/01-getting-started/install", "Docs")
-                        .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
-                        .hover([St::TextDefault]),
-                    render_style_switcher(),
-                    render_theme_toggle(),
-                ])
-                .build(),
-        ])
+        .st([St::HHeader])
+        .append([left, right])
 }
 
 #[renderer]
@@ -196,17 +260,19 @@ fn build_landing_page() -> ElementBuilder {
 
 fn section_hero() -> ElementBuilder {
     el(El::Div)
-        .st([St::TextCenter, St::MxAuto, St::MaxW48rem])
-        .attr("style", "padding:5rem 1.5rem 4rem")
+        .st([St::TextCenter, St::MxAuto, St::MaxW48rem, St::PxSm])
+        .st([St::Pt3xl, St::PbXl])
         .append([
             // Title
             el(El::H1)
                 .attr("style", "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em")
-                .st([St::Text5xl, St::LeadingTight, St::TextHigh, St::MbMd])
+                .st([St::Text3xl, St::LeadingTight, St::TextHigh, St::MbMd])
+                .md([St::Text5xl])
                 .text("rwire"),
             // Subtitle
             el(El::P)
-                .st([St::TextXl, St::TextMuted, St::LeadingRelaxed, St::MbLg])
+                .st([St::TextBase, St::TextMuted, St::LeadingRelaxed, St::MbLg])
+                .md([St::TextXl])
                 .text("Server-side UI with a binary protocol."),
             // Install command
             el(El::Div)
@@ -261,13 +327,14 @@ fn section_stats() -> ElementBuilder {
 
     el(El::Div)
         .st([St::MxAuto, St::MaxW56rem, St::PxMd])
-        .attr("style", "padding-top:2rem;padding-bottom:3rem")
+        .st([St::PtXl, St::Pb3xl])
         .append([
             Card::new()
                 .shadow(CardShadow::None)
                 .child(
                     el(El::Div)
-                        .st([St::DisplayGrid, St::GridCols4, St::GapLg, St::TextCenter])
+                        .st([St::DisplayGrid, St::GridCols2, St::GapLg, St::TextCenter])
+                        .md([St::GridCols4])
                         .append(
                             stats.iter().map(|(value, label)| {
                                 el(El::Div).append([
@@ -318,8 +385,7 @@ fn main() {
     ];
 
     el(El::Div)
-        .st([St::BgSubtle])
-        .attr("style", "padding:3rem 1.5rem")
+        .st([St::BgSubtle, St::Py3xl, St::PxLg])
         .append([
             el(El::Div)
                 .st([St::MxAuto, St::MaxW56rem])
@@ -333,12 +399,12 @@ fn main() {
                         .text("Define state, write handlers, attach renderers. The macros handle the rest."),
                     // Two-column layout: code + annotations
                     el(El::Div)
-                        .st([St::DisplayFlex, St::FlexWrap, St::GapLg])
+                        .st([St::DisplayFlex, St::FlexCol, St::GapLg])
+                        .md([St::FlexRow])
                         .append([
                             // Code block (left, wider)
                             el(El::Div)
-                                .st([St::Flex1, St::MinW0])
-                                .attr("style", "min-width:320px")
+                                .st([St::Flex1, St::MinW0, St::OverflowXAuto])
                                 .append([
                                     Code::block(code)
                                         .language("rust")
@@ -346,8 +412,7 @@ fn main() {
                                 ]),
                             // Annotations (right, narrower)
                             el(El::Div)
-                                .attr("style", "min-width:200px;max-width:280px")
-                                .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::JustifyCenter])
+                                .st([St::MaxW280px, St::DisplayFlex, St::FlexCol, St::GapMd, St::JustifyCenter])
                                 .append(
                                     annotations.iter().map(|(macro_name, desc)| {
                                         el(El::Div)
@@ -402,7 +467,7 @@ fn section_features() -> ElementBuilder {
     ];
 
     el(El::Div)
-        .attr("style", "padding:3rem 1.5rem")
+        .st([St::Py3xl, St::PxLg])
         .append([
             el(El::Div)
                 .st([St::MxAuto, St::MaxW56rem])
@@ -410,10 +475,11 @@ fn section_features() -> ElementBuilder {
                     el(El::H2)
                         .st([St::Text2xl, St::FontSemibold, St::TextCenter, St::MbLg])
                         .text("Why rwire"),
-                    Grid::new()
-                        .columns(GridColumns::Fixed3)
-                        .gap(Gap::Lg)
-                        .children(
+                    el(El::Div)
+                        .st([St::DisplayGrid, St::GridCols1, St::GapLg])
+                        .md([St::GridCols2])
+                        .lg([St::GridCols3])
+                        .append(
                             features.iter().map(|(ico, title, desc)| {
                                 Card::new()
                                     .shadow(CardShadow::None)
@@ -435,8 +501,7 @@ fn section_features() -> ElementBuilder {
                                     )
                                     .build()
                             }).collect::<Vec<_>>(),
-                        )
-                        .build(),
+                        ),
                 ]),
         ])
 }
@@ -445,8 +510,7 @@ fn section_features() -> ElementBuilder {
 
 fn section_comparison() -> ElementBuilder {
     el(El::Div)
-        .st([St::BgSubtle])
-        .attr("style", "padding:3rem 1.5rem")
+        .st([St::BgSubtle, St::Py3xl, St::PxLg])
         .append([
             el(El::Div)
                 .st([St::MxAuto, St::MaxW56rem])
@@ -457,15 +521,19 @@ fn section_comparison() -> ElementBuilder {
                     el(El::P)
                         .st([St::TextMuted, St::TextCenter, St::MbLg])
                         .text("Real numbers, not marketing claims."),
-                    Table::new()
-                        .headers(["", "rwire", "LiveView", "Blazor", "htmx"])
-                        .row(TableRow::new().cells(["Client runtime", "1.5KB", "30KB", "200KB", "14KB"]))
-                        .row(TableRow::new().cells(["Wire format", "Binary", "JSON", "JSON", "HTML"]))
-                        .row(TableRow::new().cells(["Update cost", "4 bytes", "25 bytes", "100+ bytes", "100+ bytes"]))
-                        .row(TableRow::new().cells(["Memory/conn", "2\u{2013}5KB", "5\u{2013}50KB", "250KB", "N/A"]))
-                        .row(TableRow::new().cells(["Language", "Rust", "Elixir", "C#", "Any"]))
-                        .striped(true)
-                        .build(),
+                    el(El::Div)
+                        .st([St::OverflowXAuto])
+                        .append([
+                            Table::new()
+                                .headers(["", "rwire", "LiveView", "Blazor", "htmx"])
+                                .row(TableRow::new().cells(["Client runtime", "1.5KB", "30KB", "200KB", "14KB"]))
+                                .row(TableRow::new().cells(["Wire format", "Binary", "JSON", "JSON", "HTML"]))
+                                .row(TableRow::new().cells(["Update cost", "4 bytes", "25 bytes", "100+ bytes", "100+ bytes"]))
+                                .row(TableRow::new().cells(["Memory/conn", "2\u{2013}5KB", "5\u{2013}50KB", "250KB", "N/A"]))
+                                .row(TableRow::new().cells(["Language", "Rust", "Elixir", "C#", "Any"]))
+                                .striped(true)
+                                .build(),
+                        ]),
                 ]),
         ])
 }
@@ -474,8 +542,7 @@ fn section_comparison() -> ElementBuilder {
 
 fn section_cta() -> ElementBuilder {
     el(El::Div)
-        .st([St::BgAccentSubtle, St::TextCenter])
-        .attr("style", "padding:4rem 1.5rem")
+        .st([St::BgAccentSubtle, St::TextCenter, St::Py4xl, St::PxLg])
         .append([
             el(El::H2)
                 .st([St::Text3xl, St::FontBold, St::MbLg])
@@ -616,15 +683,16 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
 
     let prev_next_nav = build_prev_next_nav(prev_page, next_page);
 
-    Stack::row()
-        .gap(Gap::Xl)
-        .children([
+    el(El::Div)
+        .st([St::DisplayFlex, St::GapXl])
+        .append([
             el(El::Div)
                 .st([St::Flex1, St::MinW0])
                 .append([
-                    // Breadcrumb
+                    // Breadcrumb (hidden on mobile)
                     el(El::Div)
-                        .st([St::DisplayFlex, St::ItemsCenter, St::GapXs, St::TextSm, St::TextMuted, St::MbLg])
+                        .st([St::DisplayNone, St::ItemsCenter, St::GapXs, St::TextSm, St::TextMuted, St::MbLg])
+                        .md([St::DisplayFlex])
                         .append([
                             Link::to("/", "Docs")
                                 .st([St::NoDecoration, St::CursorPointer, St::TextMuted])
@@ -637,18 +705,19 @@ fn build_doc_page(site: &DocSite, path: &str) -> ElementBuilder {
                     parsed.content,
                     prev_next_nav,
                 ]),
+            // Table of contents: hidden on mobile, visible at lg+
             el(El::Div)
-                .st([St::FlexShrink0, St::PositionSticky, St::TopHeader])
-                .attr("style", "width:220px;align-self:start")
+                .st([St::DisplayNone, St::FlexShrink0, St::PositionSticky, St::TopHeader])
+                .lg([St::DisplayBlock])
+                .st([St::W220px, St::SelfStart])
                 .append([toc.build()]),
         ])
-        .build()
 }
 
 fn build_prev_next_nav(prev: Option<&DocPage>, next: Option<&DocPage>) -> ElementBuilder {
     let mut nav = el(El::Nav)
         .st([St::DisplayFlex, St::JustifyBetween, St::ItemsCenter, St::BorderT, St::BorderBDefault])
-        .attr("style", "margin-top:3rem;padding-top:1.5rem");
+        .st([St::Mt2xl, St::PtLg]);
 
     // Previous link (left-aligned)
     let prev_el = if let Some(p) = prev {
@@ -747,7 +816,13 @@ fn on_route_change(state: &mut SiteState, ctx: &rwire::EventContext) {
         }
         state.searching = false;
         state.search_query.clear();
+        state.sidebar_open = false;
     }
+}
+
+#[handler]
+fn toggle_sidebar(state: &mut SiteState) {
+    state.sidebar_open = !state.sidebar_open;
 }
 
 #[handler]

@@ -189,6 +189,8 @@ pub struct ElementBuilder {
     style_props: Vec<(u8, u8)>,
     /// Pseudo-class/pseudo-element groups: (Pc code, St tokens)
     pseudo_groups: Vec<(u8, Vec<u16>)>,
+    /// Responsive breakpoint groups: (Bp code, St tokens)
+    breakpoint_groups: Vec<(u8, Vec<u16>)>,
 }
 
 impl ElementBuilder {
@@ -206,6 +208,7 @@ impl ElementBuilder {
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
+            breakpoint_groups: Vec::new(),
         }
     }
 
@@ -242,6 +245,7 @@ impl ElementBuilder {
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
+            breakpoint_groups: Vec::new(),
         }
     }
 
@@ -509,6 +513,58 @@ impl ElementBuilder {
         &self.pseudo_groups
     }
 
+    /// Apply responsive breakpoint style tokens (mobile-first, min-width).
+    ///
+    /// Breakpoint tokens generate `@media(min-width:...)` CSS rules.
+    /// Styles are applied at the specified breakpoint and above.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rwire::{el, El, St};
+    /// use rwire::style_tokens::Bp;
+    ///
+    /// el(El::Div)
+    ///     .st([St::FlexCol, St::GapMd])       // mobile: column layout
+    ///     .md([St::FlexRow])                    // 768px+: row layout
+    ///     .lg([St::GridCols3])                  // 1024px+: 3-column grid
+    /// ```
+    pub fn breakpoint<I>(mut self, bp: crate::style_tokens::Bp, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = crate::style_tokens::St>,
+    {
+        let st_codes: Vec<u16> = tokens.into_iter().map(|s| s.as_u16()).collect();
+        if !st_codes.is_empty() {
+            self.breakpoint_groups.push((bp.as_u8(), st_codes));
+        }
+        self
+    }
+
+    /// Apply styles at the `sm` breakpoint (640px+).
+    pub fn sm<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.breakpoint(crate::style_tokens::Bp::Sm, tokens)
+    }
+
+    /// Apply styles at the `md` breakpoint (768px+).
+    pub fn md<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.breakpoint(crate::style_tokens::Bp::Md, tokens)
+    }
+
+    /// Apply styles at the `lg` breakpoint (1024px+).
+    pub fn lg<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.breakpoint(crate::style_tokens::Bp::Lg, tokens)
+    }
+
+    /// Apply styles at the `xl` breakpoint (1280px+).
+    pub fn xl<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+        self.breakpoint(crate::style_tokens::Bp::Xl, tokens)
+    }
+
+    /// Get the breakpoint groups.
+    pub fn get_breakpoint_groups(&self) -> &[(u8, Vec<u16>)] {
+        &self.breakpoint_groups
+    }
+
     /// Bind an event handler to this element.
     ///
     /// The handler function will be called when the event occurs.
@@ -632,6 +688,7 @@ impl ElementBuilder {
         self.style_utils.hash(hasher);
         self.style_props.hash(hasher);
         self.pseudo_groups.hash(hasher);
+        self.breakpoint_groups.hash(hasher);
         for (ev, _) in &self.events {
             ev.as_u8().hash(hasher);
         }
@@ -687,6 +744,8 @@ pub struct BuildContext {
     used_style_values: HashSet<u8>,
     /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
     used_pseudo_pairs: HashSet<(u8, u16)>,
+    /// Used breakpoint (Bp, St) pairs (for tree-shaking)
+    used_breakpoint_pairs: HashSet<(u8, u16)>,
     /// Used attribute key codes (for tree-shaking)
     used_attr_keys: HashSet<u8>,
     /// Used attribute value codes (for tree-shaking)
@@ -773,6 +832,7 @@ impl BuildContext {
             used_style_props: HashSet::new(),
             used_style_values: HashSet::new(),
             used_pseudo_pairs: HashSet::new(),
+            used_breakpoint_pairs: HashSet::new(),
             used_attr_keys: HashSet::new(),
             used_attr_values: HashSet::new(),
             composite_table: crate::style_groups::CompositeTable::new(),
@@ -935,15 +995,15 @@ impl BuildContext {
         }
     }
 
-    fn register_remote_handler(&mut self, handler: HandlerFn) -> u8 {
+    fn register_remote_handler(&mut self, handler: HandlerFn) -> u32 {
         // Check if handler is already registered (by comparing fn_id)
         let new_id = handler.fn_id();
         for (i, h) in self.handlers.iter().enumerate() {
             if h.fn_id() == new_id {
-                return i as u8;
+                return i as u32;
             }
         }
-        let idx = self.handlers.len() as u8;
+        let idx = self.handlers.len() as u32;
         self.handlers.push(handler);
         idx
     }
@@ -952,13 +1012,13 @@ impl BuildContext {
         &mut self,
         mut mutations: LocalMutations,
         state_type_id: Option<TypeId>,
-    ) -> u8 {
+    ) -> u32 {
         self.has_local_handlers = true;
         // Assign state index if state type is known
         if let Some(type_id) = state_type_id {
             mutations.state_idx = self.get_or_create_local_state_idx(type_id);
         }
-        let idx = self.local_handlers.len() as u8;
+        let idx = self.local_handlers.len() as u32;
         self.local_handlers.push(mutations);
         idx
     }
@@ -1002,6 +1062,35 @@ impl BuildContext {
         // Track event type usage
         for (ev, _) in &el.events {
             self.used_events.insert(ev.as_u8());
+        }
+        // Track style tokens for tree-shaking
+        for &st in &el.style_utils {
+            self.used_style_utils.insert(st);
+        }
+        for &(prop, value) in &el.style_props {
+            self.used_style_props.insert(prop);
+            self.used_style_values.insert(value);
+        }
+        for (pc_code, st_codes) in &el.pseudo_groups {
+            for &st in st_codes {
+                self.used_pseudo_pairs.insert((*pc_code, st));
+            }
+        }
+        for (bp_code, st_codes) in &el.breakpoint_groups {
+            for &st in st_codes {
+                self.used_breakpoint_pairs.insert((*bp_code, st));
+            }
+        }
+        for ta in &el.typed_attrs {
+            match ta {
+                TypedAttr::Enum(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.used_attr_values.insert(value.as_u8());
+                }
+                TypedAttr::Bool(key) | TypedAttr::KeySym(key, _) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                }
+            }
         }
         // Process synced children - just track the ID counter, no symbol interning needed
         for child in &el.children {
@@ -1065,6 +1154,35 @@ impl BuildContext {
         for (ev, _) in &el.events {
             self.used_events.insert(ev.as_u8());
         }
+        // Track style tokens for tree-shaking
+        for &st in &el.style_utils {
+            self.used_style_utils.insert(st);
+        }
+        for &(prop, value) in &el.style_props {
+            self.used_style_props.insert(prop);
+            self.used_style_values.insert(value);
+        }
+        for (pc_code, st_codes) in &el.pseudo_groups {
+            for &st in st_codes {
+                self.used_pseudo_pairs.insert((*pc_code, st));
+            }
+        }
+        for (bp_code, st_codes) in &el.breakpoint_groups {
+            for &st in st_codes {
+                self.used_breakpoint_pairs.insert((*bp_code, st));
+            }
+        }
+        for ta in &el.typed_attrs {
+            match ta {
+                TypedAttr::Enum(key, value) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                    self.used_attr_values.insert(value.as_u8());
+                }
+                TypedAttr::Bool(key) | TypedAttr::KeySym(key, _) => {
+                    self.used_attr_keys.insert(key.as_u8());
+                }
+            }
+        }
         // Process children
         for child in &el.children {
             self.collect_symbols_multi(child, states);
@@ -1091,6 +1209,11 @@ impl BuildContext {
                 self.used_pseudo_pairs.insert((*pc_code, st));
             }
         }
+        for (bp_code, st_codes) in &el.breakpoint_groups {
+            for &st in st_codes {
+                self.used_breakpoint_pairs.insert((*bp_code, st));
+            }
+        }
         for ta in &el.typed_attrs {
             match ta {
                 TypedAttr::Enum(key, value) => {
@@ -1111,7 +1234,7 @@ impl BuildContext {
     }
 
     /// Emit opcodes for an element tree (second pass).
-    pub fn emit(&mut self, el: &ElementBuilder, state: &dyn Any) -> u8 {
+    pub fn emit(&mut self, el: &ElementBuilder, state: &dyn Any) -> u32 {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
 
@@ -1146,7 +1269,7 @@ impl BuildContext {
     pub fn emit_multi(
         &mut self,
         el: &ElementBuilder,
-    ) -> u8 {
+    ) -> u32 {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
 
@@ -1178,7 +1301,7 @@ impl BuildContext {
     }
 
     /// Emit text content using the best encoding.
-    fn emit_text(&mut self, ref_idx: u8, text: &str) {
+    fn emit_text(&mut self, ref_idx: u32, text: &str) {
         match self.text_encodings.get(text) {
             Some(TextEncoding::Int(n)) => {
                 self.buf.set_text_int(ref_idx, *n);
@@ -1194,7 +1317,7 @@ impl BuildContext {
         }
     }
 
-    fn emit_element(&mut self, el: &ElementBuilder, parent_ref: Option<u8>, state: &dyn Any) -> u8 {
+    fn emit_element(&mut self, el: &ElementBuilder, parent_ref: Option<u32>, state: &dyn Any) -> u32 {
         // If this is a synced element, render it and wrap with an ID
         if let Some(renderer) = &el.synced {
             let synced_id = self.next_synced_id;
@@ -1305,6 +1428,14 @@ impl BuildContext {
             self.buf.style_pseudo(ref_idx, *pc_code, st_codes);
         }
 
+        // Emit breakpoint groups
+        for (bp_code, st_codes) in &el.breakpoint_groups {
+            for &st in st_codes {
+                self.used_breakpoint_pairs.insert((*bp_code, st));
+            }
+            self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
+        }
+
         // Bind events and track event type usage
         for (ev, handler_spec) in &el.events {
             self.used_events.insert(ev.as_u8());
@@ -1358,8 +1489,8 @@ impl BuildContext {
     fn emit_element_multi(
         &mut self,
         el: &ElementBuilder,
-        parent_ref: Option<u8>,
-    ) -> u8 {
+        parent_ref: Option<u32>,
+    ) -> u32 {
         // If this is a synced element, use the cached render from collect_symbols_multi
         if let Some(renderer) = &el.synced {
             let synced_id = self.next_synced_id;
@@ -1464,6 +1595,14 @@ impl BuildContext {
                 self.used_pseudo_pairs.insert((*pc_code, st));
             }
             self.buf.style_pseudo(ref_idx, *pc_code, st_codes);
+        }
+
+        // Emit breakpoint groups
+        for (bp_code, st_codes) in &el.breakpoint_groups {
+            for &st in st_codes {
+                self.used_breakpoint_pairs.insert((*bp_code, st));
+            }
+            self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
 
         // Bind events and track event type usage
@@ -1584,6 +1723,11 @@ impl BuildContext {
     /// Get the set of used pseudo-class tokens.
     pub fn used_pseudo_pairs(&self) -> &HashSet<(u8, u16)> {
         &self.used_pseudo_pairs
+    }
+
+    /// Get the set of used breakpoint tokens.
+    pub fn used_breakpoint_pairs(&self) -> &HashSet<(u8, u16)> {
+        &self.used_breakpoint_pairs
     }
 
     /// Get the set of used attribute key codes.
@@ -1858,7 +2002,7 @@ pub fn build_synced_update_with_known_symbols(
 #[allow(clippy::too_many_arguments)]
 fn emit_update_element(
     el: &ElementBuilder,
-    parent_ref: u8,
+    parent_ref: u32,
     buf: &mut OpcodeBuffer,
     symbol_map: &HashMap<String, u32>,
     handlers: &mut Vec<HandlerFn>,
@@ -1867,8 +2011,8 @@ fn emit_update_element(
     rendered_ids: &mut HashSet<u32>,
     synced_counter: &mut u32,
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
-) -> u8 {
-    // Handle nested synced elements - create wrapper with ORIGINAL ID
+) -> u32 {
+    // Handle nested synced elements
     if let Some(renderer) = &el.synced {
         let state_type_id = renderer.state_type_id();
 
@@ -1897,7 +2041,9 @@ fn emit_update_element(
         // Find the state for this renderer's state type
         if let Some(state) = states.get(&state_type_id) {
             if let Some(rendered) = renderer.render_with_state(*state) {
-                // Use CREATE_SYNCED opcode with the ORIGINAL ID
+                // Always use CREATE_SYNCED for nested synced elements within an update.
+                // The parent's CLEAR_CHILDREN destroys the old wrapper, so GET_SYNCED
+                // would fail (the element no longer exists in the DOM).
                 let wrapper_ref = buf.create_synced(synced_id);
 
                 // Emit the rendered content as a child of the wrapper
@@ -1914,7 +2060,6 @@ fn emit_update_element(
                     states,
                 );
 
-                // Append wrapper to parent
                 buf.append(parent_ref, wrapper_ref);
 
                 return wrapper_ref;
@@ -1986,6 +2131,11 @@ fn emit_update_element(
         buf.style_pseudo(ref_idx, *pc_code, st_codes);
     }
 
+    // Emit breakpoint groups
+    for (bp_code, st_codes) in &el.breakpoint_groups {
+        buf.style_breakpoint(ref_idx, *bp_code, st_codes);
+    }
+
     // Bind events - look up handler index from existing handlers by function pointer
     // If handler not found, register it as a new handler
     for (ev, spec) in &el.events {
@@ -2004,9 +2154,9 @@ fn emit_update_element(
 
             // Use BIND_REMOTE_PARAM if we have param bytes
             if let Some(param_bytes) = &spec.param_bytes {
-                buf.bind_remote_param(ref_idx, ev.as_u8(), handler_idx as u8, param_bytes);
+                buf.bind_remote_param(ref_idx, ev.as_u8(), handler_idx as u32, param_bytes);
             } else {
-                buf.bind_remote(ref_idx, ev.as_u8(), handler_idx as u8);
+                buf.bind_remote(ref_idx, ev.as_u8(), handler_idx as u32);
             }
         }
     }

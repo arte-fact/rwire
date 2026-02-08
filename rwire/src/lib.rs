@@ -131,7 +131,7 @@ pub use style::{ScopedClass, Style};
 pub use attr_tokens::{At, Av};
 
 // Style token exports (binary-encoded styles)
-pub use style_tokens::{Pc, St, StyleProp, StyleValue};
+pub use style_tokens::{Bp, Pc, St, StyleProp, StyleValue};
 
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};

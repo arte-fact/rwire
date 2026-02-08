@@ -1,4 +1,7 @@
 //! Binary encoder for DOM opcodes.
+//!
+//! All element refs and handler indices use varint encoding, supporting
+//! unlimited elements per message (practical limit ~16K with 2-byte varints).
 
 use bytes::{BufMut, BytesMut};
 
@@ -7,18 +10,19 @@ use super::opcodes::{
     CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
     ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA,
-    SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO,
-    STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI,
+    STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
+    SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 
+/// Sentinel ref value for document.body in APPEND opcodes.
+pub const BODY_REF: u32 = 0xFFFF;
+
 /// Buffer for building opcode sequences.
 ///
-/// Supports both legacy u8 refs (for backward compatibility) and
-/// extended u32 refs using varint encoding (for >255 elements).
-///
-/// Symbol indices also use varint encoding, allowing unlimited symbols
-/// (practical limit ~16K with 2-byte varints).
+/// Element refs, symbol indices, and handler indices all use varint encoding,
+/// supporting pages with thousands of elements.
 pub struct OpcodeBuffer {
     buf: BytesMut,
     next_ref: u32,
@@ -32,22 +36,6 @@ impl OpcodeBuffer {
             next_ref: 0,
             next_symbol: SYMBOL_SESSION_START as u32,
         }
-    }
-
-    /// Create a new buffer with extended ref support (varint encoding).
-    ///
-    /// Use this when you expect more than 127 elements.
-    pub fn new_extended() -> Self {
-        Self {
-            buf: BytesMut::with_capacity(256),
-            next_ref: 0,
-            next_symbol: SYMBOL_SESSION_START as u32,
-        }
-    }
-
-    /// Check if we've exceeded the u8 ref limit.
-    pub fn needs_extended_refs(&self) -> bool {
-        self.next_ref > 127
     }
 
     /// Get the current ref count.
@@ -107,14 +95,7 @@ impl OpcodeBuffer {
     }
 
     /// Create an element. Returns the ref index.
-    ///
-    /// Note: Returns u8 for backward compatibility. Use `create_ext` for >255 elements.
-    pub fn create(&mut self, element_type: u8) -> u8 {
-        self.create_ext(element_type) as u8
-    }
-
-    /// Create an element with extended ref support. Returns the ref index as u32.
-    pub fn create_ext(&mut self, element_type: u8) -> u32 {
+    pub fn create(&mut self, element_type: u8) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(CREATE);
         self.buf.put_u8(element_type);
@@ -126,14 +107,7 @@ impl OpcodeBuffer {
     ///
     /// This is more compact than CREATE span + SET_ATTR id, saving ~15 bytes per synced element.
     /// Format: [CREATE_SYNCED, synced_id_varint] → creates span, sets id, returns ref
-    ///
-    /// Note: Returns u8 for backward compatibility. Use `create_synced_ext` for >255 elements.
-    pub fn create_synced(&mut self, synced_id: u32) -> u8 {
-        self.create_synced_ext(synced_id) as u8
-    }
-
-    /// Create a synced wrapper span with extended ref support.
-    pub fn create_synced_ext(&mut self, synced_id: u32) -> u32 {
+    pub fn create_synced(&mut self, synced_id: u32) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(CREATE_SYNCED);
         write_varint(&mut self.buf, synced_id);
@@ -145,14 +119,7 @@ impl OpcodeBuffer {
     ///
     /// This is more compact than GET_BY_ID with a symbol for "__synced_N".
     /// Format: [GET_SYNCED, synced_id_varint] → returns ref
-    ///
-    /// Note: Returns u8 for backward compatibility. Use `get_synced_ext` for >255 elements.
-    pub fn get_synced(&mut self, synced_id: u32) -> u8 {
-        self.get_synced_ext(synced_id) as u8
-    }
-
-    /// Get a synced element by numeric ID with extended ref support.
-    pub fn get_synced_ext(&mut self, synced_id: u32) -> u32 {
+    pub fn get_synced(&mut self, synced_id: u32) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(GET_SYNCED);
         write_varint(&mut self.buf, synced_id);
@@ -162,20 +129,20 @@ impl OpcodeBuffer {
 
     /// Set class on an element.
     ///
-    /// Symbol index uses varint encoding.
-    pub fn set_class(&mut self, ref_idx: u8, symbol_idx: u32) -> &mut Self {
+    /// Both ref and symbol index use varint encoding.
+    pub fn set_class(&mut self, ref_idx: u32, symbol_idx: u32) -> &mut Self {
         self.buf.put_u8(SET_CLASS);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, symbol_idx);
         self
     }
 
     /// Set text content on an element.
     ///
-    /// Symbol index uses varint encoding.
-    pub fn set_text(&mut self, ref_idx: u8, symbol_idx: u32) -> &mut Self {
+    /// Both ref and symbol index use varint encoding.
+    pub fn set_text(&mut self, ref_idx: u32, symbol_idx: u32) -> &mut Self {
         self.buf.put_u8(SET_TEXT);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, symbol_idx);
         self
     }
@@ -183,15 +150,15 @@ impl OpcodeBuffer {
     /// Set text content from word indices (words joined with spaces).
     ///
     /// More compact than symbol table when words are reused across strings.
-    /// Format: [SET_TEXT_WORDS, ref, count, idx0, idx1, ...]
-    pub fn set_text_words(&mut self, ref_idx: u8, word_indices: &[u8]) -> &mut Self {
+    /// Format: [SET_TEXT_WORDS, ref_varint, count, idx0, idx1, ...]
+    pub fn set_text_words(&mut self, ref_idx: u32, word_indices: &[u8]) -> &mut Self {
         assert!(
             word_indices.len() <= 255,
             "set_text_words: too many words ({}, max 255)",
             word_indices.len()
         );
         self.buf.put_u8(SET_TEXT_WORDS);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(word_indices.len() as u8);
         for &idx in word_indices {
             self.buf.put_u8(idx);
@@ -202,10 +169,10 @@ impl OpcodeBuffer {
     /// Set text content to a number (varint encoded).
     ///
     /// More compact than symbol table for dynamic numeric values.
-    /// Format: [SET_TEXT_INT, ref, varint]
-    pub fn set_text_int(&mut self, ref_idx: u8, value: i32) -> &mut Self {
+    /// Format: [SET_TEXT_INT, ref_varint, zigzag_varint]
+    pub fn set_text_int(&mut self, ref_idx: u32, value: i32) -> &mut Self {
         self.buf.put_u8(SET_TEXT_INT);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         // Encode as zigzag varint for signed integers
         let zigzag = ((value << 1) ^ (value >> 31)) as u32;
         write_varint(&mut self.buf, zigzag);
@@ -214,10 +181,10 @@ impl OpcodeBuffer {
 
     /// Set an attribute on an element.
     ///
-    /// Symbol indices use varint encoding.
-    pub fn set_attr(&mut self, ref_idx: u8, attr_symbol: u32, value_symbol: u32) -> &mut Self {
+    /// Ref and symbol indices use varint encoding.
+    pub fn set_attr(&mut self, ref_idx: u32, attr_symbol: u32, value_symbol: u32) -> &mut Self {
         self.buf.put_u8(SET_ATTR);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, attr_symbol);
         write_varint(&mut self.buf, value_symbol);
         self
@@ -225,53 +192,53 @@ impl OpcodeBuffer {
 
     /// Set a data attribute on an element.
     ///
-    /// Symbol indices use varint encoding.
-    pub fn set_data(&mut self, ref_idx: u8, key_symbol: u32, value_symbol: u32) -> &mut Self {
+    /// Ref and symbol indices use varint encoding.
+    pub fn set_data(&mut self, ref_idx: u32, key_symbol: u32, value_symbol: u32) -> &mut Self {
         self.buf.put_u8(SET_DATA);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, key_symbol);
         write_varint(&mut self.buf, value_symbol);
         self
     }
 
     /// Append a child to a parent element.
-    pub fn append(&mut self, parent_ref: u8, child_ref: u8) -> &mut Self {
+    pub fn append(&mut self, parent_ref: u32, child_ref: u32) -> &mut Self {
         self.buf.put_u8(APPEND);
-        self.buf.put_u8(parent_ref);
-        self.buf.put_u8(child_ref);
+        write_varint(&mut self.buf, parent_ref);
+        write_varint(&mut self.buf, child_ref);
         self
     }
 
-    /// Append a child to the document body (parent = 0xFF).
-    pub fn append_to_body(&mut self, child_ref: u8) -> &mut Self {
+    /// Append a child to the document body (parent = BODY_REF sentinel).
+    pub fn append_to_body(&mut self, child_ref: u32) -> &mut Self {
         self.buf.put_u8(APPEND);
-        self.buf.put_u8(0xFF); // Special value for document.body
-        self.buf.put_u8(child_ref);
+        write_varint(&mut self.buf, BODY_REF);
+        write_varint(&mut self.buf, child_ref);
         self
     }
 
     /// Clear all children from an element.
-    pub fn clear_children(&mut self, ref_idx: u8) -> &mut Self {
+    pub fn clear_children(&mut self, ref_idx: u32) -> &mut Self {
         self.buf.put_u8(CLEAR_CHILDREN);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self
     }
 
     /// Bind a local (WASM-only) event handler.
-    pub fn bind_local(&mut self, ref_idx: u8, event_type: u8, handler_idx: u8) -> &mut Self {
+    pub fn bind_local(&mut self, ref_idx: u32, event_type: u8, handler_idx: u32) -> &mut Self {
         self.buf.put_u8(BIND_LOCAL);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(event_type);
-        self.buf.put_u8(handler_idx);
+        write_varint(&mut self.buf, handler_idx);
         self
     }
 
     /// Bind a remote event handler (requires server round-trip).
-    pub fn bind_remote(&mut self, ref_idx: u8, event_type: u8, handler_idx: u8) -> &mut Self {
+    pub fn bind_remote(&mut self, ref_idx: u32, event_type: u8, handler_idx: u32) -> &mut Self {
         self.buf.put_u8(BIND_REMOTE);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(event_type);
-        self.buf.put_u8(handler_idx);
+        write_varint(&mut self.buf, handler_idx);
         self
     }
 
@@ -280,12 +247,12 @@ impl OpcodeBuffer {
     /// The param_bytes are stored on the element and sent back with the event,
     /// enabling item-specific handlers for dynamically generated content.
     ///
-    /// Format: [BIND_REMOTE_PARAM, ref, event_type, handler_idx, param_len, ...param_bytes]
+    /// Format: [BIND_REMOTE_PARAM, ref_varint, event_type, handler_varint, param_len, ...param_bytes]
     pub fn bind_remote_param(
         &mut self,
-        ref_idx: u8,
+        ref_idx: u32,
         event_type: u8,
-        handler_idx: u8,
+        handler_idx: u32,
         param_bytes: &[u8],
     ) -> &mut Self {
         assert!(
@@ -294,9 +261,9 @@ impl OpcodeBuffer {
             param_bytes.len()
         );
         self.buf.put_u8(BIND_REMOTE_PARAM);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(event_type);
-        self.buf.put_u8(handler_idx);
+        write_varint(&mut self.buf, handler_idx);
         self.buf.put_u8(param_bytes.len() as u8);
         self.buf.put_slice(param_bytes);
         self
@@ -305,15 +272,7 @@ impl OpcodeBuffer {
     /// Get element by ID (for updates). Returns next ref index.
     ///
     /// Symbol index uses varint encoding.
-    /// Note: Returns u8 for backward compatibility. Use `get_by_id_ext` for >255 elements.
-    pub fn get_by_id(&mut self, symbol_idx: u32) -> u8 {
-        self.get_by_id_ext(symbol_idx) as u8
-    }
-
-    /// Get element by ID with extended ref support. Returns the ref index as u32.
-    ///
-    /// Symbol index uses varint encoding.
-    pub fn get_by_id_ext(&mut self, symbol_idx: u32) -> u32 {
+    pub fn get_by_id(&mut self, symbol_idx: u32) -> u32 {
         let ref_idx = self.next_ref;
         self.buf.put_u8(GET_BY_ID);
         write_varint(&mut self.buf, symbol_idx);
@@ -359,35 +318,35 @@ impl OpcodeBuffer {
 
     /// Set validation rules on a form field.
     ///
-    /// Symbol index uses varint encoding.
-    pub fn form_set_validation(&mut self, ref_idx: u8, rules_symbol: u32) -> &mut Self {
+    /// Ref and symbol index use varint encoding.
+    pub fn form_set_validation(&mut self, ref_idx: u32, rules_symbol: u32) -> &mut Self {
         self.buf.put_u8(FORM_SET_VALIDATION);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, rules_symbol);
         self
     }
 
     /// Show validation error on a field.
     ///
-    /// Symbol index uses varint encoding.
-    pub fn form_show_error(&mut self, ref_idx: u8, message_symbol: u32) -> &mut Self {
+    /// Ref and symbol index use varint encoding.
+    pub fn form_show_error(&mut self, ref_idx: u32, message_symbol: u32) -> &mut Self {
         self.buf.put_u8(FORM_SHOW_ERROR);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, message_symbol);
         self
     }
 
     /// Clear validation error on a field.
-    pub fn form_clear_error(&mut self, ref_idx: u8) -> &mut Self {
+    pub fn form_clear_error(&mut self, ref_idx: u32) -> &mut Self {
         self.buf.put_u8(FORM_CLEAR_ERROR);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self
     }
 
     /// Set field as required.
-    pub fn form_set_required(&mut self, ref_idx: u8, required: bool) -> &mut Self {
+    pub fn form_set_required(&mut self, ref_idx: u32, required: bool) -> &mut Self {
         self.buf.put_u8(FORM_SET_REQUIRED);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(if required { 1 } else { 0 });
         self
     }
@@ -420,32 +379,30 @@ impl OpcodeBuffer {
 
     /// Set inline style on an element.
     ///
-    /// Symbol index uses varint encoding.
-    pub fn style_set(&mut self, ref_idx: u8, style_symbol: u32) -> &mut Self {
+    /// Ref and symbol index use varint encoding.
+    pub fn style_set(&mut self, ref_idx: u32, style_symbol: u32) -> &mut Self {
         self.buf.put_u8(STYLE_SET);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, style_symbol);
         self
     }
 
     /// Set a style utility token on an element.
     ///
-    /// Format: [STYLE_UTIL, ref, util_varint]
-    /// 3-4 bytes total depending on token value (varint for extended tokens).
-    pub fn style_util(&mut self, ref_idx: u8, util: u16) -> &mut Self {
+    /// Format: [STYLE_UTIL, ref_varint, util_varint]
+    pub fn style_util(&mut self, ref_idx: u32, util: u16) -> &mut Self {
         self.buf.put_u8(STYLE_UTIL);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, util as u32);
         self
     }
 
     /// Set a style property+value on an element.
     ///
-    /// Format: [STYLE_PROP, ref, prop_byte, value_byte]
-    /// 4 bytes total - flexible for any property+value combination.
-    pub fn style_prop(&mut self, ref_idx: u8, prop: u8, value: u8) -> &mut Self {
+    /// Format: [STYLE_PROP, ref_varint, prop_byte, value_byte]
+    pub fn style_prop(&mut self, ref_idx: u32, prop: u8, value: u8) -> &mut Self {
         self.buf.put_u8(STYLE_PROP);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(prop);
         self.buf.put_u8(value);
         self
@@ -453,16 +410,15 @@ impl OpcodeBuffer {
 
     /// Set multiple style utility tokens on an element.
     ///
-    /// Format: [STYLE_MULTI, ref, count, util1_varint, util2_varint, ...]
-    /// More efficient than multiple STYLE_UTIL calls for >2 utilities.
-    pub fn style_multi(&mut self, ref_idx: u8, utils: &[u16]) -> &mut Self {
+    /// Format: [STYLE_MULTI, ref_varint, count, util1_varint, util2_varint, ...]
+    pub fn style_multi(&mut self, ref_idx: u32, utils: &[u16]) -> &mut Self {
         assert!(
             utils.len() <= 255,
             "style_multi: too many tokens ({}, max 255)",
             utils.len()
         );
         self.buf.put_u8(STYLE_MULTI);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(utils.len() as u8);
         for &util in utils {
             write_varint(&mut self.buf, util as u32);
@@ -472,26 +428,45 @@ impl OpcodeBuffer {
 
     /// Apply a style composite by ID.
     ///
-    /// Format: [STYLE_COMPOSITE, ref, composite_id_varint]
-    pub fn style_composite(&mut self, ref_idx: u8, composite_id: u32) -> &mut Self {
+    /// Format: [STYLE_COMPOSITE, ref_varint, composite_id_varint]
+    pub fn style_composite(&mut self, ref_idx: u32, composite_id: u32) -> &mut Self {
         self.buf.put_u8(STYLE_COMPOSITE);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, composite_id);
         self
     }
 
     /// Apply composable pseudo-class styles to an element.
     ///
-    /// Format: [STYLE_PSEUDO, ref, pc_code, count, st1_varint, st2_varint, ...]
-    pub fn style_pseudo(&mut self, ref_idx: u8, pc: u8, st_tokens: &[u16]) -> &mut Self {
+    /// Format: [STYLE_PSEUDO, ref_varint, pc_code, count, st1_varint, st2_varint, ...]
+    pub fn style_pseudo(&mut self, ref_idx: u32, pc: u8, st_tokens: &[u16]) -> &mut Self {
         assert!(
             st_tokens.len() <= 255,
             "style_pseudo: too many tokens ({}, max 255)",
             st_tokens.len()
         );
         self.buf.put_u8(STYLE_PSEUDO);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(pc);
+        self.buf.put_u8(st_tokens.len() as u8);
+        for &token in st_tokens {
+            write_varint(&mut self.buf, token as u32);
+        }
+        self
+    }
+
+    /// Apply responsive breakpoint styles to an element.
+    ///
+    /// Format: [STYLE_BREAKPOINT, ref_varint, bp_code, count, st1_varint, st2_varint, ...]
+    pub fn style_breakpoint(&mut self, ref_idx: u32, bp: u8, st_tokens: &[u16]) -> &mut Self {
+        assert!(
+            st_tokens.len() <= 255,
+            "style_breakpoint: too many tokens ({}, max 255)",
+            st_tokens.len()
+        );
+        self.buf.put_u8(STYLE_BREAKPOINT);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(bp);
         self.buf.put_u8(st_tokens.len() as u8);
         for &token in st_tokens {
             write_varint(&mut self.buf, token as u32);
@@ -520,11 +495,10 @@ impl OpcodeBuffer {
 
     /// Set attribute with enum key + enum value.
     ///
-    /// Format: [SET_ATTR_ENUM, ref, at, av] = 4 bytes total.
-    /// Both key and value are single-byte enum codes from At/Av enums.
-    pub fn set_attr_enum(&mut self, ref_idx: u8, at: u8, av: u8) -> &mut Self {
+    /// Format: [SET_ATTR_ENUM, ref_varint, at, av]
+    pub fn set_attr_enum(&mut self, ref_idx: u32, at: u8, av: u8) -> &mut Self {
         self.buf.put_u8(SET_ATTR_ENUM);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(at);
         self.buf.put_u8(av);
         self
@@ -532,21 +506,20 @@ impl OpcodeBuffer {
 
     /// Set boolean attribute (presence-only, e.g. disabled, required).
     ///
-    /// Format: [SET_ATTR_BOOL, ref, at] = 3 bytes total.
-    pub fn set_attr_bool(&mut self, ref_idx: u8, at: u8) -> &mut Self {
+    /// Format: [SET_ATTR_BOOL, ref_varint, at]
+    pub fn set_attr_bool(&mut self, ref_idx: u32, at: u8) -> &mut Self {
         self.buf.put_u8(SET_ATTR_BOOL);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(at);
         self
     }
 
     /// Set attribute with enum key + symbol table value.
     ///
-    /// Format: [SET_ATTR_KEY_SYM, ref, at, val_sym_varint] = 4-5 bytes total.
-    /// Key is an enum code from At, value is a symbol table index.
-    pub fn set_attr_key_sym(&mut self, ref_idx: u8, at: u8, value_symbol: u32) -> &mut Self {
+    /// Format: [SET_ATTR_KEY_SYM, ref_varint, at, val_sym_varint]
+    pub fn set_attr_key_sym(&mut self, ref_idx: u32, at: u8, value_symbol: u32) -> &mut Self {
         self.buf.put_u8(SET_ATTR_KEY_SYM);
-        self.buf.put_u8(ref_idx);
+        write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(at);
         write_varint(&mut self.buf, value_symbol);
         self

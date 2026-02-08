@@ -1,6 +1,7 @@
 //! Decoder for incoming client events.
 
 use super::opcodes::Ev;
+use super::varint::read_varint;
 
 /// Maximum allowed payload size (64KB). Prevents memory exhaustion from malicious inputs.
 const MAX_PAYLOAD_SIZE: usize = 65_536;
@@ -9,7 +10,7 @@ const MAX_PAYLOAD_SIZE: usize = 65_536;
 #[derive(Debug, Clone)]
 pub struct ClientEvent {
     /// The handler index to invoke
-    pub handler_idx: u8,
+    pub handler_idx: u32,
     /// The event type (click, input, etc.)
     pub event_type: u8,
     /// The element ref that triggered the event
@@ -23,43 +24,57 @@ pub struct ClientEvent {
 impl ClientEvent {
     /// Decode a client event from binary data.
     ///
-    /// Supports two formats:
-    /// - Legacy: [handler_idx, event_type, target_ref, payload_len, ...payload]
-    /// - With params: [handler_idx, event_type, target_ref, param_len, ...param_bytes, payload_len, ...payload]
-    ///
-    /// The format is determined by checking if the message has the extended flag (0x80) set
-    /// on the handler_idx byte. If set, param_bytes are included.
+    /// Format:
+    /// - [flags, handler_varint, event_type, target_ref, payload_len, ...payload]
+    /// - With params (flags & 0x80):
+    ///   [flags, handler_varint, event_type, target_ref, param_len, ...params, payload_len, ...payload]
     pub fn decode(data: &[u8]) -> Result<Self, DecodeError> {
         if data.len() < 4 {
             return Err(DecodeError::TooShort);
         }
 
-        let first_byte = data[0];
-        let has_params = (first_byte & 0x80) != 0;
-        let handler_idx = first_byte & 0x7F;
-        let event_type = data[1];
-        let target_ref = data[2];
+        let flags = data[0];
+        let has_params = (flags & 0x80) != 0;
+
+        let (handler_idx, handler_len) = read_varint(&data[1..])
+            .ok_or(DecodeError::TooShort)?;
+
+        let mut pos = 1 + handler_len;
+        if data.len() < pos + 2 {
+            return Err(DecodeError::TooShort);
+        }
+
+        let event_type = data[pos];
+        let target_ref = data[pos + 1];
+        pos += 2;
 
         if has_params {
             // Extended format with param bytes
-            let param_len = data[3] as usize;
-            if data.len() < 4 + param_len + 1 {
+            if data.len() < pos + 1 {
+                return Err(DecodeError::PayloadTruncated);
+            }
+            let param_len = data[pos] as usize;
+            pos += 1;
+
+            if data.len() < pos + param_len + 1 {
                 return Err(DecodeError::PayloadTruncated);
             }
 
-            let param_bytes = data[4..4 + param_len].to_vec();
-            let payload_start = 4 + param_len;
-            let payload_len = data[payload_start] as usize;
+            let param_bytes = data[pos..pos + param_len].to_vec();
+            pos += param_len;
+
+            let payload_len = data[pos] as usize;
+            pos += 1;
 
             if payload_len > MAX_PAYLOAD_SIZE {
                 return Err(DecodeError::PayloadTooLarge);
             }
 
-            if data.len() < payload_start + 1 + payload_len {
+            if data.len() < pos + payload_len {
                 return Err(DecodeError::PayloadTruncated);
             }
 
-            let payload = data[payload_start + 1..payload_start + 1 + payload_len].to_vec();
+            let payload = data[pos..pos + payload_len].to_vec();
 
             Ok(Self {
                 handler_idx,
@@ -69,18 +84,22 @@ impl ClientEvent {
                 param_bytes,
             })
         } else {
-            // Legacy format without params
-            let payload_len = data[3] as usize;
+            // Standard format without params
+            if data.len() < pos + 1 {
+                return Err(DecodeError::PayloadTruncated);
+            }
+            let payload_len = data[pos] as usize;
+            pos += 1;
 
             if payload_len > MAX_PAYLOAD_SIZE {
                 return Err(DecodeError::PayloadTooLarge);
             }
 
-            if data.len() < 4 + payload_len {
+            if data.len() < pos + payload_len {
                 return Err(DecodeError::PayloadTruncated);
             }
 
-            let payload = data[4..4 + payload_len].to_vec();
+            let payload = data[pos..pos + payload_len].to_vec();
 
             Ok(Self {
                 handler_idx,

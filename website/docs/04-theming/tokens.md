@@ -107,6 +107,19 @@ el(El::Button)
 
 The pseudo system generates CSS rules like `:hover`, `:focus-visible`, and `:active` scoped to each element.
 
+## Responsive Breakpoints
+
+Apply styles at specific viewport widths using mobile-first breakpoint methods:
+
+```rust
+el(El::Div)
+    .st([St::FlexCol, St::GapMd])   // mobile: column layout
+    .md([St::FlexRow])               // 768px+: row layout
+    .lg([St::GridCols3])             // 1024px+: 3-column grid
+```
+
+Four breakpoints are available: `.sm()` (640px), `.md()` (768px), `.lg()` (1024px), `.xl()` (1280px). See [Responsive Breakpoints](/docs/04-theming/breakpoints) for the full API.
+
 ## Wire Encoding
 
 The `St` enum uses `#[repr(u16)]` internally. On the wire, tokens are varint-encoded: values under 128 take 1 byte, larger values take 2 bytes. A typical styled element sends 5-10 tokens at 1-2 bytes each, far smaller than equivalent CSS class strings.
