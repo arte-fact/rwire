@@ -82,6 +82,14 @@ pub enum Icon {
     Terminal,
     Clipboard,
     ClipboardCheck,
+
+    // Feature (landing page)
+    Zap,
+    Feather,
+    Shield,
+    Cpu,
+    Palette,
+    Leaf,
 }
 
 impl Icon {
@@ -147,6 +155,14 @@ impl Icon {
             Icon::Terminal => "M4 17l6-5-6-5M12 19h8",
             Icon::Clipboard => "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
             Icon::ClipboardCheck => "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM9 14l2 2 4-4",
+
+            // Feature (landing page)
+            Icon::Zap => "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
+            Icon::Feather => "M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5zM16 8L2 22M17.5 15H9",
+            Icon::Shield => "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+            Icon::Cpu => "M18 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM9 9h6v6H9V9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3",
+            Icon::Palette => "M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2zM6.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM9.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM14.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM17.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z",
+            Icon::Leaf => "M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75",
         }
     }
 
@@ -289,6 +305,7 @@ mod tests {
             Icon::Calendar, Icon::Clock,
             Icon::GitHub, Icon::Discord, Icon::Twitter,
             Icon::Crate, Icon::Terminal, Icon::Clipboard, Icon::ClipboardCheck,
+            Icon::Zap, Icon::Feather, Icon::Shield, Icon::Cpu, Icon::Palette, Icon::Leaf,
         ];
 
         for icon in &icons {

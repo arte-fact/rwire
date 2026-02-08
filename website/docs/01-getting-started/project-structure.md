@@ -1,0 +1,159 @@
+---
+title: Project Structure
+description: Understanding the anatomy of an rwire application
+order: 3
+---
+
+# Project Structure
+
+An rwire application is a standard Rust binary crate. There is no special project layout, no config files, and no build step beyond `cargo build`.
+
+## Typical Layout
+
+```
+my-app/
+├── Cargo.toml          # rwire + async-std dependencies
+├── src/
+│   └── main.rs         # Server setup, state, handlers, renderers, UI
+└── todo.db             # (optional) SQLite file for persisted state
+```
+
+For larger applications, split into modules:
+
+```
+my-app/
+├── Cargo.toml
+├── src/
+│   ├── main.rs         # Server setup and root function
+│   ├── state.rs        # State structs
+│   ├── handlers.rs     # Event handlers
+│   ├── renderers.rs    # Reactive renderers
+│   └── components.rs   # Reusable UI functions
+```
+
+There is no `public/` directory, no `index.html`, no `package.json`. The server generates everything the browser needs at startup.
+
+## The main() Function
+
+Every rwire app starts with `Server::bind()`. The builder pattern configures the server before starting it:
+
+```rust
+#[async_std::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Server::bind("127.0.0.1:9000")?
+        .root(app)                              // Root UI function
+        .on_route(handle_navigation())          // Client-side route handler
+        .routes(router)                         // URL pattern router
+        .capsule_config(CapsuleConfig::dark_nord())  // Theme and styling
+        .persist_interval(Duration::from_millis(100)) // Persistence flush rate
+        .run()
+        .await
+}
+```
+
+- **`.root(app)`** -- The function called to build the initial DOM for each connection. It receives no arguments and returns an `ElementBuilder`.
+- **`.on_route(handler)`** -- Called when the browser navigates to a new URL (via `Link::to()` or browser back/forward). The handler receives the path as `ctx.text()`.
+- **`.routes(router)`** -- A `Router` that maps URL patterns to view functions, enabling tree-shaking across all routes at startup.
+- **`.capsule_config(config)`** -- Configures the theme, colors, and component CSS. The framework generates tree-shaken CSS for only the style tokens your app uses.
+- **`.persist_interval(duration)`** -- How often dirty persisted state is flushed to the store (SQLite).
+
+Only `.root()` and `.run().await` are required. Everything else is optional.
+
+## State Structs
+
+State structs hold your application data. The `#[derive(State)]` macro and `#[storage(...)]` attribute control where and how state is stored.
+
+```rust
+// Memory: server-side, per-session, lost on disconnect
+#[derive(State, Default)]
+#[storage(memory)]
+struct AppState {
+    items: Vec<String>,
+    filter: String,
+}
+
+// Persisted: server-side, backed by SQLite, survives restarts
+#[derive(State, Default, Clone, Serialize, Deserialize)]
+#[storage(persisted, table = "app", key = "session_id")]
+struct UserData {
+    session_id: String,
+    preferences: Preferences,
+}
+
+// Local: client-side, instant response, no server round-trip
+#[derive(State, Default)]
+#[storage(local)]
+struct UiState {
+    sidebar_open: bool,
+    dark_mode: bool,
+}
+```
+
+**Memory** state is the most common choice. It lives on the server in a per-session hashmap. Use it for anything that needs server-side logic or validation.
+
+**Persisted** state adds durability. State is still read from memory for instant access, but a background task periodically flushes dirty entries to SQLite.
+
+**Local** state never leaves the browser. Handlers annotated with `#[handler(local)]` compile to client-side mutations that execute without a server round-trip. Use it for purely visual state like menu toggles or accordion open/close.
+
+## Handlers vs Renderers
+
+These are the two core building blocks for interactivity.
+
+**Handlers** mutate state in response to events:
+
+```rust
+#[handler]
+fn add_item(state: &mut AppState, ctx: &EventContext) {
+    if let Some(text) = ctx.text() {
+        state.items.push(text.to_string());
+    }
+}
+```
+
+- Receive `&mut State` (mutable reference)
+- Optionally receive `&EventContext` for input values, item refs, form fields
+- Triggered by user events (click, input, submit, etc.)
+
+**Renderers** produce UI from the current state:
+
+```rust
+#[renderer]
+fn render_items(state: &AppState) -> ElementBuilder {
+    el(El::Ul).append(
+        state.items.iter().map(|item| {
+            el(El::Li).text(item)
+        })
+    )
+}
+```
+
+- Receive `&State` (immutable reference)
+- Return `ElementBuilder`
+- Automatically re-run when their state type changes
+- Placed inline in the element tree: `el(El::Div).append([render_items()])`
+
+The framework tracks which renderers depend on which state types. When a handler mutates `AppState`, only renderers that read `AppState` are re-invoked.
+
+## The Capsule
+
+The "capsule" is what the browser actually receives when it requests your app's URL. It is a complete HTML page generated by the server at startup. It contains:
+
+- **A `<style>` tag** with tree-shaken CSS for the style tokens and theme your app uses
+- **A `<script>` tag** with the generated JavaScript runtime (~1.5KB)
+- **WebSocket connection setup** that auto-connects and handles reconnection
+
+The capsule JS includes lookup tables for element types and event types, but only the ones your app actually uses. If you never use `El::Textarea`, that mapping is not included. If you never bind `Ev::Scroll`, that event type is excluded.
+
+There is no build step. The capsule is generated from static analysis of your root function (and all registered routes) at server startup. Every connected browser receives the same capsule HTML. The per-session DOM is then streamed over WebSocket as binary opcodes.
+
+## WebSocket Connection
+
+The capsule JS opens a WebSocket connection as soon as it loads. The connection lifecycle:
+
+1. **Connect** -- The JS runtime opens `ws://` (or `wss://`) to the server
+2. **Initial render** -- The server calls your `root()` function and sends the full element tree as binary opcodes
+3. **Events** -- User interactions (clicks, input, etc.) are sent as compact binary messages to the server
+4. **Updates** -- The server runs handlers, re-renders affected regions, and sends only the changed opcodes back
+5. **Reconnect** -- If the connection drops, the runtime automatically reconnects and the server re-sends the full state
+
+Each connection gets its own state instance. There is no shared global state by default -- each browser tab is an independent session identified by a session cookie.

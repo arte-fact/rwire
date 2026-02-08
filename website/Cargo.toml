@@ -1,8 +1,8 @@
 [package]
-name = "docs-site"
+name = "website"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rwire = { path = "../../rwire", features = ["docs"] }
+rwire = { path = "../rwire", features = ["docs"] }
 async-std = { version = "1.12", features = ["attributes"] }
