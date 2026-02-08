@@ -208,7 +208,8 @@ impl Theme {
 /// Minimal normalization for consistent cross-browser behavior.
 /// Kept small to minimize capsule size.
 pub fn generate_base_css() -> &'static str {
-    "*,*::before,*::after{box-sizing:border-box}\
+    "html{scroll-behavior:smooth}\
+     *,*::before,*::after{box-sizing:border-box}\
      body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;\
      line-height:var(--rw-leading-normal);color:var(--rw-text-default);background:var(--rw-bg-app)}\
      button,input,select,textarea{font:inherit}\

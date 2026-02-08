@@ -58,6 +58,10 @@ fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
 /// The sep() function sends events with param bytes (for ItemRef handlers):
 /// - Format: [handler_idx | 0x80, event_type, ref, param_len, ...param_bytes, payload_len, ...payload]
 ///
+/// The sh() function scrolls to a hash target (#id) using MutationObserver:
+/// - Tries immediate getElementById; if not found, observes DOM mutations
+/// - Auto-disconnects after 2s safety timeout
+///
 /// New opcodes for bandwidth optimization:
 /// - CREATE_SYNCED (0x03): Create span with id="__synced_N" using varint ID
 /// - GET_SYNCED (0x05): Get synced element by numeric ID using varint
@@ -122,12 +126,14 @@ else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[
 else if(o===O.E){return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
+function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
+if('scrollRestoration' in history)history.scrollRestoration='manual';
 w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
-w.onopen=()=>{if(location.pathname!=='/')w.send('R'+location.pathname)};
+w.onopen=()=>{if(location.pathname!=='/')w.send('R'+location.pathname);if(location.hash)sh(location.hash)};
 w.onmessage=e=>x(new Uint8Array(e.data));
-document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
-window.addEventListener('popstate',()=>{w.send('R'+location.pathname)});"#;
+document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
+window.addEventListener('popstate',()=>{w.send('R'+location.pathname);if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
 
 /// Bind handler without local state support (sends to server).
 /// Also includes a stub xi() since the main runtime references it.
