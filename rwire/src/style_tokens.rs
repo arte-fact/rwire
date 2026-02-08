@@ -793,6 +793,60 @@ define_token_enum! {
         MtXl = 0x2FB => "margin-top:var(--rw-space-8)",
         Mt2xl = 0x2FC => "margin-top:var(--rw-space-12)",
         TopHeader = 0x2FE => "top:var(--rw-header-h,3.5rem)",
+
+        // ====================================================================
+        // Semantic Paired Tokens (0x300+) — ThemeStyle-aware via CSS variables
+        // ====================================================================
+
+        // Surface pairs (0x300-0x303)
+        BgSurface = 0x300 => "background:var(--rw-surface)",
+        TextOnSurface = 0x301 => "color:var(--rw-on-surface)",
+        BgSurfaceRaised = 0x302 => "background:var(--rw-surface-raised)",
+        TextOnSurfaceRaised = 0x303 => "color:var(--rw-on-surface-raised)",
+
+        // Primary pairs (0x304-0x309)
+        BgPrimary = 0x304 => "background:var(--rw-primary)",
+        TextOnPrimary = 0x305 => "color:var(--rw-on-primary)",
+        BgPrimaryHover = 0x306 => "background:var(--rw-primary-hover)",
+        BgPrimarySubtle = 0x307 => "background:var(--rw-primary-subtle)",
+        TextOnPrimarySubtle = 0x308 => "color:var(--rw-on-primary-subtle)",
+        BorderPrimary = 0x309 => "border-color:var(--rw-border-primary)",
+
+        // Secondary pairs (0x30A-0x30C)
+        BgSecondary = 0x30A => "background:var(--rw-secondary)",
+        TextOnSecondary = 0x30B => "color:var(--rw-on-secondary)",
+        BgSecondaryHover = 0x30C => "background:var(--rw-secondary-hover)",
+
+        // Muted pair (0x30D)
+        TextOnMuted = 0x30D => "color:var(--rw-on-muted)",
+
+        // Destructive pairs (0x30E-0x312)
+        BgDestructive = 0x30E => "background:var(--rw-destructive)",
+        TextOnDestructive = 0x30F => "color:var(--rw-on-destructive)",
+        BgDestructiveHover = 0x310 => "background:var(--rw-destructive-hover)",
+        BgDestructiveSubtle = 0x311 => "background:var(--rw-destructive-subtle)",
+        TextOnDestructiveSubtle = 0x312 => "color:var(--rw-on-destructive-subtle)",
+
+        // Focus ring (0x313)
+        RingFocus = 0x313 => "outline:2px solid var(--rw-focus-ring);outline-offset:2px",
+
+        // Full accent scale — bg variants (0x314-0x31C)
+        BgAccent1 = 0x314 => "background:var(--rw-accent-1)",
+        BgAccent2 = 0x315 => "background:var(--rw-accent-2)",
+        BgAccent3 = 0x316 => "background:var(--rw-accent-3)",
+        BgAccent5 = 0x317 => "background:var(--rw-accent-5)",
+        BgAccent6 = 0x318 => "background:var(--rw-accent-6)",
+        BgAccent7 = 0x319 => "background:var(--rw-accent-7)",
+        BgAccent8 = 0x31A => "background:var(--rw-accent-8)",
+        BgAccent11 = 0x31B => "background:var(--rw-accent-11)",
+        BgAccent12 = 0x31C => "background:var(--rw-accent-12)",
+
+        // Full accent scale — text variants (0x31D)
+        TextAccent1 = 0x31D => "color:var(--rw-accent-1)",
+
+        // Full accent scale — border variants (0x31E-0x31F)
+        BorderAccent6 = 0x31E => "border:1px solid var(--rw-accent-6)",
+        BorderAccent8 = 0x31F => "border:1px solid var(--rw-accent-8)",
     }
 }
 

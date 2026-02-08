@@ -556,7 +556,7 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
 /// - Component CSS (tree-shaken)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     use crate::style_tokens::{generate_utility_css, generate_pseudo_css};
-    use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css};
+    use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css, generate_style_css};
     use crate::tokens::css::{generate_primitive_css_filtered, generate_primitive_css_with_palette};
 
     let mut css = String::with_capacity(12288);
@@ -584,6 +584,14 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     if let Some(radius_css) = generate_radius_css(config.theme.radius) {
         used_vars.extend(extract_used_variables(radius_css));
     }
+    {
+        use crate::theme::ThemeStyle;
+        for style in [ThemeStyle::Soft, ThemeStyle::Brutalist, ThemeStyle::Minimal] {
+            if let Some(style_css) = generate_style_css(style) {
+                used_vars.extend(extract_used_variables(&style_css));
+            }
+        }
+    }
 
     // 5. Base reset (must come first)
     css.push_str(base_css);
@@ -603,6 +611,14 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     }
     if let Some(radius_css) = generate_radius_css(config.theme.radius) {
         css.push_str(radius_css);
+    }
+
+    // 8b. ThemeStyle overrides — include all presets so apps can switch at runtime
+    use crate::theme::ThemeStyle;
+    for style in [ThemeStyle::Soft, ThemeStyle::Brutalist, ThemeStyle::Minimal] {
+        if let Some(style_css) = generate_style_css(style) {
+            css.push_str(&style_css);
+        }
     }
 
     // 9. Utility token CSS classes (.u{code}{declaration})

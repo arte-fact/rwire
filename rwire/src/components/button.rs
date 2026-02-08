@@ -163,12 +163,12 @@ impl Button {
         ];
 
         match self.intent {
-            ButtonIntent::Primary => tokens.extend([St::BgAccent, St::TextOnAccent]),
+            ButtonIntent::Primary => tokens.extend([St::BgPrimary, St::TextOnPrimary]),
             ButtonIntent::Secondary => {
-                tokens.extend([St::BgMuted, St::TextHigh, St::BorderDefault])
+                tokens.extend([St::BgSecondary, St::TextOnSecondary, St::BorderDefault])
             }
             ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
-            ButtonIntent::Destructive => tokens.extend([St::BgRed9, St::TextWhite]),
+            ButtonIntent::Destructive => tokens.extend([St::BgDestructive, St::TextOnDestructive]),
         }
 
         match self.size {
@@ -195,15 +195,15 @@ impl Button {
 
     /// Apply pseudo-class styles to the builder based on button configuration.
     fn apply_pseudo(&self, mut builder: ElementBuilder) -> ElementBuilder {
-        builder = builder.focus_visible([St::OutlineAccent, St::OutlineOffset2]);
+        builder = builder.focus_visible([St::RingFocus]);
 
         builder = match self.intent {
-            ButtonIntent::Primary => builder.hover([St::BgAccentHover]),
+            ButtonIntent::Primary => builder.hover([St::BgPrimaryHover]),
             ButtonIntent::Secondary => {
-                builder.hover([St::BgHover, St::BorderEmphasis])
+                builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
             }
             ButtonIntent::Ghost => builder.hover([St::BgHover]),
-            ButtonIntent::Destructive => builder.hover([St::BgRedHover]),
+            ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
         };
 
         if self.disabled {
@@ -278,8 +278,8 @@ mod tests {
     fn test_button_primary_tokens() {
         let btn = Button::primary("Save");
         let tokens = btn.compute_tokens();
-        assert!(tokens.contains(&St::BgAccent));
-        assert!(tokens.contains(&St::TextOnAccent));
+        assert!(tokens.contains(&St::BgPrimary));
+        assert!(tokens.contains(&St::TextOnPrimary));
         assert!(tokens.contains(&St::DisplayInlineFlex));
     }
 
@@ -287,8 +287,8 @@ mod tests {
     fn test_button_secondary_tokens() {
         let btn = Button::secondary("Cancel");
         let tokens = btn.compute_tokens();
-        assert!(tokens.contains(&St::BgMuted));
-        assert!(tokens.contains(&St::TextHigh));
+        assert!(tokens.contains(&St::BgSecondary));
+        assert!(tokens.contains(&St::TextOnSecondary));
         assert!(tokens.contains(&St::BorderDefault));
     }
 
@@ -296,8 +296,8 @@ mod tests {
     fn test_button_destructive_tokens() {
         let btn = Button::destructive("Delete");
         let tokens = btn.compute_tokens();
-        assert!(tokens.contains(&St::BgRed9));
-        assert!(tokens.contains(&St::TextWhite));
+        assert!(tokens.contains(&St::BgDestructive));
+        assert!(tokens.contains(&St::TextOnDestructive));
     }
 
     #[test]

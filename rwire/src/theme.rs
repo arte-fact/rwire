@@ -64,6 +64,36 @@ impl AccentColor {
     }
 }
 
+/// Theme style preset that remaps semantic CSS variables.
+///
+/// ThemeStyle controls the *feel* of components (solid vs subtle, sharp vs soft)
+/// without changing individual components. It works by remapping CSS variables
+/// like `--rw-primary` and `--rw-destructive` to different color scale steps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeStyle {
+    /// Solid accents, medium radius, subtle shadows (current default look).
+    #[default]
+    Default,
+    /// Subtle tinted backgrounds, large radius, no shadows.
+    Soft,
+    /// Sharp corners, heavy borders, high contrast.
+    Brutalist,
+    /// Near-zero borders, large spacing, text hierarchy.
+    Minimal,
+}
+
+impl ThemeStyle {
+    /// Get the data-style attribute value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ThemeStyle::Default => "default",
+            ThemeStyle::Soft => "soft",
+            ThemeStyle::Brutalist => "brutalist",
+            ThemeStyle::Minimal => "minimal",
+        }
+    }
+}
+
 /// Border radius scaling for components.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RadiusScale {
@@ -104,6 +134,8 @@ pub struct Theme {
     pub accent: AccentColor,
     /// Border radius scale
     pub radius: RadiusScale,
+    /// Visual style preset
+    pub style: ThemeStyle,
 }
 
 impl Theme {
@@ -140,6 +172,12 @@ impl Theme {
         self
     }
 
+    /// Set the visual style preset.
+    pub fn with_style(mut self, style: ThemeStyle) -> Self {
+        self.style = style;
+        self
+    }
+
     /// Generate data attributes for the theme root element.
     ///
     /// Returns a string like `data-theme="dark" data-accent="green"`.
@@ -154,6 +192,11 @@ impl Theme {
         // Only add radius attr if not default (medium)
         if self.radius != RadiusScale::Medium {
             attrs.push_str(&format!(" data-radius=\"{}\"", self.radius.as_str()));
+        }
+
+        // Only add style attr if not default
+        if self.style != ThemeStyle::Default {
+            attrs.push_str(&format!(" data-style=\"{}\"", self.style.as_str()));
         }
 
         attrs
@@ -202,6 +245,33 @@ pub fn generate_semantic_css() -> String {
     css.push_str("--rw-success:var(--rw-green-9);\n");
     css.push_str("--rw-warning:var(--rw-amber-9);\n");
     css.push_str("--rw-error:var(--rw-red-9);\n");
+    // Surface pairs
+    css.push_str("--rw-surface:var(--rw-neutral-1);\n");
+    css.push_str("--rw-on-surface:var(--rw-neutral-12);\n");
+    css.push_str("--rw-surface-raised:var(--rw-neutral-2);\n");
+    css.push_str("--rw-on-surface-raised:var(--rw-neutral-12);\n");
+    // Primary pairs (accent-based)
+    css.push_str("--rw-primary:var(--rw-accent-9);\n");
+    css.push_str("--rw-on-primary:var(--rw-white);\n");
+    css.push_str("--rw-primary-hover:var(--rw-accent-10);\n");
+    css.push_str("--rw-primary-subtle:var(--rw-accent-3);\n");
+    css.push_str("--rw-on-primary-subtle:var(--rw-accent-11);\n");
+    // Secondary pairs (neutral-based)
+    css.push_str("--rw-secondary:var(--rw-neutral-4);\n");
+    css.push_str("--rw-on-secondary:var(--rw-neutral-12);\n");
+    css.push_str("--rw-secondary-hover:var(--rw-neutral-5);\n");
+    // Muted pairs
+    css.push_str("--rw-muted:var(--rw-neutral-3);\n");
+    css.push_str("--rw-on-muted:var(--rw-neutral-11);\n");
+    // Destructive pairs
+    css.push_str("--rw-destructive:var(--rw-red-9);\n");
+    css.push_str("--rw-on-destructive:var(--rw-white);\n");
+    css.push_str("--rw-destructive-hover:var(--rw-red-10);\n");
+    css.push_str("--rw-destructive-subtle:var(--rw-red-3);\n");
+    css.push_str("--rw-on-destructive-subtle:var(--rw-red-11);\n");
+    // Interactive
+    css.push_str("--rw-focus-ring:var(--rw-accent-8);\n");
+    css.push_str("--rw-border-primary:var(--rw-accent-7);\n");
     css.push_str("}\n");
 
     // Dark theme
@@ -221,6 +291,24 @@ pub fn generate_semantic_css() -> String {
     css.push_str("--rw-text-muted:var(--rw-neutral-5);\n");
     css.push_str("--rw-text-default:var(--rw-neutral-2);\n");
     css.push_str("--rw-text-high:var(--rw-neutral-1);\n");
+    // Invert surface pairs
+    css.push_str("--rw-surface:var(--rw-neutral-12);\n");
+    css.push_str("--rw-on-surface:var(--rw-neutral-1);\n");
+    css.push_str("--rw-surface-raised:var(--rw-neutral-11);\n");
+    css.push_str("--rw-on-surface-raised:var(--rw-neutral-1);\n");
+    // Invert secondary
+    css.push_str("--rw-secondary:var(--rw-neutral-9);\n");
+    css.push_str("--rw-on-secondary:var(--rw-neutral-1);\n");
+    css.push_str("--rw-secondary-hover:var(--rw-neutral-8);\n");
+    // Invert muted
+    css.push_str("--rw-muted:var(--rw-neutral-10);\n");
+    css.push_str("--rw-on-muted:var(--rw-neutral-4);\n");
+    // Invert destructive subtle
+    css.push_str("--rw-destructive-subtle:var(--rw-red-10);\n");
+    css.push_str("--rw-on-destructive-subtle:var(--rw-red-3);\n");
+    // Invert primary subtle
+    css.push_str("--rw-primary-subtle:var(--rw-accent-10);\n");
+    css.push_str("--rw-on-primary-subtle:var(--rw-accent-3);\n");
     css.push_str("}\n");
 
     css
@@ -261,6 +349,48 @@ pub fn generate_radius_css(radius: RadiusScale) -> Option<&'static str> {
         }
         RadiusScale::Full => {
             Some("[data-radius=\"full\"]{--rw-radius-component:var(--rw-radius-full)}\n")
+        }
+    }
+}
+
+/// Generate ThemeStyle preset override CSS.
+///
+/// Returns CSS that remaps semantic variables for a given style preset.
+/// Returns `None` if the style is the default.
+pub fn generate_style_css(style: ThemeStyle) -> Option<String> {
+    match style {
+        ThemeStyle::Default => None,
+        ThemeStyle::Soft => {
+            let mut css = String::with_capacity(512);
+            css.push_str("[data-style=\"soft\"]{");
+            css.push_str("--rw-primary:var(--rw-accent-3);");
+            css.push_str("--rw-on-primary:var(--rw-accent-11);");
+            css.push_str("--rw-primary-hover:var(--rw-accent-4);");
+            css.push_str("--rw-destructive:var(--rw-red-3);");
+            css.push_str("--rw-on-destructive:var(--rw-red-11);");
+            css.push_str("--rw-destructive-hover:var(--rw-red-4);");
+            css.push_str("--rw-border-default:var(--rw-neutral-5);");
+            css.push_str("}\n");
+            Some(css)
+        }
+        ThemeStyle::Brutalist => {
+            let mut css = String::with_capacity(512);
+            css.push_str("[data-style=\"brutalist\"]{");
+            css.push_str("--rw-border-default:var(--rw-neutral-12);");
+            css.push_str("--rw-border-subtle:var(--rw-neutral-10);");
+            css.push_str("--rw-border-emphasis:var(--rw-neutral-12);");
+            css.push_str("--rw-surface-raised:var(--rw-neutral-1);");
+            css.push_str("}\n");
+            Some(css)
+        }
+        ThemeStyle::Minimal => {
+            let mut css = String::with_capacity(512);
+            css.push_str("[data-style=\"minimal\"]{");
+            css.push_str("--rw-border-default:transparent;");
+            css.push_str("--rw-border-subtle:transparent;");
+            css.push_str("--rw-surface-raised:var(--rw-neutral-1);");
+            css.push_str("}\n");
+            Some(css)
         }
     }
 }
@@ -318,6 +448,11 @@ pub fn generate_theme_css_with_palette(
         css.push_str(radius_css);
     }
 
+    // 6. Style preset override (if non-default)
+    if let Some(style_css) = generate_style_css(theme.style) {
+        css.push_str(&style_css);
+    }
+
     css
 }
 
@@ -331,6 +466,7 @@ mod tests {
         assert_eq!(theme.mode, ThemeMode::Light);
         assert_eq!(theme.accent, AccentColor::Blue);
         assert_eq!(theme.radius, RadiusScale::Medium);
+        assert_eq!(theme.style, ThemeStyle::Default);
     }
 
     #[test]
@@ -383,14 +519,23 @@ mod tests {
         assert!(css.contains("--rw-bg-app:"));
         assert!(css.contains("--rw-text-high:"));
         assert!(css.contains("--rw-accent-9:"));
+
+        // Should have new paired variables
+        assert!(css.contains("--rw-surface:"));
+        assert!(css.contains("--rw-on-surface:"));
+        assert!(css.contains("--rw-primary:"));
+        assert!(css.contains("--rw-on-primary:"));
+        assert!(css.contains("--rw-secondary:"));
+        assert!(css.contains("--rw-destructive:"));
+        assert!(css.contains("--rw-focus-ring:"));
     }
 
     #[test]
     fn test_semantic_css_size() {
         let css = generate_semantic_css();
-        // Semantic CSS should be under 1.5KB
+        // Semantic CSS should be under 3KB (expanded with paired variables)
         assert!(
-            css.len() < 1536,
+            css.len() < 3072,
             "Semantic CSS too large: {} bytes",
             css.len()
         );
@@ -424,13 +569,52 @@ mod tests {
 
         let css = generate_theme_css(&theme);
 
-        // Full theme CSS should be under 6KB
+        // Full theme CSS should be under 8KB (expanded with paired variables)
         assert!(
-            css.len() < 6144,
+            css.len() < 8192,
             "Full theme CSS too large: {} bytes",
             css.len()
         );
         println!("Full theme CSS size: {} bytes", css.len());
+    }
+
+    #[test]
+    fn test_style_css_default_returns_none() {
+        assert!(generate_style_css(ThemeStyle::Default).is_none());
+    }
+
+    #[test]
+    fn test_style_css_soft() {
+        let css = generate_style_css(ThemeStyle::Soft).unwrap();
+        assert!(css.contains("[data-style=\"soft\"]"));
+        assert!(css.contains("--rw-primary:var(--rw-accent-3)"));
+    }
+
+    #[test]
+    fn test_style_css_brutalist() {
+        let css = generate_style_css(ThemeStyle::Brutalist).unwrap();
+        assert!(css.contains("[data-style=\"brutalist\"]"));
+        assert!(css.contains("--rw-border-default:var(--rw-neutral-12)"));
+    }
+
+    #[test]
+    fn test_style_css_minimal() {
+        let css = generate_style_css(ThemeStyle::Minimal).unwrap();
+        assert!(css.contains("[data-style=\"minimal\"]"));
+        assert!(css.contains("--rw-border-default:transparent"));
+    }
+
+    #[test]
+    fn test_data_attrs_with_style() {
+        let theme = Theme::light().with_style(ThemeStyle::Soft);
+        let attrs = theme.data_attrs();
+        assert!(attrs.contains("data-style=\"soft\""));
+    }
+
+    #[test]
+    fn test_data_attrs_default_style_omitted() {
+        let theme = Theme::default();
+        assert!(!theme.data_attrs().contains("data-style"));
     }
 
     #[test]

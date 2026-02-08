@@ -125,9 +125,9 @@ impl Switch {
         let mut input = el(El::Input)
             .st(tokens)
             .after([St::ContentEmpty, St::PositionAbsolute, St::W1rem, St::H1rem, St::BgWhite, St::RoundedFull, St::TransitionTransformFast])
-            .checked([St::BgAccent])
+            .checked([St::BgPrimary])
             .checked_after([St::TranslateXFull])
-            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .focus_visible([St::RingFocus])
             .at(At::Type, Av::Checkbox)
             .at(At::Role, Av::RoleSwitch);
 

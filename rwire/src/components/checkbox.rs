@@ -124,8 +124,8 @@ impl Checkbox {
         let mut input = el(El::Input)
             .st(tokens)
             .hover([St::BorderEmphasis])
-            .checked([St::BgAccent])
-            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .checked([St::BgPrimary])
+            .focus_visible([St::RingFocus])
             .at(At::Type, Av::Checkbox);
 
         if self.disabled {

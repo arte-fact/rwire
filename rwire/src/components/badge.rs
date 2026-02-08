@@ -106,8 +106,8 @@ impl Badge {
                 tokens.push(St::TextHigh);
             }
             BadgeIntent::Primary => {
-                tokens.push(St::BgAccent4);
-                tokens.push(St::TextAccent11);
+                tokens.push(St::BgPrimarySubtle);
+                tokens.push(St::TextOnPrimarySubtle);
             }
             BadgeIntent::Success => {
                 tokens.push(St::BgGreen4);

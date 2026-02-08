@@ -107,7 +107,7 @@ impl Progress {
 
         // Progress bar inner element - width% must remain dynamic
         let bar = el(El::Div)
-            .st([St::HFull, St::BgAccent, St::RoundedFull, St::TransitionAll, St::MinW05rem])
+            .st([St::HFull, St::BgPrimary, St::RoundedFull, St::TransitionAll, St::MinW05rem])
             .attr("style", &format!("width:{}%", percentage));
 
         container.append([bar])

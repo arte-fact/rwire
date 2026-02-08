@@ -194,7 +194,7 @@ impl Textarea {
             .st(tokens)
             .placeholder_style([St::TextMuted])
             .hover([St::BorderEmphasis])
-            .focus([St::BorderColorAccent, St::OutlineNone]);
+            .focus([St::BorderPrimary, St::OutlineNone]);
         if self.disabled {
             builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
         }

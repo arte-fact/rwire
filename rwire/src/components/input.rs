@@ -233,7 +233,7 @@ impl Input {
             .st(tokens)
             .placeholder_style([St::TextMuted])
             .hover([St::BorderEmphasis])
-            .focus([St::BorderColorAccent, St::OutlineNone])
+            .focus([St::BorderPrimary, St::OutlineNone])
             .at(At::Type, self.input_type.av());
         if self.disabled {
             builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);

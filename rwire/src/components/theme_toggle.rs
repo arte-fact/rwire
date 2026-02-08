@@ -142,7 +142,7 @@ impl ThemeToggle {
         let mut button = el(El::Button)
             .st(tokens)
             .hover([St::BgHover])
-            .focus_visible([St::OutlineAccent, St::OutlineOffset2])
+            .focus_visible([St::RingFocus])
             .active([St::Scale98])
             .at(At::Type, Av::Button)
             .at_str(At::AriaLabel, "Toggle theme")

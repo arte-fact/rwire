@@ -7,7 +7,7 @@ use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::components::*;
 use rwire::docs::{parse_markdown, DocSite, SearchResult};
 use rwire::style_tokens::St;
-use rwire::theme::{Theme, ThemeMode};
+use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::tokens::ColorPalette;
 use rwire::router::{Link, Router};
 use rwire::{el, handler, renderer, El, ElementBuilder, Server, State};
@@ -27,6 +27,8 @@ struct DocState {
     searching: bool,
     /// Theme mode (light/dark).
     theme_mode: ThemeMode,
+    /// Visual style preset.
+    theme_style: ThemeStyle,
 }
 
 // ============================================================================
@@ -94,9 +96,13 @@ fn root(state: &DocState) -> ElementBuilder {
         build_doc_page(&site, &state.current_path)
     };
 
-    el(El::Div)
+    let mut root_el = el(El::Div)
         .attr("data-theme", state.theme_mode.as_str())
-        .st([St::BgApp, St::TextDefault, St::MinHScreen])
+        .st([St::BgApp, St::TextDefault, St::MinHScreen]);
+    if state.theme_style != ThemeStyle::Default {
+        root_el = root_el.attr("data-style", state.theme_style.as_str());
+    }
+    root_el
         .append([
             AppShell::new()
                 .header(build_header())
@@ -120,12 +126,13 @@ fn build_header() -> ElementBuilder {
             Link::to("/", "rwire")
                 .attr("style", "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em")
                 .st([St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration]),
-            // Right side: search + theme toggle
+            // Right side: search + style switcher + theme toggle
             Stack::row()
                 .gap(Gap::Sm)
                 .align(StackAlign::Center)
                 .children([
                     render_search_input(),
+                    render_style_switcher(),
                     render_theme_toggle(),
                 ])
                 .build(),
@@ -151,6 +158,19 @@ fn render_theme_toggle(state: &DocState) -> ElementBuilder {
         })
         .on_toggle(toggle_theme())
         .build()
+}
+
+#[renderer]
+fn render_style_switcher(state: &DocState) -> ElementBuilder {
+    let label = match state.theme_style {
+        ThemeStyle::Default => "Default",
+        ThemeStyle::Soft => "Soft",
+        ThemeStyle::Brutalist => "Brutalist",
+        ThemeStyle::Minimal => "Minimal",
+    };
+    Button::ghost(label)
+        .size(ButtonSize::Sm)
+        .on_click(cycle_theme_style())
 }
 
 // ============================================================================
@@ -409,6 +429,16 @@ fn toggle_theme(state: &mut DocState) {
     state.theme_mode = match state.theme_mode {
         ThemeMode::Light => ThemeMode::Dark,
         ThemeMode::Dark => ThemeMode::Light,
+    };
+}
+
+#[handler]
+fn cycle_theme_style(state: &mut DocState) {
+    state.theme_style = match state.theme_style {
+        ThemeStyle::Default => ThemeStyle::Soft,
+        ThemeStyle::Soft => ThemeStyle::Brutalist,
+        ThemeStyle::Brutalist => ThemeStyle::Minimal,
+        ThemeStyle::Minimal => ThemeStyle::Default,
     };
 }
 

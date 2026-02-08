@@ -141,7 +141,8 @@ pub use tokens::css::{generate_primitive_css, minify_css};
 // Theme exports
 pub use theme::{
     generate_accent_css, generate_base_css, generate_radius_css, generate_semantic_css,
-    generate_theme_css, generate_theme_css_with_palette, AccentColor, RadiusScale, Theme, ThemeMode,
+    generate_style_css, generate_theme_css, generate_theme_css_with_palette, AccentColor,
+    RadiusScale, Theme, ThemeMode, ThemeStyle,
 };
 
 // Icon exports

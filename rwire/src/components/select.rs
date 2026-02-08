@@ -139,7 +139,7 @@ impl Select {
         let mut select = el(El::Select)
             .st(tokens)
             .hover([St::BorderEmphasis])
-            .focus_visible([St::OutlineAccent, St::OutlineOffset2]);
+            .focus_visible([St::RingFocus]);
         if self.disabled {
             select = select.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
         }

@@ -102,7 +102,7 @@ impl Card {
 
     /// Compute style tokens for this card configuration.
     pub fn compute_tokens(&self) -> Vec<St> {
-        let mut tokens = vec![St::BgApp, St::RoundedLg];
+        let mut tokens = vec![St::BgSurfaceRaised, St::RoundedLg];
 
         if self.bordered {
             tokens.push(St::BorderSubtle);
@@ -157,7 +157,7 @@ mod tests {
     fn test_card_default_tokens() {
         let card = Card::new();
         let tokens = card.compute_tokens();
-        assert!(tokens.contains(&St::BgApp));
+        assert!(tokens.contains(&St::BgSurfaceRaised));
         assert!(tokens.contains(&St::RoundedLg));
         assert!(tokens.contains(&St::BorderSubtle));
         assert!(tokens.contains(&St::PMd));
