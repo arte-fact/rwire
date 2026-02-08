@@ -193,9 +193,11 @@ impl MarkdownBuilder {
                 self.push_to_parent(img);
             }
             Tag::Table(_) => {
+                // Wrapper div allows horizontal scroll on narrow viewports
+                self.stack.push(el(El::Div).st([St::OverflowXAuto, St::MyMd]));
                 self.stack.push(
                     el(El::Table)
-                        .st([St::WFull, St::BorderSubtle, St::TextSm, St::MyMd]),
+                        .st([St::WFull, St::BorderSubtle, St::TextSm]),
                 );
             }
             Tag::TableHead => {
@@ -258,6 +260,11 @@ impl MarkdownBuilder {
                 } else {
                     self.close_current();
                 }
+            }
+            TagEnd::Table => {
+                // Close table into wrapper div, then wrapper into parent
+                self.close_current(); // table → wrapper div
+                self.close_current(); // wrapper div → parent
             }
             TagEnd::TableHead => {
                 self.in_thead = false;
