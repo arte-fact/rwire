@@ -81,6 +81,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.examples.rule=Host(`examples.${DOMAIN}`)"
       - "traefik.http.routers.examples.entrypoints=websecure"
+      - "traefik.http.routers.examples.tls.certresolver=letsencrypt"
       - "traefik.http.services.examples.loadbalancer.server.port=9003"
     restart: unless-stopped
 
