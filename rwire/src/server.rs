@@ -698,6 +698,7 @@ where
 
         let capsule_size = capsule.len();
         let capsule = Arc::new(capsule);
+        let composite_table = Arc::new(ctx.composite_table().clone());
 
         println!("Server listening on http://{}", self.addr);
         println!(
@@ -723,8 +724,9 @@ where
             let shared = Arc::clone(&shared);
             let route_handler = route_handler.clone();
             let initial_theme = initial_theme.clone();
+            let composite_table = Arc::clone(&composite_table);
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, shared, route_handler, initial_theme).await;
+                handle_client(stream, peer_addr, root, capsule, shared, route_handler, initial_theme, composite_table).await;
             });
         }
 
@@ -742,6 +744,7 @@ fn extract_cookie_from_request(request: &str) -> Option<String> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_client<F>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
@@ -750,6 +753,7 @@ async fn handle_client<F>(
     shared: Arc<SharedServerState>,
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
+    composite_table: Arc<crate::style_groups::CompositeTable>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -786,7 +790,7 @@ async fn handle_client<F>(
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, route_handler, initial_theme).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, route_handler, initial_theme, composite_table).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -922,6 +926,7 @@ impl Drop for ConnectionGuard {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_websocket<F>(
     ws_stream: async_tungstenite::WebSocketStream<TcpStream>,
     peer_addr: SocketAddr,
@@ -930,6 +935,7 @@ async fn handle_websocket<F>(
     session_id: SessionId,
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
+    composite_table: Arc<crate::style_groups::CompositeTable>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -1033,15 +1039,18 @@ where
             }
         }
 
+        // Reuse the startup composite table so that composite IDs match
+        // the CSS baked into the capsule (different DOM state would produce
+        // different ID assignments if we re-analyzed here).
+        ctx.set_composite_table((*composite_table).clone());
+
         if states_map.is_empty() {
             // No states available, use placeholder
             ctx.collect_symbols(&root_element, &placeholder_state);
-            ctx.analyze_style_patterns(&root_element);
             ctx.emit(&root_element, &placeholder_state);
         } else {
             // Use multi-state methods to render all synced elements correctly
             ctx.collect_symbols_multi(&root_element, &states_map);
-            ctx.analyze_style_patterns(&root_element);
             ctx.emit_multi(&root_element);
         }
 

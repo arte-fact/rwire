@@ -900,6 +900,11 @@ impl BuildContext {
         &self.composite_table
     }
 
+    /// Set the composite table directly (reuse startup table for per-connection rendering).
+    pub fn set_composite_table(&mut self, table: crate::style_groups::CompositeTable) {
+        self.composite_table = table;
+    }
+
     /// Decide optimal encoding for each text string.
     fn decide_text_encodings(&mut self) {
         // Collect all text strings from symbols that look like text content
