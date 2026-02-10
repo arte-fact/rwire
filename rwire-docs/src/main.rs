@@ -5,12 +5,12 @@
 
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::components::*;
-use rwire::docs::{markdown_element_types, parse_markdown, DocPage, DocSite, SearchResult};
 use rwire::icons::{icon, Icon};
 use rwire::router::{Link, Router};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Ev, Server, State};
+use rwire_markdown::{markdown_element_types, parse_markdown, DocPage, DocSite, SearchResult, TableOfContents};
 use rwire_themes::{palettes, styles};
 
 // ============================================================================

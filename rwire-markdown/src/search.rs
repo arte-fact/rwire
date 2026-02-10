@@ -3,6 +3,8 @@
 //! Provides basic keyword matching across page titles and content.
 //! No external dependencies required.
 
+use crate::site::DocPage;
+
 /// A search result entry.
 #[derive(Clone, Debug)]
 pub struct SearchResult {
@@ -34,7 +36,7 @@ pub struct SearchIndex {
 
 impl SearchIndex {
     /// Build a search index from doc pages.
-    pub fn build<'a>(pages: impl Iterator<Item = &'a super::DocPage>) -> Self {
+    pub fn build<'a>(pages: impl Iterator<Item = &'a DocPage>) -> Self {
         let entries = pages
             .map(|page| IndexEntry {
                 path: page.path.clone(),

@@ -4,9 +4,9 @@
 //! the pulldown-cmark parser. Produces styled elements using the
 //! Code, Blockquote, and Prose components.
 
-use crate::attr_tokens::At;
-use crate::style_tokens::St;
-use crate::{el, El, ElementBuilder};
+use rwire::attr_tokens::At;
+use rwire::style_tokens::St;
+use rwire::{el, El, ElementBuilder};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 /// Result of parsing markdown.

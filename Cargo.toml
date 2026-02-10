@@ -2,6 +2,7 @@
 members = [
     "rwire",
     "rwire-macros",
+    "rwire-markdown",
     "rwire-themes",
     "rwire-website",
     "rwire-docs",

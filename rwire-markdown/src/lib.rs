@@ -1,0 +1,33 @@
+//! Markdown rendering and documentation site components for rwire.
+//!
+//! Provides:
+//! - Markdown-to-ElementBuilder parsing
+//! - Documentation site structure (pages, sections, search)
+//! - Components: Prose, DocsSidebar, TableOfContents
+//! - Simple `Markdown` component for embedding markdown in any page
+//!
+//! # Quick Start
+//!
+//! ```ignore
+//! use rwire_markdown::Markdown;
+//!
+//! Markdown::new("# Hello\n\nSome **bold** text.").build()
+//! ```
+
+mod frontmatter;
+mod markdown;
+mod parser;
+mod prose;
+mod search;
+mod sidebar;
+mod site;
+mod toc;
+
+pub use frontmatter::Frontmatter;
+pub use markdown::Markdown;
+pub use parser::{markdown_element_types, parse_markdown, ParseResult, TocEntry};
+pub use prose::{Prose, ProseSize};
+pub use search::{SearchIndex, SearchResult};
+pub use sidebar::{DocsSidebar, SidebarSection};
+pub use site::{DocPage, DocSite};
+pub use toc::TableOfContents;

@@ -6,18 +6,16 @@
 //! # Example
 //!
 //! ```ignore
-//! use rwire::components::Prose;
+//! use rwire_markdown::Prose;
 //!
 //! Prose::new()
 //!     .child(el(El::H1).text("Introduction"))
 //!     .child(el(El::P).text("Welcome to the documentation."))
-//!     .child(Code::block("let x = 42;").build())
-//!     .child(Blockquote::new("Important note.").build())
 //!     .build()
 //! ```
 
-use crate::style_tokens::St;
-use crate::{el, El, ElementBuilder};
+use rwire::style_tokens::St;
+use rwire::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
 /// Prose size variant.

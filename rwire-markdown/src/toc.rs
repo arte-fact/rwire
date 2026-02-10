@@ -5,7 +5,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use rwire::components::TableOfContents;
+//! use rwire_markdown::TableOfContents;
 //!
 //! TableOfContents::new()
 //!     .heading(1, "Introduction", "#introduction")
@@ -15,9 +15,9 @@
 //!     .build()
 //! ```
 
-use crate::attr_tokens::At;
-use crate::style_tokens::St;
-use crate::{el, El, ElementBuilder};
+use rwire::attr_tokens::At;
+use rwire::style_tokens::St;
+use rwire::{el, El, ElementBuilder};
 use std::borrow::Cow;
 
 /// A heading entry for the table of contents.

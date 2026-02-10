@@ -1,36 +1,11 @@
-//! Documentation site support module.
+//! Documentation site structure.
 //!
-//! Provides markdown parsing, frontmatter extraction, and page rendering
-//! for building documentation sites with rwire.
-//!
-//! This module is behind the `docs` feature flag. Enable it in Cargo.toml:
-//!
-//! ```toml
-//! rwire = { path = "rwire", features = ["docs"] }
-//! ```
-//!
-//! # Example
-//!
-//! ```ignore
-//! use rwire::docs::{parse_markdown, DocSite, DocPage};
-//!
-//! // Parse a single page
-//! let result = parse_markdown("# Hello\n\nWorld");
-//! let element = result.content;  // ElementBuilder tree
-//! let headings = result.headings; // For TableOfContents
-//!
-//! // Load a docs directory
-//! let site = DocSite::load("docs/");
-//! let page = site.page("/docs/install").unwrap();
-//! ```
+//! Provides `DocSite` for loading a directory of markdown pages
+//! and `DocPage` for individual page data.
 
-mod frontmatter;
-mod parser;
-mod search;
-
-pub use frontmatter::Frontmatter;
-pub use parser::{markdown_element_types, parse_markdown, ParseResult, TocEntry};
-pub use search::{SearchIndex, SearchResult};
+use crate::frontmatter;
+use crate::search::SearchIndex;
+pub use crate::search::SearchResult;
 
 use std::collections::HashMap;
 use std::path::Path;
