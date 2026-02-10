@@ -1,374 +1,205 @@
 //! CSS custom property generation from tokens.
 //!
-//! Generates the `:root` CSS block containing all primitive tokens
+//! Generates the `:root` CSS block containing primitive tokens
 //! as CSS custom properties. This is included once in the capsule's
 //! `<style>` block.
-//!
-//! # Output Format
-//!
-//! ```css
-//! :root {
-//!   --rw-neutral-1: oklch(0.985 0 0);
-//!   --rw-blue-9: oklch(0.55 0.18 250);
-//!   --rw-space-4: 1rem;
-//!   /* ... */
-//! }
-//! ```
 
-use super::palette::ColorPalette;
 use super::primitives::{color, font_size, font_weight, line_height, radius, shadow, space};
 use std::collections::HashSet;
 
-/// Generate CSS custom properties for all primitive tokens.
+/// Single source of truth for all non-color primitive CSS variables.
 ///
-/// This is included once in the capsule's `<style>` block.
-/// Returns CSS defining `:root` variables with `--rw-*` prefix.
-pub fn generate_primitive_css() -> String {
-    let mut css = String::with_capacity(4096);
+/// Each entry is `(name, value)` where the emitted variable is `--{name}:{value}`.
+/// Short names: S=spacing, R=radius, T=text size, W=weight, X=leading, Z=shadow.
+pub(crate) const NONCOLOR_PRIMITIVES: &[(&str, &str)] = &[
+    // Spacing (--S{n})
+    ("S0", space::_0),
+    ("S1", space::_1),
+    ("S2", space::_2),
+    ("S3", space::_3),
+    ("S4", space::_4),
+    ("S5", space::_5),
+    ("S6", space::_6),
+    ("S8", space::_8),
+    ("S10", space::_10),
+    ("S12", space::_12),
+    ("S16", space::_16),
+    ("S20", space::_20),
+    ("S24", space::_24),
+    // Radius (--R{n}, numbered 0-6)
+    ("R0", radius::NONE),
+    ("R1", radius::SM),
+    ("R2", radius::MD),
+    ("R3", radius::LG),
+    ("R4", radius::XL),
+    ("R5", radius::_2XL),
+    ("R6", radius::FULL),
+    // Font sizes (--T{n}, numbered 1-10)
+    ("T1", font_size::XS),
+    ("T2", font_size::SM),
+    ("T3", font_size::BASE),
+    ("T4", font_size::LG),
+    ("T5", font_size::XL),
+    ("T6", font_size::_2XL),
+    ("T7", font_size::_3XL),
+    ("T8", font_size::_4XL),
+    ("T9", font_size::_5XL),
+    ("T10", font_size::_6XL),
+    // Font weights (--W{n}, CSS weight ÷ 100)
+    ("W4", font_weight::NORMAL),
+    ("W5", font_weight::MEDIUM),
+    ("W6", font_weight::SEMIBOLD),
+    ("W7", font_weight::BOLD),
+    // Line heights (--X{n}, numbered 1-5)
+    ("X1", line_height::TIGHT),
+    ("X2", line_height::SNUG),
+    ("X3", line_height::NORMAL),
+    ("X4", line_height::RELAXED),
+    ("X5", line_height::LOOSE),
+    // Shadows (--Z{n}, numbered 1-4)
+    ("Z1", shadow::SM),
+    ("Z2", shadow::MD),
+    ("Z3", shadow::LG),
+    ("Z4", shadow::XL),
+];
+
+// Color scale arrays for iteration
+const NEUTRAL_SCALE: [&str; 12] = [
+    color::NEUTRAL_1,  color::NEUTRAL_2,  color::NEUTRAL_3,  color::NEUTRAL_4,
+    color::NEUTRAL_5,  color::NEUTRAL_6,  color::NEUTRAL_7,  color::NEUTRAL_8,
+    color::NEUTRAL_9,  color::NEUTRAL_10, color::NEUTRAL_11, color::NEUTRAL_12,
+];
+
+const BLUE_SCALE: [&str; 12] = [
+    color::BLUE_1,  color::BLUE_2,  color::BLUE_3,  color::BLUE_4,
+    color::BLUE_5,  color::BLUE_6,  color::BLUE_7,  color::BLUE_8,
+    color::BLUE_9,  color::BLUE_10, color::BLUE_11, color::BLUE_12,
+];
+
+const RED_SCALE: [&str; 12] = [
+    color::RED_1,  color::RED_2,  color::RED_3,  color::RED_4,
+    color::RED_5,  color::RED_6,  color::RED_7,  color::RED_8,
+    color::RED_9,  color::RED_10, color::RED_11, color::RED_12,
+];
+
+const GREEN_SCALE: [&str; 12] = [
+    color::GREEN_1,  color::GREEN_2,  color::GREEN_3,  color::GREEN_4,
+    color::GREEN_5,  color::GREEN_6,  color::GREEN_7,  color::GREEN_8,
+    color::GREEN_9,  color::GREEN_10, color::GREEN_11, color::GREEN_12,
+];
+
+const AMBER_SCALE: [&str; 12] = [
+    color::AMBER_1,  color::AMBER_2,  color::AMBER_3,  color::AMBER_4,
+    color::AMBER_5,  color::AMBER_6,  color::AMBER_7,  color::AMBER_8,
+    color::AMBER_9,  color::AMBER_10, color::AMBER_11, color::AMBER_12,
+];
+
+/// Write a single CSS variable.
+fn write_var(css: &mut String, name: &str, value: &str) {
+    css.push_str("--");
+    css.push_str(name);
+    css.push(':');
+    css.push_str(value);
+    css.push_str(";\n");
+}
+
+/// Generate CSS custom properties for only non-color primitive tokens.
+///
+/// Emits spacing, radius, typography, and shadow tokens. Color variables
+/// are no longer emitted — they are resolved at build time via `ResolvedPalette`.
+pub fn generate_noncolor_primitive_css() -> String {
+    let mut css = String::with_capacity(1024);
     css.push_str(":root{\n");
 
-    // Color scales
-    write_color_scale(&mut css, "neutral", &NEUTRAL_SCALE);
-    write_color_scale(&mut css, "blue", &BLUE_SCALE);
-    write_color_scale(&mut css, "red", &RED_SCALE);
-    write_color_scale(&mut css, "green", &GREEN_SCALE);
-    write_color_scale(&mut css, "amber", &AMBER_SCALE);
-
-    // Special colors
-    write_var(&mut css, "white", color::WHITE);
-    write_var(&mut css, "black", color::BLACK);
-
-    // Spacing
-    write_var(&mut css, "space-0", space::_0);
-    write_var(&mut css, "space-1", space::_1);
-    write_var(&mut css, "space-2", space::_2);
-    write_var(&mut css, "space-3", space::_3);
-    write_var(&mut css, "space-4", space::_4);
-    write_var(&mut css, "space-5", space::_5);
-    write_var(&mut css, "space-6", space::_6);
-    write_var(&mut css, "space-8", space::_8);
-    write_var(&mut css, "space-10", space::_10);
-    write_var(&mut css, "space-12", space::_12);
-    write_var(&mut css, "space-16", space::_16);
-    write_var(&mut css, "space-20", space::_20);
-    write_var(&mut css, "space-24", space::_24);
-
-    // Radius
-    write_var(&mut css, "radius-none", radius::NONE);
-    write_var(&mut css, "radius-sm", radius::SM);
-    write_var(&mut css, "radius-md", radius::MD);
-    write_var(&mut css, "radius-lg", radius::LG);
-    write_var(&mut css, "radius-xl", radius::XL);
-    write_var(&mut css, "radius-2xl", radius::_2XL);
-    write_var(&mut css, "radius-full", radius::FULL);
-
-    // Font sizes
-    write_var(&mut css, "text-xs", font_size::XS);
-    write_var(&mut css, "text-sm", font_size::SM);
-    write_var(&mut css, "text-base", font_size::BASE);
-    write_var(&mut css, "text-lg", font_size::LG);
-    write_var(&mut css, "text-xl", font_size::XL);
-    write_var(&mut css, "text-2xl", font_size::_2XL);
-    write_var(&mut css, "text-3xl", font_size::_3XL);
-    write_var(&mut css, "text-4xl", font_size::_4XL);
-    write_var(&mut css, "text-5xl", font_size::_5XL);
-    write_var(&mut css, "text-6xl", font_size::_6XL);
-
-    // Font weights
-    write_var(&mut css, "font-normal", font_weight::NORMAL);
-    write_var(&mut css, "font-medium", font_weight::MEDIUM);
-    write_var(&mut css, "font-semibold", font_weight::SEMIBOLD);
-    write_var(&mut css, "font-bold", font_weight::BOLD);
-
-    // Line heights
-    write_var(&mut css, "leading-tight", line_height::TIGHT);
-    write_var(&mut css, "leading-snug", line_height::SNUG);
-    write_var(&mut css, "leading-normal", line_height::NORMAL);
-    write_var(&mut css, "leading-relaxed", line_height::RELAXED);
-    write_var(&mut css, "leading-loose", line_height::LOOSE);
-
-    // Shadows
-    write_var(&mut css, "shadow-sm", shadow::SM);
-    write_var(&mut css, "shadow-md", shadow::MD);
-    write_var(&mut css, "shadow-lg", shadow::LG);
-    write_var(&mut css, "shadow-xl", shadow::XL);
+    for &(name, value) in NONCOLOR_PRIMITIVES {
+        write_var(&mut css, name, value);
+    }
 
     css.push_str("}\n");
     css
 }
 
-/// Generate CSS custom properties using a custom color palette.
+/// Generate CSS custom properties for only the non-color primitives that are actually used.
 ///
-/// Uses the provided palette for all color scales while keeping
-/// other primitive tokens (spacing, radius, etc.) from the defaults.
-pub fn generate_primitive_css_with_palette(palette: &ColorPalette) -> String {
-    let mut css = String::with_capacity(4096);
-    css.push_str(":root{\n");
+/// Takes a set of variable names (with `--` prefix) and only generates CSS
+/// for those variables. This tree-shakes spacing, radius, typography, and shadow
+/// tokens so small apps don't pay for unused vars.
+pub(crate) fn generate_primitive_css_filtered(used_vars: &HashSet<String>) -> String {
+    if used_vars.is_empty() {
+        return String::new();
+    }
 
-    // Use palette colors instead of hardcoded scales
-    css.push_str(&palette.to_css());
+    let mut css = String::with_capacity(512);
 
-    // Special colors (keep defaults)
-    write_var(&mut css, "white", color::WHITE);
-    write_var(&mut css, "black", color::BLACK);
+    for &(name, value) in NONCOLOR_PRIMITIVES {
+        let var_name = format!("--{}", name);
+        if used_vars.contains(&var_name) {
+            write_var(&mut css, name, value);
+        }
+    }
 
-    // Spacing
-    write_var(&mut css, "space-0", space::_0);
-    write_var(&mut css, "space-1", space::_1);
-    write_var(&mut css, "space-2", space::_2);
-    write_var(&mut css, "space-3", space::_3);
-    write_var(&mut css, "space-4", space::_4);
-    write_var(&mut css, "space-5", space::_5);
-    write_var(&mut css, "space-6", space::_6);
-    write_var(&mut css, "space-8", space::_8);
-    write_var(&mut css, "space-10", space::_10);
-    write_var(&mut css, "space-12", space::_12);
-    write_var(&mut css, "space-16", space::_16);
-    write_var(&mut css, "space-20", space::_20);
-    write_var(&mut css, "space-24", space::_24);
+    if css.is_empty() {
+        return String::new();
+    }
 
-    // Radius
-    write_var(&mut css, "radius-none", radius::NONE);
-    write_var(&mut css, "radius-sm", radius::SM);
-    write_var(&mut css, "radius-md", radius::MD);
-    write_var(&mut css, "radius-lg", radius::LG);
-    write_var(&mut css, "radius-xl", radius::XL);
-    write_var(&mut css, "radius-2xl", radius::_2XL);
-    write_var(&mut css, "radius-full", radius::FULL);
-
-    // Font sizes
-    write_var(&mut css, "text-xs", font_size::XS);
-    write_var(&mut css, "text-sm", font_size::SM);
-    write_var(&mut css, "text-base", font_size::BASE);
-    write_var(&mut css, "text-lg", font_size::LG);
-    write_var(&mut css, "text-xl", font_size::XL);
-    write_var(&mut css, "text-2xl", font_size::_2XL);
-    write_var(&mut css, "text-3xl", font_size::_3XL);
-    write_var(&mut css, "text-4xl", font_size::_4XL);
-    write_var(&mut css, "text-5xl", font_size::_5XL);
-    write_var(&mut css, "text-6xl", font_size::_6XL);
-
-    // Font weights
-    write_var(&mut css, "font-normal", font_weight::NORMAL);
-    write_var(&mut css, "font-medium", font_weight::MEDIUM);
-    write_var(&mut css, "font-semibold", font_weight::SEMIBOLD);
-    write_var(&mut css, "font-bold", font_weight::BOLD);
-
-    // Line heights
-    write_var(&mut css, "leading-tight", line_height::TIGHT);
-    write_var(&mut css, "leading-snug", line_height::SNUG);
-    write_var(&mut css, "leading-normal", line_height::NORMAL);
-    write_var(&mut css, "leading-relaxed", line_height::RELAXED);
-    write_var(&mut css, "leading-loose", line_height::LOOSE);
-
-    // Shadows
-    write_var(&mut css, "shadow-sm", shadow::SM);
-    write_var(&mut css, "shadow-md", shadow::MD);
-    write_var(&mut css, "shadow-lg", shadow::LG);
-    write_var(&mut css, "shadow-xl", shadow::XL);
-
-    css.push_str("}\n");
-    css
+    let mut result = String::with_capacity(css.len() + 10);
+    result.push_str(":root{\n");
+    result.push_str(&css);
+    result.push_str("}\n");
+    result
 }
 
-/// Generate CSS custom properties for only the primitive tokens that are actually used.
+/// Generate CSS custom properties for only the color tokens that are actually used.
 ///
-/// Takes a set of variable names (with `--rw-` prefix) and only generates CSS
-/// for those variables. This reduces CSS size by tree-shaking unused tokens.
-pub fn generate_primitive_css_filtered(used_vars: &HashSet<String>) -> String {
-    let mut css = String::with_capacity(2048);
-    css.push_str(":root{\n");
+/// Takes a set of variable names (with `--` prefix) and only generates CSS
+/// for those variables. This is used to tree-shake color primitives that are
+/// directly referenced by St tokens (e.g., `--P4` for green-4, `--O9` for red-9).
+///
+/// Short names: N=neutral, U=blue, O=red, P=green, M=amber, Y=special (Yw/Yb).
+pub(crate) fn generate_color_css_filtered(used_vars: &HashSet<String>) -> String {
+    if used_vars.is_empty() {
+        return String::new();
+    }
 
-    // Helper to conditionally write a variable if it's used
+    let mut css = String::with_capacity(512);
+
     let write_if_used = |css: &mut String, name: &str, value: &str| {
-        let var_name = format!("--rw-{}", name);
+        let var_name = format!("--{}", name);
         if used_vars.contains(&var_name) {
             write_var(css, name, value);
         }
     };
 
-    // Color scales
-    for (i, color) in NEUTRAL_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("neutral-{}", i + 1), color);
+    // Color scales (short prefix + 1-based index)
+    for (i, c) in NEUTRAL_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("N{}", i + 1), c);
     }
-    for (i, color) in BLUE_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("blue-{}", i + 1), color);
+    for (i, c) in BLUE_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("U{}", i + 1), c);
     }
-    for (i, color) in RED_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("red-{}", i + 1), color);
+    for (i, c) in RED_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("O{}", i + 1), c);
     }
-    for (i, color) in GREEN_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("green-{}", i + 1), color);
+    for (i, c) in GREEN_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("P{}", i + 1), c);
     }
-    for (i, color) in AMBER_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("amber-{}", i + 1), color);
+    for (i, c) in AMBER_SCALE.iter().enumerate() {
+        write_if_used(&mut css, &format!("M{}", i + 1), c);
     }
 
     // Special colors
-    write_if_used(&mut css, "white", color::WHITE);
-    write_if_used(&mut css, "black", color::BLACK);
+    write_if_used(&mut css, "Yw", color::WHITE);
+    write_if_used(&mut css, "Yb", color::BLACK);
 
-    // Spacing
-    write_if_used(&mut css, "space-0", space::_0);
-    write_if_used(&mut css, "space-1", space::_1);
-    write_if_used(&mut css, "space-2", space::_2);
-    write_if_used(&mut css, "space-3", space::_3);
-    write_if_used(&mut css, "space-4", space::_4);
-    write_if_used(&mut css, "space-5", space::_5);
-    write_if_used(&mut css, "space-6", space::_6);
-    write_if_used(&mut css, "space-8", space::_8);
-    write_if_used(&mut css, "space-10", space::_10);
-    write_if_used(&mut css, "space-12", space::_12);
-    write_if_used(&mut css, "space-16", space::_16);
-    write_if_used(&mut css, "space-20", space::_20);
-    write_if_used(&mut css, "space-24", space::_24);
-
-    // Radius
-    write_if_used(&mut css, "radius-none", radius::NONE);
-    write_if_used(&mut css, "radius-sm", radius::SM);
-    write_if_used(&mut css, "radius-md", radius::MD);
-    write_if_used(&mut css, "radius-lg", radius::LG);
-    write_if_used(&mut css, "radius-xl", radius::XL);
-    write_if_used(&mut css, "radius-2xl", radius::_2XL);
-    write_if_used(&mut css, "radius-full", radius::FULL);
-
-    // Font sizes
-    write_if_used(&mut css, "text-xs", font_size::XS);
-    write_if_used(&mut css, "text-sm", font_size::SM);
-    write_if_used(&mut css, "text-base", font_size::BASE);
-    write_if_used(&mut css, "text-lg", font_size::LG);
-    write_if_used(&mut css, "text-xl", font_size::XL);
-    write_if_used(&mut css, "text-2xl", font_size::_2XL);
-    write_if_used(&mut css, "text-3xl", font_size::_3XL);
-    write_if_used(&mut css, "text-4xl", font_size::_4XL);
-    write_if_used(&mut css, "text-5xl", font_size::_5XL);
-    write_if_used(&mut css, "text-6xl", font_size::_6XL);
-
-    // Font weights
-    write_if_used(&mut css, "font-normal", font_weight::NORMAL);
-    write_if_used(&mut css, "font-medium", font_weight::MEDIUM);
-    write_if_used(&mut css, "font-semibold", font_weight::SEMIBOLD);
-    write_if_used(&mut css, "font-bold", font_weight::BOLD);
-
-    // Line heights
-    write_if_used(&mut css, "leading-tight", line_height::TIGHT);
-    write_if_used(&mut css, "leading-snug", line_height::SNUG);
-    write_if_used(&mut css, "leading-normal", line_height::NORMAL);
-    write_if_used(&mut css, "leading-relaxed", line_height::RELAXED);
-    write_if_used(&mut css, "leading-loose", line_height::LOOSE);
-
-    // Shadows
-    write_if_used(&mut css, "shadow-sm", shadow::SM);
-    write_if_used(&mut css, "shadow-md", shadow::MD);
-    write_if_used(&mut css, "shadow-lg", shadow::LG);
-    write_if_used(&mut css, "shadow-xl", shadow::XL);
-
-    css.push_str("}\n");
-    css
-}
-
-// Color scale arrays for iteration
-const NEUTRAL_SCALE: [&str; 12] = [
-    color::NEUTRAL_1,
-    color::NEUTRAL_2,
-    color::NEUTRAL_3,
-    color::NEUTRAL_4,
-    color::NEUTRAL_5,
-    color::NEUTRAL_6,
-    color::NEUTRAL_7,
-    color::NEUTRAL_8,
-    color::NEUTRAL_9,
-    color::NEUTRAL_10,
-    color::NEUTRAL_11,
-    color::NEUTRAL_12,
-];
-
-const BLUE_SCALE: [&str; 12] = [
-    color::BLUE_1,
-    color::BLUE_2,
-    color::BLUE_3,
-    color::BLUE_4,
-    color::BLUE_5,
-    color::BLUE_6,
-    color::BLUE_7,
-    color::BLUE_8,
-    color::BLUE_9,
-    color::BLUE_10,
-    color::BLUE_11,
-    color::BLUE_12,
-];
-
-const RED_SCALE: [&str; 12] = [
-    color::RED_1,
-    color::RED_2,
-    color::RED_3,
-    color::RED_4,
-    color::RED_5,
-    color::RED_6,
-    color::RED_7,
-    color::RED_8,
-    color::RED_9,
-    color::RED_10,
-    color::RED_11,
-    color::RED_12,
-];
-
-const GREEN_SCALE: [&str; 12] = [
-    color::GREEN_1,
-    color::GREEN_2,
-    color::GREEN_3,
-    color::GREEN_4,
-    color::GREEN_5,
-    color::GREEN_6,
-    color::GREEN_7,
-    color::GREEN_8,
-    color::GREEN_9,
-    color::GREEN_10,
-    color::GREEN_11,
-    color::GREEN_12,
-];
-
-const AMBER_SCALE: [&str; 12] = [
-    color::AMBER_1,
-    color::AMBER_2,
-    color::AMBER_3,
-    color::AMBER_4,
-    color::AMBER_5,
-    color::AMBER_6,
-    color::AMBER_7,
-    color::AMBER_8,
-    color::AMBER_9,
-    color::AMBER_10,
-    color::AMBER_11,
-    color::AMBER_12,
-];
-
-/// Write a color scale as CSS variables.
-fn write_color_scale(css: &mut String, name: &str, values: &[&str; 12]) {
-    for (i, value) in values.iter().enumerate() {
-        css.push_str("--rw-");
-        css.push_str(name);
-        css.push('-');
-        // Steps are 1-indexed
-        let step = i + 1;
-        if step >= 10 {
-            css.push_str(&step.to_string());
-        } else {
-            css.push((b'0' + step as u8) as char);
-        }
-        css.push(':');
-        css.push_str(value);
-        css.push_str(";\n");
+    if css.is_empty() {
+        return String::new();
     }
-}
 
-/// Write a single CSS variable.
-fn write_var(css: &mut String, name: &str, value: &str) {
-    css.push_str("--rw-");
-    css.push_str(name);
-    css.push(':');
-    css.push_str(value);
-    css.push_str(";\n");
+    let mut result = String::with_capacity(css.len() + 10);
+    result.push_str(":root{\n");
+    result.push_str(&css);
+    result.push_str("}\n");
+    result
 }
 
 /// Minify CSS by removing unnecessary whitespace.
@@ -411,64 +242,88 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_primitive_css_structure() {
-        let css = generate_primitive_css();
+    fn test_generate_noncolor_primitive_css_structure() {
+        let css = generate_noncolor_primitive_css();
 
         // Should start with :root
         assert!(css.starts_with(":root{"));
         assert!(css.ends_with("}\n"));
 
-        // Should contain all color scales
-        assert!(css.contains("--rw-neutral-1:"));
-        assert!(css.contains("--rw-neutral-12:"));
-        assert!(css.contains("--rw-blue-9:"));
-        assert!(css.contains("--rw-red-9:"));
-        assert!(css.contains("--rw-green-9:"));
-        assert!(css.contains("--rw-amber-9:"));
+        // Should NOT contain color scales
+        assert!(!css.contains("--N1:"), "Should not emit color vars");
+        assert!(!css.contains("--U9:"), "Should not emit color vars");
 
-        // Should contain spacing
-        assert!(css.contains("--rw-space-4:"));
+        // Should contain spacing (short names)
+        assert!(css.contains("--S4:"));
 
-        // Should contain radius
-        assert!(css.contains("--rw-radius-md:"));
+        // Should contain radius (short names)
+        assert!(css.contains("--R2:"));
 
-        // Should contain typography
-        assert!(css.contains("--rw-text-base:"));
-        assert!(css.contains("--rw-font-medium:"));
-        assert!(css.contains("--rw-leading-normal:"));
+        // Should contain typography (short names)
+        assert!(css.contains("--T3:"));
+        assert!(css.contains("--W5:"));
+        assert!(css.contains("--X3:"));
 
-        // Should contain shadows
-        assert!(css.contains("--rw-shadow-sm:"));
+        // Should contain shadows (short names)
+        assert!(css.contains("--Z1:"));
     }
 
     #[test]
-    fn test_css_size_budget() {
-        let css = generate_primitive_css();
+    fn test_noncolor_css_size_budget() {
+        let css = generate_noncolor_primitive_css();
 
-        // Primitive CSS should be under 4KB
+        // Non-color CSS should be much smaller than old full primitive CSS
         assert!(
-            css.len() < 4096,
-            "Primitive CSS exceeds budget: {} bytes (max 4096)",
+            css.len() < 2048,
+            "Non-color CSS exceeds budget: {} bytes (max 2048)",
             css.len()
         );
+    }
 
-        // Log actual size for tracking
-        println!("Primitive CSS size: {} bytes", css.len());
+    #[test]
+    fn test_noncolor_primitives_table_count() {
+        // Verify we have the expected number of entries
+        assert_eq!(NONCOLOR_PRIMITIVES.len(), 43);
+    }
+
+    #[test]
+    fn test_color_css_filtered() {
+        let mut used = HashSet::new();
+        used.insert("--P4".to_string());
+        used.insert("--O9".to_string());
+
+        let css = generate_color_css_filtered(&used);
+
+        // Should contain only the requested colors (short names)
+        assert!(css.contains("--P4:"));
+        assert!(css.contains("--O9:"));
+        // Should NOT contain others
+        assert!(!css.contains("--U1:"));
+        assert!(!css.contains("--N1:"));
+    }
+
+    #[test]
+    fn test_color_css_filtered_empty() {
+        let used = HashSet::new();
+        let css = generate_color_css_filtered(&used);
+
+        // Should return empty string when no colors are used
+        assert_eq!(css, "");
     }
 
     #[test]
     fn test_minify_css() {
-        let input = ":root {\n  --rw-space-4: 1rem;\n  --rw-blue-9: oklch(0.55 0.18 250);\n}\n";
+        let input = ":root {\n  --S4: 1rem;\n  --U9: oklch(0.55 0.18 250);\n}\n";
         let output = minify_css(input);
 
         assert!(!output.contains('\n'));
-        assert!(output.contains("--rw-space-4:1rem"));
-        assert!(output.contains("--rw-blue-9:oklch(0.55 0.18 250)"));
+        assert!(output.contains("--S4:1rem"));
+        assert!(output.contains("--U9:oklch(0.55 0.18 250)"));
     }
 
     #[test]
     fn test_minified_size() {
-        let css = generate_primitive_css();
+        let css = generate_noncolor_primitive_css();
         let minified = minify_css(&css);
 
         // Minified should be smaller
@@ -477,28 +332,20 @@ mod tests {
         // Minified should still be valid (starts/ends correctly)
         assert!(minified.starts_with(":root{"));
         assert!(minified.ends_with("}"));
-
-        println!(
-            "Minified CSS size: {} bytes (saved {} bytes)",
-            minified.len(),
-            css.len() - minified.len()
-        );
     }
 
     #[test]
     fn test_no_duplicate_variables() {
-        let css = generate_primitive_css();
+        let css = generate_noncolor_primitive_css();
 
         let vars: Vec<&str> = css
             .lines()
-            .filter(|line| line.contains("--rw-"))
+            .filter(|line| line.starts_with("--"))
             .map(|line| {
-                // Extract variable name
                 line.trim()
                     .split(':')
                     .next()
                     .unwrap_or("")
-                    .trim_start_matches("--rw-")
             })
             .collect();
 

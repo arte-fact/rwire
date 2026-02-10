@@ -6,13 +6,13 @@
 use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
-    APPEND, BATCH_END, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM, CLEAR_CHILDREN, COMPOSITE_TABLE,
-    CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
-    FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH,
-    ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA,
-    SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI,
-    STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
-    SYMBOL_SESSION_START, WORD_TABLE,
+    APPEND, BATCH_END, BIND_DEBOUNCED, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM,
+    CLEAR_CHILDREN, COMPOSITE_TABLE, CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER,
+    FORM_CLEAR_ERROR, FORM_SET_REQUIRED, FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID,
+    GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH, ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL,
+    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
+    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
+    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 
@@ -239,6 +239,25 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(event_type);
         write_varint(&mut self.buf, handler_idx);
+        self
+    }
+
+    /// Bind a debounced remote event handler.
+    ///
+    /// Format: [BIND_DEBOUNCED, ref_varint, event_type, handler_varint, ms_hi, ms_lo]
+    pub fn bind_debounced(
+        &mut self,
+        ref_idx: u32,
+        event_type: u8,
+        handler_idx: u32,
+        delay_ms: u16,
+    ) -> &mut Self {
+        self.buf.put_u8(BIND_DEBOUNCED);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(event_type);
+        write_varint(&mut self.buf, handler_idx);
+        self.buf.put_u8((delay_ms >> 8) as u8);
+        self.buf.put_u8((delay_ms & 0xFF) as u8);
         self
     }
 

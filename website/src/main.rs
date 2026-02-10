@@ -9,7 +9,8 @@ use rwire::docs::{parse_markdown, DocPage, DocSite, SearchResult};
 use rwire::icons::{icon, Icon};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
-use rwire::tokens::ColorPalette;
+use rwire::tokens::PalettePreset;
+use rwire::ColorPalette;
 use rwire::router::{Link, Router};
 use rwire::{el, handler, renderer, El, Ev, ElementBuilder, Server, State};
 
@@ -26,6 +27,7 @@ struct SiteState {
     sidebar_open: bool,
     theme_mode: ThemeMode,
     theme_style: ThemeStyle,
+    palette: PalettePreset,
 }
 
 // ============================================================================
@@ -61,8 +63,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
     let capsule_config = CapsuleConfig::new()
-        .theme(Theme::default())
-        .palette(ColorPalette::nord())
+        .theme(Theme::default().palette(ColorPalette::nord()))
+        .palettes(PalettePreset::ALL)
+        .styles(ThemeStyle::ALL)
         .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind("0.0.0.0:9000")?
@@ -83,9 +86,7 @@ fn root(state: &SiteState) -> ElementBuilder {
     let site = DocSite::load(DOCS_DIR);
     let is_landing = state.current_path.is_empty();
 
-    let main_content = if state.searching {
-        build_search_results(&site, &state.search_query)
-    } else if is_landing {
+    let main_content = if is_landing {
         build_landing_page()
     } else {
         build_doc_page(&site, &state.current_path)
@@ -96,6 +97,9 @@ fn root(state: &SiteState) -> ElementBuilder {
         .st([St::BgApp, St::TextDefault, St::MinHScreen]);
     if state.theme_style != ThemeStyle::Default {
         root_el = root_el.attr("data-style", state.theme_style.as_str());
+    }
+    if state.palette != PalettePreset::Default {
+        root_el = root_el.attr("data-palette", state.palette.as_str());
     }
 
     if is_landing {
@@ -210,11 +214,59 @@ fn build_header(show_hamburger: bool) -> ElementBuilder {
 
 #[renderer]
 fn render_search_input(state: &SiteState) -> ElementBuilder {
-    Input::search()
+    let input = Input::search()
         .placeholder("Search docs...")
         .size(InputSize::Sm)
+        .id("search-input")
         .value(state.search_query.clone())
-        .on_input(on_search_input())
+        .on_input_debounced(on_search_input(), 300);
+
+    let mut container = el(El::Div).st([St::PositionRelative]);
+    container = container.append([input]);
+
+    if state.searching {
+        let site = DocSite::load(DOCS_DIR);
+        let results = site.search(&state.search_query, 8);
+
+        // Transparent full-screen backdrop for click-outside dismiss
+        let backdrop = el(El::Div)
+            .st([St::PositionFixed, St::Inset0, St::Z40])
+            .on(Ev::Click, close_search());
+
+        // Dropdown panel positioned below input
+        let panel = el(El::Div)
+            .st([
+                St::PositionAbsolute, St::Right0, St::Z50,
+                St::BgApp, St::BorderSubtle, St::RoundedMd, St::ShadowLg,
+                St::OverflowYAuto, St::PySm, St::MaxW360px,
+            ])
+            .attr("style", "top:100%;margin-top:4px;max-height:400px")
+            .append(if results.is_empty() {
+                vec![el(El::Div)
+                    .st([St::PxMd, St::PySm, St::TextMuted, St::TextSm])
+                    .text("No results found")]
+            } else {
+                results.iter().map(|r| {
+                    Link::to_with_content(
+                        &r.path,
+                        el(El::Div).append([
+                            el(El::Div).st([St::FontMedium, St::TextSm]).text(&r.title),
+                            el(El::Div).st([St::TextXs, St::TextMuted]).text(&r.section),
+                        ]),
+                    )
+                    .st([
+                        St::DisplayBlock, St::PxMd, St::PySm,
+                        St::NoDecoration, St::TextDefault,
+                        St::TransitionColors, St::CursorPointer,
+                    ])
+                    .hover([St::BgHover])
+                }).collect()
+            });
+
+        container = container.append([backdrop, panel]);
+    }
+
+    container
 }
 
 #[renderer]
@@ -230,15 +282,18 @@ fn render_theme_toggle(state: &SiteState) -> ElementBuilder {
 
 #[renderer]
 fn render_style_switcher(state: &SiteState) -> ElementBuilder {
-    let label = match state.theme_style {
-        ThemeStyle::Default => "Default",
-        ThemeStyle::Soft => "Soft",
-        ThemeStyle::Brutalist => "Brutalist",
-        ThemeStyle::Minimal => "Minimal",
-    };
-    Button::ghost(label)
-        .size(ButtonSize::Sm)
-        .on_click(cycle_theme_style())
+    Stack::row()
+        .gap(Gap::Xs)
+        .align(StackAlign::Center)
+        .children([
+            Button::ghost(state.theme_style.label())
+                .size(ButtonSize::Sm)
+                .on_click(cycle_theme_style()),
+            Button::ghost(state.palette.label())
+                .size(ButtonSize::Sm)
+                .on_click(cycle_palette()),
+        ])
+        .build()
 }
 
 // ============================================================================
@@ -835,12 +890,16 @@ fn toggle_theme(state: &mut SiteState) {
 
 #[handler]
 fn cycle_theme_style(state: &mut SiteState) {
-    state.theme_style = match state.theme_style {
-        ThemeStyle::Default => ThemeStyle::Soft,
-        ThemeStyle::Soft => ThemeStyle::Brutalist,
-        ThemeStyle::Brutalist => ThemeStyle::Minimal,
-        ThemeStyle::Minimal => ThemeStyle::Default,
-    };
+    let all = ThemeStyle::ALL_WITH_DEFAULT;
+    let idx = all.iter().position(|s| *s == state.theme_style).unwrap_or(0);
+    state.theme_style = all[(idx + 1) % all.len()];
+}
+
+#[handler]
+fn cycle_palette(state: &mut SiteState) {
+    let all = PalettePreset::ALL;
+    let idx = all.iter().position(|p| *p == state.palette).unwrap_or(0);
+    state.palette = all[(idx + 1) % all.len()];
 }
 
 #[handler]
@@ -849,6 +908,12 @@ fn on_search_input(state: &mut SiteState, ctx: &rwire::EventContext) {
         state.search_query = text.to_string();
         state.searching = !state.search_query.is_empty();
     }
+}
+
+#[handler]
+fn close_search(state: &mut SiteState) {
+    state.searching = false;
+    state.search_query.clear();
 }
 
 // ============================================================================

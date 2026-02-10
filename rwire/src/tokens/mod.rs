@@ -42,5 +42,5 @@ pub mod css;
 pub mod palette;
 pub mod primitives;
 
-pub use palette::{ColorPalette, ColorScale};
+pub use palette::{ColorPalette, ColorScale, PalettePreset};
 pub use primitives::*;

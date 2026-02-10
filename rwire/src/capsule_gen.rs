@@ -15,8 +15,8 @@ use std::collections::HashSet;
 use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
 use crate::protocol::El;
 use crate::style_tokens::St;
-use crate::theme::Theme;
-use crate::tokens::ColorPalette;
+use crate::theme::{Theme, ThemeStyle};
+use crate::tokens::PalettePreset;
 
 /// Generate a tree-shaken JS object literal from a mappings array.
 ///
@@ -87,6 +87,7 @@ function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0];wv(a
 function sep(h,t,f,prm,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0x80];wv(a,h);a.push(t,f&255,prm.length);let msg=new Uint8Array(a.length+prm.length+1+pb.length);let j=0;for(let b of a)msg[j++]=b;msg.set(prm,j);j+=prm.length;msg[j++]=pb.length;msg.set(pb,j);w.send(msg)}
 function x(d){
 let r=[],i=0,_oc=0;
+let ae=document.activeElement,ai=ae&&ae.id,ap=ae?ae.selectionStart:0;
 try{
 while(i<d.length){
 let _p=i,o=d[i++];_oc++;
@@ -123,15 +124,25 @@ else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let 
 else if(o===O.SC){let[f,fl]=rv(d,i);i+=fl;let[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
 else if(o===O.PD){let[f,fl]=rv(d,i);i+=fl;let pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
 else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('b'+bp+'u'+u)}}
-else if(o===O.E){return}
+else if(o===O.E){if(ai){let ne=document.getElementById(ai);if(ne&&ne!==document.activeElement){ne.focus();try{ne.setSelectionRange(ap,ap)}catch(_){}}}return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
 function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
 if('scrollRestoration' in history)history.scrollRestoration='manual';
+let rc=0,rn=false;
+function connect(){
 w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
-w.onopen=()=>{if(location.pathname!=='/')w.send('R'+location.pathname);if(location.hash)sh(location.hash)};
+w.onopen=()=>{
+if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}}
+rn=false;rc=0;
+if(location.pathname!=='/')w.send('R'+location.pathname);
+if(location.hash)sh(location.hash)};
 w.onmessage=e=>x(new Uint8Array(e.data));
+w.onclose=()=>{rn=true;setTimeout(connect,Math.min(1000*Math.pow(2,rc++),30000))};
+w.onerror=()=>{}}
+connect();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&w.readyState>1){rc=0;connect()}});
 document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
 window.addEventListener('popstate',()=>{w.send('R'+location.pathname);if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
 
@@ -341,35 +352,34 @@ impl FontFace {
 pub struct CapsuleConfig {
     /// Theme configuration for CSS variables
     pub theme: Theme,
-    /// Optional custom color palette (Nord, custom, etc.)
-    pub palette: Option<ColorPalette>,
     /// Whether to include local state mutation interpreter
-    pub has_local_handlers: bool,
+    pub(crate) has_local_handlers: bool,
     /// Used style utility tokens (for tree-shaking)
-    pub used_style_utils: HashSet<u16>,
+    pub(crate) used_style_utils: HashSet<u16>,
     /// Used style property codes (for tree-shaking)
-    pub used_style_props: HashSet<u8>,
+    pub(crate) used_style_props: HashSet<u8>,
     /// Used style value codes (for tree-shaking)
-    pub used_style_values: HashSet<u8>,
+    pub(crate) used_style_values: HashSet<u8>,
     /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
-    pub used_pseudo_pairs: HashSet<(u8, u16)>,
+    pub(crate) used_pseudo_pairs: HashSet<(u8, u16)>,
     /// Used breakpoint (Bp, St) pairs (for tree-shaking)
-    pub used_breakpoint_pairs: HashSet<(u8, u16)>,
+    pub(crate) used_breakpoint_pairs: HashSet<(u8, u16)>,
     /// Used attribute key codes (for tree-shaking)
-    pub used_attr_keys: HashSet<u8>,
+    pub(crate) used_attr_keys: HashSet<u8>,
     /// Used attribute value codes (for tree-shaking)
-    pub used_attr_values: HashSet<u8>,
+    pub(crate) used_attr_values: HashSet<u8>,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
-    pub composite_css: String,
+    pub(crate) composite_css: String,
     /// Extra element types to include in the capsule beyond what tree-shaking discovers.
-    /// Use this when dynamic content (e.g., markdown) creates element types not present
-    /// in the initial render.
-    pub extra_elements: HashSet<u8>,
+    pub(crate) extra_elements: HashSet<u8>,
     /// Extra style utility tokens to include beyond what tree-shaking discovers.
-    /// Same purpose as extra_elements but for CSS utility classes.
-    pub extra_style_utils: HashSet<u16>,
+    pub(crate) extra_style_utils: HashSet<u16>,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
+    /// Palette presets for runtime switching via `[data-palette="name"]`.
+    pub(crate) palettes: Vec<PalettePreset>,
+    /// Style presets for runtime switching via `[data-style="name"]`.
+    pub(crate) styles: Vec<ThemeStyle>,
 }
 
 impl CapsuleConfig {
@@ -380,9 +390,7 @@ impl CapsuleConfig {
 
     /// Create a dark theme with Nord color palette.
     pub fn dark_nord() -> Self {
-        Self::default()
-            .theme(Theme::dark())
-            .palette(ColorPalette::nord())
+        Self::default().theme(Theme::dark_nord())
     }
 
     /// Create a light theme with default colors.
@@ -401,89 +409,56 @@ impl CapsuleConfig {
         self
     }
 
-    /// Set a custom color palette.
-    ///
-    /// When set, the palette's colors will be used instead of the default
-    /// Oklch-based colors. Use presets like `ColorPalette::nord()` or
-    /// create custom palettes.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use rwire::tokens::ColorPalette;
-    /// use rwire::capsule_gen::CapsuleConfig;
-    ///
-    /// let config = CapsuleConfig::new()
-    ///     .palette(ColorPalette::nord());
-    /// ```
-    pub fn palette(mut self, palette: ColorPalette) -> Self {
-        self.palette = Some(palette);
-        self
-    }
-
     /// Set whether local handlers are used.
-    pub fn has_local_handlers(mut self, has: bool) -> Self {
+    pub(crate) fn has_local_handlers(mut self, has: bool) -> Self {
         self.has_local_handlers = has;
         self
     }
 
-    /// Add a used style utility token.
-    pub fn use_style_util(mut self, util: u16) -> Self {
-        self.used_style_utils.insert(util);
-        self
-    }
-
-    /// Add used style property and value codes.
-    pub fn use_style_prop(mut self, prop: u8, value: u8) -> Self {
-        self.used_style_props.insert(prop);
-        self.used_style_values.insert(value);
-        self
-    }
-
     /// Set all used style utility tokens (from build context).
-    pub fn with_style_utils(mut self, utils: &HashSet<u16>) -> Self {
+    pub(crate) fn with_style_utils(mut self, utils: &HashSet<u16>) -> Self {
         self.used_style_utils = utils.clone();
         self
     }
 
     /// Set all used style property codes (from build context).
-    pub fn with_style_props(mut self, props: &HashSet<u8>) -> Self {
+    pub(crate) fn with_style_props(mut self, props: &HashSet<u8>) -> Self {
         self.used_style_props = props.clone();
         self
     }
 
     /// Set all used style value codes (from build context).
-    pub fn with_style_values(mut self, values: &HashSet<u8>) -> Self {
+    pub(crate) fn with_style_values(mut self, values: &HashSet<u8>) -> Self {
         self.used_style_values = values.clone();
         self
     }
 
     /// Set all used pseudo-class (Pc, St) pairs (from build context).
-    pub fn with_pseudo_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
+    pub(crate) fn with_pseudo_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
         self.used_pseudo_pairs = pairs.clone();
         self
     }
 
     /// Set all used breakpoint (Bp, St) pairs (from build context).
-    pub fn with_breakpoint_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
+    pub(crate) fn with_breakpoint_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
         self.used_breakpoint_pairs = pairs.clone();
         self
     }
 
     /// Set all used attribute key codes (from build context).
-    pub fn with_attr_keys(mut self, keys: &HashSet<u8>) -> Self {
+    pub(crate) fn with_attr_keys(mut self, keys: &HashSet<u8>) -> Self {
         self.used_attr_keys = keys.clone();
         self
     }
 
     /// Set all used attribute value codes (from build context).
-    pub fn with_attr_values(mut self, values: &HashSet<u8>) -> Self {
+    pub(crate) fn with_attr_values(mut self, values: &HashSet<u8>) -> Self {
         self.used_attr_values = values.clone();
         self
     }
 
     /// Set pre-generated composite CSS from style grouping analysis.
-    pub fn with_composite_css(mut self, css: String) -> Self {
+    pub(crate) fn with_composite_css(mut self, css: String) -> Self {
         self.composite_css = css;
         self
     }
@@ -514,6 +489,47 @@ impl CapsuleConfig {
         self
     }
 
+    /// Register palette presets for runtime switching.
+    ///
+    /// The theme's palette is the default; these are additional options
+    /// accessible via `data-palette="name"` attribute on the root element.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// CapsuleConfig::new()
+    ///     .palettes(PalettePreset::ALL)
+    /// ```
+    pub fn palettes(mut self, presets: &[PalettePreset]) -> Self {
+        self.palettes = presets.to_vec();
+        self
+    }
+
+    /// Register theme style presets for runtime switching.
+    ///
+    /// Ensures all theme-hook utility classes survive tree-shaking so
+    /// runtime style switching (e.g., Default → Glass → Neon) works.
+    /// Cost: ~14 extra CSS rules (~600 bytes). Default Q-var values are
+    /// `none`/`0`/transparent, so these classes are visually inert until
+    /// a ThemeStyle override activates them.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// CapsuleConfig::new()
+    ///     .styles(ThemeStyle::ALL)
+    /// ```
+    pub fn styles(mut self, styles: &[ThemeStyle]) -> Self {
+        self.styles = styles.to_vec();
+        for &code in &[
+            0x32Du16, 0x32E, 0x32F, 0x330, 0x331, 0x332, 0x333,
+            0x334, 0x335, 0x336, 0x337, 0x338, 0x339, 0x33A,
+        ] {
+            self.extra_style_utils.insert(code);
+        }
+        self
+    }
+
     /// Register a font face for the capsule.
     ///
     /// The font's CSS (`@import` or `@font-face`) is generated at capsule
@@ -540,21 +556,30 @@ impl CapsuleConfig {
 
 /// Extract all CSS variable references from a CSS string.
 ///
-/// Scans for `var(--rw-*)` patterns and returns a set of variable names.
+/// Scans for `var(--..)` patterns and returns a set of variable names.
+/// Tracks all custom property references (short-name primitives, color vars, etc.)
+/// but excludes semantic vars (lowercase `--a` through `--z`, uppercase `--A`-`--L`,
+/// `--n1`-`--n12`) since those are always emitted by the theme system.
 fn extract_used_variables(css: &str) -> HashSet<String> {
     let mut vars = HashSet::new();
 
-    // Find all occurrences of "var(" and extract the variable name
     for (idx, _) in css.match_indices("var(") {
         let rest = &css[idx + 4..]; // Skip "var("
 
-        // Find the end of the variable name (either ',' or ')')
         if let Some(end) = rest.find([',', ')']) {
             let var_name = rest[..end].trim();
 
-            // Only track --rw-* variables
-            if var_name.starts_with("--rw-") {
-                vars.insert(var_name.to_string());
+            // Track short-name primitives and color vars:
+            // S=spacing, R=radius, T=text, W=weight, X=leading, Z=shadow
+            // N=neutral, U=blue, O=red, P=green, M=amber, Y=special
+            // Q=component hooks
+            if var_name.starts_with("--") && var_name.len() >= 4 {
+                let suffix = &var_name[2..];
+                let first = suffix.as_bytes()[0];
+                if matches!(first, b'S' | b'R' | b'T' | b'W' | b'X' | b'Z'
+                    | b'N' | b'U' | b'O' | b'P' | b'M' | b'Y' | b'Q') {
+                    vars.insert(var_name.to_string());
+                }
             }
         }
     }
@@ -562,80 +587,102 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
     vars
 }
 
-/// Generate complete CSS for the capsule with tree-shaken variables.
+/// Generate complete CSS for the capsule with resolved theme.
 ///
 /// Includes:
 /// - Base reset CSS
-/// - Primitive token CSS variables (tree-shaken, or from custom palette)
-/// - Semantic token CSS variables (tree-shaken)
-/// - Theme overrides (accent, radius)
-/// - Component CSS (tree-shaken)
+/// - Non-color primitive CSS (spacing, radius, typography, shadows)
+/// - Resolved semantic CSS (light + dark, with direct oklch values)
+/// - Color primitive CSS (tree-shaken: only palette colors referenced by St tokens)
+/// - Theme style preset overrides
+/// - Component CSS (tree-shaken utility, pseudo, breakpoint classes)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     use crate::style_tokens::{generate_utility_css, generate_pseudo_css, generate_breakpoint_css};
-    use crate::theme::{generate_base_css, generate_semantic_css, generate_accent_css, generate_radius_css, generate_style_css};
-    use crate::tokens::css::{generate_primitive_css_filtered, generate_primitive_css_with_palette};
+    use crate::theme::{
+        generate_base_css, generate_q_var_base_css, generate_radius_css, ResolvedPalette,
+        generate_resolved_semantic_css, generate_resolved_style_css,
+    };
+    use crate::tokens::css::{generate_primitive_css_filtered, generate_color_css_filtered};
 
-    let mut css = String::with_capacity(12288);
+    let mut css = String::with_capacity(8192);
 
-    // 1. Get base CSS and extract variables used in it
-    let base_css = generate_base_css();
-    let mut used_vars = extract_used_variables(base_css);
-
-    // 2. Generate utility + pseudo + breakpoint token CSS (class-based, tree-shaken)
-    let utility_token_css = generate_utility_css(&config.used_style_utils);
+    // 1. Generate utility + pseudo + breakpoint token CSS (class-based, tree-shaken)
+    let mut all_utils = config.used_style_utils.clone();
+    all_utils.extend(&config.extra_style_utils);
+    let utility_token_css = generate_utility_css(&all_utils);
     let pseudo_token_css = generate_pseudo_css(&config.used_pseudo_pairs);
     let breakpoint_token_css = generate_breakpoint_css(&config.used_breakpoint_pairs);
 
-    // Extract variables used in token CSS rules
+    // 2. Extract var(--...) references from token CSS rules.
+    //    Short-name vars: S=spacing, R=radius, T=text, W=weight, X=leading, Z=shadow
+    //    Color vars: N=neutral, U=blue, O=red, P=green, M=amber, Y=special
+    //    Component hooks: Q=hooks
+    let base_css = generate_base_css();
+    let mut used_vars = extract_used_variables(base_css);
     used_vars.extend(extract_used_variables(&utility_token_css));
     used_vars.extend(extract_used_variables(&pseudo_token_css));
     used_vars.extend(extract_used_variables(&breakpoint_token_css));
-
-    // 3. Generate semantic CSS to extract primitive variables it references
-    let semantic_css = generate_semantic_css();
-    used_vars.extend(extract_used_variables(&semantic_css));
-
-    // 4. Also check theme overrides for additional variables
-    if let Some(accent_css) = generate_accent_css(config.theme.accent) {
-        used_vars.extend(extract_used_variables(&accent_css));
-    }
     if let Some(radius_css) = generate_radius_css(config.theme.radius) {
         used_vars.extend(extract_used_variables(radius_css));
     }
-    {
-        use crate::theme::ThemeStyle;
-        for style in [ThemeStyle::Soft, ThemeStyle::Brutalist, ThemeStyle::Minimal] {
-            if let Some(style_css) = generate_style_css(style) {
-                used_vars.extend(extract_used_variables(&style_css));
-            }
-        }
-    }
 
-    // 5. Base reset (must come first)
+    // 3. Base reset (must come first)
     css.push_str(base_css);
 
-    // 6. Primitive tokens (tree-shaken or from custom palette)
-    match &config.palette {
-        Some(palette) => css.push_str(&generate_primitive_css_with_palette(palette)),
-        None => css.push_str(&generate_primitive_css_filtered(&used_vars)),
+    // 4. Non-color primitives (tree-shaken: S, R, T, W, X, Z prefixes)
+    let primitive_vars: HashSet<String> = used_vars
+        .iter()
+        .filter(|v| {
+            v.len() >= 4 && matches!(v.as_bytes()[2], b'S' | b'R' | b'T' | b'W' | b'X' | b'Z')
+        })
+        .cloned()
+        .collect();
+    if !primitive_vars.is_empty() {
+        css.push_str(&generate_primitive_css_filtered(&primitive_vars));
     }
 
-    // 7. Semantic tokens
-    css.push_str(&semantic_css);
-
-    // 8. Theme overrides
-    if let Some(accent_css) = generate_accent_css(config.theme.accent) {
-        css.push_str(&accent_css);
+    // 5. Color primitives (tree-shaken: N, U, O, P, M, Y prefixes)
+    let color_vars: HashSet<String> = used_vars
+        .iter()
+        .filter(|v| {
+            v.len() >= 4 && matches!(v.as_bytes()[2], b'N' | b'U' | b'O' | b'P' | b'M' | b'Y')
+        })
+        .cloned()
+        .collect();
+    if !color_vars.is_empty() {
+        css.push_str(&generate_color_css_filtered(&color_vars));
     }
+
+    // 6. Resolved semantic tokens (light + dark, with direct oklch values)
+    let rp = ResolvedPalette::new(&config.theme);
+    css.push_str(&generate_resolved_semantic_css(&rp));
+
+    // 6b. Q-var base CSS (theme-style hooks)
+    css.push_str(generate_q_var_base_css());
+
+    // 7. Radius override (if non-default)
     if let Some(radius_css) = generate_radius_css(config.theme.radius) {
         css.push_str(radius_css);
     }
 
-    // 8b. ThemeStyle overrides — include all presets so apps can switch at runtime
-    use crate::theme::ThemeStyle;
-    for style in [ThemeStyle::Soft, ThemeStyle::Brutalist, ThemeStyle::Minimal] {
-        if let Some(style_css) = generate_style_css(style) {
+    // 8. ThemeStyle overrides — include all presets so apps can switch at runtime
+    for style in ThemeStyle::ALL {
+        if let Some(style_css) = generate_resolved_style_css(*style, &rp) {
             css.push_str(&style_css);
+        }
+    }
+
+    // 8b. Palette overrides — pre-generated for runtime switching
+    if !config.palettes.is_empty() {
+        use crate::theme::generate_palette_override_css;
+        for preset in &config.palettes {
+            // Skip Default — it's already the :root palette
+            if *preset == PalettePreset::Default {
+                continue;
+            }
+            let p_theme = Theme::default().palette(preset.palette());
+            let p_rp = ResolvedPalette::new(&p_theme);
+            css.push_str(&generate_palette_override_css(preset.as_str(), &p_rp));
         }
     }
 
@@ -743,13 +790,13 @@ const SE={{{svg_js}}};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{AccentColor, ThemeMode};
+    use crate::theme::ThemeMode;
 
     #[test]
     fn test_capsule_config_defaults() {
         let config = CapsuleConfig::new();
         assert_eq!(config.theme.mode, ThemeMode::Light);
-        assert_eq!(config.theme.accent, AccentColor::Blue);
+        assert!(config.theme.palette_ref().is_none());
         assert!(!config.has_local_handlers);
     }
 
@@ -760,57 +807,36 @@ mod tests {
 
         // Should contain base reset
         assert!(css.contains("box-sizing"));
-        // Should contain primitive tokens
-        assert!(css.contains("--rw-neutral-1"));
-        // Should contain semantic tokens
-        assert!(css.contains("--rw-bg-app"));
+        // Should contain resolved semantic tokens with short names
+        assert!(css.contains("--a:"), "Missing --a (bg-app)");
+        assert!(css.contains("--k:"), "Missing --k (text-default)");
     }
 
     #[test]
-    fn test_css_variables_not_empty() {
-        // This test verifies the fix for the bug where CSS variables were empty
-        // because primitive tokens referenced by semantic CSS were being tree-shaken out
+    fn test_css_variables_resolved() {
+        // Verify the resolved theme pipeline: semantic vars use short names
+        // with direct oklch values, and primitives are tree-shaken.
 
-        // Simulate St tokens that components use. These tokens reference CSS
-        // variables that must be included in the primitive CSS output.
         let mut used_utils = HashSet::new();
-        used_utils.insert(0xC0); // BgApp -> --rw-bg-app
-        used_utils.insert(0x8B); // RoundedLg -> --rw-radius-lg
-        used_utils.insert(0xD1); // BorderSubtle -> --rw-border-subtle
-        used_utils.insert(0x53); // PMd -> --rw-space-4
-        used_utils.insert(0xE9); // ShadowSm -> --rw-shadow-sm
+        used_utils.insert(0xC0); // BgApp -> var(--a)
+        used_utils.insert(0x8B); // RoundedLg -> var(--R3)
+        used_utils.insert(0xD1); // BorderSubtle -> var(--g)
+        used_utils.insert(0x53); // PMd -> var(--S4)
+        used_utils.insert(0xE9); // ShadowSm -> var(--Z1)
 
         let config = CapsuleConfig::new()
             .with_style_utils(&used_utils);
         let css = generate_capsule_css(&config);
 
-        // Semantic tokens that reference primitives should all be present
-        assert!(css.contains("--rw-neutral-1:"), "Missing --rw-neutral-1");
-        assert!(css.contains("--rw-neutral-2:"), "Missing --rw-neutral-2");
-        assert!(css.contains("--rw-neutral-11:"), "Missing --rw-neutral-11");
-        assert!(css.contains("--rw-neutral-12:"), "Missing --rw-neutral-12");
+        // Non-color primitives (tree-shaken: only used ones)
+        assert!(css.contains("--S4:"), "Missing --S4 (space-4)");
+        assert!(css.contains("--R3:"), "Missing --R3 (radius-lg)");
+        assert!(css.contains("--X3:"), "Missing --X3 (leading-normal, from base CSS)");
+        assert!(css.contains("--Z1:"), "Missing --Z1 (shadow-sm)");
 
-        // Blue scale (used by default accent)
-        assert!(css.contains("--rw-blue-9:"), "Missing --rw-blue-9");
-
-        // White (used by text-on-accent)
-        assert!(css.contains("--rw-white:"), "Missing --rw-white");
-
-        // Spacing tokens used by St utility classes
-        assert!(css.contains("--rw-space-4:"), "Missing --rw-space-4");
-
-        // Radius tokens used by St utility classes
-        assert!(css.contains("--rw-radius-lg:"), "Missing --rw-radius-lg");
-
-        // Typography tokens used in base CSS
-        assert!(css.contains("--rw-leading-normal:"), "Missing --rw-leading-normal");
-
-        // Shadow tokens used by St utility classes
-        assert!(css.contains("--rw-shadow-sm:"), "Missing --rw-shadow-sm");
-
-        // Verify semantic tokens are defined and reference primitives correctly
-        assert!(css.contains("--rw-bg-app:var(--rw-neutral-1)"), "Semantic token not referencing primitive");
-        assert!(css.contains("--rw-text-default:var(--rw-neutral-11)"), "Semantic token not referencing primitive");
+        // Resolved semantic tokens use short names with direct oklch values
+        assert!(css.contains("--a:oklch("), "Semantic --a should have resolved oklch value");
+        assert!(css.contains("--k:oklch("), "Semantic --k should have resolved oklch value");
     }
 
     #[test]
@@ -823,7 +849,7 @@ mod tests {
         events.insert(1); // click
 
         let config = CapsuleConfig::new()
-            .theme(Theme::dark().with_accent(AccentColor::Green))
+            .theme(Theme::dark().accent("#00FF00"))
             .has_local_handlers(false);
 
         let css = generate_capsule_css(&config);
@@ -838,7 +864,8 @@ mod tests {
 
         // Should have theme data attribute
         assert!(capsule.contains("data-theme=\"dark\""));
-        assert!(capsule.contains("data-accent=\"green\""));
+        // data-accent is no longer emitted — accent is resolved at build time
+        assert!(!capsule.contains("data-accent"), "data-accent should not be emitted");
 
         // Should have div#rw for app root
         assert!(capsule.contains("<div id=\"rw\""));
@@ -857,7 +884,7 @@ mod tests {
         events.insert(1); // click
 
         let mut used_utils = HashSet::new();
-        used_utils.insert(0xC0); // BgApp
+        used_utils.insert(0xC0); // BgApp -> var(--a)
 
         let config = CapsuleConfig::new()
             .with_style_utils(&used_utils);
@@ -869,8 +896,8 @@ mod tests {
         assert!(capsule.contains("<style>"));
         assert!(capsule.contains("</style></head>"));
 
-        // Should contain generated CSS content
-        assert!(capsule.contains("--rw-bg-app"));
+        // Should contain resolved semantic var --a (bg-app)
+        assert!(capsule.contains("--a:"), "Missing resolved --a (bg-app)");
     }
 
     #[test]
@@ -948,21 +975,21 @@ mod tests {
     fn test_capsule_config_dark_nord() {
         let config = CapsuleConfig::dark_nord();
         assert_eq!(config.theme.mode, ThemeMode::Dark);
-        assert!(config.palette.is_some());
+        assert!(config.theme.palette_ref().is_some());
     }
 
     #[test]
     fn test_capsule_config_light() {
         let config = CapsuleConfig::light();
         assert_eq!(config.theme.mode, ThemeMode::Light);
-        assert!(config.palette.is_none());
+        assert!(config.theme.palette_ref().is_none());
     }
 
     #[test]
     fn test_capsule_config_dark() {
         let config = CapsuleConfig::dark();
         assert_eq!(config.theme.mode, ThemeMode::Dark);
-        assert!(config.palette.is_none());
+        assert!(config.theme.palette_ref().is_none());
     }
 
     #[test]
@@ -973,7 +1000,7 @@ mod tests {
         let events = HashSet::new();
 
         let config = CapsuleConfig::new()
-            .with_composite_css(".c256{display:flex;flex-direction:column;gap:var(--rw-space-4)}".to_string());
+            .with_composite_css(".c256{display:flex;flex-direction:column;gap:var(--S4)}".to_string());
 
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&elements, &events, &config, &css);
@@ -1008,5 +1035,22 @@ mod tests {
         let css = generate_capsule_css(&config);
         // Should not contain any composite class patterns
         assert!(!css.contains(".c256"), "Empty composite CSS should not produce .c256");
+    }
+
+    #[test]
+    fn test_styles_registers_theme_tokens() {
+        let config = CapsuleConfig::new().styles(ThemeStyle::ALL);
+        // All 14 theme-hook utility codes should be in extra_style_utils
+        for code in 0x32Du16..=0x33A {
+            assert!(
+                config.extra_style_utils.contains(&code),
+                "Missing theme-hook utility code 0x{code:X}"
+            );
+        }
+
+        // Generated CSS should include the theme-hook utility classes
+        let css = generate_capsule_css(&config);
+        assert!(css.contains(".u813{"), "Missing ShadowTheme utility class");
+        assert!(css.contains(".u826{"), "Missing TextShadowTheme utility class");
     }
 }

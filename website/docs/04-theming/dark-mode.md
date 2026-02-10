@@ -19,25 +19,25 @@ let theme = Theme::light();
 
 ## How It Works
 
-The capsule CSS includes two blocks of semantic variable definitions:
+The capsule CSS includes two blocks of semantic variables with resolved color values:
 
 ```css
-:root, [data-theme="light"] {
-  --rw-bg-app: var(--rw-neutral-1);
-  --rw-text-default: var(--rw-neutral-11);
-  --rw-text-muted: var(--rw-neutral-9);
+:root,[data-theme="light"]{
+  --a:oklch(0.985 0 0);   /* bg-app */
+  --k:oklch(0.25 0 0);    /* text-default */
+  --j:oklch(0.55 0 0);    /* text-muted */
   /* ...light mappings */
 }
 
-[data-theme="dark"] {
-  --rw-bg-app: var(--rw-neutral-12);
-  --rw-text-default: var(--rw-neutral-2);
-  --rw-text-muted: var(--rw-neutral-5);
-  /* ...inverted mappings */
+[data-theme="dark"]{
+  --a:oklch(0.15 0 0);    /* bg-app (inverted) */
+  --k:oklch(0.97 0 0);    /* text-default (inverted) */
+  --j:oklch(0.55 0 0);    /* text-muted (inverted) */
+  /* ...dark mappings */
 }
 ```
 
-When `data-theme` changes, all semantic tokens (`BgApp`, `TextDefault`, `TextMuted`, etc.) automatically resolve to the correct palette step. Components never need conditional color logic.
+When `data-theme` changes, all semantic tokens (`BgApp`, `TextDefault`, `TextMuted`, etc.) automatically resolve to the correct value. Components never need conditional color logic.
 
 ## ThemeToggle Component
 

@@ -29,7 +29,7 @@ fn select_arrow() -> ElementBuilder {
         .at(At::Height, Av::V12)
         .at(At::ViewBox, Av::ViewBox12)
         .at(At::Fill, Av::CurrentColor)
-        .attr("style", "right:var(--rw-space-3);top:50%;transform:translateY(-50%)")
+        .attr("style", "right:var(--S3);top:50%;transform:translateY(-50%)")
         .append([
             el(El::Path).at_str(At::D, "M6 9L1 4h10z")
         ])
@@ -124,7 +124,7 @@ impl Select {
         let mut tokens = vec![
             St::DisplayBlock, St::WFull, St::TextSm, St::TextHigh,
             St::BgApp, St::BorderDefault, St::RoundedMd, St::CursorPointer,
-            St::TransitionColors, St::AppearanceNone,
+            St::TransTheme, St::BorderWTheme, St::AppearanceNone,
         ];
         if self.invalid {
             tokens.push(St::BorderRed8);

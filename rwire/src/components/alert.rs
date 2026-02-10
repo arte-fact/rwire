@@ -105,7 +105,7 @@ impl Alert {
             St::GapSm,
             St::PMd,
             St::RoundedMd,
-            St::BorderL4,
+            St::BorderLTheme,
             St::TextSm,
         ];
 
@@ -119,8 +119,8 @@ impl Alert {
                 tokens.push(St::BorderGreen8);
             }
             AlertIntent::Warning => {
-                tokens.push(St::BgYellow2);
-                tokens.push(St::BorderYellow8);
+                tokens.push(St::BgAmber2);
+                tokens.push(St::BorderAmber8);
             }
             AlertIntent::Error => {
                 tokens.push(St::BgRed4);

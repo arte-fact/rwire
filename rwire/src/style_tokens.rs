@@ -90,12 +90,12 @@ define_token_enum! {
 
         // Gap - Design Tokens (0x28-0x2F)
         Gap0 = 0x28 => "gap:0",
-        GapXs = 0x29 => "gap:var(--rw-space-1)",
-        GapSm = 0x2A => "gap:var(--rw-space-2)",
-        GapMd = 0x2B => "gap:var(--rw-space-4)",
-        GapLg = 0x2C => "gap:var(--rw-space-6)",
-        GapXl = 0x2D => "gap:var(--rw-space-8)",
-        Gap2xl = 0x2E => "gap:var(--rw-space-12)",
+        GapXs = 0x29 => "gap:var(--S1)",
+        GapSm = 0x2A => "gap:var(--S2)",
+        GapMd = 0x2B => "gap:var(--S4)",
+        GapLg = 0x2C => "gap:var(--S6)",
+        GapXl = 0x2D => "gap:var(--S8)",
+        Gap2xl = 0x2E => "gap:var(--S12)",
 
         // Position (0x30-0x37)
         PositionRelative = 0x30 => "position:relative",
@@ -126,25 +126,25 @@ define_token_enum! {
 
         // Padding - Design Tokens (0x50-0x5F)
         P0 = 0x50 => "padding:0",
-        PXs = 0x51 => "padding:var(--rw-space-1)",
-        PSm = 0x52 => "padding:var(--rw-space-2)",
-        PMd = 0x53 => "padding:var(--rw-space-4)",
-        PLg = 0x54 => "padding:var(--rw-space-6)",
-        PXl = 0x55 => "padding:var(--rw-space-8)",
-        PxXs = 0x56 => "padding-inline:var(--rw-space-1)",
-        PxSm = 0x57 => "padding-inline:var(--rw-space-2)",
-        PxMd = 0x58 => "padding-inline:var(--rw-space-4)",
-        PyXs = 0x59 => "padding-block:var(--rw-space-1)",
-        PySm = 0x5A => "padding-block:var(--rw-space-2)",
-        PyMd = 0x5B => "padding-block:var(--rw-space-4)",
+        PXs = 0x51 => "padding:var(--S1)",
+        PSm = 0x52 => "padding:var(--S2)",
+        PMd = 0x53 => "padding:var(--S4)",
+        PLg = 0x54 => "padding:var(--S6)",
+        PXl = 0x55 => "padding:var(--S8)",
+        PxXs = 0x56 => "padding-inline:var(--S1)",
+        PxSm = 0x57 => "padding-inline:var(--S2)",
+        PxMd = 0x58 => "padding-inline:var(--S4)",
+        PyXs = 0x59 => "padding-block:var(--S1)",
+        PySm = 0x5A => "padding-block:var(--S2)",
+        PyMd = 0x5B => "padding-block:var(--S4)",
 
         // Margin - Design Tokens (0x60-0x6F)
         M0 = 0x60 => "margin:0",
-        MXs = 0x61 => "margin:var(--rw-space-1)",
-        MSm = 0x62 => "margin:var(--rw-space-2)",
-        MMd = 0x63 => "margin:var(--rw-space-4)",
-        MLg = 0x64 => "margin:var(--rw-space-6)",
-        MXl = 0x65 => "margin:var(--rw-space-8)",
+        MXs = 0x61 => "margin:var(--S1)",
+        MSm = 0x62 => "margin:var(--S2)",
+        MMd = 0x63 => "margin:var(--S4)",
+        MLg = 0x64 => "margin:var(--S6)",
+        MXl = 0x65 => "margin:var(--S8)",
         MAuto = 0x66 => "margin:auto",
         MxAuto = 0x67 => "margin-inline:auto",
         MyAuto = 0x68 => "margin-block:auto",
@@ -154,12 +154,12 @@ define_token_enum! {
         TextCenter = 0x71 => "text-align:center",
         TextRight = 0x72 => "text-align:right",
         TextJustify = 0x73 => "text-align:justify",
-        TextXs = 0x74 => "font-size:var(--rw-text-xs)",
-        TextSm = 0x75 => "font-size:var(--rw-text-sm)",
-        TextBase = 0x76 => "font-size:var(--rw-text-base)",
-        TextLg = 0x77 => "font-size:var(--rw-text-lg)",
-        TextXl = 0x78 => "font-size:var(--rw-text-xl)",
-        Text2xl = 0x79 => "font-size:var(--rw-text-2xl)",
+        TextXs = 0x74 => "font-size:var(--T1)",
+        TextSm = 0x75 => "font-size:var(--T2)",
+        TextBase = 0x76 => "font-size:var(--T3)",
+        TextLg = 0x77 => "font-size:var(--T4)",
+        TextXl = 0x78 => "font-size:var(--T5)",
+        Text2xl = 0x79 => "font-size:var(--T6)",
         FontNormal = 0x7A => "font-weight:400",
         FontMedium = 0x7B => "font-weight:500",
         FontSemibold = 0x7C => "font-weight:600",
@@ -176,10 +176,10 @@ define_token_enum! {
 
         // Border Radius - Design Tokens (0x88-0x8F)
         Rounded0 = 0x88 => "border-radius:0",
-        RoundedSm = 0x89 => "border-radius:var(--rw-radius-sm)",
-        RoundedMd = 0x8A => "border-radius:var(--rw-radius-md)",
-        RoundedLg = 0x8B => "border-radius:var(--rw-radius-lg)",
-        RoundedXl = 0x8C => "border-radius:var(--rw-radius-xl)",
+        RoundedSm = 0x89 => "border-radius:var(--R1)",
+        RoundedMd = 0x8A => "border-radius:var(--R2)",
+        RoundedLg = 0x8B => "border-radius:var(--R3)",
+        RoundedXl = 0x8C => "border-radius:var(--R4)",
         RoundedFull = 0x8D => "border-radius:9999px",
 
         // Opacity (0x90-0x97)
@@ -225,30 +225,30 @@ define_token_enum! {
         // ====================================================================
 
         // Background - Semantic (0xC0-0xC7)
-        BgApp = 0xC0 => "background:var(--rw-bg-app)",
-        BgSubtle = 0xC1 => "background:var(--rw-bg-subtle)",
-        BgMuted = 0xC2 => "background:var(--rw-bg-muted)",
-        BgEmphasis = 0xC3 => "background:var(--rw-bg-emphasis)",
-        BgHover = 0xC4 => "background:var(--rw-bg-hover)",
-        BgActive = 0xC5 => "background:var(--rw-bg-active)",
-        BgAccent = 0xC6 => "background:var(--rw-accent-9)",
-        BgAccentHover = 0xC7 => "background:var(--rw-accent-10)",
+        BgApp = 0xC0 => "background:var(--a)",
+        BgSubtle = 0xC1 => "background:var(--b)",
+        BgMuted = 0xC2 => "background:var(--c)",
+        BgEmphasis = 0xC3 => "background:var(--d)",
+        BgHover = 0xC4 => "background:var(--e)",
+        BgActive = 0xC5 => "background:var(--f)",
+        BgAccent = 0xC6 => "background:var(--n9)",
+        BgAccentHover = 0xC7 => "background:var(--n10)",
 
         // Text - Semantic (0xC8-0xCF)
-        TextDefault = 0xC8 => "color:var(--rw-text-default)",
-        TextHigh = 0xC9 => "color:var(--rw-text-high)",
-        TextMuted = 0xCA => "color:var(--rw-text-muted)",
-        TextOnAccent = 0xCB => "color:var(--rw-text-on-accent)",
-        TextSuccess = 0xCC => "color:var(--rw-success)",
-        TextWarning = 0xCD => "color:var(--rw-warning)",
-        TextError = 0xCE => "color:var(--rw-error)",
-        TextAccent = 0xCF => "color:var(--rw-accent-11)",
+        TextDefault = 0xC8 => "color:var(--k)",
+        TextHigh = 0xC9 => "color:var(--l)",
+        TextMuted = 0xCA => "color:var(--j)",
+        TextOnAccent = 0xCB => "color:var(--m)",
+        TextSuccess = 0xCC => "color:var(--o)",
+        TextWarning = 0xCD => "color:var(--p)",
+        TextError = 0xCE => "color:var(--q)",
+        TextAccent = 0xCF => "color:var(--n11)",
 
         // Border - Semantic (0xD0-0xD7)
-        BorderDefault = 0xD0 => "border:1px solid var(--rw-border-default)",
-        BorderSubtle = 0xD1 => "border:1px solid var(--rw-border-subtle)",
-        BorderEmphasis = 0xD2 => "border:1px solid var(--rw-border-emphasis)",
-        BorderAccent = 0xD3 => "border:1px solid var(--rw-accent-7)",
+        BorderDefault = 0xD0 => "border:1px solid var(--h)",
+        BorderSubtle = 0xD1 => "border:1px solid var(--g)",
+        BorderEmphasis = 0xD2 => "border:1px solid var(--i)",
+        BorderAccent = 0xD3 => "border:1px solid var(--n7)",
         BorderNone = 0xD4 => "border:none",
 
         // Additional Layout (0xD8-0xDF)
@@ -270,18 +270,18 @@ define_token_enum! {
 
         // Shadow (0xE8-0xEF) - Box shadows
         ShadowNone = 0xE8 => "box-shadow:none",
-        ShadowSm = 0xE9 => "box-shadow:var(--rw-shadow-sm)",
-        ShadowMd = 0xEA => "box-shadow:var(--rw-shadow-md)",
-        ShadowLg = 0xEB => "box-shadow:var(--rw-shadow-lg)",
-        ShadowXl = 0xEC => "box-shadow:var(--rw-shadow-xl)",
+        ShadowSm = 0xE9 => "box-shadow:var(--Z1)",
+        ShadowMd = 0xEA => "box-shadow:var(--Z2)",
+        ShadowLg = 0xEB => "box-shadow:var(--Z3)",
+        ShadowXl = 0xEC => "box-shadow:var(--Z4)",
         ShadowInner = 0xED => "box-shadow:inset 0 2px 4px rgba(0,0,0,0.1)",
 
         // Outline (0xF0-0xF7) - Focus styles
         OutlineNone = 0xF0 => "outline:none",
-        OutlineAccent = 0xF1 => "outline:2px solid var(--rw-accent-8)",
+        OutlineAccent = 0xF1 => "outline:2px solid var(--n8)",
         OutlineOffset2 = 0xF2 => "outline-offset:2px",
-        RingAccent = 0xF3 => "box-shadow:0 0 0 2px var(--rw-accent-8)",
-        RingInset = 0xF4 => "box-shadow:inset 0 0 0 1px var(--rw-border-default)",
+        RingAccent = 0xF3 => "box-shadow:0 0 0 2px var(--n8)",
+        RingInset = 0xF4 => "box-shadow:inset 0 0 0 1px var(--h)",
 
         // ====================================================================
         // Extended CSS3 (0x100+) - Using two-byte encoding
@@ -314,26 +314,26 @@ define_token_enum! {
         // Background Extended (0x118-0x11F)
         BgTransparent = 0x118 => "background:transparent",
         BgCurrentColor = 0x119 => "background:currentColor",
-        BgWhite = 0x11A => "background:var(--rw-white)",
-        BgBlack = 0x11B => "background:var(--rw-black)",
-        BgSuccess = 0x11C => "background:var(--rw-success)",
-        BgWarning = 0x11D => "background:var(--rw-warning)",
-        BgError = 0x11E => "background:var(--rw-error)",
+        BgWhite = 0x11A => "background:var(--Yw)",
+        BgBlack = 0x11B => "background:var(--Yb)",
+        BgSuccess = 0x11C => "background:var(--o)",
+        BgWarning = 0x11D => "background:var(--p)",
+        BgError = 0x11E => "background:var(--q)",
 
         // Text Extended (0x120-0x127)
-        TextWhite = 0x120 => "color:var(--rw-white)",
-        TextBlack = 0x121 => "color:var(--rw-black)",
+        TextWhite = 0x120 => "color:var(--Yw)",
+        TextBlack = 0x121 => "color:var(--Yb)",
         TextInherit = 0x122 => "color:inherit",
         TextCurrentColor = 0x123 => "color:currentColor",
-        Text3xl = 0x124 => "font-size:var(--rw-text-3xl)",
-        Text4xl = 0x125 => "font-size:var(--rw-text-4xl)",
+        Text3xl = 0x124 => "font-size:var(--T7)",
+        Text4xl = 0x125 => "font-size:var(--T8)",
 
         // Line Height (0x128-0x12F)
-        LeadingTight = 0x128 => "line-height:var(--rw-leading-tight)",
-        LeadingSnug = 0x129 => "line-height:var(--rw-leading-snug)",
-        LeadingNormal = 0x12A => "line-height:var(--rw-leading-normal)",
-        LeadingRelaxed = 0x12B => "line-height:var(--rw-leading-relaxed)",
-        LeadingLoose = 0x12C => "line-height:var(--rw-leading-loose)",
+        LeadingTight = 0x128 => "line-height:var(--X1)",
+        LeadingSnug = 0x129 => "line-height:var(--X2)",
+        LeadingNormal = 0x12A => "line-height:var(--X3)",
+        LeadingRelaxed = 0x12B => "line-height:var(--X4)",
+        LeadingLoose = 0x12C => "line-height:var(--X5)",
         LeadingNone = 0x12D => "line-height:1",
 
         // Letter Spacing (0x130-0x137)
@@ -389,12 +389,12 @@ define_token_enum! {
 
         // More Borders (0x170-0x17F)
         BorderTransparent = 0x170 => "border-color:transparent",
-        BorderT = 0x171 => "border-top:1px solid var(--rw-border-default)",
-        BorderR = 0x172 => "border-right:1px solid var(--rw-border-default)",
-        BorderB = 0x173 => "border-bottom:1px solid var(--rw-border-default)",
-        BorderL = 0x174 => "border-left:1px solid var(--rw-border-default)",
+        BorderT = 0x171 => "border-top:1px solid var(--h)",
+        BorderR = 0x172 => "border-right:1px solid var(--h)",
+        BorderB = 0x173 => "border-bottom:1px solid var(--h)",
+        BorderL = 0x174 => "border-left:1px solid var(--h)",
         Border2 = 0x175 => "border-width:2px",
-        DivideY = 0x176 => "& > * + *{border-top:1px solid var(--rw-border-subtle)}",
+        DivideY = 0x176 => "& > * + *{border-top:1px solid var(--g)}",
 
         // Sizing Extended (0x180-0x18F)
         WMax = 0x180 => "width:max-content",
@@ -407,11 +407,11 @@ define_token_enum! {
         MaxHScreen = 0x187 => "max-height:100vh",
 
         // Spacing Extended (0x190-0x19F)
-        P2xl = 0x190 => "padding:var(--rw-space-10)",
-        PxLg = 0x191 => "padding-inline:var(--rw-space-6)",
-        PxXl = 0x192 => "padding-inline:var(--rw-space-8)",
-        PyLg = 0x193 => "padding-block:var(--rw-space-6)",
-        PyXl = 0x194 => "padding-block:var(--rw-space-8)",
+        P2xl = 0x190 => "padding:var(--S10)",
+        PxLg = 0x191 => "padding-inline:var(--S6)",
+        PxXl = 0x192 => "padding-inline:var(--S8)",
+        PyLg = 0x193 => "padding-block:var(--S6)",
+        PyXl = 0x194 => "padding-block:var(--S8)",
         Mx0 = 0x195 => "margin-inline:0",
         My0 = 0x196 => "margin-block:0",
         MlAuto = 0x197 => "margin-left:auto",
@@ -419,13 +419,13 @@ define_token_enum! {
 
         // Gap Extended (0x1A0-0x1A7)
         GapX0 = 0x1A0 => "column-gap:0",
-        GapXSm = 0x1A1 => "column-gap:var(--rw-space-2)",
-        GapXMd = 0x1A2 => "column-gap:var(--rw-space-4)",
-        GapXLg = 0x1A3 => "column-gap:var(--rw-space-6)",
+        GapXSm = 0x1A1 => "column-gap:var(--S2)",
+        GapXMd = 0x1A2 => "column-gap:var(--S4)",
+        GapXLg = 0x1A3 => "column-gap:var(--S6)",
         GapY0 = 0x1A4 => "row-gap:0",
-        GapYSm = 0x1A5 => "row-gap:var(--rw-space-2)",
-        GapYMd = 0x1A6 => "row-gap:var(--rw-space-4)",
-        GapYLg = 0x1A7 => "row-gap:var(--rw-space-6)",
+        GapYSm = 0x1A5 => "row-gap:var(--S2)",
+        GapYMd = 0x1A6 => "row-gap:var(--S4)",
+        GapYLg = 0x1A7 => "row-gap:var(--S6)",
 
         // Appearance (0x1B0-0x1B7)
         AppearanceNone = 0x1B0 => "appearance:none",
@@ -458,52 +458,52 @@ define_token_enum! {
         // ====================================================================
 
         // Margin-top (0x1D5-0x1D8)
-        MtXs = 0x1D5 => "margin-top:var(--rw-space-1)",
-        MtSm = 0x1D6 => "margin-top:var(--rw-space-2)",
-        MtMd = 0x1D7 => "margin-top:var(--rw-space-4)",
-        MtLg = 0x1D8 => "margin-top:var(--rw-space-6)",
+        MtXs = 0x1D5 => "margin-top:var(--S1)",
+        MtSm = 0x1D6 => "margin-top:var(--S2)",
+        MtMd = 0x1D7 => "margin-top:var(--S4)",
+        MtLg = 0x1D8 => "margin-top:var(--S6)",
 
         // Margin-bottom (0x1D9-0x1DC)
-        MbXs = 0x1D9 => "margin-bottom:var(--rw-space-1)",
-        MbSm = 0x1DA => "margin-bottom:var(--rw-space-2)",
-        MbMd = 0x1DB => "margin-bottom:var(--rw-space-4)",
-        MbLg = 0x1DC => "margin-bottom:var(--rw-space-6)",
+        MbXs = 0x1D9 => "margin-bottom:var(--S1)",
+        MbSm = 0x1DA => "margin-bottom:var(--S2)",
+        MbMd = 0x1DB => "margin-bottom:var(--S4)",
+        MbLg = 0x1DC => "margin-bottom:var(--S6)",
 
         // Margin-left (0x1DD-0x1E0)
-        MlXs = 0x1DD => "margin-left:var(--rw-space-1)",
-        MlSm = 0x1DE => "margin-left:var(--rw-space-2)",
-        MlMd = 0x1DF => "margin-left:var(--rw-space-4)",
-        MlLg = 0x1E0 => "margin-left:var(--rw-space-6)",
+        MlXs = 0x1DD => "margin-left:var(--S1)",
+        MlSm = 0x1DE => "margin-left:var(--S2)",
+        MlMd = 0x1DF => "margin-left:var(--S4)",
+        MlLg = 0x1E0 => "margin-left:var(--S6)",
 
         // Margin-right (0x1E1-0x1E4)
-        MrXs = 0x1E1 => "margin-right:var(--rw-space-1)",
-        MrSm = 0x1E2 => "margin-right:var(--rw-space-2)",
-        MrMd = 0x1E3 => "margin-right:var(--rw-space-4)",
-        MrLg = 0x1E4 => "margin-right:var(--rw-space-6)",
+        MrXs = 0x1E1 => "margin-right:var(--S1)",
+        MrSm = 0x1E2 => "margin-right:var(--S2)",
+        MrMd = 0x1E3 => "margin-right:var(--S4)",
+        MrLg = 0x1E4 => "margin-right:var(--S6)",
 
         // Padding-top (0x1E5-0x1E8)
-        PtXs = 0x1E5 => "padding-top:var(--rw-space-1)",
-        PtSm = 0x1E6 => "padding-top:var(--rw-space-2)",
-        PtMd = 0x1E7 => "padding-top:var(--rw-space-4)",
-        PtLg = 0x1E8 => "padding-top:var(--rw-space-6)",
+        PtXs = 0x1E5 => "padding-top:var(--S1)",
+        PtSm = 0x1E6 => "padding-top:var(--S2)",
+        PtMd = 0x1E7 => "padding-top:var(--S4)",
+        PtLg = 0x1E8 => "padding-top:var(--S6)",
 
         // Padding-bottom (0x1E9-0x1EC)
-        PbXs = 0x1E9 => "padding-bottom:var(--rw-space-1)",
-        PbSm = 0x1EA => "padding-bottom:var(--rw-space-2)",
-        PbMd = 0x1EB => "padding-bottom:var(--rw-space-4)",
-        PbLg = 0x1EC => "padding-bottom:var(--rw-space-6)",
+        PbXs = 0x1E9 => "padding-bottom:var(--S1)",
+        PbSm = 0x1EA => "padding-bottom:var(--S2)",
+        PbMd = 0x1EB => "padding-bottom:var(--S4)",
+        PbLg = 0x1EC => "padding-bottom:var(--S6)",
 
         // Padding-left (0x1ED-0x1F0)
-        PlXs = 0x1ED => "padding-left:var(--rw-space-1)",
-        PlSm = 0x1EE => "padding-left:var(--rw-space-2)",
-        PlMd = 0x1EF => "padding-left:var(--rw-space-4)",
-        PlLg = 0x1F0 => "padding-left:var(--rw-space-6)",
+        PlXs = 0x1ED => "padding-left:var(--S1)",
+        PlSm = 0x1EE => "padding-left:var(--S2)",
+        PlMd = 0x1EF => "padding-left:var(--S4)",
+        PlLg = 0x1F0 => "padding-left:var(--S6)",
 
         // Padding-right (0x1F1-0x1F4)
-        PrXs = 0x1F1 => "padding-right:var(--rw-space-1)",
-        PrSm = 0x1F2 => "padding-right:var(--rw-space-2)",
-        PrMd = 0x1F3 => "padding-right:var(--rw-space-4)",
-        PrLg = 0x1F4 => "padding-right:var(--rw-space-6)",
+        PrXs = 0x1F1 => "padding-right:var(--S1)",
+        PrSm = 0x1F2 => "padding-right:var(--S2)",
+        PrMd = 0x1F3 => "padding-right:var(--S4)",
+        PrLg = 0x1F4 => "padding-right:var(--S6)",
 
         // ====================================================================
         // Text Transforms & Extended (0x1F5-0x202)
@@ -540,51 +540,51 @@ define_token_enum! {
         BorderL4 = 0x213 => "border-left:4px solid",
 
         // Palette Backgrounds (0x220-0x226)
-        BgGreen4 = 0x220 => "background:var(--rw-green-4)",
-        BgAmber4 = 0x221 => "background:var(--rw-amber-4)",
-        BgRed4 = 0x222 => "background:var(--rw-red-4)",
-        BgBlue2 = 0x223 => "background:var(--rw-blue-2)",
-        BgYellow2 = 0x224 => "background:var(--rw-yellow-2)",
+        BgGreen4 = 0x220 => "background:var(--P4)",
+        BgAmber4 = 0x221 => "background:var(--M4)",
+        BgRed4 = 0x222 => "background:var(--O4)",
+        BgBlue2 = 0x223 => "background:var(--U2)",
+        BgAmber2 = 0x224 => "background:var(--M2)",
 
         // Palette Text Colors (0x225-0x227)
-        TextGreen11 = 0x225 => "color:var(--rw-green-11)",
-        TextAmber11 = 0x226 => "color:var(--rw-amber-11)",
-        TextRed11 = 0x227 => "color:var(--rw-red-11)",
+        TextGreen11 = 0x225 => "color:var(--P11)",
+        TextAmber11 = 0x226 => "color:var(--M11)",
+        TextRed11 = 0x227 => "color:var(--O11)",
 
         // Palette Border Colors (0x228-0x22B)
-        BorderGreen8 = 0x228 => "border-color:var(--rw-green-8)",
-        BorderBlue8 = 0x229 => "border-color:var(--rw-blue-8)",
-        BorderYellow8 = 0x22A => "border-color:var(--rw-yellow-8)",
-        BorderRed8 = 0x22B => "border-color:var(--rw-red-8)",
+        BorderGreen8 = 0x228 => "border-color:var(--P8)",
+        BorderBlue8 = 0x229 => "border-color:var(--U8)",
+        BorderAmber8 = 0x22A => "border-color:var(--M8)",
+        BorderRed8 = 0x22B => "border-color:var(--O8)",
 
         // Margin-block (0x230-0x234) - used by Divider component
-        MyXs = 0x230 => "margin-block:var(--rw-space-1)",
-        MySm = 0x231 => "margin-block:var(--rw-space-2)",
-        MyMd = 0x232 => "margin-block:var(--rw-space-4)",
-        MyLg = 0x233 => "margin-block:var(--rw-space-6)",
-        MyXl = 0x234 => "margin-block:var(--rw-space-8)",
+        MyXs = 0x230 => "margin-block:var(--S1)",
+        MySm = 0x231 => "margin-block:var(--S2)",
+        MyMd = 0x232 => "margin-block:var(--S4)",
+        MyLg = 0x233 => "margin-block:var(--S6)",
+        MyXl = 0x234 => "margin-block:var(--S8)",
 
         // Border variants (0x235-0x236)
-        BorderTSubtle = 0x235 => "border-top:1px solid var(--rw-border-subtle)",
-        BorderLSubtle = 0x236 => "border-left:1px solid var(--rw-border-subtle)",
+        BorderTSubtle = 0x235 => "border-top:1px solid var(--g)",
+        BorderLSubtle = 0x236 => "border-left:1px solid var(--g)",
 
         // Palette accents (0x237)
-        BgAccent4 = 0x237 => "background:var(--rw-accent-4)",
-        TextAccent11 = 0x238 => "color:var(--rw-accent-11)",
+        BgAccent4 = 0x237 => "background:var(--n4)",
+        TextAccent11 = 0x238 => "color:var(--n11)",
 
         // Flex shrink (0x239)
         FlexShrink = 0x239 => "flex-shrink:0",
 
         // Phase 3 migration tokens (0x23A+) - Interactive components
-        BgRed9 = 0x23A => "background:var(--rw-red-9)",
+        BgRed9 = 0x23A => "background:var(--O9)",
         TextTransparent = 0x23B => "color:transparent",
         ListStyleNone = 0x23C => "list-style:none",
         ListDecimal = 0x23D => "list-style-type:decimal",
-        TextMedium = 0x23E => "color:var(--rw-text-medium)",
-        TextLow = 0x23F => "color:var(--rw-text-low)",
+        TextMedium = 0x23E => "color:var(--N9)",
+        TextLow = 0x23F => "color:var(--N8)",
         NoDecoration = 0x240 => "text-decoration:none",
-        BorderBDefault = 0x241 => "border-bottom:1px solid var(--rw-border-default)",
-        BorderBAccent = 0x242 => "border-bottom-color:var(--rw-accent-9)",
+        BorderBDefault = 0x241 => "border-bottom:1px solid var(--h)",
+        BorderBAccent = 0x242 => "border-bottom-color:var(--n9)",
 
         // ====================================================================
         // Component Sizing Tokens (0x250+) - Replaces inline style strings
@@ -603,11 +603,11 @@ define_token_enum! {
 
         // Spacing-scale heights (0x259-0x25F)
         HSp0 = 0x259 => "height:0",
-        HSp1 = 0x25A => "height:var(--rw-space-1)",
-        HSp2 = 0x25B => "height:var(--rw-space-2)",
-        HSp4 = 0x25C => "height:var(--rw-space-4)",
-        HSp6 = 0x25D => "height:var(--rw-space-6)",
-        HSp8 = 0x25E => "height:var(--rw-space-8)",
+        HSp1 = 0x25A => "height:var(--S1)",
+        HSp2 = 0x25B => "height:var(--S2)",
+        HSp4 = 0x25C => "height:var(--S4)",
+        HSp6 = 0x25D => "height:var(--S6)",
+        HSp8 = 0x25E => "height:var(--S8)",
         H05rem = 0x25F => "height:0.5rem",
 
         // Fixed-rem widths (0x260-0x264)
@@ -619,11 +619,11 @@ define_token_enum! {
 
         // Spacing-scale widths (0x265-0x26A)
         WSp0 = 0x265 => "width:0",
-        WSp1 = 0x266 => "width:var(--rw-space-1)",
-        WSp2 = 0x267 => "width:var(--rw-space-2)",
-        WSp4 = 0x268 => "width:var(--rw-space-4)",
-        WSp6 = 0x269 => "width:var(--rw-space-6)",
-        WSp8 = 0x26A => "width:var(--rw-space-8)",
+        WSp1 = 0x266 => "width:var(--S1)",
+        WSp2 = 0x267 => "width:var(--S2)",
+        WSp4 = 0x268 => "width:var(--S4)",
+        WSp6 = 0x269 => "width:var(--S6)",
+        WSp8 = 0x26A => "width:var(--S8)",
 
         // Fixed-px widths for modals (0x26B-0x26E)
         W400px = 0x26B => "width:400px",
@@ -643,19 +643,19 @@ define_token_enum! {
         MaxH90vh = 0x278 => "max-height:90vh",
 
         // Padding/Margin extended (0x280-0x285)
-        PxSp3 = 0x280 => "padding-inline:var(--rw-space-3)",
+        PxSp3 = 0x280 => "padding-inline:var(--S3)",
         Px0 = 0x281 => "padding-inline:0",
-        PySp3 = 0x282 => "padding-block:var(--rw-space-3)",
-        PSp3 = 0x283 => "padding:var(--rw-space-3)",
-        MxMd = 0x284 => "margin-inline:var(--rw-space-4)",
+        PySp3 = 0x282 => "padding-block:var(--S3)",
+        PSp3 = 0x283 => "padding:var(--S3)",
+        MxMd = 0x284 => "margin-inline:var(--S4)",
         MbNeg2px = 0x285 => "margin-bottom:-2px",
 
         // Border extended (0x290-0x295)
         Bw3 = 0x290 => "border-width:3px",
         BorderRTransparent = 0x291 => "border-right-color:transparent",
-        Border2Default = 0x292 => "border:2px solid var(--rw-border-default)",
-        BorderB2Default = 0x293 => "border-bottom:2px solid var(--rw-border-default)",
-        BorderB2Accent = 0x294 => "border-bottom:2px solid var(--rw-accent-9)",
+        Border2Default = 0x292 => "border:2px solid var(--h)",
+        BorderB2Default = 0x293 => "border-bottom:2px solid var(--h)",
+        BorderB2Accent = 0x294 => "border-bottom:2px solid var(--n9)",
         BorderB2Transparent = 0x295 => "border-bottom:2px solid transparent",
 
         // Component misc (0x2A0-0x2A7)
@@ -669,17 +669,17 @@ define_token_enum! {
         BgOverlay50 = 0x2A7 => "background:rgba(0,0,0,0.5)",
 
         // Pseudo-class decomposition tokens (0x2B0-0x2BF)
-        BgRedHover = 0x2B0 => "background:var(--rw-red-10)",
-        BorderColorAccent = 0x2B1 => "border-color:var(--rw-accent-8)",
+        BgRedHover = 0x2B0 => "background:var(--O10)",
+        BorderColorAccent = 0x2B1 => "border-color:var(--n8)",
         Scale98 = 0x2B2 => "transform:scale(0.98)",
         Mb0 = 0x2B3 => "margin-bottom:0",
-        BorderBSubtle = 0x2B4 => "border-bottom:1px solid var(--rw-border-subtle)",
+        BorderBSubtle = 0x2B4 => "border-bottom:1px solid var(--g)",
         ContentEmpty = 0x2B5 => "content:\"\"",
         ContentAsterisk = 0x2B6 => "content:\" *\"",
         ContentSlash = 0x2B7 => "content:\"/\"",
         TranslateXFull = 0x2B8 => "transform:translateX(100%)",
         TransitionTransformFast = 0x2B9 => "transition:transform .2s",
-        MxSp2 = 0x2BA => "margin-inline:var(--rw-space-2)",
+        MxSp2 = 0x2BA => "margin-inline:var(--S2)",
         BorderStyleSolid = 0x2BB => "border-style:solid",
 
         // Vertical alignment (0x2BC)
@@ -690,16 +690,16 @@ define_token_enum! {
         // ====================================================================
 
         // Font family (0x2C0)
-        FontMono = 0x2C0 => "font-family:var(--rw-font-mono,ui-monospace,SFMono-Regular,monospace)",
+        FontMono = 0x2C0 => "font-family:var(--Qm,ui-monospace,SFMono-Regular,monospace)",
 
         // Code background (0x2C1)
-        BgCode = 0x2C1 => "background:var(--rw-bg-code,var(--rw-bg-subtle))",
+        BgCode = 0x2C1 => "background:var(--Qc,var(--b))",
 
         // Max height for accordion (0x2C2)
         MaxH96 = 0x2C2 => "max-height:24rem",
 
         // Border-left for blockquote (0x2C3)
-        BorderL3Accent = 0x2C3 => "border-left:3px solid var(--rw-accent-7)",
+        BorderL3Accent = 0x2C3 => "border-left:3px solid var(--n7)",
 
         // List style (0x2C4)
         ListDisc = 0x2C4 => "list-style-type:disc",
@@ -710,11 +710,11 @@ define_token_enum! {
         // Prose container tokens (0x2C6-0x2CA)
         LeadingRelaxedProse = 0x2C6 => "line-height:1.75",
         MaxWProse = 0x2C7 => "max-width:65ch",
-        SpaceYMd = 0x2C8 => "& > * + *{margin-top:var(--rw-space-4)}",
-        SpaceYSm = 0x2C9 => "& > * + *{margin-top:var(--rw-space-2)}",
+        SpaceYMd = 0x2C8 => "& > * + *{margin-top:var(--S4)}",
+        SpaceYSm = 0x2C9 => "& > * + *{margin-top:var(--S2)}",
 
         // Skeleton shimmer (0x2CA)
-        BgShimmer = 0x2CA => "background:linear-gradient(90deg,var(--rw-bg-muted) 0%,var(--rw-bg-subtle) 50%,var(--rw-bg-muted) 100%);background-size:200% 100%;animation:rw-shimmer 1.5s ease-in-out infinite",
+        BgShimmer = 0x2CA => "background:linear-gradient(90deg,var(--c) 0%,var(--b) 50%,var(--c) 100%);background-size:200% 100%;animation:rw-shimmer 1.5s ease-in-out infinite",
 
         // ====================================================================
         // Phase 2: Layout & Navigation Tokens (0x2CB+)
@@ -724,22 +724,22 @@ define_token_enum! {
         GridTemplateShell = 0x2CB => "display:grid;grid-template-rows:auto 1fr;grid-template-columns:auto 1fr;min-height:100vh",
         GridColFull = 0x2CC => "grid-column:1/-1",
         OverflowYScroll = 0x2CD => "overflow-y:auto;-webkit-overflow-scrolling:touch",
-        BgSidebar = 0x2CE => "background:var(--rw-bg-sidebar,var(--rw-bg-subtle))",
-        BorderRDefault = 0x2CF => "border-right:1px solid var(--rw-border-default)",
+        BgSidebar = 0x2CE => "background:var(--Qs,var(--b))",
+        BorderRDefault = 0x2CF => "border-right:1px solid var(--h)",
 
         // Sidebar/TOC navigation (0x2D0-0x2D3)
-        TextXsMuted = 0x2D0 => "font-size:var(--rw-text-xs);color:var(--rw-text-muted)",
-        BgAccentSubtle = 0x2D1 => "background:var(--rw-accent-3)",
-        TextAccent12 = 0x2D2 => "color:var(--rw-accent-12)",
-        PlMdIndent = 0x2D3 => "padding-left:var(--rw-space-6)",
+        TextXsMuted = 0x2D0 => "font-size:var(--T1);color:var(--j)",
+        BgAccentSubtle = 0x2D1 => "background:var(--n3)",
+        TextAccent12 = 0x2D2 => "color:var(--n12)",
+        PlMdIndent = 0x2D3 => "padding-left:var(--S6)",
 
         // ====================================================================
         // Phase 4: Tier 2 Component Tokens (0x2D4+)
         // ====================================================================
 
         // Tooltip (0x2D4-0x2D8)
-        TooltipBg = 0x2D4 => "background:var(--rw-bg-emphasis)",
-        TextOnEmphasis = 0x2D5 => "color:var(--rw-text-on-emphasis,#fff)",
+        TooltipBg = 0x2D4 => "background:var(--d)",
+        TextOnEmphasis = 0x2D5 => "color:var(--Qe,#fff)",
         WhitespaceNowrapInline = 0x2D6 => "white-space:nowrap;max-width:20rem",
         TransformCenterX = 0x2D7 => "transform:translateX(-50%)",
         TransformCenterY = 0x2D8 => "transform:translateY(-50%)",
@@ -754,121 +754,137 @@ define_token_enum! {
 
         // Toast (0x2E0-0x2E2)
         AnimateSlideIn = 0x2E0 => "animation:rw-slide-in .3s ease-out",
-        FixedBottomRight = 0x2E1 => "position:fixed;bottom:var(--rw-space-4);right:var(--rw-space-4)",
+        FixedBottomRight = 0x2E1 => "position:fixed;bottom:var(--S4);right:var(--S4)",
         MaxW360px = 0x2E2 => "max-width:360px",
 
         // Tier 3 components (0x2E3-0x2F8)
         // Kbd
-        KbdBg = 0x2E3 => "background:var(--rw-bg-subtle);border:1px solid var(--rw-border-default);border-bottom:2px solid var(--rw-border-default)",
-        KbdShadow = 0x2E4 => "box-shadow:0 1px 0 var(--rw-border-default)",
+        KbdBg = 0x2E3 => "background:var(--b);border:1px solid var(--h);border-bottom:2px solid var(--h)",
+        KbdShadow = 0x2E4 => "box-shadow:0 1px 0 var(--h)",
         MinWKbd = 0x2E5 => "min-width:1.5em;text-align:center",
         // (GapXs already at 0x29)
         // AvatarGroup (negative overlap)
         NegMlOverlap = 0x2E7 => "margin-left:-8px",
-        AvatarRing = 0x2E8 => "outline:2px solid var(--rw-bg-app);outline-offset:-1px",
+        AvatarRing = 0x2E8 => "outline:2px solid var(--a);outline-offset:-1px",
         // EmptyState
-        Py2xl = 0x2E9 => "padding-top:var(--rw-space-10);padding-bottom:var(--rw-space-10)",
+        Py2xl = 0x2E9 => "padding-top:var(--S10);padding-bottom:var(--S10)",
         // Timeline
-        TimelineLine = 0x2EA => "border-left:2px solid var(--rw-border-default)",
-        TimelineDot = 0x2EB => "width:12px;height:12px;border-radius:50%;border:2px solid var(--rw-border-default);background:var(--rw-bg-app)",
-        TimelineDotActive = 0x2EC => "width:12px;height:12px;border-radius:50%;border:2px solid var(--rw-accent-8);background:var(--rw-accent-3)",
+        TimelineLine = 0x2EA => "border-left:2px solid var(--h)",
+        TimelineDot = 0x2EB => "width:12px;height:12px;border-radius:50%;border:2px solid var(--h);background:var(--a)",
+        TimelineDotActive = 0x2EC => "width:12px;height:12px;border-radius:50%;border:2px solid var(--n8);background:var(--n3)",
         NegMl7px = 0x2ED => "margin-left:-7px",
         // Stat (Text4xl already at 0x125)
-        Text5xl = 0x2EF => "font-size:var(--rw-text-5xl)",
-        TextGreen12 = 0x2F0 => "color:var(--rw-green-12)",
-        TextRed12 = 0x2F1 => "color:var(--rw-red-12)",
+        Text5xl = 0x2EF => "font-size:var(--T9)",
+        TextGreen12 = 0x2F0 => "color:var(--P12)",
+        TextRed12 = 0x2F1 => "color:var(--O12)",
         // Slider
-        SliderTrack = 0x2F2 => "width:100%;height:6px;border-radius:3px;background:var(--rw-bg-emphasis)",
-        SliderFill = 0x2F3 => "height:100%;border-radius:3px;background:var(--rw-accent-8)",
+        SliderTrack = 0x2F2 => "width:100%;height:6px;border-radius:3px;background:var(--d)",
+        SliderFill = 0x2F3 => "height:100%;border-radius:3px;background:var(--n8)",
         SliderInput = 0x2F4 => "-webkit-appearance:none;appearance:none;background:transparent;width:100%;cursor:pointer",
-        SliderThumb = 0x2F5 => "&::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--rw-accent-9);cursor:pointer}",
+        SliderThumb = 0x2F5 => "&::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--n9);cursor:pointer}",
         // Stepper
-        StepLine = 0x2F6 => "flex:1;height:2px;background:var(--rw-border-default)",
-        StepLineActive = 0x2F7 => "flex:1;height:2px;background:var(--rw-accent-8)",
-        StepCircle = 0x2F8 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-border-default);background:var(--rw-bg-app);font-size:var(--rw-text-sm);font-weight:500",
-        StepCircleActive = 0x2F9 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-accent-8);background:var(--rw-accent-3);color:var(--rw-accent-11);font-size:var(--rw-text-sm);font-weight:500",
-        StepCircleDone = 0x2FA => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--rw-accent-8);background:var(--rw-accent-9);color:white;font-size:var(--rw-text-sm);font-weight:500",
+        StepLine = 0x2F6 => "flex:1;height:2px;background:var(--h)",
+        StepLineActive = 0x2F7 => "flex:1;height:2px;background:var(--n8)",
+        StepCircle = 0x2F8 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--h);background:var(--a);font-size:var(--T2);font-weight:500",
+        StepCircleActive = 0x2F9 => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--n8);background:var(--n3);color:var(--n11);font-size:var(--T2);font-weight:500",
+        StepCircleDone = 0x2FA => "width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--n8);background:var(--n9);color:white;font-size:var(--T2);font-weight:500",
 
         // Prose heading spacing (0x2FB-0x2FE)
-        MtXl = 0x2FB => "margin-top:var(--rw-space-8)",
-        Mt2xl = 0x2FC => "margin-top:var(--rw-space-12)",
-        TopHeader = 0x2FE => "top:var(--rw-header-h,3.5rem)",
+        MtXl = 0x2FB => "margin-top:var(--S8)",
+        Mt2xl = 0x2FC => "margin-top:var(--S12)",
+        TopHeader = 0x2FE => "top:var(--Qh,3.5rem)",
 
         // ====================================================================
         // Semantic Paired Tokens (0x300+) — ThemeStyle-aware via CSS variables
         // ====================================================================
 
         // Surface pairs (0x300-0x303)
-        BgSurface = 0x300 => "background:var(--rw-surface)",
-        TextOnSurface = 0x301 => "color:var(--rw-on-surface)",
-        BgSurfaceRaised = 0x302 => "background:var(--rw-surface-raised)",
-        TextOnSurfaceRaised = 0x303 => "color:var(--rw-on-surface-raised)",
+        BgSurface = 0x300 => "background:var(--r)",
+        TextOnSurface = 0x301 => "color:var(--s)",
+        BgSurfaceRaised = 0x302 => "background:var(--t)",
+        TextOnSurfaceRaised = 0x303 => "color:var(--u)",
 
         // Primary pairs (0x304-0x309)
-        BgPrimary = 0x304 => "background:var(--rw-primary)",
-        TextOnPrimary = 0x305 => "color:var(--rw-on-primary)",
-        BgPrimaryHover = 0x306 => "background:var(--rw-primary-hover)",
-        BgPrimarySubtle = 0x307 => "background:var(--rw-primary-subtle)",
-        TextOnPrimarySubtle = 0x308 => "color:var(--rw-on-primary-subtle)",
-        BorderPrimary = 0x309 => "border-color:var(--rw-border-primary)",
+        BgPrimary = 0x304 => "background:var(--v)",
+        TextOnPrimary = 0x305 => "color:var(--w)",
+        BgPrimaryHover = 0x306 => "background:var(--x)",
+        BgPrimarySubtle = 0x307 => "background:var(--y)",
+        TextOnPrimarySubtle = 0x308 => "color:var(--z)",
+        BorderPrimary = 0x309 => "border-color:var(--L)",
 
         // Secondary pairs (0x30A-0x30C)
-        BgSecondary = 0x30A => "background:var(--rw-secondary)",
-        TextOnSecondary = 0x30B => "color:var(--rw-on-secondary)",
-        BgSecondaryHover = 0x30C => "background:var(--rw-secondary-hover)",
+        BgSecondary = 0x30A => "background:var(--A)",
+        TextOnSecondary = 0x30B => "color:var(--B)",
+        BgSecondaryHover = 0x30C => "background:var(--C)",
 
         // Muted pair (0x30D)
-        TextOnMuted = 0x30D => "color:var(--rw-on-muted)",
+        TextOnMuted = 0x30D => "color:var(--E)",
 
         // Destructive pairs (0x30E-0x312)
-        BgDestructive = 0x30E => "background:var(--rw-destructive)",
-        TextOnDestructive = 0x30F => "color:var(--rw-on-destructive)",
-        BgDestructiveHover = 0x310 => "background:var(--rw-destructive-hover)",
-        BgDestructiveSubtle = 0x311 => "background:var(--rw-destructive-subtle)",
-        TextOnDestructiveSubtle = 0x312 => "color:var(--rw-on-destructive-subtle)",
+        BgDestructive = 0x30E => "background:var(--F)",
+        TextOnDestructive = 0x30F => "color:var(--G)",
+        BgDestructiveHover = 0x310 => "background:var(--H)",
+        BgDestructiveSubtle = 0x311 => "background:var(--I)",
+        TextOnDestructiveSubtle = 0x312 => "color:var(--J)",
 
         // Focus ring (0x313)
-        RingFocus = 0x313 => "outline:2px solid var(--rw-focus-ring);outline-offset:2px",
+        RingFocus = 0x313 => "outline:2px solid var(--K);outline-offset:2px",
 
         // Full accent scale — bg variants (0x314-0x31C)
-        BgAccent1 = 0x314 => "background:var(--rw-accent-1)",
-        BgAccent2 = 0x315 => "background:var(--rw-accent-2)",
-        BgAccent3 = 0x316 => "background:var(--rw-accent-3)",
-        BgAccent5 = 0x317 => "background:var(--rw-accent-5)",
-        BgAccent6 = 0x318 => "background:var(--rw-accent-6)",
-        BgAccent7 = 0x319 => "background:var(--rw-accent-7)",
-        BgAccent8 = 0x31A => "background:var(--rw-accent-8)",
-        BgAccent11 = 0x31B => "background:var(--rw-accent-11)",
-        BgAccent12 = 0x31C => "background:var(--rw-accent-12)",
+        BgAccent1 = 0x314 => "background:var(--n1)",
+        BgAccent2 = 0x315 => "background:var(--n2)",
+        BgAccent3 = 0x316 => "background:var(--n3)",
+        BgAccent5 = 0x317 => "background:var(--n5)",
+        BgAccent6 = 0x318 => "background:var(--n6)",
+        BgAccent7 = 0x319 => "background:var(--n7)",
+        BgAccent8 = 0x31A => "background:var(--n8)",
+        BgAccent11 = 0x31B => "background:var(--n11)",
+        BgAccent12 = 0x31C => "background:var(--n12)",
 
         // Full accent scale — text variants (0x31D)
-        TextAccent1 = 0x31D => "color:var(--rw-accent-1)",
+        TextAccent1 = 0x31D => "color:var(--n1)",
 
         // Full accent scale — border variants (0x31E-0x31F)
-        BorderAccent6 = 0x31E => "border:1px solid var(--rw-accent-6)",
-        BorderAccent8 = 0x31F => "border:1px solid var(--rw-accent-8)",
+        BorderAccent6 = 0x31E => "border:1px solid var(--n6)",
+        BorderAccent8 = 0x31F => "border:1px solid var(--n8)",
 
         // ====================================================================
         // Website Foundation Tokens (0x320+)
         // ====================================================================
 
-        Text6xl = 0x320 => "font-size:var(--rw-text-6xl)",
+        Text6xl = 0x320 => "font-size:var(--T10)",
         GridColsAuto = 0x321 => "grid-template-columns:repeat(auto-fill,minmax(280px,1fr))",
         Grayscale = 0x322 => "filter:grayscale(1)",
         MaxW56rem = 0x323 => "max-width:56rem",
 
         // Extended spacing: padding-top/bottom xl+ (0x324-0x32B)
-        PtXl = 0x324 => "padding-top:var(--rw-space-8)",
-        PbXl = 0x325 => "padding-bottom:var(--rw-space-8)",
-        Pt3xl = 0x326 => "padding-top:var(--rw-space-12)",
-        Pb3xl = 0x327 => "padding-bottom:var(--rw-space-12)",
-        Py3xl = 0x328 => "padding-block:var(--rw-space-12)",
-        Py4xl = 0x329 => "padding-block:var(--rw-space-16)",
+        PtXl = 0x324 => "padding-top:var(--S8)",
+        PbXl = 0x325 => "padding-bottom:var(--S8)",
+        Pt3xl = 0x326 => "padding-top:var(--S12)",
+        Pb3xl = 0x327 => "padding-bottom:var(--S12)",
+        Py3xl = 0x328 => "padding-block:var(--S12)",
+        Py4xl = 0x329 => "padding-block:var(--S16)",
 
-        // Layout-specific tokens (0x32A-0x32D)
-        HHeader = 0x32A => "height:var(--rw-header-h,3.5rem)",
+        // Layout-specific tokens (0x32A-0x32C)
+        HHeader = 0x32A => "height:var(--Qh,3.5rem)",
         W220px = 0x32B => "width:220px",
         MaxW280px = 0x32C => "max-width:280px",
+
+        // Theme-hook tokens (Q-var references) (0x32D-0x33A)
+        ShadowTheme = 0x32D => "box-shadow:var(--Qd)",
+        GlowTheme = 0x32E => "box-shadow:var(--Qgw)",
+        BorderWTheme = 0x32F => "border-width:var(--Qb)",
+        BorderLTheme = 0x330 => "border-left-width:var(--Qbl)",
+        BorderTTheme = 0x331 => "border-top-width:var(--Qbt)",
+        BorderCTheme = 0x332 => "border-color:var(--Qbc)",
+        BorderSTheme = 0x333 => "border-style:var(--Qbs)",
+        OutlineTheme = 0x334 => "outline:var(--Qol) solid var(--Qf);outline-offset:var(--Qoo)",
+        RingTheme = 0x335 => "outline:var(--Qol) solid var(--Qf);outline-offset:var(--Qoo)",
+        BackdropTheme = 0x336 => "backdrop-filter:var(--Qbf)",
+        OpacityTheme = 0x337 => "opacity:var(--Qso)",
+        GradientTheme = 0x338 => "background:var(--Qgr)",
+        TransTheme = 0x339 => "transition:all var(--Qt) ease",
+        TextShadowTheme = 0x33A => "text-shadow:var(--Qts)",
     }
 }
 
@@ -994,27 +1010,27 @@ define_token_enum! {
         Quarter = 0x43 => "25%",
         Screen = 0x44 => "100vw",
 
-        // Space tokens (0x50-0x5F) - maps to --rw-space-N
+        // Space tokens (0x50-0x5F) - maps to --S{N}
         Space0 = 0x50 => "0",
-        Space1 = 0x51 => "var(--rw-space-1)",
-        Space2 = 0x52 => "var(--rw-space-2)",
-        Space3 = 0x53 => "var(--rw-space-3)",
-        Space4 = 0x54 => "var(--rw-space-4)",
-        Space5 = 0x55 => "var(--rw-space-5)",
-        Space6 = 0x56 => "var(--rw-space-6)",
-        Space8 = 0x57 => "var(--rw-space-8)",
-        Space10 = 0x58 => "var(--rw-space-10)",
-        Space12 = 0x59 => "var(--rw-space-12)",
-        Space16 = 0x5A => "var(--rw-space-16)",
+        Space1 = 0x51 => "var(--S1)",
+        Space2 = 0x52 => "var(--S2)",
+        Space3 = 0x53 => "var(--S3)",
+        Space4 = 0x54 => "var(--S4)",
+        Space5 = 0x55 => "var(--S5)",
+        Space6 = 0x56 => "var(--S6)",
+        Space8 = 0x57 => "var(--S8)",
+        Space10 = 0x58 => "var(--S10)",
+        Space12 = 0x59 => "var(--S12)",
+        Space16 = 0x5A => "var(--S16)",
 
-        // Text sizes (0x60-0x6F) - maps to --rw-text-N
-        TextXs = 0x60 => "var(--rw-text-xs)",
-        TextSm = 0x61 => "var(--rw-text-sm)",
-        TextBase = 0x62 => "var(--rw-text-base)",
-        TextLg = 0x63 => "var(--rw-text-lg)",
-        TextXl = 0x64 => "var(--rw-text-xl)",
-        Text2xl = 0x65 => "var(--rw-text-2xl)",
-        Text3xl = 0x66 => "var(--rw-text-3xl)",
+        // Text sizes (0x60-0x6F) - maps to --T{N}
+        TextXs = 0x60 => "var(--T1)",
+        TextSm = 0x61 => "var(--T2)",
+        TextBase = 0x62 => "var(--T3)",
+        TextLg = 0x63 => "var(--T4)",
+        TextXl = 0x64 => "var(--T5)",
+        Text2xl = 0x65 => "var(--T6)",
+        Text3xl = 0x66 => "var(--T7)",
 
         // Font weights (0x70-0x77)
         Weight400 = 0x70 => "400",
@@ -1022,12 +1038,12 @@ define_token_enum! {
         Weight600 = 0x72 => "600",
         Weight700 = 0x73 => "700",
 
-        // Border radius (0x78-0x7F) - maps to --rw-radius-N
+        // Border radius (0x78-0x7F) - maps to --R{N}
         RadiusNone = 0x78 => "0",
-        RadiusSm = 0x79 => "var(--rw-radius-sm)",
-        RadiusMd = 0x7A => "var(--rw-radius-md)",
-        RadiusLg = 0x7B => "var(--rw-radius-lg)",
-        RadiusXl = 0x7C => "var(--rw-radius-xl)",
+        RadiusSm = 0x79 => "var(--R1)",
+        RadiusMd = 0x7A => "var(--R2)",
+        RadiusLg = 0x7B => "var(--R3)",
+        RadiusXl = 0x7C => "var(--R4)",
         RadiusFull = 0x7D => "9999px",
 
         // Opacity (0x80-0x87)
@@ -1075,7 +1091,7 @@ define_token_enum! {
     ///
     /// # CSS Class Naming
     ///
-    /// `h{pc_code}u{st_code}` -> `.h0u199:hover{background:var(--rw-accent-10)}`
+    /// `h{pc_code}u{st_code}` -> `.h0u199:hover{background:var(--n10)}`
     pub enum Pc(u8) {
         str_method = selector;
         mappings = PC_MAPPINGS;

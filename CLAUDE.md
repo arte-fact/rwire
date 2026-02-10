@@ -48,7 +48,13 @@ rwire/
 │   ├── session.rs       # Session ID generation and cookie management
 │   ├── state.rs         # State traits, HandlerFn, EventContext, Renderer
 │   ├── store.rs         # State persistence (MemoryStore, JsonFileStore)
-│   └── style.rs         # CSS-in-Rust styling utilities
+│   ├── style.rs         # CSS-in-Rust styling utilities
+│   ├── style_tokens.rs  # St (u16), Pc (u8), Bp (u8) enums + CSS mappings
+│   ├── theme.rs         # Theme config, ResolvedPalette, semantic CSS generation
+│   └── tokens/          # Design tokens
+│       ├── css.rs       # CSS custom property generation
+│       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
+│       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
 ├── rwire-macros/        # Proc macros
 │   ├── lib.rs           # #[handler], #[renderer], #[derive(State)]
 │   └── mutation_parser.rs # Local handler mutation analysis
@@ -210,6 +216,81 @@ The capsule JS is generated with only used element/event types:
 - `capsule_gen::generate_capsule()` filters `ELEMENT_MAPPINGS` and `EVENT_MAPPINGS`
 - Result: Counter app capsule is ~1.5KB instead of ~2KB
 
+## Theme System
+
+Themes are resolved at build time via `ResolvedPalette`. The server knows the full theme configuration (palette, accent color, mode) and emits resolved CSS values — no runtime color switching except light/dark mode via `data-theme`.
+
+### CSS Variable Architecture
+
+CSS uses short variable names for minimal wire size. Semantic variables are defined in `theme.rs` and referenced in `St` token CSS in `style_tokens.rs`:
+
+| Short Name | Semantic Meaning | Example Value |
+|------------|-----------------|---------------|
+| `--a` | bg-app | `oklch(0.985 0 0)` |
+| `--b` | bg-subtle | `oklch(0.97 0 0)` |
+| `--c` | bg-muted | `oklch(0.94 0 0)` |
+| `--k` | text-default | `oklch(0.25 0 0)` |
+| `--l` | text-muted | `oklch(0.55 0 0)` |
+| `--n1`..`--n12` | accent scale | resolved from palette |
+| `--r`/`--s` | surface bg/hover | |
+| `--v`/`--w` | primary bg/hover | |
+
+Non-color primitives use short names: `--S4` (space-4), `--R2` (radius-md), `--Z1` (shadow-sm), `--T2` (text-sm), `--W5` (font-medium), `--X3` (leading-normal). Color scales: `--N` (neutral), `--U` (blue), `--O` (red), `--P` (green), `--M` (amber), `--Yw`/`--Yb` (white/black). Component hooks: `--Q` prefix (Qm=font-mono, Qc=bg-code, Qs=bg-sidebar, Qe=text-on-emphasis, Qh=header-h).
+
+The Rust `St` enum variant names (`St::BgApp`, `St::Primary`) serve as human-readable documentation for the short CSS names.
+
+### Configuring Themes
+
+All color configuration lives on the `Theme` builder:
+
+```rust
+// Minimal dark mode:
+let config = CapsuleConfig::dark();
+
+// Custom accent from one color (auto-generates 12-step scale):
+let config = CapsuleConfig::new()
+    .theme(Theme::dark().accent("#5E81AC"));
+
+// Full custom theme from seed colors:
+let config = CapsuleConfig::new()
+    .theme(Theme::dark()
+        .accent("#5E81AC")
+        .neutral("#2E3440")
+        .style(ThemeStyle::Soft));
+
+// Named preset:
+let config = CapsuleConfig::dark_nord();
+```
+
+`ColorScale::from_color(css_color)` accepts `#RRGGBB`, `#RGB`, or `oklch(L C H)` and generates a 12-step Radix-style color scale automatically.
+
+### Adding a New Semantic Variable
+
+1. Choose the next available short name (check `generate_resolved_semantic_css` in `theme.rs`)
+2. Add the variable definition in `generate_resolved_semantic_css()` (light and dark blocks)
+3. Reference it in `St::css()` in `style_tokens.rs` as `var(--x)` where `x` is the short name
+4. Add to `generate_resolved_style_css()` if style presets need to override it
+
+### Style Tokens
+
+`St` enum (`#[repr(u16)]`) provides 590+ CSS utility tokens. Each maps to a CSS class `.u{code}{declaration}`:
+
+```rust
+// In style_tokens.rs
+BgApp = 0xC0,  // → .uC0{background:var(--a)}
+
+// In components
+el(El::Div).st([St::BgApp, St::Px4, St::Py2])
+    .hover([St::BgSubtle])
+    .sm([St::Px6])  // responsive breakpoint
+```
+
+### Adding a New Style Token
+
+1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x32D`+)
+2. Add CSS mapping to `St::css()` method
+3. Add `(u16_code, "css")` to `UTIL_MAPPINGS` const
+
 ## Testing
 
 ```bash
@@ -339,3 +420,5 @@ Kill existing process: `fuser -k 9000/tcp`
 4. **ItemRef for dynamic content**: Type-safe item binding without runtime string parsing or data attributes.
 
 5. **Varint encoding**: Compact wire format for element refs and item indices (1-3 bytes instead of fixed 4).
+
+6. **Build-time theme resolution**: CSS variables are resolved to final values at capsule generation. Only light/dark mode switching remains at runtime via `data-theme`. Short variable names (`--a` through `--L`) minimize CSS size.

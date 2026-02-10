@@ -70,15 +70,17 @@ St::LeadingSnug // line-height: 1.375
 
 ### Colors (Semantic)
 
+Color tokens reference semantic CSS variables that are resolved at build time. The same tokens work across all palettes and in both light and dark mode:
+
 ```rust
-St::TextDefault   // color: var(--rw-text-default)
-St::TextMuted     // color: var(--rw-text-muted)
-St::TextHigh      // color: var(--rw-text-high)
-St::BgApp         // background: var(--rw-bg-app)
-St::BgSubtle      // background: var(--rw-bg-subtle)
-St::BgSurface     // background: var(--rw-surface)
-St::TextAccent    // color: var(--rw-accent-11)
-St::BgAccentSubtle // background: var(--rw-accent-3)
+St::TextDefault   // body text color
+St::TextMuted     // secondary text
+St::TextHigh      // highest contrast text
+St::BgApp         // page background
+St::BgSubtle      // section background
+St::BgSurface     // card/surface background
+St::TextAccent    // accent-colored text (links, labels)
+St::BgAccentSubtle // light accent tint background
 ```
 
 ### Borders and Effects
@@ -87,8 +89,8 @@ St::BgAccentSubtle // background: var(--rw-accent-3)
 St::RoundedSm         // border-radius: sm
 St::RoundedMd         // border-radius: md
 St::RoundedLg         // border-radius: lg
-St::BorderDefault     // border: 1px solid var(--rw-border-default)
-St::BorderSubtle      // border: 1px solid var(--rw-border-subtle)
+St::BorderDefault     // border: 1px solid (theme border color)
+St::BorderSubtle      // border: 1px solid (lighter border)
 St::TransitionColors  // transition: colors 150ms
 St::CursorPointer     // cursor: pointer
 ```
@@ -124,4 +126,4 @@ Four breakpoints are available: `.sm()` (640px), `.md()` (768px), `.lg()` (1024p
 
 The `St` enum uses `#[repr(u16)]` internally. On the wire, tokens are varint-encoded: values under 128 take 1 byte, larger values take 2 bytes. A typical styled element sends 5-10 tokens at 1-2 bytes each, far smaller than equivalent CSS class strings.
 
-The framework currently defines 580+ tokens covering CSS3 layout, spacing, typography, color, border, shadow, and animation properties.
+The framework currently defines 590+ tokens covering CSS3 layout, spacing, typography, color, border, shadow, and animation properties.

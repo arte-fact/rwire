@@ -98,7 +98,7 @@ pub use state::{
 pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 
 // Server exports
-pub use server::{persist_task, BroadcastMsg, Server, SharedServerState};
+pub use server::{persist_task, session_eviction_task, BroadcastMsg, Server, SharedServerState};
 
 // Store exports
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};
@@ -135,13 +135,13 @@ pub use style_tokens::{Bp, Pc, St, StyleProp, StyleValue};
 
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
-pub use tokens::{ColorPalette, ColorScale};
-pub use tokens::css::{generate_primitive_css, minify_css};
+pub use tokens::{ColorPalette, ColorScale, PalettePreset};
+pub use tokens::css::minify_css;
 
 // Theme exports
 pub use theme::{
-    generate_accent_css, generate_base_css, generate_radius_css, generate_semantic_css,
-    generate_style_css, generate_theme_css, generate_theme_css_with_palette, AccentColor,
+    generate_base_css, generate_palette_override_css, generate_q_var_base_css, generate_radius_css,
+    generate_resolved_semantic_css, generate_resolved_style_css, ResolvedPalette,
     RadiusScale, Theme, ThemeMode, ThemeStyle,
 };
 

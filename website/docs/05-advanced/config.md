@@ -69,34 +69,39 @@ Registers a `Router` for URL pattern matching and automatic tree shaking. See th
 
 ```rust
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
-use rwire::theme::{Theme, AccentColor, ThemeStyle};
-use rwire::tokens::ColorPalette;
+use rwire::theme::{Theme, ThemeStyle};
 
 let config = CapsuleConfig::new()
     .theme(
         Theme::dark()
-            .with_accent(AccentColor::Green)
-            .with_style(ThemeStyle::Soft)
+            .accent("#5E81AC")
+            .style(ThemeStyle::Soft)
     )
-    .palette(ColorPalette::nord())
     .font(FontFace::google("Inter", &[400, 500, 600]))
     .has_local_handlers(true);
 ```
 
 ### .theme(Theme)
 
-Sets the visual theme. The `Theme` struct controls mode (light/dark), accent color, border radius scale, and style preset:
+Sets the visual theme. The `Theme` struct controls mode (light/dark), border radius scale, style preset, color palette, and seed colors:
 
 ```rust
+use rwire::theme::{Theme, ThemeStyle, RadiusScale};
+
 Theme::dark()
-    .with_accent(AccentColor::Amber)
-    .with_radius(RadiusScale::Large)
-    .with_style(ThemeStyle::Brutalist)
+    .accent("#5E81AC")
+    .radius(RadiusScale::Large)
+    .style(ThemeStyle::Brutalist)
 ```
 
-### .palette(ColorPalette)
+Color configuration methods on `Theme`:
 
-Overrides the default Oklch color scales with a custom palette. Use `ColorPalette::nord()` for the built-in Nord preset, or build a custom palette with `ColorScale::from_hex()`.
+- `.accent(color)` -- Sets accent color from hex or oklch string (auto-generates 12-step scale)
+- `.neutral(color)` -- Sets neutral color from hex or oklch string
+- `.error(color)` / `.success(color)` / `.warning(color)` -- Sets status colors
+- `.palette(ColorPalette)` -- Full palette override (e.g., `ColorPalette::nord()`)
+
+Presets: `Theme::dark_nord()`, `Theme::light_nord()`.
 
 ### .font(FontFace)
 

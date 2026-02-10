@@ -94,7 +94,8 @@ impl Toast {
             St::GapSm,
             St::PMd,
             St::RoundedMd,
-            St::ShadowLg,
+            St::ShadowTheme,
+            St::TextShadowTheme,
             St::TextSm,
             St::AnimateSlideIn,
             St::MaxW360px,
@@ -113,8 +114,8 @@ impl Toast {
                 tokens.push(St::TextGreen11);
             }
             ToastIntent::Warning => {
-                tokens.push(St::BgYellow2);
-                tokens.push(St::BorderYellow8);
+                tokens.push(St::BgAmber2);
+                tokens.push(St::BorderAmber8);
                 tokens.push(St::TextAmber11);
             }
             ToastIntent::Error => {

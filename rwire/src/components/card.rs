@@ -117,10 +117,16 @@ impl Card {
 
         match self.shadow {
             CardShadow::None => tokens.push(St::ShadowNone),
-            CardShadow::Sm => tokens.push(St::ShadowSm),
+            CardShadow::Sm => tokens.push(St::ShadowTheme),
             CardShadow::Md => tokens.push(St::ShadowMd),
             CardShadow::Lg => tokens.push(St::ShadowLg),
         }
+
+        // Theme-aware hooks for Glass/Neon support
+        tokens.extend([
+            St::BackdropTheme, St::OpacityTheme, St::BorderCTheme,
+            St::GlowTheme, St::TextShadowTheme, St::TransTheme,
+        ]);
 
         tokens
     }
@@ -161,7 +167,7 @@ mod tests {
         assert!(tokens.contains(&St::RoundedLg));
         assert!(tokens.contains(&St::BorderSubtle));
         assert!(tokens.contains(&St::PMd));
-        assert!(tokens.contains(&St::ShadowSm));
+        assert!(tokens.contains(&St::ShadowTheme));
     }
 
     #[test]

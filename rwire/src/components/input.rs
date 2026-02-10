@@ -190,7 +190,8 @@ impl Input {
             St::BgApp,
             St::BorderDefault,
             St::RoundedMd,
-            St::TransitionColors,
+            St::TransTheme,
+            St::BorderWTheme,
         ];
 
         match self.size {
@@ -233,7 +234,7 @@ impl Input {
             .st(tokens)
             .placeholder_style([St::TextMuted])
             .hover([St::BorderEmphasis])
-            .focus([St::BorderPrimary, St::OutlineNone])
+            .focus([St::BorderPrimary, St::OutlineTheme])
             .at(At::Type, self.input_type.av());
         if self.disabled {
             builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
@@ -273,6 +274,14 @@ impl Input {
     /// Build with input event handler.
     pub fn on_input(self, handler: HandlerSpec) -> ElementBuilder {
         self.build().on(Ev::Input, handler)
+    }
+
+    /// Build with debounced input event handler.
+    ///
+    /// The handler fires only after `delay_ms` milliseconds of inactivity.
+    /// Useful for search inputs to reduce server round-trips.
+    pub fn on_input_debounced(self, handler: HandlerSpec, delay_ms: u16) -> ElementBuilder {
+        self.build().on_debounced(Ev::Input, handler, delay_ms)
     }
 
     /// Build with change event handler.

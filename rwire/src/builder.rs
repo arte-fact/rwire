@@ -575,6 +575,17 @@ impl ElementBuilder {
         self
     }
 
+    /// Bind a debounced event handler to this element.
+    ///
+    /// The handler will only fire after `delay_ms` milliseconds of inactivity.
+    /// Useful for search inputs to avoid sending a server request on every keystroke.
+    pub fn on_debounced(mut self, ev: Ev, handler: HandlerSpec, delay_ms: u16) -> Self {
+        let mut h = handler;
+        h.debounce_ms = delay_ms;
+        self.events.push((ev, h));
+        self
+    }
+
     /// Bind an event handler with an item reference parameter.
     ///
     /// This is used for dynamically-generated content where each item needs
@@ -1454,13 +1465,21 @@ impl BuildContext {
                     if let Some(handler) = &handler_spec.remote_handler {
                         let handler_idx = self.register_remote_handler(handler.clone());
 
-                        // Use BIND_REMOTE_PARAM if we have param bytes, otherwise BIND_REMOTE
+                        // Use BIND_REMOTE_PARAM if we have param bytes,
+                        // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
                         if let Some(param_bytes) = &handler_spec.param_bytes {
                             self.buf.bind_remote_param(
                                 ref_idx,
                                 ev.as_u8(),
                                 handler_idx,
                                 param_bytes,
+                            );
+                        } else if handler_spec.debounce_ms > 0 {
+                            self.buf.bind_debounced(
+                                ref_idx,
+                                ev.as_u8(),
+                                handler_idx,
+                                handler_spec.debounce_ms,
                             );
                         } else {
                             self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
@@ -1623,13 +1642,21 @@ impl BuildContext {
                     if let Some(handler) = &handler_spec.remote_handler {
                         let handler_idx = self.register_remote_handler(handler.clone());
 
-                        // Use BIND_REMOTE_PARAM if we have param bytes, otherwise BIND_REMOTE
+                        // Use BIND_REMOTE_PARAM if we have param bytes,
+                        // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
                         if let Some(param_bytes) = &handler_spec.param_bytes {
                             self.buf.bind_remote_param(
                                 ref_idx,
                                 ev.as_u8(),
                                 handler_idx,
                                 param_bytes,
+                            );
+                        } else if handler_spec.debounce_ms > 0 {
+                            self.buf.bind_debounced(
+                                ref_idx,
+                                ev.as_u8(),
+                                handler_idx,
+                                handler_spec.debounce_ms,
                             );
                         } else {
                             self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
@@ -2152,9 +2179,12 @@ fn emit_update_element(
                     idx
                 });
 
-            // Use BIND_REMOTE_PARAM if we have param bytes
+            // Use BIND_REMOTE_PARAM if we have param bytes,
+            // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
             if let Some(param_bytes) = &spec.param_bytes {
                 buf.bind_remote_param(ref_idx, ev.as_u8(), handler_idx as u32, param_bytes);
+            } else if spec.debounce_ms > 0 {
+                buf.bind_debounced(ref_idx, ev.as_u8(), handler_idx as u32, spec.debounce_ms);
             } else {
                 buf.bind_remote(ref_idx, ev.as_u8(), handler_idx as u32);
             }

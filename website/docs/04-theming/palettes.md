@@ -1,22 +1,27 @@
 ---
 title: Color Palettes
-description: Nord palette and semantic color system
+description: Nord palette, auto-generated scales, and semantic color system
 order: 2
 ---
 # Color Palettes
 
 rwire uses a 12-step color scale system inspired by Radix Colors. Each scale maps steps to UI roles, and a `ColorPalette` bundles five scales (neutral, accent, red, green, amber) into a complete color system.
 
+## Quick Setup
+
 ```rust
-use rwire::tokens::ColorPalette;
 use rwire::capsule_gen::CapsuleConfig;
+use rwire::theme::Theme;
 
-// Use the built-in Nord palette
-let config = CapsuleConfig::new()
-    .palette(ColorPalette::nord());
-
-// Or use the default Oklch-based palette
+// Default Oklch palette
 let config = CapsuleConfig::new();
+
+// Custom accent from a single color (auto-generates 12-step scale)
+let config = CapsuleConfig::new()
+    .theme(Theme::dark().accent("#5E81AC"));
+
+// Nord preset
+let config = CapsuleConfig::dark_nord();
 ```
 
 ## The 12-Step Scale
@@ -34,32 +39,49 @@ Each color scale follows a consistent purpose mapping:
 
 ## Semantic Color Tokens
 
-Style tokens reference semantic CSS variables, not raw colors. These variables adapt automatically based on the active palette and theme mode.
+Style tokens reference semantic CSS variables that are resolved at build time from the active palette. Components never need conditional color logic.
 
 ```rust
 // Text hierarchy
-St::TextHigh       // --rw-text-high (highest contrast)
-St::TextDefault    // --rw-text-default (body text)
-St::TextMuted      // --rw-text-muted (secondary text)
+St::TextHigh       // highest contrast text
+St::TextDefault    // body text
+St::TextMuted      // secondary text
 
 // Background layers
-St::BgApp          // --rw-bg-app (page background)
-St::BgSubtle       // --rw-bg-subtle (section background)
-St::BgSurface      // --rw-surface (card background)
+St::BgApp          // page background
+St::BgSubtle       // section background
+St::BgSurface      // card background
 
 // Accent colors
-St::TextAccent     // --rw-accent-11 (links, labels)
-St::BgAccentSubtle // --rw-accent-3 (tinted backgrounds)
+St::TextAccent     // links, labels (accent step 11)
+St::BgAccentSubtle // tinted backgrounds (accent step 3)
 
 // Status colors
-// --rw-success (green-9), --rw-warning (amber-9), --rw-error (red-9)
+// St::BgSuccess (green-9), St::BgWarning (amber-9), St::BgError (red-9)
 ```
+
+## Single-Color Scales
+
+Generate a full 12-step scale from one seed color using `ColorScale::from_color()`. The seed becomes step 9 (primary solid), and steps 1-8 and 10-12 are derived automatically using oklch lightness and chroma ramps.
+
+```rust
+use rwire::tokens::palette::ColorScale;
+
+// From hex
+let scale = ColorScale::from_color("#5E81AC");
+
+// From oklch
+let scale = ColorScale::from_color("oklch(0.55 0.08 250)");
+```
+
+Supported formats: `#RRGGBB`, `#RGB`, and `oklch(L C H)`.
 
 ## Nord Palette
 
 The built-in Nord preset maps arctic-inspired colors to the 12-step scale:
 
 ```rust
+use rwire::tokens::ColorPalette;
 let palette = ColorPalette::nord();
 ```
 
@@ -71,10 +93,11 @@ let palette = ColorPalette::nord();
 
 ## Custom Palettes
 
-Build a palette from scratch using `ColorScale`:
+For full control, build a palette from explicit 12-step hex scales:
 
 ```rust
 use rwire::tokens::palette::{ColorPalette, ColorScale};
+use rwire::theme::Theme;
 
 let palette = ColorPalette::new()
     .with_neutral(ColorScale::from_hex([
@@ -87,9 +110,11 @@ let palette = ColorPalette::new()
         "#60A5FA", "#3B82F6", "#2563EB", "#1D4ED8",
         "#1E40AF", "#1E3A8A", "#172554", "#0F172A",
     ]));
+
+let theme = Theme::dark().palette(palette);
 ```
 
-You can also use Oklch values for perceptually uniform scales:
+Or from oklch tuples for perceptually uniform scales:
 
 ```rust
 let scale = ColorScale::from_oklch([
@@ -97,19 +122,37 @@ let scale = ColorScale::from_oklch([
 ]);
 ```
 
-## CSS Variables Under the Hood
+## Seed-Based Themes
 
-The palette generates CSS custom properties on `:root`:
+For the simplest possible custom theme, set seed colors directly on `Theme`. Each seed auto-generates a full 12-step scale:
+
+```rust
+use rwire::theme::Theme;
+
+let theme = Theme::dark()
+    .accent("#5E81AC")    // primary actions
+    .neutral("#2E3440");  // backgrounds/text
+```
+
+Optional seeds: `.error("#BF616A")`, `.success("#A3BE8C")`, `.warning("#EBCB8B")`. Any omitted role uses the default oklch palette.
+
+## Build-Time Resolution
+
+Colors are resolved to final values during capsule generation. The output CSS contains direct oklch values instead of `var()` indirection:
 
 ```css
-:root {
-  --rw-neutral-1: #ECEFF4;
-  --rw-neutral-2: #E5E9F0;
-  /* ...through step 12 */
-  --rw-blue-1: #F0F4F8;
-  --rw-blue-9: #5E81AC;
-  /* ...all scales */
+:root,[data-theme="light"]{
+  --a:oklch(0.985 0 0);    /* bg-app */
+  --b:oklch(0.97 0 0);     /* bg-subtle */
+  --k:oklch(0.25 0.02 250); /* text-default */
+  --n9:oklch(0.55 0.08 250); /* accent step 9 */
+}
+[data-theme="dark"]{
+  --a:oklch(0.15 0 0);     /* bg-app (inverted) */
+  --k:oklch(0.97 0 0);     /* text-default (inverted) */
 }
 ```
 
-Semantic tokens then reference these primitives: `--rw-bg-app: var(--rw-neutral-1)`. Switching palettes swaps all colors at once without touching component code.
+Short variable names (`--a` through `--L`, `--n1`..`--n12`) minimize CSS size. The Rust `St` enum variant names (`St::BgApp`, `St::TextDefault`) serve as human-readable documentation.
+
+Switching palettes changes all colors at once without touching component code.

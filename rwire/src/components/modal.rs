@@ -127,8 +127,9 @@ impl Modal {
     /// Compute style tokens for the modal inner panel.
     pub fn compute_tokens(&self) -> Vec<St> {
         vec![
-            St::BgSurfaceRaised, St::RoundedLg, St::ShadowLg, St::DisplayFlex,
+            St::BgSurfaceRaised, St::RoundedLg, St::ShadowTheme, St::DisplayFlex,
             St::FlexCol, St::PointerEventsAuto, St::OverflowHidden,
+            St::BackdropTheme, St::OpacityTheme,
         ]
     }
 
@@ -267,7 +268,7 @@ mod tests {
         let tokens = modal.compute_tokens();
         assert!(tokens.contains(&St::BgSurfaceRaised));
         assert!(tokens.contains(&St::RoundedLg));
-        assert!(tokens.contains(&St::ShadowLg));
+        assert!(tokens.contains(&St::ShadowTheme));
         assert!(tokens.contains(&St::DisplayFlex));
         assert!(tokens.contains(&St::FlexCol));
         assert!(tokens.contains(&St::PointerEventsAuto));

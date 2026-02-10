@@ -748,6 +748,9 @@ pub struct HandlerSpec {
     /// Used for fine-grained reactivity - only renderers depending on these
     /// fields will re-render after this handler executes.
     pub changes: ChangeSet,
+    /// Debounce delay in milliseconds (0 = no debounce).
+    /// When > 0, uses BIND_DEBOUNCED opcode instead of BIND_REMOTE.
+    pub debounce_ms: u16,
 }
 
 impl HandlerSpec {
@@ -774,6 +777,7 @@ impl HandlerSpec {
                 local_mutations: None, // Will be set by macro for local handlers
                 param_bytes: None,
                 changes,
+                debounce_ms: 0,
             },
             StorageType::Memory => Self {
                 storage_type: StorageType::Memory,
@@ -782,6 +786,7 @@ impl HandlerSpec {
                 local_mutations: None,
                 param_bytes: None,
                 changes,
+                debounce_ms: 0,
             },
             StorageType::Persisted => Self {
                 storage_type: StorageType::Persisted,
@@ -790,6 +795,7 @@ impl HandlerSpec {
                 local_mutations: None,
                 param_bytes: None,
                 changes,
+                debounce_ms: 0,
             },
         }
     }
@@ -819,6 +825,7 @@ impl HandlerSpec {
                 local_mutations: None, // Local handlers with context not supported yet
                 param_bytes: None,
                 changes,
+                debounce_ms: 0,
             },
             StorageType::Memory => Self {
                 storage_type: StorageType::Memory,
@@ -829,6 +836,7 @@ impl HandlerSpec {
                 local_mutations: None,
                 param_bytes: None,
                 changes,
+                debounce_ms: 0,
             },
             StorageType::Persisted => Self {
                 storage_type: StorageType::Persisted,
@@ -839,6 +847,7 @@ impl HandlerSpec {
                 local_mutations: None,
                 param_bytes: None,
                 changes,
+                debounce_ms: 0,
             },
         }
     }
@@ -860,6 +869,7 @@ impl HandlerSpec {
             local_mutations: Some(mutations),
             param_bytes: None,
             changes,
+            debounce_ms: 0,
         }
     }
 
@@ -874,6 +884,7 @@ impl HandlerSpec {
             local_mutations: Some(mutations),
             param_bytes: None,
             changes: ChangeSet::all(),
+            debounce_ms: 0,
         }
     }
 
@@ -886,6 +897,7 @@ impl HandlerSpec {
             local_mutations: None,
             param_bytes: None,
             changes: ChangeSet::all(),
+            debounce_ms: 0,
         }
     }
 

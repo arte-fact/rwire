@@ -5,27 +5,41 @@ order: 5
 ---
 # Custom Themes
 
-rwire's theming system is configured through `CapsuleConfig`. You can customize the color palette, accent color, border radius, font, and style preset -- all in one place.
+rwire's theming system is configured through `Theme` and `CapsuleConfig`. You can customize the color palette, accent color, border radius, font, and style preset -- all on the `Theme` builder.
 
 ```rust
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
-use rwire::theme::{Theme, AccentColor, RadiusScale, ThemeStyle};
-use rwire::tokens::ColorPalette;
+use rwire::theme::{Theme, RadiusScale, ThemeStyle};
 
 let config = CapsuleConfig::new()
     .theme(
         Theme::dark()
-            .with_accent(AccentColor::Green)
-            .with_radius(RadiusScale::Large)
-            .with_style(ThemeStyle::Soft)
+            .accent("#5E81AC")
+            .radius(RadiusScale::Large)
+            .style(ThemeStyle::Soft)
     )
-    .palette(ColorPalette::nord())
     .font(FontFace::google("Inter", &[400, 600]));
 ```
 
+## Custom Accent Color
+
+Set a custom accent color from a single CSS color. A full 12-step scale is auto-generated:
+
+```rust
+use rwire::theme::Theme;
+
+// From hex
+let theme = Theme::dark().accent("#5E81AC");
+
+// From oklch
+let theme = Theme::dark().accent("oklch(0.55 0.08 250)");
+```
+
+The accent controls primary buttons, links, focus rings, and other interactive elements. The 12-step scale is derived at build time using oklch lightness and chroma ramps.
+
 ## Custom Color Palettes
 
-Build a palette by providing 12-step color scales for each role:
+For full control, build a palette by providing 12-step color scales for each role:
 
 ```rust
 use rwire::tokens::palette::{ColorPalette, ColorScale};
@@ -49,31 +63,41 @@ let palette = ColorPalette::new()
 // .with_green() and .with_amber() follow the same pattern
 ```
 
-The palette generates CSS variables (`--rw-neutral-1` through `--rw-neutral-12`, etc.) that semantic tokens reference.
-
-## Accent Colors
-
-Four accent colors are built in: Blue (default), Red, Green, and Amber. The accent controls primary buttons, links, focus rings, and other interactive elements.
+Then pass it to the `Theme`:
 
 ```rust
-Theme::light().with_accent(AccentColor::Green)
+let config = CapsuleConfig::new()
+    .theme(Theme::dark().palette(palette));
 ```
 
-This sets `data-accent="green"` on the root element, remapping `--rw-accent-1` through `--rw-accent-12` to the green scale.
+## Seed-Based Themes
+
+For the simplest approach, set seed colors directly on `Theme`. Each seed auto-generates a complete 12-step scale:
+
+```rust
+use rwire::theme::Theme;
+
+let theme = Theme::dark()
+    .accent("#5E81AC")    // primary actions
+    .neutral("#2E3440")   // backgrounds and text
+    .error("#BF616A")     // error states
+    .success("#A3BE8C")   // success states
+    .warning("#EBCB8B");  // warning states
+```
+
+Any omitted role uses the default oklch palette.
 
 ## Radius Scale
 
 Control component border radius globally:
 
 ```rust
-Theme::light().with_radius(RadiusScale::Full)   // pill shapes
-Theme::light().with_radius(RadiusScale::Large)   // pronounced rounding
-Theme::light().with_radius(RadiusScale::Medium)  // default
-Theme::light().with_radius(RadiusScale::Small)   // subtle rounding
-Theme::light().with_radius(RadiusScale::None)    // sharp corners
+Theme::light().radius(RadiusScale::Full)   // pill shapes
+Theme::light().radius(RadiusScale::Large)   // pronounced rounding
+Theme::light().radius(RadiusScale::Medium)  // default
+Theme::light().radius(RadiusScale::Small)   // subtle rounding
+Theme::light().radius(RadiusScale::None)    // sharp corners
 ```
-
-The radius scale overrides `--rw-radius-component`, which all components reference.
 
 ## Custom Fonts
 
@@ -100,23 +124,25 @@ For styles beyond what tokens cover, pass extra CSS alongside the capsule config
 ```rust
 let extra_css = r#"
     .custom-gradient {
-        background: linear-gradient(135deg, var(--rw-accent-3), var(--rw-accent-5));
+        background: linear-gradient(135deg, var(--n3), var(--n5));
     }
 "#;
 ```
 
-Reference semantic CSS variables (`--rw-accent-*`, `--rw-bg-*`, `--rw-text-*`) in custom CSS to ensure it adapts to palette and theme changes.
+Reference short semantic CSS variables (`--a` through `--L`, `--n1`..`--n12`) or primitive variables (`--S*` spacing, `--R*` radius, `--T*` text size, `--Z*` shadow) in custom CSS.
 
 ## How It All Fits Together
 
 The capsule CSS is assembled in layers:
 
 1. **Base reset** -- Box-sizing, body margins, system font
-2. **Primitive tokens** -- Raw color scales from the palette
-3. **Semantic tokens** -- Light and dark mappings
-4. **Accent override** -- Remaps accent scale (if non-default)
+2. **Non-color primitives** -- Spacing, radius, typography, shadows (tree-shaken)
+3. **Color primitives** -- Only palette colors still referenced by tokens (tree-shaken)
+4. **Resolved semantics** -- Light and dark mappings with direct oklch values
 5. **Radius override** -- Adjusts component radius (if non-default)
-6. **Style preset** -- Remaps semantic variables (if non-default)
+6. **Style preset** -- Remaps semantic variables for Soft/Brutalist/Minimal
 7. **Component CSS** -- Tree-shaken token classes
 
-Each layer is optional and only included when needed. The total theme CSS stays under 8KB.
+All color values are resolved at build time from the palette. There is no runtime accent switching -- the server knows the full theme configuration and emits final CSS values. Only light/dark mode switching remains at runtime via the `data-theme` attribute.
+
+The total theme CSS stays under 4KB.

@@ -158,7 +158,7 @@ impl Button {
             St::RoundedMd,
             St::BorderTransparent,
             St::CursorPointer,
-            St::TransitionColors,
+            St::TransTheme,
             St::TextSm,
         ];
 
@@ -195,10 +195,10 @@ impl Button {
 
     /// Apply pseudo-class styles to the builder based on button configuration.
     fn apply_pseudo(&self, mut builder: ElementBuilder) -> ElementBuilder {
-        builder = builder.focus_visible([St::RingFocus]);
+        builder = builder.focus_visible([St::RingTheme]);
 
         builder = match self.intent {
-            ButtonIntent::Primary => builder.hover([St::BgPrimaryHover]),
+            ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
             ButtonIntent::Secondary => {
                 builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
             }

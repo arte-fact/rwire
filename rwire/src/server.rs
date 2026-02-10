@@ -4,6 +4,7 @@
 //! - HTTP GET / → capsule HTML
 //! - WebSocket upgrade → binary DOM protocol with state management
 
+use async_std::future::timeout;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
 use async_tungstenite::accept_async;
@@ -15,7 +16,7 @@ use std::error::Error;
 use std::net::{AddrParseError, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::builder::{
     build_synced_update_with_known_symbols, extract_renderers, BuildContext, ElementBuilder,
@@ -45,6 +46,12 @@ pub enum BroadcastMsg {
     },
 }
 
+/// Cached session state for reconnection.
+struct CachedSession {
+    states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    cached_at: Instant,
+}
+
 /// Shared state across all connections.
 ///
 /// This holds the single source of truth for persisted state, allowing
@@ -71,6 +78,9 @@ pub struct SharedServerState {
 
     /// Capacity of per-connection broadcast channels. Default: 32.
     pub broadcast_capacity: usize,
+
+    /// Cached session states for reconnection.
+    session_state_cache: RwLock<HashMap<String, CachedSession>>,
 }
 
 impl SharedServerState {
@@ -89,6 +99,7 @@ impl SharedServerState {
             next_connection_id: AtomicU64::new(1),
             persist_interval,
             broadcast_capacity,
+            session_state_cache: RwLock::new(HashMap::new()),
         })
     }
 
@@ -234,6 +245,37 @@ impl SharedServerState {
         }
     }
 
+    /// Cache session state on disconnect for later reconnection.
+    pub fn cache_session(&self, session_id: &str, states: HashMap<TypeId, Box<dyn Any + Send + Sync>>) {
+        if states.is_empty() {
+            return;
+        }
+        self.session_state_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.to_string(), CachedSession {
+                states,
+                cached_at: Instant::now(),
+            });
+    }
+
+    /// Restore cached session state on reconnect (removes from cache).
+    pub fn restore_session(&self, session_id: &str) -> Option<HashMap<TypeId, Box<dyn Any + Send + Sync>>> {
+        self.session_state_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(session_id)
+            .map(|c| c.states)
+    }
+
+    /// Evict expired sessions older than the given TTL.
+    pub fn evict_expired_sessions(&self, ttl: Duration) {
+        self.session_state_cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, cached| cached.cached_at.elapsed() < ttl);
+    }
+
     /// Persist all dirty state to the store.
     ///
     /// This is called by the background persist task and during graceful shutdown.
@@ -376,6 +418,17 @@ pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist:
                 eprintln!("Persist task error: {}", e);
             }
         }
+    }
+}
+
+/// Background task that evicts expired session state caches.
+///
+/// Runs periodically at half the TTL interval. Sessions older than the TTL
+/// are removed to prevent unbounded memory growth.
+pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration) {
+    loop {
+        task::sleep(ttl / 2).await;
+        shared.evict_expired_sessions(ttl);
     }
 }
 
@@ -613,6 +666,12 @@ where
         let root = Arc::new(self.root);
         let route_handler = self.route_handler.map(Arc::new);
 
+        // Spawn session eviction task (5-minute TTL)
+        {
+            let shared = Arc::clone(&shared);
+            task::spawn(session_eviction_task(shared, Duration::from_secs(300)));
+        }
+
         while let Ok((stream, peer_addr)) = listener.accept().await {
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
@@ -773,6 +832,33 @@ impl ConnectionState {
     fn get_state_mut(&mut self, type_id: TypeId) -> Option<&mut (dyn Any + Send + Sync)> {
         self.states.get_mut(&type_id).map(|s| s.as_mut())
     }
+
+    /// Take all states out of this connection (for caching on disconnect).
+    fn take_states(&mut self) -> HashMap<TypeId, Box<dyn Any + Send + Sync>> {
+        std::mem::take(&mut self.states)
+    }
+
+    /// Restore states from a cached session.
+    fn restore_states(&mut self, cached: HashMap<TypeId, Box<dyn Any + Send + Sync>>) {
+        self.states = cached;
+    }
+
+    /// Initialize missing states (fill gaps for types not in the cache).
+    fn initialize_missing_states(&mut self) {
+        let handlers: Vec<_> = self.handlers.clone();
+        for handler in &handlers {
+            let type_id = handler.state_type_id();
+            self.states
+                .entry(type_id)
+                .or_insert_with(|| handler.create_state());
+        }
+        for synced in &self.synced_elements {
+            let type_id = synced.state_type_id;
+            self.states
+                .entry(type_id)
+                .or_insert_with(|| synced.create_default_state());
+        }
+    }
 }
 
 /// RAII guard that unregisters a connection when dropped.
@@ -831,8 +917,14 @@ where
     conn_state.handlers = ctx.handlers().to_vec();
     conn_state.synced_elements = ctx.take_synced_elements();
 
-    // Initialize all state types from handlers and synced elements
-    conn_state.initialize_all_states();
+    // Restore cached session state if available, otherwise initialize fresh
+    if let Some(cached) = shared.restore_session(conn_state.session_id.as_str()) {
+        println!("[{}] Restored cached session state", peer_addr);
+        conn_state.restore_states(cached);
+        conn_state.initialize_missing_states();
+    } else {
+        conn_state.initialize_all_states();
+    }
 
     // For persisted state handlers, check if state exists in shared cache
     // and subscribe to updates
@@ -919,8 +1011,29 @@ where
     // Handle incoming messages
     let mut consecutive_decode_errors: u32 = 0;
     const MAX_CONSECUTIVE_DECODE_ERRORS: u32 = 10;
+    const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+    let mut awaiting_pong = false;
 
-    while let Some(msg) = read.next().await {
+    loop {
+        let msg = match timeout(HEARTBEAT_INTERVAL, read.next()).await {
+            Ok(Some(msg)) => {
+                awaiting_pong = false; // any message = alive
+                msg
+            }
+            Ok(None) => break, // stream ended
+            Err(_) => {
+                // Timeout — no message in 30s
+                if awaiting_pong {
+                    println!("[{}] Heartbeat timeout, disconnecting", peer_addr);
+                    break;
+                }
+                if write.send(Message::Ping(vec![])).await.is_err() {
+                    break;
+                }
+                awaiting_pong = true;
+                continue;
+            }
+        };
         match msg {
             Ok(Message::Binary(data)) => match ClientEvent::decode(&data) {
                 Ok(event) => {
@@ -1103,6 +1216,10 @@ where
             }
         }
     }
+
+    // Cache session state for potential reconnection
+    let session_states = conn_state.take_states();
+    shared.cache_session(&conn_state.session_id, session_states);
 
     // Cleanup happens automatically via ConnectionGuard drop
 
