@@ -1,0 +1,45 @@
+services:
+  rwire-website:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-website
+    ports:
+      - "9000:9000"
+    env_file: .env.local
+    environment:
+      BIND_ADDR: "0.0.0.0:9000"
+
+  rwire-docs:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-docs
+    ports:
+      - "9001:9001"
+    env_file: .env.local
+    environment:
+      BIND_ADDR: "0.0.0.0:9001"
+      DOCS_DIR: /app/docs
+
+  rwire-design-system:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-design-system
+    ports:
+      - "9002:9002"
+    env_file: .env.local
+    environment:
+      BIND_ADDR: "0.0.0.0:9002"
+
+  rwire-examples:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-examples
+    ports:
+      - "9003:9003"
+    env_file: .env.local
+    environment:
+      BIND_ADDR: "0.0.0.0:9003"

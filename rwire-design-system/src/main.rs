@@ -1,11 +1,59 @@
-//! rwire Design System Documentation
+//! rwire Design System
 //!
 //! Interactive showcase of all rwire components.
 
+use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::components::*;
+use rwire::style_tokens::St;
+use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Server, State};
-use rwire::capsule_gen::CapsuleConfig;
-use rwire::theme::{Theme, ThemeMode};
+use rwire_themes::{palettes, styles};
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+struct Config {
+    bind_addr: String,
+    website_url: String,
+    docs_url: String,
+    examples_url: String,
+}
+
+impl Config {
+    fn from_env() -> Self {
+        Self {
+            bind_addr: env_or("BIND_ADDR", "0.0.0.0:9002"),
+            website_url: env_or("WEBSITE_URL", "http://127.0.0.1:9000"),
+            docs_url: env_or("DOCS_URL", "http://127.0.0.1:9001"),
+            examples_url: env_or("EXAMPLES_URL", "http://127.0.0.1:9003"),
+        }
+    }
+}
+
+static mut WEBSITE_URL: &str = "";
+static mut DOCS_URL: &str = "";
+static mut EXAMPLES_URL: &str = "";
+
+fn website_url() -> &'static str {
+    unsafe { WEBSITE_URL }
+}
+
+fn docs_url() -> &'static str {
+    unsafe { DOCS_URL }
+}
+
+fn examples_url() -> &'static str {
+    unsafe { EXAMPLES_URL }
+}
+
+// ============================================================================
+// State
+// ============================================================================
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -19,59 +67,97 @@ struct DesignSystemState {
     current_page: usize,
 }
 
+// ============================================================================
+// Entry Point
+// ============================================================================
+
 #[theme]
 fn app_theme() -> Theme {
-    Theme::default()
+    Theme::default().palette(palettes::nord())
 }
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("rwire Design System Documentation");
-    println!("Open http://127.0.0.1:9000 in your browser");
+    let config = Config::from_env();
+
+    unsafe {
+        WEBSITE_URL = Box::leak(config.website_url.into_boxed_str());
+        DOCS_URL = Box::leak(config.docs_url.into_boxed_str());
+        EXAMPLES_URL = Box::leak(config.examples_url.into_boxed_str());
+    }
+
+    println!("rwire Design System");
+    println!("Open http://127.0.0.1:9002 in your browser");
     println!();
 
-    Server::bind("127.0.0.1:9000")?
+    let capsule_config =
+        CapsuleConfig::new().font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
+
+    Server::bind(&config.bind_addr)?
         .root(root)
-        .capsule_config(CapsuleConfig::new())
+        .capsule_config(capsule_config)
         .theme(app_theme())
         .run()
         .await
 }
 
+// ============================================================================
+// Root Layout
+// ============================================================================
+
 fn root() -> ElementBuilder {
     el(El::Div)
+        .st([St::BgApp, St::TextDefault, St::MinHScreen])
         .append([
+            build_header(),
             Stack::column()
                 .gap(Gap::Md)
-                .children([
-                    render_header(),
-                    render_nav(),
-                    render_content(),
-                ])
-                .build()
+                .children([render_nav(), render_content()])
+                .build(),
+            build_footer(),
         ])
 }
 
-fn render_header() -> ElementBuilder {
-    Card::new()
-        .child(
-            Stack::row()
-                .gap(Gap::Md)
-                .justify(StackJustify::Between)
-                .align(StackAlign::Center)
-                .children([
-                    Stack::column()
-                        .gap(Gap::Sm)
-                        .children([
-                            el(El::H1).text("rwire Design System"),
-                            el(El::P).text("Interactive documentation for all rwire components"),
-                        ])
-                        .build(),
-                    render_theme_toggle(),
-                ])
-                .build(),
+fn build_header() -> ElementBuilder {
+    let left = el(El::A)
+        .attr("href", website_url())
+        .attr(
+            "style",
+            "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em",
         )
-        .build()
+        .st([St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration])
+        .text("rwire");
+
+    let right = Stack::row()
+        .gap(Gap::Sm)
+        .align(StackAlign::Center)
+        .children([
+            el(El::A)
+                .attr("href", docs_url())
+                .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                .hover([St::TextDefault])
+                .text("Docs"),
+            el(El::A)
+                .attr("href", examples_url())
+                .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                .hover([St::TextDefault])
+                .text("Examples"),
+            el(El::Div)
+                .st([St::DisplayNone])
+                .md([St::DisplayFlex])
+                .append([render_style_switcher()]),
+            render_theme_toggle(),
+        ])
+        .build();
+
+    el(El::Header)
+        .st([
+            St::PositionSticky, St::Top0, St::Z50, St::BgApp,
+            St::BorderBDefault, St::DisplayFlex, St::ItemsCenter,
+            St::JustifyBetween, St::PxMd,
+        ])
+        .st([St::HHeader])
+        .append([left, right])
 }
 
 #[renderer]
@@ -122,9 +208,46 @@ fn render_nav(state: &DesignSystemState) -> ElementBuilder {
         .build()
 }
 
+#[renderer]
+fn render_style_switcher(theme: &Theme) -> ElementBuilder {
+    Stack::row()
+        .gap(Gap::Xs)
+        .align(StackAlign::Center)
+        .children([
+            Button::ghost(theme.style.label())
+                .size(ButtonSize::Sm)
+                .on_click(cycle_theme_style()),
+            Button::ghost(if theme.palette_ref().is_some() {
+                "Nord"
+            } else {
+                "Default"
+            })
+            .size(ButtonSize::Sm)
+            .on_click(cycle_palette()),
+        ])
+        .build()
+}
+
 #[handler]
 fn toggle_theme(theme: &mut Theme) {
     theme.mode = theme.mode.toggle();
+}
+
+#[handler]
+fn cycle_theme_style(theme: &mut Theme) {
+    let mut all = vec![ThemeStyle::soft()];
+    all.extend(styles::ALL.iter().map(|f| f()));
+    let idx = all.iter().position(|s| *s == theme.style).unwrap_or(0);
+    theme.style = all[(idx + 1) % all.len()];
+}
+
+#[handler]
+fn cycle_palette(theme: &mut Theme) {
+    if theme.palette_ref().is_some() {
+        theme.clear_palette();
+    } else {
+        theme.set_palette(palettes::nord());
+    }
 }
 
 #[renderer]
@@ -604,4 +727,35 @@ fn next_page(state: &mut DesignSystemState) {
 #[handler]
 fn previous_page(state: &mut DesignSystemState) {
     state.current_page = state.current_page.saturating_sub(1);
+}
+
+// ============================================================================
+// Footer
+// ============================================================================
+
+fn build_footer() -> ElementBuilder {
+    Footer::new()
+        .logo(
+            el(El::Span)
+                .attr(
+                    "style",
+                    "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em",
+                )
+                .st([St::TextLg, St::TextDefault])
+                .text("rwire"),
+        )
+        .tagline("Server-side UI framework with a binary protocol.")
+        .column(
+            FooterColumn::new("Ecosystem")
+                .external_link("Website", website_url())
+                .external_link("Docs", docs_url())
+                .external_link("Examples", examples_url()),
+        )
+        .column(
+            FooterColumn::new("Community")
+                .external_link("GitHub", "https://github.com")
+                .external_link("Discord", "https://discord.gg"),
+        )
+        .copyright("\u{00a9} 2026 rwire contributors. MIT License.")
+        .build()
 }

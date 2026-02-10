@@ -1,0 +1,88 @@
+services:
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    restart: unless-stopped
+
+  rwire-website:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-website
+    env_file: .env.production
+    environment:
+      BIND_ADDR: "0.0.0.0:9000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.website.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.website.entrypoints=websecure"
+      - "traefik.http.routers.website.tls.certresolver=letsencrypt"
+      - "traefik.http.services.website.loadbalancer.server.port=9000"
+    restart: unless-stopped
+
+  rwire-docs:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-docs
+    env_file: .env.production
+    environment:
+      BIND_ADDR: "0.0.0.0:9001"
+      DOCS_DIR: /app/docs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.docs.rule=Host(`docs.${DOMAIN}`)"
+      - "traefik.http.routers.docs.entrypoints=websecure"
+      - "traefik.http.routers.docs.tls.certresolver=letsencrypt"
+      - "traefik.http.services.docs.loadbalancer.server.port=9001"
+    restart: unless-stopped
+
+  rwire-design-system:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-design-system
+    env_file: .env.production
+    environment:
+      BIND_ADDR: "0.0.0.0:9002"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.design.rule=Host(`design.${DOMAIN}`)"
+      - "traefik.http.routers.design.entrypoints=websecure"
+      - "traefik.http.routers.design.tls.certresolver=letsencrypt"
+      - "traefik.http.services.design.loadbalancer.server.port=9002"
+    restart: unless-stopped
+
+  rwire-examples:
+    build:
+      context: .
+      args:
+        PACKAGE: rwire-examples
+    env_file: .env.production
+    environment:
+      BIND_ADDR: "0.0.0.0:9003"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.examples.rule=Host(`examples.${DOMAIN}`)"
+      - "traefik.http.routers.examples.entrypoints=websecure"
+      - "traefik.http.services.examples.loadbalancer.server.port=9003"
+    restart: unless-stopped
+
+volumes:
+  letsencrypt:

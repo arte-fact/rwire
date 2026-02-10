@@ -1,0 +1,5 @@
+target/
+.git/
+.claude/
+*.md
+!rwire-docs/docs/**/*.md

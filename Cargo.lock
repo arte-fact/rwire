@@ -264,14 +264,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
-name = "design-system"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "rwire",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -928,6 +920,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwire-design-system"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "rwire",
+ "rwire-themes",
+]
+
+[[package]]
+name = "rwire-docs"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "rwire",
+ "rwire-themes",
+]
+
+[[package]]
+name = "rwire-examples"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "rwire",
+ "rwire-themes",
+]
+
+[[package]]
 name = "rwire-macros"
 version = "0.1.0"
 dependencies = [
@@ -941,6 +960,15 @@ name = "rwire-themes"
 version = "0.1.0"
 dependencies = [
  "rwire",
+]
+
+[[package]]
+name = "rwire-website"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "rwire",
+ "rwire-themes",
 ]
 
 [[package]]
@@ -1260,15 +1288,6 @@ checksum = "312e32e551d92129218ea9a2452120f4aabc03529ef03e4d0d82fb2780608598"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "website"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "rwire",
- "rwire-themes",
 ]
 
 [[package]]
