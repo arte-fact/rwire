@@ -1,9 +1,8 @@
 //! Theme system for rwire.
 //!
-//! Colors are resolved at build time: the server knows the full theme configuration
-//! (palette, accent color, mode) so we flatten `var(--rw-neutral-1)` references into
-//! direct CSS values like `oklch(0.985 0 0)`. Only light/dark switching remains
-//! runtime via `data-theme` attribute.
+//! Theme is a framework-provided state type. Handlers mutate `&mut Theme`,
+//! a built-in renderer converts the theme to CSS variables, and the synced
+//! element system patches them on the client. One concept, zero new abstractions.
 //!
 //! CSS variables use short names (`--a` through `--Z`) to minimize wire size.
 //! The Rust enum variant names (`St::BgApp`, `St::Primary`) serve as documentation.
@@ -23,6 +22,9 @@
 //! let theme = Theme::dark_nord();
 //! ```
 
+use crate::builder::{el, ElementBuilder};
+use crate::protocol::El;
+use crate::state::{State, StorageType};
 use crate::tokens::ColorPalette;
 
 /// Theme mode (light or dark).
@@ -34,11 +36,19 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
-    /// Get the data-theme attribute value.
+    /// Get the string representation.
     pub fn as_str(&self) -> &'static str {
         match self {
             ThemeMode::Light => "light",
             ThemeMode::Dark => "dark",
+        }
+    }
+
+    /// Toggle between light and dark mode.
+    pub fn toggle(&self) -> Self {
+        match self {
+            ThemeMode::Light => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::Light,
         }
     }
 }
@@ -65,15 +75,6 @@ pub enum ThemeStyle {
 }
 
 impl ThemeStyle {
-    /// All non-default style variants (for CSS generation).
-    pub const ALL: &[ThemeStyle] = &[
-        ThemeStyle::Soft,
-        ThemeStyle::Brutalist,
-        ThemeStyle::Minimal,
-        ThemeStyle::Glass,
-        ThemeStyle::Neon,
-    ];
-
     /// All variants including Default (for UI cycling).
     pub const ALL_WITH_DEFAULT: &[ThemeStyle] = &[
         ThemeStyle::Default,
@@ -84,7 +85,7 @@ impl ThemeStyle {
         ThemeStyle::Neon,
     ];
 
-    /// Get the data-style attribute value.
+    /// Get the string representation.
     pub fn as_str(&self) -> &'static str {
         match self {
             ThemeStyle::Default => "default",
@@ -126,7 +127,7 @@ pub enum RadiusScale {
 }
 
 impl RadiusScale {
-    /// Get the data-radius attribute value.
+    /// Get the string representation.
     pub fn as_str(&self) -> &'static str {
         match self {
             RadiusScale::None => "none",
@@ -138,10 +139,11 @@ impl RadiusScale {
     }
 }
 
-/// Theme configuration.
+/// Theme configuration — a framework-provided state type.
 ///
-/// Defines the visual appearance of the application. Colors are configured
-/// via builder methods that accept CSS color strings (hex, oklch).
+/// Handlers can mutate `&mut Theme` to change the visual appearance at runtime.
+/// A built-in renderer converts theme state to CSS variables that get patched
+/// on the client via the synced element system.
 ///
 /// # Example
 ///
@@ -165,6 +167,11 @@ pub struct Theme {
     pub style: ThemeStyle,
     /// Custom color palette (private — use builder methods)
     palette: Option<ColorPalette>,
+}
+
+// Theme implements State manually (can't use derive macro from within rwire crate).
+impl State for Theme {
+    const STORAGE_TYPE: StorageType = StorageType::Memory;
 }
 
 impl Theme {
@@ -273,25 +280,53 @@ impl Theme {
     pub fn palette_ref(&self) -> Option<&ColorPalette> {
         self.palette.as_ref()
     }
+}
 
-    /// Generate data attributes for the theme root element.
-    ///
-    /// Returns a string like `data-theme="dark"`.
-    pub fn data_attrs(&self) -> String {
-        let mut attrs = format!("data-theme=\"{}\"", self.mode.as_str());
+// ============================================================================
+// ThemeProvider — bridge between #[theme] macro and server
+// ============================================================================
 
-        // Only add radius attr if not default (medium)
-        if self.radius != RadiusScale::Medium {
-            attrs.push_str(&format!(" data-radius=\"{}\"", self.radius.as_str()));
-        }
+/// Opaque provider type returned by the `#[theme]` proc macro.
+///
+/// This is the only type accepted by `ServerWithRoot::theme()`, ensuring
+/// themes are always defined via `#[theme]` functions.
+pub struct ThemeProvider {
+    /// The function that creates the initial theme value.
+    pub(crate) init_fn: fn() -> Theme,
+}
 
-        // Only add style attr if not default
-        if self.style != ThemeStyle::Default {
-            attrs.push_str(&format!(" data-style=\"{}\"", self.style.as_str()));
-        }
-
-        attrs
+impl ThemeProvider {
+    /// Create a new ThemeProvider (called by the `#[theme]` macro).
+    pub fn new(init_fn: fn() -> Theme) -> Self {
+        Self { init_fn }
     }
+
+    /// Call the init function to get the initial theme.
+    pub fn init(&self) -> Theme {
+        (self.init_fn)()
+    }
+}
+
+// ============================================================================
+// Built-in Theme Renderer
+// ============================================================================
+
+/// The theme renderer function used by the synced element system.
+///
+/// Converts `Theme` state to a `<style>` element with CSS variable declarations.
+fn theme_renderer(theme: &Theme) -> ElementBuilder {
+    let css = generate_theme_css(theme);
+    el(El::Style).text(&css)
+}
+
+/// Create an `ElementBuilder` representing the theme synced region.
+///
+/// This returns a synced element that, when included in the element tree,
+/// renders to a `<style>` element with CSS variable declarations.
+/// On theme state changes, the synced element system patches the `<style>`
+/// content, causing an instant browser restyle.
+pub(crate) fn theme_synced_builder() -> ElementBuilder {
+    ElementBuilder::synced::<Theme>(theme_renderer)
 }
 
 // ============================================================================
@@ -302,14 +337,13 @@ impl Theme {
 ///
 /// Instead of `var(--rw-neutral-1)`, semantic variables get the actual CSS value
 /// like `oklch(0.985 0 0)`. This struct is constructed once at capsule build time.
-pub struct ResolvedPalette {
+pub(crate) struct ResolvedPalette {
     pub neutral: [String; 12],
     pub accent: [String; 12],
     pub red: [String; 12],
     pub green: [String; 12],
     pub amber: [String; 12],
     pub white: String,
-    pub black: String,
 }
 
 impl ResolvedPalette {
@@ -331,7 +365,6 @@ impl ResolvedPalette {
             green: p.green.steps().clone(),
             amber: p.amber.steps().clone(),
             white: color::WHITE.to_string(),
-            black: color::BLACK.to_string(),
         }
     }
 }
@@ -374,107 +407,219 @@ pub fn generate_base_css() -> &'static str {
      img{max-width:100%;height:auto}\n"
 }
 
-/// Generate resolved semantic CSS for light and dark themes.
+/// Generate complete theme CSS from a Theme value.
 ///
-/// All color values are resolved from `ResolvedPalette` — no `var(--rw-neutral-*)` indirection.
-/// Uses short CSS variable names (`--a` through `--L`).
-pub fn generate_resolved_semantic_css(rp: &ResolvedPalette) -> String {
+/// Produces a single `:root{...}` block with all resolved CSS variables.
+/// Mode (light/dark) is resolved server-side: picks the right scale indices.
+/// Style preset Q-vars and radius overrides are resolved inline.
+/// No `data-theme`, `data-style`, or `data-radius` attribute selectors.
+pub fn generate_theme_css(theme: &Theme) -> String {
+    let rp = ResolvedPalette::new(theme);
+    let is_dark = theme.mode == ThemeMode::Dark;
     let mut css = String::with_capacity(2048);
 
-    // Light theme (default)
-    css.push_str(":root,[data-theme=\"light\"]{");
-    // Backgrounds
-    v(&mut css, "a", &rp.neutral[0]);  // bg-app
-    v(&mut css, "b", &rp.neutral[1]);  // bg-subtle
-    v(&mut css, "c", &rp.neutral[2]);  // bg-muted
-    v(&mut css, "d", &rp.neutral[3]);  // bg-emphasis
-    v(&mut css, "e", &rp.neutral[4]);  // bg-hover
-    v(&mut css, "f", &rp.neutral[5]);  // bg-active
-    // Borders
-    v(&mut css, "g", &rp.neutral[5]);  // border-subtle
-    v(&mut css, "h", &rp.neutral[6]);  // border-default
-    v(&mut css, "i", &rp.neutral[7]);  // border-emphasis
-    // Text
-    v(&mut css, "j", &rp.neutral[8]);  // text-muted
-    v(&mut css, "k", &rp.neutral[10]); // text-default
-    v(&mut css, "l", &rp.neutral[11]); // text-high
-    v(&mut css, "m", &rp.white);       // text-on-accent
-    // Accent scale (1-12)
+    css.push_str(":root{");
+
+    // --- Semantic color variables (mode-aware) ---
+    if is_dark {
+        // Dark mode: invert scales
+        v(&mut css, "a", &rp.neutral[11]); // bg-app
+        v(&mut css, "b", &rp.neutral[10]); // bg-subtle
+        v(&mut css, "c", &rp.neutral[9]);  // bg-muted
+        v(&mut css, "d", &rp.neutral[8]);  // bg-emphasis
+        v(&mut css, "e", &rp.neutral[7]);  // bg-hover
+        v(&mut css, "f", &rp.neutral[6]);  // bg-active
+        v(&mut css, "g", &rp.neutral[6]);  // border-subtle
+        v(&mut css, "h", &rp.neutral[5]);  // border-default
+        v(&mut css, "i", &rp.neutral[4]);  // border-emphasis
+        v(&mut css, "j", &rp.neutral[4]);  // text-muted
+        v(&mut css, "k", &rp.neutral[1]);  // text-default
+        v(&mut css, "l", &rp.neutral[0]);  // text-high
+        v(&mut css, "m", &rp.white);       // text-on-accent
+        v(&mut css, "r", &rp.neutral[11]); // surface
+        v(&mut css, "s", &rp.neutral[0]);  // on-surface
+        v(&mut css, "t", &rp.neutral[10]); // surface-raised
+        v(&mut css, "u", &rp.neutral[0]);  // on-surface-raised
+        v(&mut css, "A", &rp.neutral[8]);  // secondary
+        v(&mut css, "B", &rp.neutral[0]);  // on-secondary
+        v(&mut css, "C", &rp.neutral[7]);  // secondary-hover
+        v(&mut css, "D", &rp.neutral[9]);  // muted
+        v(&mut css, "E", &rp.neutral[3]);  // on-muted
+        v(&mut css, "I", &rp.red[9]);      // destructive-subtle
+        v(&mut css, "J", &rp.red[2]);      // on-destructive-subtle
+        v(&mut css, "y", &rp.accent[9]);   // primary-subtle
+        v(&mut css, "z", &rp.accent[2]);   // on-primary-subtle
+    } else {
+        // Light mode
+        v(&mut css, "a", &rp.neutral[0]);  // bg-app
+        v(&mut css, "b", &rp.neutral[1]);  // bg-subtle
+        v(&mut css, "c", &rp.neutral[2]);  // bg-muted
+        v(&mut css, "d", &rp.neutral[3]);  // bg-emphasis
+        v(&mut css, "e", &rp.neutral[4]);  // bg-hover
+        v(&mut css, "f", &rp.neutral[5]);  // bg-active
+        v(&mut css, "g", &rp.neutral[5]);  // border-subtle
+        v(&mut css, "h", &rp.neutral[6]);  // border-default
+        v(&mut css, "i", &rp.neutral[7]);  // border-emphasis
+        v(&mut css, "j", &rp.neutral[8]);  // text-muted
+        v(&mut css, "k", &rp.neutral[10]); // text-default
+        v(&mut css, "l", &rp.neutral[11]); // text-high
+        v(&mut css, "m", &rp.white);       // text-on-accent
+        v(&mut css, "r", &rp.neutral[0]);  // surface
+        v(&mut css, "s", &rp.neutral[11]); // on-surface
+        v(&mut css, "t", &rp.neutral[1]);  // surface-raised
+        v(&mut css, "u", &rp.neutral[11]); // on-surface-raised
+        v(&mut css, "A", &rp.neutral[3]);  // secondary
+        v(&mut css, "B", &rp.neutral[11]); // on-secondary
+        v(&mut css, "C", &rp.neutral[4]);  // secondary-hover
+        v(&mut css, "D", &rp.neutral[2]);  // muted
+        v(&mut css, "E", &rp.neutral[10]); // on-muted
+        v(&mut css, "I", &rp.red[2]);      // destructive-subtle
+        v(&mut css, "J", &rp.red[10]);     // on-destructive-subtle
+        v(&mut css, "y", &rp.accent[2]);   // primary-subtle
+        v(&mut css, "z", &rp.accent[10]);  // on-primary-subtle
+    }
+
+    // Mode-independent vars
     for i in 0..12 {
         vn(&mut css, "n", i + 1, &rp.accent[i]);
     }
-    // Status
     v(&mut css, "o", &rp.green[8]);    // success
     v(&mut css, "p", &rp.amber[8]);    // warning
     v(&mut css, "q", &rp.red[8]);      // error
-    // Surface pairs
-    v(&mut css, "r", &rp.neutral[0]);  // surface
-    v(&mut css, "s", &rp.neutral[11]); // on-surface
-    v(&mut css, "t", &rp.neutral[1]);  // surface-raised
-    v(&mut css, "u", &rp.neutral[11]); // on-surface-raised
-    // Primary pairs (accent-based)
-    v(&mut css, "v", &rp.accent[8]);   // primary
-    v(&mut css, "w", &rp.white);       // on-primary
-    v(&mut css, "x", &rp.accent[9]);   // primary-hover
-    v(&mut css, "y", &rp.accent[2]);   // primary-subtle
-    v(&mut css, "z", &rp.accent[10]);  // on-primary-subtle
-    // Secondary pairs (neutral-based)
-    v(&mut css, "A", &rp.neutral[3]);  // secondary
-    v(&mut css, "B", &rp.neutral[11]); // on-secondary
-    v(&mut css, "C", &rp.neutral[4]);  // secondary-hover
-    // Muted pairs
-    v(&mut css, "D", &rp.neutral[2]);  // muted
-    v(&mut css, "E", &rp.neutral[10]); // on-muted
-    // Destructive pairs
     v(&mut css, "F", &rp.red[8]);      // destructive
     v(&mut css, "G", &rp.white);       // on-destructive
     v(&mut css, "H", &rp.red[9]);      // destructive-hover
-    v(&mut css, "I", &rp.red[2]);      // destructive-subtle
-    v(&mut css, "J", &rp.red[10]);     // on-destructive-subtle
-    // Interactive
     v(&mut css, "K", &rp.accent[7]);   // focus-ring
     v(&mut css, "L", &rp.accent[6]);   // border-primary
-    css.push_str("}\n");
 
-    // Dark theme — invert scales
-    css.push_str("[data-theme=\"dark\"]{");
-    // Backgrounds (inverted)
-    v(&mut css, "a", &rp.neutral[11]); // bg-app
-    v(&mut css, "b", &rp.neutral[10]); // bg-subtle
-    v(&mut css, "c", &rp.neutral[9]);  // bg-muted
-    v(&mut css, "d", &rp.neutral[8]);  // bg-emphasis
-    v(&mut css, "e", &rp.neutral[7]);  // bg-hover
-    v(&mut css, "f", &rp.neutral[6]);  // bg-active
-    // Borders (inverted)
-    v(&mut css, "g", &rp.neutral[6]);  // border-subtle
-    v(&mut css, "h", &rp.neutral[5]);  // border-default
-    v(&mut css, "i", &rp.neutral[4]);  // border-emphasis
-    // Text (inverted)
-    v(&mut css, "j", &rp.neutral[4]);  // text-muted
-    v(&mut css, "k", &rp.neutral[1]);  // text-default
-    v(&mut css, "l", &rp.neutral[0]);  // text-high
-    // Surface pairs (inverted)
-    v(&mut css, "r", &rp.neutral[11]); // surface
-    v(&mut css, "s", &rp.neutral[0]);  // on-surface
-    v(&mut css, "t", &rp.neutral[10]); // surface-raised
-    v(&mut css, "u", &rp.neutral[0]);  // on-surface-raised
-    // Secondary (inverted)
-    v(&mut css, "A", &rp.neutral[8]);  // secondary
-    v(&mut css, "B", &rp.neutral[0]);  // on-secondary
-    v(&mut css, "C", &rp.neutral[7]);  // secondary-hover
-    // Muted (inverted)
-    v(&mut css, "D", &rp.neutral[9]);  // muted
-    v(&mut css, "E", &rp.neutral[3]);  // on-muted
-    // Destructive subtle (inverted)
-    v(&mut css, "I", &rp.red[9]);      // destructive-subtle
-    v(&mut css, "J", &rp.red[2]);      // on-destructive-subtle
-    // Primary subtle (inverted)
-    v(&mut css, "y", &rp.accent[9]);   // primary-subtle
-    v(&mut css, "z", &rp.accent[2]);   // on-primary-subtle
-    css.push_str("}\n");
+    // --- Style preset: resolve primary/surface/border overrides inline ---
+    match theme.style {
+        ThemeStyle::Default => {
+            v(&mut css, "v", &rp.accent[8]);   // primary
+            v(&mut css, "w", &rp.white);       // on-primary
+            v(&mut css, "x", &rp.accent[9]);   // primary-hover
+        }
+        ThemeStyle::Soft => {
+            if is_dark {
+                v(&mut css, "v", &rp.accent[9]);
+                v(&mut css, "w", &rp.accent[2]);
+                v(&mut css, "x", &rp.accent[8]);
+                v(&mut css, "F", &rp.red[9]);
+                v(&mut css, "G", &rp.red[2]);
+                v(&mut css, "H", &rp.red[8]);
+                v(&mut css, "h", &rp.neutral[if is_dark { 9 } else { 3 }]);
+                css.push_str("--g:transparent;");
+                v(&mut css, "t", &rp.neutral[if is_dark { 9 } else { 0 }]);
+            } else {
+                v(&mut css, "v", &rp.accent[2]);
+                v(&mut css, "w", &rp.accent[10]);
+                v(&mut css, "x", &rp.accent[3]);
+                v(&mut css, "F", &rp.red[2]);
+                v(&mut css, "G", &rp.red[10]);
+                v(&mut css, "H", &rp.red[3]);
+                v(&mut css, "h", &rp.neutral[3]);
+                v(&mut css, "g", &rp.neutral[2]);
+                v(&mut css, "t", &rp.neutral[0]);
+            }
+        }
+        ThemeStyle::Brutalist => {
+            v(&mut css, "v", &rp.accent[8]);
+            v(&mut css, "w", &rp.white);
+            v(&mut css, "x", &rp.accent[9]);
+            if is_dark {
+                v(&mut css, "h", &rp.neutral[0]);
+                v(&mut css, "g", &rp.neutral[2]);
+                v(&mut css, "i", &rp.neutral[0]);
+                v(&mut css, "t", &rp.neutral[11]);
+            } else {
+                v(&mut css, "h", &rp.neutral[11]);
+                v(&mut css, "g", &rp.neutral[9]);
+                v(&mut css, "i", &rp.neutral[11]);
+                v(&mut css, "t", &rp.neutral[0]);
+            }
+        }
+        ThemeStyle::Minimal => {
+            v(&mut css, "v", &rp.accent[8]);
+            v(&mut css, "w", &rp.white);
+            v(&mut css, "x", &rp.accent[9]);
+            css.push_str("--h:transparent;--g:transparent;");
+            v(&mut css, "t", &rp.neutral[if is_dark { 11 } else { 0 }]);
+        }
+        ThemeStyle::Glass => {
+            v(&mut css, "v", &rp.accent[8]);
+            v(&mut css, "w", &rp.white);
+            v(&mut css, "x", &rp.accent[9]);
+        }
+        ThemeStyle::Neon => {
+            v(&mut css, "v", &rp.accent[8]);
+            v(&mut css, "w", &rp.white);
+            v(&mut css, "x", &rp.accent[9]);
+        }
+    }
 
+    // --- Q-vars (theme-style hooks for non-color customization) ---
+    match theme.style {
+        ThemeStyle::Default => {
+            css.push_str("--Qd:var(--Z1);--Qgw:none;");
+            css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
+            css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+            css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+            css.push_str("--Qt:150ms;--Qts:none;");
+        }
+        ThemeStyle::Soft => {
+            css.push_str("--Qd:none;--Qgw:none;");
+            css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
+            css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+            css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+            css.push_str("--Qt:200ms;--Qts:none;");
+        }
+        ThemeStyle::Brutalist => {
+            css.push_str("--Qd:none;--Qgw:none;");
+            css.push_str("--Qb:2px;--Qbl:3px;--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
+            css.push_str("--Qol:3px;--Qoo:0px;--Qf:var(--K);");
+            css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+            css.push_str("--Qt:0ms;--Qts:none;");
+        }
+        ThemeStyle::Minimal => {
+            css.push_str("--Qd:none;--Qgw:none;");
+            css.push_str("--Qb:0;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:transparent;--Qbs:none;");
+            css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+            css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+            css.push_str("--Qt:200ms;--Qts:none;");
+        }
+        ThemeStyle::Glass => {
+            css.push_str("--Qd:none;--Qgw:none;");
+            css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:rgba(255,255,255,0.1);--Qbs:solid;");
+            css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+            if is_dark {
+                css.push_str("--Qbf:blur(12px);--Qso:0.75;--Qgr:none;");
+            } else {
+                css.push_str("--Qbf:blur(12px);--Qso:0.85;--Qgr:none;");
+            }
+            css.push_str("--Qt:200ms;--Qts:none;");
+        }
+        ThemeStyle::Neon => {
+            css.push_str("--Qd:none;--Qgw:0 0 8px var(--n9),0 0 16px var(--n9);");
+            css.push_str("--Qb:2px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--n9);--Qbs:solid;");
+            css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--n9);");
+            css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+            css.push_str("--Qt:50ms;--Qts:0 0 8px currentColor;");
+        }
+    }
+
+    // --- Radius overrides ---
+    match theme.radius {
+        RadiusScale::Medium => {} // default, no overrides needed
+        RadiusScale::None => css.push_str("--R2:0;--R3:0;--R4:0;"),
+        RadiusScale::Small => css.push_str("--R2:var(--R1);--R3:var(--R1);--R4:var(--R2);"),
+        RadiusScale::Large => css.push_str("--R2:var(--R3);--R3:var(--R4);--R4:var(--R5);"),
+        RadiusScale::Full => css.push_str("--R2:9999px;--R3:9999px;--R4:9999px;"),
+    }
+
+    css.push_str("}\n");
     css
 }
+
 
 /// Helper: write `--{name}:{value};`
 fn v(css: &mut String, name: &str, value: &str) {
@@ -493,223 +638,6 @@ fn vn(css: &mut String, prefix: &str, num: usize, value: &str) {
     let _ = write!(css, "{}:{};", num, value);
 }
 
-/// Generate Q-var base CSS.
-///
-/// Q-vars provide theme-style hooks for non-color customization (shadows, borders,
-/// transitions, etc.). Components use `var(--Qx)` to adapt to different ThemeStyles.
-pub fn generate_q_var_base_css() -> &'static str {
-    ":root{\
-     --Qd:var(--Z1);--Qgw:none;\
-     --Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;\
-     --Qol:2px;--Qoo:2px;--Qf:var(--K);\
-     --Qbf:none;--Qso:1;--Qgr:none;\
-     --Qt:150ms;\
-     --Qts:none}\n"
-}
-
-/// Generate ThemeStyle preset override CSS with resolved colors.
-///
-/// Returns CSS that remaps semantic variables for a given style preset.
-/// Returns `None` if the style is the default.
-pub fn generate_resolved_style_css(style: ThemeStyle, rp: &ResolvedPalette) -> Option<String> {
-    match style {
-        ThemeStyle::Default => None,
-        ThemeStyle::Soft => {
-            let mut css = String::with_capacity(512);
-            // Light: tinted primaries, softer borders, elevated surfaces
-            css.push_str("[data-style=\"soft\"]{");
-            v(&mut css, "v", &rp.accent[2]);   // primary = accent-3
-            v(&mut css, "w", &rp.accent[10]);  // on-primary = accent-11
-            v(&mut css, "x", &rp.accent[3]);   // primary-hover = accent-4
-            v(&mut css, "F", &rp.red[2]);      // destructive = red-3
-            v(&mut css, "G", &rp.red[10]);     // on-destructive = red-11
-            v(&mut css, "H", &rp.red[3]);      // destructive-hover = red-4
-            v(&mut css, "h", &rp.neutral[3]);  // border-default = neutral-4
-            v(&mut css, "g", &rp.neutral[2]);  // border-subtle = neutral-3
-            v(&mut css, "t", &rp.neutral[0]);  // surface-raised = neutral-1
-            css.push_str("--Qd:none;--Qt:200ms;");
-            css.push_str("}\n");
-            // Dark: muted primaries
-            css.push_str("[data-theme=\"dark\"][data-style=\"soft\"]{");
-            v(&mut css, "v", &rp.accent[9]);   // primary = accent-10
-            v(&mut css, "w", &rp.accent[2]);   // on-primary = accent-3
-            v(&mut css, "x", &rp.accent[8]);   // primary-hover = accent-9
-            v(&mut css, "F", &rp.red[9]);      // destructive = red-10
-            v(&mut css, "G", &rp.red[2]);      // on-destructive = red-3
-            v(&mut css, "H", &rp.red[8]);      // destructive-hover = red-9
-            v(&mut css, "h", &rp.neutral[9]);  // border-default = neutral-10
-            css.push_str("--g:transparent;");   // border-subtle
-            v(&mut css, "t", &rp.neutral[9]);  // surface-raised = neutral-10
-            css.push_str("}\n");
-            Some(css)
-        }
-        ThemeStyle::Brutalist => {
-            let mut css = String::with_capacity(512);
-            // Light: heavy borders, high contrast
-            css.push_str("[data-style=\"brutalist\"]{");
-            v(&mut css, "h", &rp.neutral[11]); // border-default = neutral-12
-            v(&mut css, "g", &rp.neutral[9]);  // border-subtle = neutral-10
-            v(&mut css, "i", &rp.neutral[11]); // border-emphasis = neutral-12
-            v(&mut css, "t", &rp.neutral[0]);  // surface-raised = neutral-1
-            css.push_str("--Qd:none;--Qb:2px;--Qbl:3px;--Qt:0ms;--Qol:3px;--Qoo:0px;");
-            css.push_str("}\n");
-            // Dark: invert
-            css.push_str("[data-theme=\"dark\"][data-style=\"brutalist\"]{");
-            v(&mut css, "h", &rp.neutral[0]);  // border-default = neutral-1
-            v(&mut css, "g", &rp.neutral[2]);  // border-subtle = neutral-3
-            v(&mut css, "i", &rp.neutral[0]);  // border-emphasis = neutral-1
-            v(&mut css, "t", &rp.neutral[11]); // surface-raised = neutral-12
-            css.push_str("}\n");
-            Some(css)
-        }
-        ThemeStyle::Minimal => {
-            let mut css = String::with_capacity(256);
-            // Light: no borders
-            css.push_str("[data-style=\"minimal\"]{--h:transparent;--g:transparent;");
-            v(&mut css, "t", &rp.neutral[0]);  // surface-raised = neutral-1
-            css.push_str("--Qd:none;--Qb:0;--Qbc:transparent;--Qbs:none;--Qt:200ms;");
-            css.push_str("}\n");
-            // Dark: no borders
-            css.push_str("[data-theme=\"dark\"][data-style=\"minimal\"]{--h:transparent;--g:transparent;");
-            v(&mut css, "t", &rp.neutral[11]); // surface-raised = neutral-12
-            css.push_str("}\n");
-            Some(css)
-        }
-        ThemeStyle::Glass => {
-            let mut css = String::with_capacity(512);
-            css.push_str("[data-style=\"glass\"]{");
-            css.push_str("--Qd:none;--Qb:1px;--Qt:200ms;--Qbf:blur(12px);--Qso:0.85;--Qbc:rgba(255,255,255,0.1);--Qgr:none;--Qol:2px;");
-            css.push_str("}\n");
-            css.push_str("[data-theme=\"dark\"][data-style=\"glass\"]{");
-            css.push_str("--Qso:0.75;--Qbc:rgba(255,255,255,0.06);");
-            css.push_str("}\n");
-            // Fallback for browsers without backdrop-filter
-            css.push_str("@supports not (backdrop-filter:blur(0px)){[data-style=\"glass\"]{--Qso:1;--Qbf:none}}\n");
-            Some(css)
-        }
-        ThemeStyle::Neon => {
-            let mut css = String::with_capacity(512);
-            css.push_str("[data-style=\"neon\"]{");
-            css.push_str("--Qd:none;--Qb:2px;--Qt:50ms;--Qgw:0 0 8px var(--n9),0 0 16px var(--n9);--Qts:0 0 8px currentColor;--Qbc:var(--n9);--Qol:2px;--Qf:var(--n9);");
-            css.push_str("}\n");
-            Some(css)
-        }
-    }
-}
-
-/// Generate palette override CSS scoped to `[data-palette="name"]`.
-///
-/// Same structure as `generate_resolved_semantic_css` but scoped under
-/// an attribute selector so apps can switch palettes at runtime.
-pub fn generate_palette_override_css(name: &str, rp: &ResolvedPalette) -> String {
-    let mut css = String::with_capacity(2048);
-
-    // Light overrides
-    css.push_str(&format!("[data-palette=\"{}\"]{{", name));
-    // Backgrounds
-    v(&mut css, "a", &rp.neutral[0]);
-    v(&mut css, "b", &rp.neutral[1]);
-    v(&mut css, "c", &rp.neutral[2]);
-    v(&mut css, "d", &rp.neutral[3]);
-    v(&mut css, "e", &rp.neutral[4]);
-    v(&mut css, "f", &rp.neutral[5]);
-    // Borders
-    v(&mut css, "g", &rp.neutral[5]);
-    v(&mut css, "h", &rp.neutral[6]);
-    v(&mut css, "i", &rp.neutral[7]);
-    // Text
-    v(&mut css, "j", &rp.neutral[8]);
-    v(&mut css, "k", &rp.neutral[10]);
-    v(&mut css, "l", &rp.neutral[11]);
-    v(&mut css, "m", &rp.white);
-    // Accent scale
-    for i in 0..12 {
-        vn(&mut css, "n", i + 1, &rp.accent[i]);
-    }
-    // Status
-    v(&mut css, "o", &rp.green[8]);
-    v(&mut css, "p", &rp.amber[8]);
-    v(&mut css, "q", &rp.red[8]);
-    // Surface pairs
-    v(&mut css, "r", &rp.neutral[0]);
-    v(&mut css, "s", &rp.neutral[11]);
-    v(&mut css, "t", &rp.neutral[1]);
-    v(&mut css, "u", &rp.neutral[11]);
-    // Primary pairs
-    v(&mut css, "v", &rp.accent[8]);
-    v(&mut css, "w", &rp.white);
-    v(&mut css, "x", &rp.accent[9]);
-    v(&mut css, "y", &rp.accent[2]);
-    v(&mut css, "z", &rp.accent[10]);
-    // Secondary
-    v(&mut css, "A", &rp.neutral[3]);
-    v(&mut css, "B", &rp.neutral[11]);
-    v(&mut css, "C", &rp.neutral[4]);
-    // Muted
-    v(&mut css, "D", &rp.neutral[2]);
-    v(&mut css, "E", &rp.neutral[10]);
-    // Destructive
-    v(&mut css, "F", &rp.red[8]);
-    v(&mut css, "G", &rp.white);
-    v(&mut css, "H", &rp.red[9]);
-    v(&mut css, "I", &rp.red[2]);
-    v(&mut css, "J", &rp.red[10]);
-    // Interactive
-    v(&mut css, "K", &rp.accent[7]);
-    v(&mut css, "L", &rp.accent[6]);
-    css.push_str("}\n");
-
-    // Dark overrides
-    css.push_str(&format!("[data-theme=\"dark\"][data-palette=\"{}\"]{{", name));
-    v(&mut css, "a", &rp.neutral[11]);
-    v(&mut css, "b", &rp.neutral[10]);
-    v(&mut css, "c", &rp.neutral[9]);
-    v(&mut css, "d", &rp.neutral[8]);
-    v(&mut css, "e", &rp.neutral[7]);
-    v(&mut css, "f", &rp.neutral[6]);
-    v(&mut css, "g", &rp.neutral[6]);
-    v(&mut css, "h", &rp.neutral[5]);
-    v(&mut css, "i", &rp.neutral[4]);
-    v(&mut css, "j", &rp.neutral[4]);
-    v(&mut css, "k", &rp.neutral[1]);
-    v(&mut css, "l", &rp.neutral[0]);
-    v(&mut css, "r", &rp.neutral[11]);
-    v(&mut css, "s", &rp.neutral[0]);
-    v(&mut css, "t", &rp.neutral[10]);
-    v(&mut css, "u", &rp.neutral[0]);
-    v(&mut css, "A", &rp.neutral[8]);
-    v(&mut css, "B", &rp.neutral[0]);
-    v(&mut css, "C", &rp.neutral[7]);
-    v(&mut css, "D", &rp.neutral[9]);
-    v(&mut css, "E", &rp.neutral[3]);
-    v(&mut css, "I", &rp.red[9]);
-    v(&mut css, "J", &rp.red[2]);
-    v(&mut css, "y", &rp.accent[9]);
-    v(&mut css, "z", &rp.accent[2]);
-    css.push_str("}\n");
-
-    css
-}
-
-/// Generate radius scale override CSS.
-///
-/// Returns CSS to override the component radius.
-/// Returns `None` if the radius is the default (medium).
-pub fn generate_radius_css(radius: RadiusScale) -> Option<&'static str> {
-    match radius {
-        RadiusScale::Medium => None,
-        RadiusScale::None => Some("[data-radius=\"none\"]{--R2:0;--R3:0;--R4:0}\n"),
-        RadiusScale::Small => {
-            Some("[data-radius=\"small\"]{--R2:var(--R1);--R3:var(--R1);--R4:var(--R2)}\n")
-        }
-        RadiusScale::Large => {
-            Some("[data-radius=\"large\"]{--R2:var(--R3);--R3:var(--R4);--R4:var(--R5)}\n")
-        }
-        RadiusScale::Full => {
-            Some("[data-radius=\"full\"]{--R2:9999px;--R3:9999px;--R4:9999px}\n")
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -752,17 +680,9 @@ mod tests {
     }
 
     #[test]
-    fn test_data_attrs_minimal() {
-        let theme = Theme::default();
-        assert_eq!(theme.data_attrs(), "data-theme=\"light\"");
-    }
-
-    #[test]
-    fn test_data_attrs_full() {
-        let theme = Theme::dark().radius(RadiusScale::Full);
-        let attrs = theme.data_attrs();
-        assert!(attrs.contains("data-theme=\"dark\""));
-        assert!(attrs.contains("data-radius=\"full\""));
+    fn test_theme_mode_toggle() {
+        assert_eq!(ThemeMode::Light.toggle(), ThemeMode::Dark);
+        assert_eq!(ThemeMode::Dark.toggle(), ThemeMode::Light);
     }
 
     #[test]
@@ -772,114 +692,74 @@ mod tests {
     }
 
     #[test]
-    fn test_resolved_semantic_css_structure() {
-        let theme = Theme::default();
-        let rp = ResolvedPalette::new(&theme);
-        let css = generate_resolved_semantic_css(&rp);
+    fn test_generate_theme_css_light() {
+        let theme = Theme::light();
+        let css = generate_theme_css(&theme);
 
-        // Should have both light and dark themes
-        assert!(css.contains(":root"), "Missing :root");
-        assert!(css.contains("[data-theme=\"light\"]"), "Missing light theme");
-        assert!(css.contains("[data-theme=\"dark\"]"), "Missing dark theme");
+        // Single :root block, no data-theme selectors
+        assert!(css.starts_with(":root{"), "Should start with :root{{");
+        assert!(!css.contains("[data-theme"), "Should not contain data-theme selectors");
+        assert!(!css.contains("[data-style"), "Should not contain data-style selectors");
 
-        // Should use short variable names with resolved values
+        // Should have resolved values
         assert!(css.contains("--a:"), "Missing --a (bg-app)");
         assert!(css.contains("--k:"), "Missing --k (text-default)");
         assert!(css.contains("--v:"), "Missing --v (primary)");
-
-        // Should contain resolved oklch values, NOT var() references
         assert!(css.contains("oklch("), "Should contain resolved oklch values");
-        assert!(!css.contains("var(--rw-neutral"), "Should not contain var(--rw-neutral-*) indirection");
-        assert!(!css.contains("var(--rw-accent"), "Should not contain var(--rw-accent-*) indirection");
+
+        // Should include Q-vars
+        assert!(css.contains("--Qd:"), "Missing Q-var --Qd");
+        assert!(css.contains("--Qt:"), "Missing Q-var --Qt");
     }
 
     #[test]
-    fn test_resolved_semantic_css_size() {
-        let theme = Theme::default();
-        let rp = ResolvedPalette::new(&theme);
-        let css = generate_resolved_semantic_css(&rp);
-        // Resolved CSS should be much smaller than old 3KB
-        assert!(css.len() < 2048, "Resolved semantic CSS too large: {} bytes", css.len());
+    fn test_generate_theme_css_dark() {
+        let theme = Theme::dark();
+        let css = generate_theme_css(&theme);
+
+        assert!(css.starts_with(":root{"), "Should start with :root{{");
+        assert!(!css.contains("[data-theme"), "No data-theme selectors");
     }
 
     #[test]
-    fn test_radius_css() {
-        assert!(generate_radius_css(RadiusScale::Medium).is_none());
+    fn test_generate_theme_css_dark_nord() {
+        let theme = Theme::dark_nord();
+        let css = generate_theme_css(&theme);
 
-        let css = generate_radius_css(RadiusScale::Full).unwrap();
-        assert!(css.contains("[data-radius=\"full\"]"));
+        assert!(css.starts_with(":root{"), "Should start with :root{{");
+        assert!(css.contains("--n1:"), "Missing accent scale --n1");
     }
 
     #[test]
-    fn test_full_theme_css_size() {
-        let theme = Theme::dark().radius(RadiusScale::Large);
-        let rp = ResolvedPalette::new(&theme);
-        let css = generate_resolved_semantic_css(&rp);
-        assert!(css.len() < 2048, "Resolved CSS too large: {} bytes", css.len());
+    fn test_generate_theme_css_with_style() {
+        let theme = Theme::dark().style(ThemeStyle::Soft);
+        let css = generate_theme_css(&theme);
+
+        // Soft style Q-vars should be inline
+        assert!(css.contains("--Qd:none"), "Soft should have --Qd:none");
+        assert!(css.contains("--Qt:200ms"), "Soft should have --Qt:200ms");
+        assert!(!css.contains("[data-style"), "No data-style selectors");
     }
 
     #[test]
-    fn test_style_css_default_returns_none() {
-        let rp = ResolvedPalette::new(&Theme::default());
-        assert!(generate_resolved_style_css(ThemeStyle::Default, &rp).is_none());
+    fn test_generate_theme_css_with_radius() {
+        let theme = Theme::light().radius(RadiusScale::Full);
+        let css = generate_theme_css(&theme);
+
+        assert!(css.contains("--R2:9999px"), "Full radius should override --R2");
+        assert!(!css.contains("[data-radius"), "No data-radius selectors");
     }
 
     #[test]
-    fn test_style_css_soft() {
-        let rp = ResolvedPalette::new(&Theme::default());
-        let css = generate_resolved_style_css(ThemeStyle::Soft, &rp).unwrap();
-        assert!(css.contains("[data-style=\"soft\"]"));
-        assert!(css.contains("--v:"), "Should contain --v (primary)");
+    fn test_generate_theme_css_size() {
+        let theme = Theme::dark_nord().style(ThemeStyle::Soft).radius(RadiusScale::Large);
+        let css = generate_theme_css(&theme);
+        // Single block should be compact
+        assert!(css.len() < 2048, "Theme CSS too large: {} bytes", css.len());
     }
 
     #[test]
-    fn test_style_css_brutalist() {
-        let rp = ResolvedPalette::new(&Theme::default());
-        let css = generate_resolved_style_css(ThemeStyle::Brutalist, &rp).unwrap();
-        assert!(css.contains("[data-style=\"brutalist\"]"));
-        assert!(css.contains("--h:"), "Should contain --h (border-default)");
-    }
-
-    #[test]
-    fn test_style_css_minimal() {
-        let rp = ResolvedPalette::new(&Theme::default());
-        let css = generate_resolved_style_css(ThemeStyle::Minimal, &rp).unwrap();
-        assert!(css.contains("[data-style=\"minimal\"]"));
-        assert!(css.contains("--h:transparent"));
-    }
-
-    #[test]
-    fn test_data_attrs_with_style() {
-        let theme = Theme::light().style(ThemeStyle::Soft);
-        let attrs = theme.data_attrs();
-        assert!(attrs.contains("data-style=\"soft\""));
-    }
-
-    #[test]
-    fn test_data_attrs_default_style_omitted() {
-        let theme = Theme::default();
-        assert!(!theme.data_attrs().contains("data-style"));
-    }
-
-    #[test]
-    fn test_resolved_palette_accent_from_seed() {
-        // Custom accent should use the seed color's generated scale
-        let theme = Theme::default().accent("#00FF00");
-        let rp = ResolvedPalette::new(&theme);
-        let css = generate_resolved_semantic_css(&rp);
-        // The accent should contain oklch values (from generated scale)
-        assert!(css.contains("oklch("), "Accent should have oklch values");
-    }
-
-    #[test]
-    fn test_no_primitive_color_vars() {
-        let theme = Theme::default();
-        let rp = ResolvedPalette::new(&theme);
-        let css = generate_resolved_semantic_css(&rp);
-
-        // Should NOT contain any --rw-neutral-*, --rw-blue-*, etc. color primitives
-        assert!(!css.contains("--rw-neutral-"), "Should not emit primitive color vars");
-        assert!(!css.contains("--rw-blue-"), "Should not emit primitive color vars");
-        assert!(!css.contains("--rw-red-"), "Should not emit primitive color vars");
+    fn test_theme_implements_state() {
+        assert_eq!(Theme::STORAGE_TYPE, StorageType::Memory);
     }
 }

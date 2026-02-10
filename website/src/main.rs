@@ -9,10 +9,9 @@ use rwire::docs::{parse_markdown, DocPage, DocSite, SearchResult};
 use rwire::icons::{icon, Icon};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
-use rwire::tokens::PalettePreset;
 use rwire::ColorPalette;
 use rwire::router::{Link, Router};
-use rwire::{el, handler, renderer, El, Ev, ElementBuilder, Server, State};
+use rwire::{el, handler, renderer, theme, El, Ev, ElementBuilder, Server, State};
 
 // ============================================================================
 // State
@@ -25,9 +24,6 @@ struct SiteState {
     search_query: String,
     searching: bool,
     sidebar_open: bool,
-    theme_mode: ThemeMode,
-    theme_style: ThemeStyle,
-    palette: PalettePreset,
 }
 
 // ============================================================================
@@ -35,6 +31,11 @@ struct SiteState {
 // ============================================================================
 
 static DOCS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docs");
+
+#[theme]
+fn site_theme() -> Theme {
+    Theme::default().palette(ColorPalette::nord())
+}
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,9 +64,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
     let capsule_config = CapsuleConfig::new()
-        .theme(Theme::default().palette(ColorPalette::nord()))
-        .palettes(PalettePreset::ALL)
-        .styles(ThemeStyle::ALL)
         .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind("0.0.0.0:9000")?
@@ -73,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .on_route(on_route_change())
         .routes(router)
         .capsule_config(capsule_config)
+        .theme(site_theme())
         .run()
         .await
 }
@@ -92,15 +91,8 @@ fn root(state: &SiteState) -> ElementBuilder {
         build_doc_page(&site, &state.current_path)
     };
 
-    let mut root_el = el(El::Div)
-        .attr("data-theme", state.theme_mode.as_str())
+    let root_el = el(El::Div)
         .st([St::BgApp, St::TextDefault, St::MinHScreen]);
-    if state.theme_style != ThemeStyle::Default {
-        root_el = root_el.attr("data-style", state.theme_style.as_str());
-    }
-    if state.palette != PalettePreset::Default {
-        root_el = root_el.attr("data-palette", state.palette.as_str());
-    }
 
     if is_landing {
         // Landing page: no sidebar, full-width layout
@@ -270,9 +262,9 @@ fn render_search_input(state: &SiteState) -> ElementBuilder {
 }
 
 #[renderer]
-fn render_theme_toggle(state: &SiteState) -> ElementBuilder {
+fn render_theme_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(match state.theme_mode {
+        .mode(match theme.mode {
             ThemeMode::Light => ThemeToggleMode::Light,
             ThemeMode::Dark => ThemeToggleMode::Dark,
         })
@@ -281,15 +273,16 @@ fn render_theme_toggle(state: &SiteState) -> ElementBuilder {
 }
 
 #[renderer]
-fn render_style_switcher(state: &SiteState) -> ElementBuilder {
+fn render_style_switcher(theme: &Theme) -> ElementBuilder {
     Stack::row()
         .gap(Gap::Xs)
         .align(StackAlign::Center)
         .children([
-            Button::ghost(state.theme_style.label())
+            Button::ghost(theme.style.label())
                 .size(ButtonSize::Sm)
                 .on_click(cycle_theme_style()),
-            Button::ghost(state.palette.label())
+            // Palette name display — show "Nord" if palette is set, "Default" otherwise
+            Button::ghost(if theme.palette_ref().is_some() { "Nord" } else { "Default" })
                 .size(ButtonSize::Sm)
                 .on_click(cycle_palette()),
         ])
@@ -881,25 +874,25 @@ fn toggle_sidebar(state: &mut SiteState) {
 }
 
 #[handler]
-fn toggle_theme(state: &mut SiteState) {
-    state.theme_mode = match state.theme_mode {
-        ThemeMode::Light => ThemeMode::Dark,
-        ThemeMode::Dark => ThemeMode::Light,
-    };
+fn toggle_theme(theme: &mut Theme) {
+    theme.mode = theme.mode.toggle();
 }
 
 #[handler]
-fn cycle_theme_style(state: &mut SiteState) {
+fn cycle_theme_style(theme: &mut Theme) {
     let all = ThemeStyle::ALL_WITH_DEFAULT;
-    let idx = all.iter().position(|s| *s == state.theme_style).unwrap_or(0);
-    state.theme_style = all[(idx + 1) % all.len()];
+    let idx = all.iter().position(|s| *s == theme.style).unwrap_or(0);
+    theme.style = all[(idx + 1) % all.len()];
 }
 
 #[handler]
-fn cycle_palette(state: &mut SiteState) {
-    let all = PalettePreset::ALL;
-    let idx = all.iter().position(|p| *p == state.palette).unwrap_or(0);
-    state.palette = all[(idx + 1) % all.len()];
+fn cycle_palette(theme: &mut Theme) {
+    // Toggle between no palette (default blue) and Nord palette
+    if theme.palette_ref().is_some() {
+        *theme = Theme::new().palette(ColorPalette::default());
+    } else {
+        *theme = Theme::new().palette(ColorPalette::nord());
+    }
 }
 
 #[handler]

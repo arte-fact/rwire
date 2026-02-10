@@ -4,7 +4,8 @@ use rwire::capsule_gen::CapsuleConfig;
 use rwire::components::{
     Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
 };
-use rwire::{handler, renderer, ElementBuilder, Server, State};
+use rwire::theme::Theme;
+use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -38,11 +39,17 @@ fn add_item(s: &mut TodoState) {
 #[handler] fn clear_completed(s: &mut TodoState) { s.items.retain(|i| !i.completed); }
 #[handler] fn remove_first(s: &mut TodoState) { if !s.items.is_empty() { s.items.remove(0); } }
 
+#[theme]
+fn app_theme() -> Theme {
+    Theme::dark_nord()
+}
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(app)
-        .capsule_config(CapsuleConfig::dark_nord())
+        .capsule_config(CapsuleConfig::new())
+        .theme(app_theme())
         .run()
         .await
 }

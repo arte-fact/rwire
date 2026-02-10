@@ -252,6 +252,7 @@ define_token_enum! {
         Polyline = 0x2E => "polyline",
         Rect = 0x2F => "rect",
         G = 0x30 => "g",
+        Style = 0x31 => "style",
     }
 }
 

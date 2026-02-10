@@ -7,7 +7,8 @@ use rwire::capsule_gen::CapsuleConfig;
 use rwire::components::{
     Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack, Text, TextColor,
 };
-use rwire::{handler, renderer, ElementBuilder, Server, St, State};
+use rwire::theme::Theme;
+use rwire::{handler, renderer, theme, ElementBuilder, Server, St, State};
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -15,11 +16,17 @@ struct Counter {
     count: i32,
 }
 
+#[theme]
+fn app_theme() -> Theme {
+    Theme::dark_nord()
+}
+
 #[main]
 async fn main() -> Result<(), Box<dyn Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(app)
-        .capsule_config(CapsuleConfig::dark_nord())
+        .capsule_config(CapsuleConfig::new())
+        .theme(app_theme())
         .run()
         .await
 }

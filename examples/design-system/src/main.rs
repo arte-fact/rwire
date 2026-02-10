@@ -3,7 +3,7 @@
 //! Interactive showcase of all rwire components.
 
 use rwire::components::*;
-use rwire::{el, handler, renderer, El, ElementBuilder, Server, State};
+use rwire::{el, handler, renderer, theme, El, ElementBuilder, Server, State};
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::theme::{Theme, ThemeMode};
 
@@ -17,7 +17,11 @@ struct DesignSystemState {
     progress_value: u32,
     active_tab: usize,
     current_page: usize,
-    theme_mode: ThemeMode,
+}
+
+#[theme]
+fn app_theme() -> Theme {
+    Theme::default()
 }
 
 #[async_std::main]
@@ -26,20 +30,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9000 in your browser");
     println!();
 
-    let capsule_config = CapsuleConfig::new()
-        .theme(Theme::default());
-
     Server::bind("127.0.0.1:9000")?
         .root(root)
-        .capsule_config(capsule_config)
+        .capsule_config(CapsuleConfig::new())
+        .theme(app_theme())
         .run()
         .await
 }
 
-#[renderer]
-fn root(state: &DesignSystemState) -> ElementBuilder {
+fn root() -> ElementBuilder {
     el(El::Div)
-        .attr("data-theme", state.theme_mode.as_str())
         .append([
             Stack::column()
                 .gap(Gap::Md)
@@ -52,8 +52,7 @@ fn root(state: &DesignSystemState) -> ElementBuilder {
         ])
 }
 
-#[renderer]
-fn render_header(state: &DesignSystemState) -> ElementBuilder {
+fn render_header() -> ElementBuilder {
     Card::new()
         .child(
             Stack::row()
@@ -68,16 +67,21 @@ fn render_header(state: &DesignSystemState) -> ElementBuilder {
                             el(El::P).text("Interactive documentation for all rwire components"),
                         ])
                         .build(),
-                    ThemeToggle::new()
-                        .mode(match state.theme_mode {
-                            ThemeMode::Light => ThemeToggleMode::Light,
-                            ThemeMode::Dark => ThemeToggleMode::Dark,
-                        })
-                        .on_toggle(toggle_theme())
-                        .build(),
+                    render_theme_toggle(),
                 ])
                 .build(),
         )
+        .build()
+}
+
+#[renderer]
+fn render_theme_toggle(theme: &Theme) -> ElementBuilder {
+    ThemeToggle::new()
+        .mode(match theme.mode {
+            ThemeMode::Light => ThemeToggleMode::Light,
+            ThemeMode::Dark => ThemeToggleMode::Dark,
+        })
+        .on_toggle(toggle_theme())
         .build()
 }
 
@@ -119,11 +123,8 @@ fn render_nav(state: &DesignSystemState) -> ElementBuilder {
 }
 
 #[handler]
-fn toggle_theme(state: &mut DesignSystemState) {
-    state.theme_mode = match state.theme_mode {
-        ThemeMode::Light => ThemeMode::Dark,
-        ThemeMode::Dark => ThemeMode::Light,
-    };
+fn toggle_theme(theme: &mut Theme) {
+    theme.mode = theme.mode.toggle();
 }
 
 #[renderer]

@@ -27,6 +27,7 @@ use crate::capsule_gen::{self, CapsuleConfig};
 use crate::protocol::ClientEvent;
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn, HandlerSpec};
+use crate::theme::ThemeProvider;
 
 // ============================================================================
 // Shared Server State
@@ -451,6 +452,7 @@ pub struct ServerWithRoot<F> {
     capsule_config: Option<CapsuleConfig>,
     route_handler: Option<HandlerFn>,
     router: Option<crate::router::Router>,
+    theme_provider: Option<ThemeProvider>,
 }
 
 impl Server {
@@ -490,6 +492,7 @@ impl ServerBuilder {
             capsule_config: None,
             route_handler: None,
             router: None,
+            theme_provider: None,
         }
     }
 }
@@ -541,6 +544,32 @@ where
     /// ```
     pub fn on_route(mut self, handler: HandlerSpec) -> Self {
         self.route_handler = handler.remote_handler;
+        self
+    }
+
+    /// Set the theme for this server.
+    ///
+    /// Accepts a `ThemeProvider` created by the `#[theme]` attribute macro.
+    /// The theme is used for:
+    /// 1. Default CSS variables in the capsule `<head>` (FOUC prevention)
+    /// 2. A built-in synced renderer that outputs a `<style>` element
+    /// 3. Per-connection `Theme` state that handlers can mutate via `&mut Theme`
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[theme]
+    /// fn app_theme() -> Theme {
+    ///     Theme::dark().accent("#5E81AC")
+    /// }
+    ///
+    /// Server::bind("0.0.0.0:9000")?
+    ///     .root(app)
+    ///     .theme(app_theme)
+    ///     .run().await
+    /// ```
+    pub fn theme(mut self, provider: ThemeProvider) -> Self {
+        self.theme_provider = Some(provider);
         self
     }
 
@@ -615,8 +644,18 @@ where
             }
         }
 
+        // Resolve initial theme if provider is set
+        let initial_theme = self.theme_provider.as_ref().map(|p| p.init());
+
         // Generate capsule - styled if config provided, basic otherwise
         let capsule = if let Some(config) = self.capsule_config {
+            // If theme provider is set, override config theme with initial theme
+            let config = if let Some(ref theme) = initial_theme {
+                config.theme(theme.clone())
+            } else {
+                config
+            };
+
             // Merge style tokens and attribute tokens into config
             let composite_css = ctx.composite_table().generate_css();
             let mut all_style_utils = ctx.used_style_utils().clone();
@@ -635,6 +674,11 @@ where
             // Merge extra elements from config into used elements
             let mut all_elements = ctx.used_elements().clone();
             all_elements.extend(&config.extra_elements);
+
+            // Theme renderer emits El::Style — ensure it's in the element map
+            if initial_theme.is_some() {
+                all_elements.insert(crate::protocol::El::Style.as_u8());
+            }
 
             // Generate CSS and embed in capsule HTML <style> tag
             let css = capsule_gen::generate_capsule_css(&config);
@@ -665,6 +709,7 @@ where
 
         let root = Arc::new(self.root);
         let route_handler = self.route_handler.map(Arc::new);
+        let initial_theme = initial_theme.map(Arc::new);
 
         // Spawn session eviction task (5-minute TTL)
         {
@@ -677,8 +722,9 @@ where
             let capsule = Arc::clone(&capsule);
             let shared = Arc::clone(&shared);
             let route_handler = route_handler.clone();
+            let initial_theme = initial_theme.clone();
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, shared, route_handler).await;
+                handle_client(stream, peer_addr, root, capsule, shared, route_handler, initial_theme).await;
             });
         }
 
@@ -703,6 +749,7 @@ async fn handle_client<F>(
     capsule: Arc<String>,
     shared: Arc<SharedServerState>,
     route_handler: Option<Arc<HandlerFn>>,
+    initial_theme: Option<Arc<crate::theme::Theme>>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -739,7 +786,7 @@ async fn handle_client<F>(
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, route_handler).await {
+                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, route_handler, initial_theme).await {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -882,6 +929,7 @@ async fn handle_websocket<F>(
     shared: Arc<SharedServerState>,
     session_id: SessionId,
     route_handler: Option<Arc<HandlerFn>>,
+    initial_theme: Option<Arc<crate::theme::Theme>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
@@ -902,8 +950,13 @@ where
     // Create per-connection state with the session ID from cookie
     let mut conn_state = ConnectionState::new(connection_id, session_id);
 
-    // Build the root element
-    let root_element = root();
+    // Build the root element, appending theme synced region if theme is configured
+    let root_element = if initial_theme.is_some() {
+        use crate::theme::theme_synced_builder;
+        root().append([theme_synced_builder()])
+    } else {
+        root()
+    };
 
     // First pass: collect handlers to find the state types
     let mut ctx = BuildContext::new();
@@ -916,6 +969,15 @@ where
     // Extract handlers
     conn_state.handlers = ctx.handlers().to_vec();
     conn_state.synced_elements = ctx.take_synced_elements();
+
+    // Pre-populate theme state with initial value (before state initialization)
+    if let Some(ref theme) = initial_theme {
+        use crate::theme::Theme;
+        conn_state.states.insert(
+            TypeId::of::<Theme>(),
+            Box::new(theme.as_ref().clone()),
+        );
+    }
 
     // Restore cached session state if available, otherwise initialize fresh
     if let Some(cached) = shared.restore_session(conn_state.session_id.as_str()) {

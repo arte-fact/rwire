@@ -50,7 +50,7 @@ rwire/
 │   ├── store.rs         # State persistence (MemoryStore, JsonFileStore)
 │   ├── style.rs         # CSS-in-Rust styling utilities
 │   ├── style_tokens.rs  # St (u16), Pc (u8), Bp (u8) enums + CSS mappings
-│   ├── theme.rs         # Theme config, ResolvedPalette, semantic CSS generation
+│   ├── theme.rs         # Theme as state, ThemeProvider, CSS variable generation
 │   └── tokens/          # Design tokens
 │       ├── css.rs       # CSS custom property generation
 │       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
@@ -218,7 +218,7 @@ The capsule JS is generated with only used element/event types:
 
 ## Theme System
 
-Themes are resolved at build time via `ResolvedPalette`. The server knows the full theme configuration (palette, accent color, mode) and emits resolved CSS values — no runtime color switching except light/dark mode via `data-theme`.
+Theme is a framework-provided state type. Handlers mutate `&mut Theme`, a built-in renderer converts theme state to CSS variables via a `<style>` element, and the synced element system patches the browser. All color/mode/style/radius changes are reactive — no `data-*` attribute selectors.
 
 ### CSS Variable Architecture
 
@@ -241,35 +241,38 @@ The Rust `St` enum variant names (`St::BgApp`, `St::Primary`) serve as human-rea
 
 ### Configuring Themes
 
-All color configuration lives on the `Theme` builder:
+Define a theme with the `#[theme]` macro and pass it to the server:
 
 ```rust
-// Minimal dark mode:
-let config = CapsuleConfig::dark();
+#[theme]
+fn app_theme() -> Theme {
+    Theme::dark().accent("#5E81AC").style(ThemeStyle::Soft)
+}
 
-// Custom accent from one color (auto-generates 12-step scale):
-let config = CapsuleConfig::new()
-    .theme(Theme::dark().accent("#5E81AC"));
+Server::bind("127.0.0.1:9000")?
+    .root(app)
+    .capsule_config(CapsuleConfig::new())
+    .theme(app_theme())
+    .run().await
+```
 
-// Full custom theme from seed colors:
-let config = CapsuleConfig::new()
-    .theme(Theme::dark()
-        .accent("#5E81AC")
-        .neutral("#2E3440")
-        .style(ThemeStyle::Soft));
+Handlers can mutate theme at runtime:
 
-// Named preset:
-let config = CapsuleConfig::dark_nord();
+```rust
+#[handler]
+fn toggle_mode(theme: &mut Theme) {
+    theme.mode = theme.mode.toggle();
+}
 ```
 
 `ColorScale::from_color(css_color)` accepts `#RRGGBB`, `#RGB`, or `oklch(L C H)` and generates a 12-step Radix-style color scale automatically.
 
 ### Adding a New Semantic Variable
 
-1. Choose the next available short name (check `generate_resolved_semantic_css` in `theme.rs`)
-2. Add the variable definition in `generate_resolved_semantic_css()` (light and dark blocks)
+1. Choose the next available short name (check `generate_theme_css` in `theme.rs`)
+2. Add the variable in `generate_theme_css()` — both light and dark branches
 3. Reference it in `St::css()` in `style_tokens.rs` as `var(--x)` where `x` is the short name
-4. Add to `generate_resolved_style_css()` if style presets need to override it
+4. Add to the style preset match arms in `generate_theme_css()` if style presets need to override it
 
 ### Style Tokens
 
@@ -421,4 +424,4 @@ Kill existing process: `fuser -k 9000/tcp`
 
 5. **Varint encoding**: Compact wire format for element refs and item indices (1-3 bytes instead of fixed 4).
 
-6. **Build-time theme resolution**: CSS variables are resolved to final values at capsule generation. Only light/dark mode switching remains at runtime via `data-theme`. Short variable names (`--a` through `--L`) minimize CSS size.
+6. **Theme as state**: Theme is a framework-provided state type (`&mut Theme` in handlers). A built-in renderer converts theme to CSS variables in a `<style>` element, patched reactively via the synced element system. Short variable names (`--a` through `--L`) minimize CSS size.

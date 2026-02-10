@@ -15,8 +15,7 @@ use std::collections::HashSet;
 use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
 use crate::protocol::El;
 use crate::style_tokens::St;
-use crate::theme::{Theme, ThemeStyle};
-use crate::tokens::PalettePreset;
+use crate::theme::Theme;
 
 /// Generate a tree-shaken JS object literal from a mappings array.
 ///
@@ -376,10 +375,6 @@ pub struct CapsuleConfig {
     pub(crate) extra_style_utils: HashSet<u16>,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
-    /// Palette presets for runtime switching via `[data-palette="name"]`.
-    pub(crate) palettes: Vec<PalettePreset>,
-    /// Style presets for runtime switching via `[data-style="name"]`.
-    pub(crate) styles: Vec<ThemeStyle>,
 }
 
 impl CapsuleConfig {
@@ -489,47 +484,6 @@ impl CapsuleConfig {
         self
     }
 
-    /// Register palette presets for runtime switching.
-    ///
-    /// The theme's palette is the default; these are additional options
-    /// accessible via `data-palette="name"` attribute on the root element.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// CapsuleConfig::new()
-    ///     .palettes(PalettePreset::ALL)
-    /// ```
-    pub fn palettes(mut self, presets: &[PalettePreset]) -> Self {
-        self.palettes = presets.to_vec();
-        self
-    }
-
-    /// Register theme style presets for runtime switching.
-    ///
-    /// Ensures all theme-hook utility classes survive tree-shaking so
-    /// runtime style switching (e.g., Default → Glass → Neon) works.
-    /// Cost: ~14 extra CSS rules (~600 bytes). Default Q-var values are
-    /// `none`/`0`/transparent, so these classes are visually inert until
-    /// a ThemeStyle override activates them.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// CapsuleConfig::new()
-    ///     .styles(ThemeStyle::ALL)
-    /// ```
-    pub fn styles(mut self, styles: &[ThemeStyle]) -> Self {
-        self.styles = styles.to_vec();
-        for &code in &[
-            0x32Du16, 0x32E, 0x32F, 0x330, 0x331, 0x332, 0x333,
-            0x334, 0x335, 0x336, 0x337, 0x338, 0x339, 0x33A,
-        ] {
-            self.extra_style_utils.insert(code);
-        }
-        self
-    }
-
     /// Register a font face for the capsule.
     ///
     /// The font's CSS (`@import` or `@font-face`) is generated at capsule
@@ -598,10 +552,7 @@ fn extract_used_variables(css: &str) -> HashSet<String> {
 /// - Component CSS (tree-shaken utility, pseudo, breakpoint classes)
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     use crate::style_tokens::{generate_utility_css, generate_pseudo_css, generate_breakpoint_css};
-    use crate::theme::{
-        generate_base_css, generate_q_var_base_css, generate_radius_css, ResolvedPalette,
-        generate_resolved_semantic_css, generate_resolved_style_css,
-    };
+    use crate::theme::{generate_base_css, generate_theme_css};
     use crate::tokens::css::{generate_primitive_css_filtered, generate_color_css_filtered};
 
     let mut css = String::with_capacity(8192);
@@ -622,9 +573,6 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     used_vars.extend(extract_used_variables(&utility_token_css));
     used_vars.extend(extract_used_variables(&pseudo_token_css));
     used_vars.extend(extract_used_variables(&breakpoint_token_css));
-    if let Some(radius_css) = generate_radius_css(config.theme.radius) {
-        used_vars.extend(extract_used_variables(radius_css));
-    }
 
     // 3. Base reset (must come first)
     css.push_str(base_css);
@@ -653,54 +601,26 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         css.push_str(&generate_color_css_filtered(&color_vars));
     }
 
-    // 6. Resolved semantic tokens (light + dark, with direct oklch values)
-    let rp = ResolvedPalette::new(&config.theme);
-    css.push_str(&generate_resolved_semantic_css(&rp));
+    // 6. Theme CSS — single :root{...} block with mode-aware colors, style preset Q-vars,
+    //    and radius overrides. Replaces the old dual light/dark blocks + [data-style] +
+    //    [data-palette] + [data-radius] selectors.
+    css.push_str(&generate_theme_css(&config.theme));
 
-    // 6b. Q-var base CSS (theme-style hooks)
-    css.push_str(generate_q_var_base_css());
-
-    // 7. Radius override (if non-default)
-    if let Some(radius_css) = generate_radius_css(config.theme.radius) {
-        css.push_str(radius_css);
-    }
-
-    // 8. ThemeStyle overrides — include all presets so apps can switch at runtime
-    for style in ThemeStyle::ALL {
-        if let Some(style_css) = generate_resolved_style_css(*style, &rp) {
-            css.push_str(&style_css);
-        }
-    }
-
-    // 8b. Palette overrides — pre-generated for runtime switching
-    if !config.palettes.is_empty() {
-        use crate::theme::generate_palette_override_css;
-        for preset in &config.palettes {
-            // Skip Default — it's already the :root palette
-            if *preset == PalettePreset::Default {
-                continue;
-            }
-            let p_theme = Theme::default().palette(preset.palette());
-            let p_rp = ResolvedPalette::new(&p_theme);
-            css.push_str(&generate_palette_override_css(preset.as_str(), &p_rp));
-        }
-    }
-
-    // 9. Utility token CSS classes (.u{code}{declaration})
+    // 7. Utility token CSS classes (.u{code}{declaration})
     css.push_str(&utility_token_css);
 
-    // 10. Pseudo-class token CSS rules (.h{pc}u{st}:hover{...}, etc.)
+    // 8. Pseudo-class token CSS rules (.h{pc}u{st}:hover{...}, etc.)
     css.push_str(&pseudo_token_css);
 
-    // 10b. Breakpoint token CSS rules (@media(min-width:...){.b{bp}u{st}{...}})
+    // 8b. Breakpoint token CSS rules (@media(min-width:...){.b{bp}u{st}{...}})
     css.push_str(&breakpoint_token_css);
 
-    // 11. Composite style CSS classes (.c{id}{declarations})
+    // 9. Composite style CSS classes (.c{id}{declarations})
     if !config.composite_css.is_empty() {
         css.push_str(&config.composite_css);
     }
 
-    // 12. Font face CSS (@import and @font-face rules)
+    // 10. Font face CSS (@import and @font-face rules)
     if !config.fonts.is_empty() {
         // @import rules must appear before all other rules in CSS.
         // Collect them separately and prepend to the output.
@@ -748,7 +668,6 @@ pub fn generate_styled_capsule(
     let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
     let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
     let svg_js = generate_svg_set(used_elements);
-    let theme_attrs = config.theme.data_attrs();
 
     // Generate style token lookup tables (tree-shaken)
     // Note: U (utility) map removed - utilities now use CSS classes generated server-side
@@ -766,10 +685,11 @@ pub fn generate_styled_capsule(
         BIND_LOCAL_REMOTE_JS
     };
 
-    // Theme attrs go on <html> so CSS variables cascade properly to body
-    // CSS is embedded in <style> tag so styles are available before WS connects
+    // No data-theme/data-style/data-radius attributes on <html>.
+    // Theme CSS is a single :root{...} block embedded in <style>.
+    // Dynamic theme changes come via the built-in theme renderer (synced <style> element).
     format!(
-        r#"<!DOCTYPE html><html {theme_attrs}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>{css}</style></head><body>
 <div id="rw"></div>
 <script>
@@ -862,9 +782,8 @@ mod tests {
         assert!(capsule.contains("<style>"));
         assert!(capsule.contains("box-sizing"));
 
-        // Should have theme data attribute
-        assert!(capsule.contains("data-theme=\"dark\""));
-        // data-accent is no longer emitted — accent is resolved at build time
+        // No data-theme/data-style/data-palette attributes (theme-as-state handles CSS vars)
+        assert!(!capsule.contains("data-theme"), "data-theme should not be emitted");
         assert!(!capsule.contains("data-accent"), "data-accent should not be emitted");
 
         // Should have div#rw for app root
@@ -1038,19 +957,18 @@ mod tests {
     }
 
     #[test]
-    fn test_styles_registers_theme_tokens() {
-        let config = CapsuleConfig::new().styles(ThemeStyle::ALL);
-        // All 14 theme-hook utility codes should be in extra_style_utils
-        for code in 0x32Du16..=0x33A {
-            assert!(
-                config.extra_style_utils.contains(&code),
-                "Missing theme-hook utility code 0x{code:X}"
-            );
-        }
-
-        // Generated CSS should include the theme-hook utility classes
+    fn test_capsule_css_uses_theme_css() {
+        let config = CapsuleConfig::new()
+            .theme(Theme::dark_nord());
         let css = generate_capsule_css(&config);
-        assert!(css.contains(".u813{"), "Missing ShadowTheme utility class");
-        assert!(css.contains(".u826{"), "Missing TextShadowTheme utility class");
+
+        // Should contain a single :root{} block with resolved theme CSS
+        assert!(css.contains(":root{"), "Missing :root{{ block");
+        assert!(css.contains("--a:"), "Missing --a (bg-app)");
+        assert!(css.contains("--k:"), "Missing --k (text-default)");
+        // Should NOT contain old dual-mode or data-attribute selectors
+        assert!(!css.contains("[data-theme"), "Should not contain data-theme selectors");
+        assert!(!css.contains("[data-style"), "Should not contain data-style selectors");
+        assert!(!css.contains("[data-palette"), "Should not contain data-palette selectors");
     }
 }

@@ -8,7 +8,8 @@ use rwire::capsule_gen::CapsuleConfig;
 use rwire::components::{
     Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
 };
-use rwire::{handler, renderer, ElementBuilder, Server, State};
+use rwire::theme::Theme;
+use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
 
 // --- Four separate state types for TypeId filtering ---
 
@@ -46,13 +47,19 @@ struct ItemsState {
 #[handler] fn add_item(s: &mut ItemsState) { s.items.push(format!("Item {}", s.items.len() + 1)); }
 #[handler] fn remove_item(s: &mut ItemsState) { s.items.pop(); }
 
+#[theme]
+fn app_theme() -> Theme {
+    Theme::dark_nord()
+}
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Fine-Grained Reactivity with TypeId Filtering");
     println!("Watch this console: each click should only trigger ONE renderer!");
     Server::bind("127.0.0.1:9000")?
         .root(app)
-        .capsule_config(CapsuleConfig::dark_nord())
+        .capsule_config(CapsuleConfig::new())
+        .theme(app_theme())
         .run()
         .await
 }

@@ -14,7 +14,7 @@
 //! Open: http://127.0.0.1:9000
 
 use rwire::{
-    el, handler, persist_task, renderer, El, ElementBuilder, Ev, IterWithRef, PersistError,
+    el, handler, persist_task, renderer, theme, El, ElementBuilder, Ev, IterWithRef, PersistError,
     PersistableType, Server, SqliteStore, State,
     // Styling system
     Button, ButtonSize, Input, Stack, Gap, Card, CardPadding,
@@ -515,6 +515,11 @@ fn render_persisted_count(state: &PersistedTodoState) -> ElementBuilder {
 // Main
 // ============================================================================
 
+#[theme]
+fn todo_theme() -> Theme {
+    Theme::light()
+}
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("rwire Server - Todo Combined Demo");
@@ -568,15 +573,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("SQLite database initialized: ./todo.db");
 
-    // Configure theme for styled capsule
-    let theme = Theme::light();
-    let config = CapsuleConfig::new().theme(theme);
-
     // Build server with persistence support and styling
     let mut server = Server::bind("127.0.0.1:9000")?
         .persist_interval(Duration::from_millis(100))
         .root(build_app)
-        .capsule_config(config);
+        .capsule_config(CapsuleConfig::new())
+        .theme(todo_theme());
 
     // Get shared state for persist task and shutdown
     let shared = server.shared_state();

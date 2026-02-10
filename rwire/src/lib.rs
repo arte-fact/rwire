@@ -140,9 +140,8 @@ pub use tokens::css::minify_css;
 
 // Theme exports
 pub use theme::{
-    generate_base_css, generate_palette_override_css, generate_q_var_base_css, generate_radius_css,
-    generate_resolved_semantic_css, generate_resolved_style_css, ResolvedPalette,
-    RadiusScale, Theme, ThemeMode, ThemeStyle,
+    generate_base_css, generate_theme_css,
+    RadiusScale, Theme, ThemeMode, ThemeProvider, ThemeStyle,
 };
 
 // Icon exports
@@ -178,7 +177,7 @@ pub use metrics::{Counter, Gauge, Histogram, Metrics};
 pub use session::{Session, SessionId};
 
 // Macro re-exports
-pub use rwire_macros::{handler, renderer, State};
+pub use rwire_macros::{handler, renderer, theme, State};
 
 // Re-export common types for convenience
 pub use bytes::Bytes;

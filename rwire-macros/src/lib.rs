@@ -491,6 +491,53 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Attribute macro for theme provider functions.
+///
+/// Transforms a function returning `Theme` into a `ThemeProvider` that can be
+/// passed to `Server::bind(...).root(app).theme(my_theme)`.
+///
+/// The function must take no arguments and return `Theme`.
+///
+/// # Example
+///
+/// ```ignore
+/// #[theme]
+/// fn app_theme() -> Theme {
+///     Theme::dark().accent("#5E81AC")
+/// }
+///
+/// Server::bind("0.0.0.0:9000")?
+///     .root(app)
+///     .theme(app_theme)
+///     .run().await
+/// ```
+#[proc_macro_attribute]
+pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+    let fn_name = &input.sig.ident;
+    let vis = &input.vis;
+    let block = &input.block;
+
+    // Validate: no parameters
+    if !input.sig.inputs.is_empty() {
+        return syn::Error::new_spanned(
+            &input.sig.inputs,
+            "#[theme] function must take no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let expanded = quote! {
+        #vis fn #fn_name() -> rwire::theme::ThemeProvider {
+            fn __theme_init() -> rwire::theme::Theme #block
+            rwire::theme::ThemeProvider::new(__theme_init)
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
 /// Attribute macro for renderer functions.
 ///
 /// Transforms a function taking `&State` and returning `ElementBuilder` into
