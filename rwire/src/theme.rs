@@ -276,6 +276,16 @@ impl Theme {
         self
     }
 
+    /// Set the palette on a mutable theme reference.
+    pub fn set_palette(&mut self, palette: ColorPalette) {
+        self.palette = Some(palette);
+    }
+
+    /// Clear the palette back to None (framework default colors).
+    pub fn clear_palette(&mut self) {
+        self.palette = None;
+    }
+
     /// Get a reference to the palette, if set.
     pub fn palette_ref(&self) -> Option<&ColorPalette> {
         self.palette.as_ref()

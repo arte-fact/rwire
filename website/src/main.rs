@@ -889,9 +889,9 @@ fn cycle_theme_style(theme: &mut Theme) {
 fn cycle_palette(theme: &mut Theme) {
     // Toggle between no palette (default blue) and Nord palette
     if theme.palette_ref().is_some() {
-        *theme = Theme::new().palette(ColorPalette::default());
+        theme.clear_palette();
     } else {
-        *theme = Theme::new().palette(ColorPalette::nord());
+        theme.set_palette(ColorPalette::nord());
     }
 }
 

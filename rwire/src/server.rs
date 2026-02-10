@@ -950,10 +950,15 @@ where
     // Create per-connection state with the session ID from cookie
     let mut conn_state = ConnectionState::new(connection_id, session_id);
 
-    // Build the root element, appending theme synced region if theme is configured
+    // Build the root element, wrapping with theme synced region if theme is configured.
+    // Theme synced builder must be a sibling of the root (not a child), because
+    // synced elements clear their children on re-render — a child synced element
+    // would be destroyed when the parent re-renders.
     let root_element = if initial_theme.is_some() {
+        use crate::builder::el;
+        use crate::protocol::El;
         use crate::theme::theme_synced_builder;
-        root().append([theme_synced_builder()])
+        el(El::Div).append([root(), theme_synced_builder()])
     } else {
         root()
     };
