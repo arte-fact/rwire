@@ -16,10 +16,9 @@
 use rwire::{
     el, handler, persist_task, renderer, theme, El, ElementBuilder, Ev, IterWithRef, PersistError,
     PersistableType, Server, SqliteStore, State,
-    // Styling system
-    Button, ButtonSize, Input, Stack, Gap, Card, CardPadding,
     Theme, CapsuleConfig,
 };
+use rwire_components::{Button, ButtonSize, Input, Stack, Gap, Card, CardPadding};
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::sync::Arc;
@@ -420,7 +419,7 @@ fn render_memory_items_list(state: &MemoryTodoState) -> ElementBuilder {
             let class = if item.done { "item done" } else { "item" };
             Stack::row()
                 .gap(Gap::Sm)
-                .align(rwire::StackAlign::Center)
+                .align(rwire_components::StackAlign::Center)
                 .class(class)
                 .children([
                     el(El::Span)
@@ -479,7 +478,7 @@ fn render_persisted_items_list(state: &PersistedTodoState) -> ElementBuilder {
             let class = if item.done { "item done" } else { "item" };
             Stack::row()
                 .gap(Gap::Sm)
-                .align(rwire::StackAlign::Center)
+                .align(rwire_components::StackAlign::Center)
                 .class(class)
                 .children([
                     el(El::Span)

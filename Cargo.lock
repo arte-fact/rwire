@@ -229,6 +229,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "rwire-themes",
 ]
 
@@ -351,6 +352,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "rwire-themes",
 ]
 
@@ -919,11 +921,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwire-components"
+version = "0.1.0"
+dependencies = [
+ "rwire",
+]
+
+[[package]]
 name = "rwire-design-system"
 version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
+ "rwire-markdown",
  "rwire-themes",
 ]
 
@@ -933,6 +944,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "rwire-markdown",
  "rwire-themes",
 ]
@@ -943,6 +955,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "rwire-themes",
 ]
 
@@ -976,6 +989,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "rwire-themes",
 ]
 
@@ -1126,6 +1140,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "serde",
 ]
 
@@ -1135,6 +1150,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-components",
  "rwire-themes",
 ]
 

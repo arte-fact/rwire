@@ -28,40 +28,48 @@ Server (Rust)                    Browser (JS ~1.5KB)
 
 ```
 rwire/
-├── rwire/               # Core library
-│   ├── builder.rs       # Fluent el() API, BuildContext, tree-shaking
-│   ├── capsule.rs       # HTTP serving for capsule HTML
-│   ├── capsule_gen.rs   # JS runtime generation with tree-shaking
-│   ├── config.rs        # Server configuration (bind address, max connections)
-│   ├── form.rs          # Form builder and validation rules
-│   ├── health.rs        # Health check endpoints (/health, /ready)
-│   ├── item_ref.rs      # ItemRef<T> for type-safe dynamic content binding
-│   ├── metrics.rs       # Prometheus-format metrics (counters, gauges, histograms)
-│   ├── protocol/        # Binary opcode encoder/decoder
-│   │   ├── opcodes.rs   # El, Ev enums and byte constants
-│   │   ├── encoder.rs   # OpcodeBuffer for building messages
-│   │   ├── decoder.rs   # ClientEvent parsing
-│   │   └── varint.rs    # Variable-length integer encoding
-│   ├── registry.rs      # Connection registry with admission control
-│   ├── router.rs        # URL pattern matching and client-side routing
-│   ├── server.rs        # WebSocket server, connection handling
-│   ├── session.rs       # Session ID generation and cookie management
-│   ├── state.rs         # State traits, HandlerFn, EventContext, Renderer
-│   ├── store.rs         # State persistence (MemoryStore, JsonFileStore)
-│   ├── style.rs         # CSS-in-Rust styling utilities
-│   ├── style_tokens.rs  # St (u16), Pc (u8), Bp (u8) enums + CSS mappings
-│   ├── theme.rs         # Theme as state, ThemeProvider, CSS variable generation
-│   └── tokens/          # Design tokens
-│       ├── css.rs       # CSS custom property generation
-│       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
-│       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
-├── rwire-macros/        # Proc macros
-│   ├── lib.rs           # #[handler], #[renderer], #[derive(State)]
-│   └── mutation_parser.rs # Local handler mutation analysis
+├── libs/
+│   ├── rwire/               # Core framework library
+│   │   ├── builder.rs       # Fluent el() API, BuildContext, tree-shaking
+│   │   ├── capsule.rs       # HTTP serving for capsule HTML
+│   │   ├── capsule_gen.rs   # JS runtime generation with tree-shaking
+│   │   ├── config.rs        # Server configuration (bind address, max connections)
+│   │   ├── form.rs          # Form builder and validation rules
+│   │   ├── health.rs        # Health check endpoints (/health, /ready)
+│   │   ├── item_ref.rs      # ItemRef<T> for type-safe dynamic content binding
+│   │   ├── metrics.rs       # Prometheus-format metrics (counters, gauges, histograms)
+│   │   ├── protocol/        # Binary opcode encoder/decoder
+│   │   │   ├── opcodes.rs   # El, Ev enums and byte constants
+│   │   │   ├── encoder.rs   # OpcodeBuffer for building messages
+│   │   │   ├── decoder.rs   # ClientEvent parsing
+│   │   │   └── varint.rs    # Variable-length integer encoding
+│   │   ├── registry.rs      # Connection registry with admission control
+│   │   ├── router.rs        # URL pattern matching and client-side routing
+│   │   ├── server.rs        # WebSocket server, connection handling
+│   │   ├── session.rs       # Session ID generation and cookie management
+│   │   ├── state.rs         # State traits, HandlerFn, EventContext, Renderer
+│   │   ├── store.rs         # State persistence (MemoryStore, JsonFileStore)
+│   │   ├── style.rs         # CSS-in-Rust styling utilities
+│   │   ├── style_tokens.rs  # St (u16), Pc (u8), Bp (u8) enums + CSS mappings
+│   │   ├── theme.rs         # Theme as state, ThemeProvider, CSS variable generation
+│   │   └── tokens/          # Design tokens
+│   │       ├── css.rs       # CSS custom property generation
+│   │       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
+│   │       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
+│   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
+│   ├── rwire-components/    # UI component library (52 components)
+│   ├── rwire-markdown/      # Markdown rendering for docs
+│   └── rwire-themes/        # Predefined styles and palettes
+├── apps/
+│   ├── rwire-website/       # Marketing landing page
+│   ├── rwire-docs/          # Documentation site
+│   ├── rwire-design-system/ # Component showcase
+│   └── rwire-examples/      # Examples gallery
 └── examples/
-    ├── counter/         # Simple counter app
-    ├── todolist/        # Todo list with filtering
-    └── todo-combined/   # Todo list with ItemRef dynamic binding
+    ├── counter/             # Simple counter app
+    ├── todolist/            # Todo list with filtering
+    ├── todo-combined/       # Todo list with ItemRef dynamic binding
+    └── fine-grained/        # Fine-grained reactivity demo
 ```
 
 ## Binary Protocol

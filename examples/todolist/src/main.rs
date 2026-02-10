@@ -1,11 +1,11 @@
 //! Todolist example - demonstrates reactive state with lists and filtering.
 
 use rwire::capsule_gen::CapsuleConfig;
-use rwire::components::{
-    Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
-};
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
+use rwire_components::{
+    Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
+};
 use rwire_themes::palettes;
 
 #[derive(State, Default)]

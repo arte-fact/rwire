@@ -108,7 +108,7 @@ No global state, no context providers, no prop drilling.
 | Feedback | `/docs/components/feedback` | Alert, Toast, Spinner, Progress, Skeleton, Modal |
 
 Each component page follows the pattern:
-1. **Import** — `use rwire::components::*;`
+1. **Import** — `use rwire_components::*;`
 2. **Basic usage** — Simplest example
 3. **Variants** — Size, color, style options
 4. **With events** — Interactive example

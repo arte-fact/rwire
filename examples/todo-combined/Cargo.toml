@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rwire = { path = "../../rwire" }
+rwire = { path = "../../libs/rwire" }
+rwire-components = { path = "../../libs/rwire-components" }
 async-std = { version = "1.12", features = ["attributes"] }
 serde = { version = "1.0", features = ["derive"] }

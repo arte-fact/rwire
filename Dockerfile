@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 ARG PACKAGE
 COPY --from=builder /app/target/release/${PACKAGE} /usr/local/bin/app
 # Copy docs for rwire-docs (no-op for other packages, mkdir -p is safe)
-COPY --from=builder /app/rwire-docs/docs/ /app/docs/
+COPY --from=builder /app/apps/rwire-docs/docs/ /app/docs/
 ENV DOCS_DIR=/app/docs
 EXPOSE 9000
 CMD ["app"]

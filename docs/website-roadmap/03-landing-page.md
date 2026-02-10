@@ -76,7 +76,7 @@ Show real rwire code — a complete, runnable counter app. This is the "aha mome
 ### Content
 
 ```rust
-use rwire::components::*;
+use rwire_components::*;
 use rwire::{el, handler, renderer, El, Server, State};
 
 #[derive(State, Default)]

@@ -5,11 +5,11 @@
 //! to verify that clicking "+" only calls render_counter(), not all renderers.
 
 use rwire::capsule_gen::CapsuleConfig;
-use rwire::components::{
-    Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
-};
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
+use rwire_components::{
+    Badge, BadgeIntent, Button, Card, Container, Divider, Gap, Stack, Text,
+};
 use rwire_themes::palettes;
 
 // --- Four separate state types for TypeId filtering ---

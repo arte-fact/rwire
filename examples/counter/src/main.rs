@@ -4,11 +4,11 @@ use std::error::Error;
 
 use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
-use rwire::components::{
-    Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack, Text, TextColor,
-};
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, St, State};
+use rwire_components::{
+    Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack, Text, TextColor,
+};
 use rwire_themes::palettes;
 
 #[derive(State, Default)]
