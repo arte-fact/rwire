@@ -5,7 +5,7 @@
 
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::components::*;
-use rwire::docs::{parse_markdown, DocPage, DocSite, SearchResult};
+use rwire::docs::{markdown_element_types, parse_markdown, DocPage, DocSite, SearchResult};
 use rwire::icons::{icon, Icon};
 use rwire::router::{Link, Router};
 use rwire::style_tokens::St;
@@ -117,8 +117,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_search_results(&DocSite::load(docs_dir()), "example")
         });
 
-    let capsule_config =
-        CapsuleConfig::new().font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
+    let capsule_config = CapsuleConfig::new()
+        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]))
+        .extra_elements(&markdown_element_types());
 
     Server::bind(&config.bind_addr)?
         .root(root)

@@ -29,7 +29,7 @@ mod parser;
 mod search;
 
 pub use frontmatter::Frontmatter;
-pub use parser::{parse_markdown, ParseResult, TocEntry};
+pub use parser::{markdown_element_types, parse_markdown, ParseResult, TocEntry};
 pub use search::{SearchIndex, SearchResult};
 
 use std::collections::HashMap;
