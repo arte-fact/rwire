@@ -9,7 +9,7 @@ use rwire::docs::{parse_markdown, DocPage, DocSite, SearchResult};
 use rwire::icons::{icon, Icon};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
-use rwire::ColorPalette;
+use rwire_themes::{palettes, styles};
 use rwire::router::{Link, Router};
 use rwire::{el, handler, renderer, theme, El, Ev, ElementBuilder, Server, State};
 
@@ -34,7 +34,7 @@ static DOCS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docs");
 
 #[theme]
 fn site_theme() -> Theme {
-    Theme::default().palette(ColorPalette::nord())
+    Theme::default().palette(palettes::nord())
 }
 
 #[async_std::main]
@@ -880,7 +880,8 @@ fn toggle_theme(theme: &mut Theme) {
 
 #[handler]
 fn cycle_theme_style(theme: &mut Theme) {
-    let all = ThemeStyle::ALL_WITH_DEFAULT;
+    let mut all = vec![ThemeStyle::soft()];
+    all.extend(styles::ALL.iter().map(|f| f()));
     let idx = all.iter().position(|s| *s == theme.style).unwrap_or(0);
     theme.style = all[(idx + 1) % all.len()];
 }
@@ -891,7 +892,7 @@ fn cycle_palette(theme: &mut Theme) {
     if theme.palette_ref().is_some() {
         theme.clear_palette();
     } else {
-        theme.set_palette(ColorPalette::nord());
+        theme.set_palette(palettes::nord());
     }
 }
 

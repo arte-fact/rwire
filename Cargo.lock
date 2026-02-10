@@ -229,6 +229,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-themes",
 ]
 
 [[package]]
@@ -358,6 +359,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-themes",
 ]
 
 [[package]]
@@ -935,6 +937,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwire-themes"
+version = "0.1.0"
+dependencies = [
+ "rwire",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1090,6 +1099,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-themes",
 ]
 
 [[package]]
@@ -1258,6 +1268,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "rwire",
+ "rwire-themes",
 ]
 
 [[package]]

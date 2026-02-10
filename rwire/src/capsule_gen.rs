@@ -383,11 +383,6 @@ impl CapsuleConfig {
         Self::default()
     }
 
-    /// Create a dark theme with Nord color palette.
-    pub fn dark_nord() -> Self {
-        Self::default().theme(Theme::dark_nord())
-    }
-
     /// Create a light theme with default colors.
     pub fn light() -> Self {
         Self::default().theme(Theme::light())
@@ -891,13 +886,6 @@ mod tests {
     }
 
     #[test]
-    fn test_capsule_config_dark_nord() {
-        let config = CapsuleConfig::dark_nord();
-        assert_eq!(config.theme.mode, ThemeMode::Dark);
-        assert!(config.theme.palette_ref().is_some());
-    }
-
-    #[test]
     fn test_capsule_config_light() {
         let config = CapsuleConfig::light();
         assert_eq!(config.theme.mode, ThemeMode::Light);
@@ -959,7 +947,7 @@ mod tests {
     #[test]
     fn test_capsule_css_uses_theme_css() {
         let config = CapsuleConfig::new()
-            .theme(Theme::dark_nord());
+            .theme(Theme::dark().accent("#5E81AC"));
         let css = generate_capsule_css(&config);
 
         // Should contain a single :root{} block with resolved theme CSS

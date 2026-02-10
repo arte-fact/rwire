@@ -6,6 +6,7 @@ use rwire::components::{
 };
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
+use rwire_themes::palettes;
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -41,7 +42,7 @@ fn add_item(s: &mut TodoState) {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::dark_nord()
+    Theme::dark().palette(palettes::nord())
 }
 
 #[async_std::main]

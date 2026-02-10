@@ -9,6 +9,7 @@ use rwire::components::{
 };
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, St, State};
+use rwire_themes::palettes;
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -18,7 +19,7 @@ struct Counter {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::dark_nord()
+    Theme::dark().palette(palettes::nord())
 }
 
 #[main]

@@ -10,6 +10,7 @@ use rwire::components::{
 };
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
+use rwire_themes::palettes;
 
 // --- Four separate state types for TypeId filtering ---
 
@@ -49,7 +50,7 @@ struct ItemsState {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::dark_nord()
+    Theme::dark().palette(palettes::nord())
 }
 
 #[async_std::main]

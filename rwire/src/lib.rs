@@ -135,13 +135,14 @@ pub use style_tokens::{Bp, Pc, St, StyleProp, StyleValue};
 
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
-pub use tokens::{ColorPalette, ColorScale, PalettePreset};
+pub use tokens::{ColorPalette, ColorScale};
 pub use tokens::css::minify_css;
 
 // Theme exports
 pub use theme::{
-    generate_base_css, generate_theme_css,
-    RadiusScale, Theme, ThemeMode, ThemeProvider, ThemeStyle,
+    css_var, generate_base_css, generate_theme_css,
+    IntoStyle, IntoPalette, RadiusScale, ResolvedPalette,
+    Theme, ThemeMode, ThemeProvider, ThemeStyle,
 };
 
 // Icon exports

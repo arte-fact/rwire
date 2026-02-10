@@ -17,13 +17,14 @@
 //! # Color Palettes
 //!
 //! ```ignore
-//! use rwire::tokens::palette::ColorPalette;
+//! use rwire::tokens::palette::{ColorPalette, ColorScale};
 //!
-//! // Use the Nord preset
-//! let palette = ColorPalette::nord();
-//!
-//! // Or use the default Oklch-based palette
+//! // Use the default Oklch-based palette
 //! let palette = ColorPalette::default();
+//!
+//! // Or build a custom palette from seed colors
+//! let palette = ColorPalette::default()
+//!     .with_accent(ColorScale::from_color("#5E81AC"));
 //! ```
 //!
 //! # Example
@@ -42,5 +43,5 @@ pub mod css;
 pub mod palette;
 pub mod primitives;
 
-pub use palette::{ColorPalette, ColorScale, PalettePreset};
+pub use palette::{ColorPalette, ColorScale};
 pub use primitives::*;
