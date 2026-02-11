@@ -29,6 +29,7 @@ pub struct AppShell {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl AppShell {
     /// Create a new AppShell with default dimensions.
     pub fn new() -> Self {

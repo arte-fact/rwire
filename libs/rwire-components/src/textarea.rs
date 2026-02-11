@@ -64,6 +64,7 @@ impl Default for Textarea {
     }
 }
 
+#[rwire::component]
 impl Textarea {
     /// Create a new textarea.
     pub fn new() -> Self {

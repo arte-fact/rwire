@@ -48,6 +48,7 @@ pub struct Grid {
     children: Vec<ElementBuilder>,
 }
 
+#[rwire::component]
 impl Grid {
     /// Create a new grid with responsive auto-fill columns.
     pub fn new() -> Self {

@@ -55,6 +55,7 @@ pub struct Card {
     children: Vec<ElementBuilder>,
 }
 
+#[rwire::component]
 impl Card {
     /// Create a new card with default settings.
     pub fn new() -> Self {

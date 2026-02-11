@@ -65,6 +65,7 @@ pub struct Text {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Text {
     /// Create a new text component.
     pub fn new() -> Self {

@@ -64,6 +64,7 @@ pub struct Timeline {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Timeline {
     /// Create a new timeline.
     pub fn new() -> Self {

@@ -1,13 +1,12 @@
 //! Todo Combined Example - Full TodoMVC with EventContext and ItemRef support.
 //!
-//! This example demonstrates all three storage types with full TodoMVC functionality:
-//! 1. **Local Todo** - Instant toggles without server round-trip (UI state)
-//! 2. **Memory Todo** - Server-side state with text input (session state)
-//! 3. **Persisted Todo** - File-backed, survives refresh (data state)
+//! This example demonstrates two storage types with full TodoMVC functionality:
+//! 1. **Memory Todo** - Server-side state with text input (session state)
+//! 2. **Persisted Todo** - SQLite-backed, survives restart (data state)
 //!
 //! Key features demonstrated:
 //! - Text input capture via EventContext
-//! - Item-specific actions using ItemRef and iter_with_ref() (new API)
+//! - Item-specific actions using ItemRef and iter_with_ref()
 //! - Type-safe event binding with on_ref()
 //!
 //! Run with: `cargo run -p todo-combined`
@@ -23,46 +22,6 @@ use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 use std::time::Duration;
-
-// ============================================================================
-// Local State - Client-side, instant response
-// ============================================================================
-
-/// Local state for UI interactions - toggle without server round-trip.
-///
-/// NOTE: Local state handlers require #[handler(local)] attribute and
-/// can only use simple mutations (toggle, add, set).
-#[derive(State, Default)]
-#[storage(local)]
-struct LocalUiState {
-    item1_done: bool,
-    item2_done: bool,
-    item3_done: bool,
-    show_completed: bool,
-}
-
-// Local handlers use #[handler(local)] and compile to client-side mutations.
-// These handlers execute entirely in the browser without network round-trips.
-
-#[handler(local)]
-fn toggle_local_1(state: &mut LocalUiState) {
-    state.item1_done = !state.item1_done;
-}
-
-#[handler(local)]
-fn toggle_local_2(state: &mut LocalUiState) {
-    state.item2_done = !state.item2_done;
-}
-
-#[handler(local)]
-fn toggle_local_3(state: &mut LocalUiState) {
-    state.item3_done = !state.item3_done;
-}
-
-#[handler(local)]
-fn toggle_show_completed(state: &mut LocalUiState) {
-    state.show_completed = !state.show_completed;
-}
 
 // ============================================================================
 // Memory State - Server-side, per-session with text input support
@@ -229,46 +188,16 @@ fn build_app() -> ElementBuilder {
             el(El::H1).text("rwire Multi-State TodoMVC"),
             el(El::P)
                 .class("subtitle")
-                .text("Three todo lists demonstrating different storage strategies with EventContext"),
+                .text("Two todo lists demonstrating different storage strategies with EventContext"),
             Stack::row()
                 .gap(Gap::Lg)
                 .class("columns")
                 .children([
-                    build_local_column(),
                     build_memory_column(),
                     build_persisted_column(),
                 ])
                 .build(),
         ])
-        .build()
-}
-
-fn build_local_column() -> ElementBuilder {
-    Card::new()
-        .class("column local")
-        .child(
-            Stack::column()
-                .gap(Gap::Md)
-                .children([
-                    el(El::H2).text("Local State"),
-                    el(El::P)
-                        .class("description")
-                        .text("Instant - no server round-trip"),
-                    Stack::row()
-                        .gap(Gap::Sm)
-                        .wrap(true)
-                        .class("controls")
-                        .children([
-                            Button::secondary("Toggle #1").on_click(toggle_local_1()),
-                            Button::secondary("Toggle #2").on_click(toggle_local_2()),
-                            Button::secondary("Toggle #3").on_click(toggle_local_3()),
-                            Button::secondary("Toggle Show Done").on_click(toggle_show_completed()),
-                        ])
-                        .build(),
-                    render_local_items(),
-                ])
-                .build(),
-        )
         .build()
 }
 
@@ -358,37 +287,6 @@ fn build_persisted_column() -> ElementBuilder {
 //
 // WORKAROUND: Keep renderers flat (no nested renderers).
 // Split logic into separate renderers that are siblings, not nested.
-
-#[renderer]
-fn render_local_items(state: &LocalUiState) -> ElementBuilder {
-    let mut items = Vec::new();
-
-    // Fixed items with toggleable state
-    let item1 = ("Buy groceries", state.item1_done);
-    let item2 = ("Clean house", state.item2_done);
-    let item3 = ("Read book", state.item3_done);
-
-    for (text, done) in [item1, item2, item3] {
-        if !done || state.show_completed {
-            let mark = if done { "[x]" } else { "[ ]" };
-            items.push(format!("{} {}", mark, text));
-        }
-    }
-
-    let status = if state.show_completed {
-        "showing all"
-    } else {
-        "hiding completed"
-    };
-
-    let display = if items.is_empty() {
-        format!("(all done) - {}", status)
-    } else {
-        format!("{} | {}", items.join(" | "), status)
-    };
-
-    el(El::Span).class("item-list").text(&display)
-}
 
 // Memory todo - split into 3 renderers (items list, count, empty state)
 // These are SIBLINGS, not nested, to avoid the nested renderer bug.
@@ -524,8 +422,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("rwire Server - Todo Combined Demo");
     println!("==================================");
     println!();
-    println!("Demonstrating three storage types with EventContext and ItemRef:");
-    println!("  - Local:     Client-side, instant UI response (fixed items)");
+    println!("Demonstrating two storage types with EventContext and ItemRef:");
     println!("  - Memory:    Server-side with text input (session-scoped)");
     println!("  - Persisted: SQLite-backed, survives server restart");
     println!();

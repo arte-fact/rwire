@@ -36,6 +36,7 @@ pub struct Switch {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Switch {
     /// Create a new switch.
     pub fn new() -> Self {

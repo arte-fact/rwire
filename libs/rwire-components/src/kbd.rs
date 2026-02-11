@@ -25,6 +25,7 @@ pub struct Kbd {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Kbd {
     /// Create a kbd for a single key.
     pub fn new(key: impl Into<Cow<'static, str>>) -> Self {

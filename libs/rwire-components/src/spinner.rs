@@ -40,6 +40,7 @@ pub struct Spinner {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Spinner {
     /// Create a new spinner.
     pub fn new() -> Self {

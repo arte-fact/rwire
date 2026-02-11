@@ -95,6 +95,7 @@ pub struct Stack {
     children: Vec<ElementBuilder>,
 }
 
+#[rwire::component]
 impl Stack {
     /// Create a new vertical stack.
     pub fn new() -> Self {

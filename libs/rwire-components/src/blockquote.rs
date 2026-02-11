@@ -27,6 +27,7 @@ pub struct Blockquote {
     children: Vec<ElementBuilder>,
 }
 
+#[rwire::component]
 impl Blockquote {
     /// Create a new blockquote with text content.
     pub fn new(content: impl Into<Cow<'static, str>>) -> Self {

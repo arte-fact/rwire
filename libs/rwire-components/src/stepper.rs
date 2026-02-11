@@ -28,6 +28,7 @@ pub struct Stepper {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Stepper {
     /// Create a new stepper.
     pub fn new() -> Self {

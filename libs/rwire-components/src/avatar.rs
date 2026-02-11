@@ -58,6 +58,7 @@ pub struct Avatar {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Avatar {
     /// Create a new avatar.
     pub fn new() -> Self {

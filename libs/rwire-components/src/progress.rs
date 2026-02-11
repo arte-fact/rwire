@@ -44,6 +44,7 @@ impl Default for Progress {
     }
 }
 
+#[rwire::component]
 impl Progress {
     /// Create a new progress bar.
     pub fn new() -> Self {

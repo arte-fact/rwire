@@ -85,9 +85,9 @@ DOM operations:          ~200 bytes (append, set_text, set_class)
 WebSocket connection:    ~150 bytes
 Style token decoder:     ~100 bytes (if using St tokens)
 Route handler:           ~80 bytes  (if using router)
-Local mutation interp:   ~150 bytes (if using local state)
+Client actions:          ~250 bytes (if using targets/selectors)
 ─────────────────────────────────
 Total:                   ~1.0-1.5KB
 ```
 
-Every feature has a cost, but that cost is only paid when the feature is used. An app without routing, local state, or style tokens gets a smaller capsule.
+Every feature has a cost, but that cost is only paid when the feature is used. An app without routing, client actions, or style tokens gets a smaller capsule.

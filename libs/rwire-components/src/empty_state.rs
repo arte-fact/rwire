@@ -28,6 +28,7 @@ pub struct EmptyState {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl EmptyState {
     /// Create a new empty state.
     pub fn new() -> Self {

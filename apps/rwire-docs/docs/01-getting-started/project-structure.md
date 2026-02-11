@@ -80,20 +80,13 @@ struct UserData {
     preferences: Preferences,
 }
 
-// Local: client-side, instant response, no server round-trip
-#[derive(State, Default)]
-#[storage(local)]
-struct UiState {
-    sidebar_open: bool,
-    dark_mode: bool,
-}
 ```
 
 **Memory** state is the most common choice. It lives on the server in a per-session hashmap. Use it for anything that needs server-side logic or validation.
 
 **Persisted** state adds durability. State is still read from memory for instant access, but a background task periodically flushes dirty entries to SQLite.
 
-**Local** state never leaves the browser. Handlers annotated with `#[handler(local)]` compile to client-side mutations that execute without a server round-trip. Use it for purely visual state like menu toggles or accordion open/close.
+For purely visual state like menu toggles or tab switching, use [Client Actions](/docs/advanced/client-actions) instead of state -- they run entirely in the browser with zero latency.
 
 ## Handlers vs Renderers
 

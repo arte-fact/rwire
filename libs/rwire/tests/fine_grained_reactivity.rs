@@ -9,7 +9,9 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
-use rwire::builder::{build_synced_update_multi, ElementBuilder, SyncedElement, SyncedRenderer};
+use rwire::builder::{
+    build_synced_update_multi, ElementBuilder, SyncedElement, SyncedRenderer, TokenInventory,
+};
 use rwire::protocol::opcodes::GET_SYNCED;
 use rwire::state::{ChangeSet, RendererDeps};
 use rwire::{el, El, HandlerFn, MemoryState};
@@ -245,6 +247,10 @@ impl SyncedRenderer for TestRenderer {
 
     fn deps(&self) -> RendererDeps {
         self.deps
+    }
+
+    fn token_inventory(&self) -> &'static TokenInventory {
+        &TokenInventory::EMPTY
     }
 }
 

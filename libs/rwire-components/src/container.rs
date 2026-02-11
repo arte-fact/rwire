@@ -44,6 +44,7 @@ pub struct Container {
     children: Vec<ElementBuilder>,
 }
 
+#[rwire::component]
 impl Container {
     /// Create a new container with default settings.
     pub fn new() -> Self {

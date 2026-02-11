@@ -3,10 +3,6 @@
 //! This module generates a capsule that contains only the element types and
 //! event types actually used by the application, reducing the capsule size.
 //!
-//! When local state handlers are used, the capsule includes a mutation
-//! interpreter (~150 bytes) that executes mutations on the client without
-//! server round-trips.
-//!
 //! For styled capsules, CSS is embedded in a `<style>` tag within `<head>`,
 //! tree-shaken to include only the styles for components actually used.
 
@@ -46,8 +42,6 @@ fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
 }
 
 /// The runtime JavaScript code (constant part, not affected by tree shaking).
-/// Does NOT include local state handling - that's added separately when needed.
-/// When local state is used, the xi() function must be defined before this.
 ///
 /// The gp() function collects payload data from events:
 /// - Form submit: collects all field values as JSON {t:'form',v:{...}}
@@ -71,7 +65,7 @@ fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,BP:0x8A,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,BP:0x8A,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={};
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
@@ -123,6 +117,14 @@ else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let 
 else if(o===O.SC){let[f,fl]=rv(d,i);i+=fl;let[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
 else if(o===O.PD){let[f,fl]=rv(d,i);i+=fl;let pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
 else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('b'+bp+'u'+u)}}
+else if(o===O.IT){if(typeof fl2!=='undefined'){fl2[d[i]]=!!d[i+1]}i+=2}
+else if(o===O.BT){let[f,l]=rv(d,i);i+=l;let ti=d[i++];let[st,sl]=rv(d,i);i+=sl;let inv=d[i++];if(typeof fb2!=='undefined'){(fb2[ti]||(fb2[ti]=[])).push({e:r[f],s:st,n:!!inv});uf2(ti)}}
+else if(o===O.TG){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++];if(typeof fl2!=='undefined'){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();fl2[ti]=!fl2[ti];uf2(ti)})}}
+else if(o===O.IS){if(typeof sl2!=='undefined'){sl2[d[i]]=d[i+1]}i+=2}
+else if(o===O.BS){let[f,l]=rv(d,i);i+=l;let si=d[i++],mv=d[i++];let[st,sl]=rv(d,i);i+=sl;if(typeof sb2!=='undefined'){(sb2[si]||(sb2[si]=[])).push({e:r[f],v:mv,s:st});us2(si)}}
+else if(o===O.SS2){let[f,l]=rv(d,i);i+=l;let t=d[i++],si=d[i++],sv=d[i++];if(typeof sl2!=='undefined'){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sl2[si]=sv;us2(si)})}}
+else if(o===O.TT){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);fl2[ti]=true;uf2(ti);tm=setTimeout(()=>{fl2[ti]=false;uf2(ti)},ms)})}}
+else if(o===O.AT2){let ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){setTimeout(()=>{fl2[ti]=!fl2[ti];uf2(ti)},ms)}}
 else if(o===O.E){if(ai){let ne=document.getElementById(ai);if(ne&&ne!==document.activeElement){ne.focus();try{ne.setSelectionRange(ap,ap)}catch(_){}}}return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
@@ -133,7 +135,7 @@ function connect(){
 w=new WebSocket('ws://'+location.host);
 w.binaryType='arraybuffer';
 w.onopen=()=>{
-if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}}
+if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
 rn=false;rc=0;
 if(location.pathname!=='/')w.send('R'+location.pathname);
 if(location.hash)sh(location.hash)};
@@ -145,62 +147,31 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&w.readySt
 document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
 window.addEventListener('popstate',()=>{w.send('R'+location.pathname);if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
 
-/// Bind handler without local state support (sends to server).
+/// Client actions JS (~250 bytes): targets (bool toggle) and selectors (exclusive enum).
+///
+/// - `fl2[idx]` = bool state, `fb2[idx]` = [{e: element, s: st_code, n: invert}]
+/// - `sl2[idx]` = u8 state, `sb2[idx]` = [{e: element, v: match_value, s: st_code}]
+/// - `uf2(idx)` = update all target bindings for index
+/// - `us2(idx)` = update all selector bindings for index
+///
+/// Conditionally included when `has_client_actions` is true.
+const CLIENT_ACTIONS_JS: &str = r#"let fl2={},fb2={},sl2={},sb2={};
+function uf2(i){let v=fl2[i];for(let b of fb2[i]||[]){if(v!==b.n)b.e.classList.add('u'+b.s);else b.e.classList.remove('u'+b.s)}}
+function us2(i){let v=sl2[i];for(let b of sb2[i]||[]){if(v===b.v)b.e.classList.add('u'+b.s);else b.e.classList.remove('u'+b.s)}}"#;
+
+/// Bind handler (sends to server via WebSocket).
 /// Also includes a stub xi() since the main runtime references it.
-const BIND_LOCAL_REMOTE_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
+const BIND_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
 function xi(d,i){return i}"#;
 
-/// Local state mutation interpreter (~200 bytes).
-/// Adds support for:
-/// - INIT_LOCAL_STATE (0x40): Initialize local state from JSON
-/// - DEF_LOCAL_HANDLER (0x42): Define a local handler with mutations
-/// - Local event binding that executes mutations without server round-trip
-///
-/// Mutation opcodes:
-/// - 0x50 TOGGLE: Toggle boolean field
-/// - 0x51 ADD_I8: Add signed byte to number field
-/// - 0x52 ADD_I32: Add signed 32-bit int to number field
-/// - 0x53 SET_BOOL: Set boolean field
-/// - 0x54 SET_I32: Set 32-bit int field
-/// - 0x55 SET_STR: Set string field
-const LOCAL_STATE_JS: &str = r#"let ls={},lh={};
-function mut(st,m){let i=0;while(i<m.length){let o=m[i++],f=m[i++],k=Object.keys(st)[f];
-if(o===0x50)st[k]=!st[k];
-else if(o===0x51)st[k]+=(m[i++]<<24>>24);
-else if(o===0x52)st[k]+=(m[i++]<<24|m[i++]<<16|m[i++]<<8|m[i++]);
-else if(o===0x53)st[k]=!!m[i++];
-else if(o===0x54)st[k]=(m[i++]<<24|m[i++]<<16|m[i++]<<8|m[i++]);
-else if(o===0x55){let l=m[i++];st[k]=new TextDecoder().decode(new Uint8Array(m.slice(i,i+l)));i+=l}}}
-function BL(f,t,h,r){
-r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();let hd=lh[h];if(hd){mut(ls[hd.si],hd.ms)}else{se(h,t,f,e,r[f])}})}
-function xi(d,i){
-if(d[i]===0x40){let si=d[i+1],l=(d[i+2]<<8)|d[i+3];ls[si]=JSON.parse(new TextDecoder().decode(d.slice(i+4,i+4+l)));return i+4+l}
-if(d[i]===0x42){let hi=d[i+1],si=d[i+2],mc=d[i+3],ms=[],j=i+4;
-for(let c=0;c<mc;c++){let o=d[j++],f=d[j++];ms.push(o,f);
-if(o===0x51)ms.push(d[j++]);
-else if(o>=0x52&&o<=0x54){for(let k=0;k<4;k++)ms.push(d[j++])}
-else if(o===0x55){let l=d[j++];ms.push(l);for(let k=0;k<l;k++)ms.push(d[j++])}}
-lh[hi]={si,ms};return j}return i}"#;
-
 /// Generate a minimal capsule HTML with only the used element and event types.
-///
-/// If `has_local_handlers` is true, includes the local state mutation interpreter
-/// which adds ~200 bytes but enables client-side state mutations without server round-trips.
 pub fn generate_capsule(
     used_elements: &HashSet<u8>,
     used_events: &HashSet<u8>,
-    has_local_handlers: bool,
 ) -> String {
     let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
     let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
     let svg_js = generate_svg_set(used_elements);
-
-    // Choose the appropriate bind handler based on whether we have local state
-    let bind_and_local_js = if has_local_handlers {
-        LOCAL_STATE_JS
-    } else {
-        BIND_LOCAL_REMOTE_JS
-    };
 
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
@@ -212,7 +183,7 @@ const Y={{}};
 const AT={{}};
 const AV={{}};
 const SE={{{svg_js}}};
-{bind_and_local_js}
+{BIND_JS}
 {RUNTIME_JS}
 </script>
 </body></html>"#
@@ -351,8 +322,6 @@ impl FontFace {
 pub struct CapsuleConfig {
     /// Theme configuration for CSS variables
     pub theme: Theme,
-    /// Whether to include local state mutation interpreter
-    pub(crate) has_local_handlers: bool,
     /// Used style utility tokens (for tree-shaking)
     pub(crate) used_style_utils: HashSet<u16>,
     /// Used style property codes (for tree-shaking)
@@ -367,6 +336,8 @@ pub struct CapsuleConfig {
     pub(crate) used_attr_keys: HashSet<u8>,
     /// Used attribute value codes (for tree-shaking)
     pub(crate) used_attr_values: HashSet<u8>,
+    /// Whether any client actions (targets/selectors) are used
+    pub(crate) has_client_actions: bool,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
     pub(crate) composite_css: String,
     /// Extra element types to include in the capsule beyond what tree-shaking discovers.
@@ -399,9 +370,9 @@ impl CapsuleConfig {
         self
     }
 
-    /// Set whether local handlers are used.
-    pub(crate) fn has_local_handlers(mut self, has: bool) -> Self {
-        self.has_local_handlers = has;
+    /// Set whether client actions (targets/selectors) are used.
+    pub(crate) fn has_client_actions(mut self, has: bool) -> Self {
+        self.has_client_actions = has;
         self
     }
 
@@ -478,6 +449,7 @@ impl CapsuleConfig {
         }
         self
     }
+
 
     /// Register a font face for the capsule.
     ///
@@ -568,6 +540,8 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     used_vars.extend(extract_used_variables(&utility_token_css));
     used_vars.extend(extract_used_variables(&pseudo_token_css));
     used_vars.extend(extract_used_variables(&breakpoint_token_css));
+    // Scan composite CSS for var() references (Concern 3: composite vars)
+    used_vars.extend(extract_used_variables(&config.composite_css));
 
     // 3. Base reset (must come first)
     css.push_str(base_css);
@@ -673,16 +647,13 @@ pub fn generate_styled_capsule(
     let attr_keys_js = generate_js_map(AT_MAPPINGS, &config.used_attr_keys);
     let attr_values_js = generate_js_map(AV_MAPPINGS, &config.used_attr_values);
 
-    // Choose the appropriate bind handler based on whether we have local state
-    let bind_and_local_js = if config.has_local_handlers {
-        LOCAL_STATE_JS
+    // Include client actions JS (targets & selectors) when used
+    let client_actions_js = if config.has_client_actions {
+        CLIENT_ACTIONS_JS
     } else {
-        BIND_LOCAL_REMOTE_JS
+        ""
     };
 
-    // No data-theme/data-style/data-radius attributes on <html>.
-    // Theme CSS is a single :root{...} block embedded in <style>.
-    // Dynamic theme changes come via the built-in theme renderer (synced <style> element).
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>{css}</style></head><body>
@@ -695,7 +666,8 @@ const Y={{{values_js}}};
 const AT={{{attr_keys_js}}};
 const AV={{{attr_values_js}}};
 const SE={{{svg_js}}};
-{bind_and_local_js}
+{client_actions_js}
+{BIND_JS}
 {RUNTIME_JS}
 </script>
 </body></html>"#
@@ -712,7 +684,6 @@ mod tests {
         let config = CapsuleConfig::new();
         assert_eq!(config.theme.mode, ThemeMode::Light);
         assert!(config.theme.palette_ref().is_none());
-        assert!(!config.has_local_handlers);
     }
 
     #[test]
@@ -764,8 +735,7 @@ mod tests {
         events.insert(1); // click
 
         let config = CapsuleConfig::new()
-            .theme(Theme::dark().accent("#00FF00"))
-            .has_local_handlers(false);
+            .theme(Theme::dark().accent("#00FF00"));
 
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&elements, &events, &config, &css);
@@ -853,36 +823,18 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_capsule_without_local() {
+    fn test_generate_capsule() {
         let mut elements = HashSet::new();
         elements.insert(0); // div
 
         let mut events = HashSet::new();
         events.insert(1); // click
 
-        let capsule = generate_capsule(&elements, &events, false);
+        let capsule = generate_capsule(&elements, &events);
         assert!(capsule.contains("const E={0:'div'}"));
         assert!(capsule.contains("const V={1:'click'}"));
         assert!(capsule.contains("<!DOCTYPE html>"));
-        // Should NOT contain local state code
         assert!(!capsule.contains("let ls={},lh={}"));
-    }
-
-    #[test]
-    fn test_generate_capsule_with_local() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
-        let capsule = generate_capsule(&elements, &events, true);
-        assert!(capsule.contains("const E={0:'div'}"));
-        assert!(capsule.contains("const V={1:'click'}"));
-        assert!(capsule.contains("<!DOCTYPE html>"));
-        // Should contain local state code
-        assert!(capsule.contains("let ls={},lh={}"));
-        assert!(capsule.contains("function mut"));
     }
 
     #[test]
@@ -958,5 +910,101 @@ mod tests {
         assert!(!css.contains("[data-theme"), "Should not contain data-theme selectors");
         assert!(!css.contains("[data-style"), "Should not contain data-style selectors");
         assert!(!css.contains("[data-palette"), "Should not contain data-palette selectors");
+    }
+
+    #[test]
+    fn test_composite_css_vars_scanned() {
+        // Composite CSS references var(--S6) which is not used by any utility token.
+        // After the fix, generate_capsule_css should include --S6 in the :root block.
+        let config = CapsuleConfig::new()
+            .with_composite_css(".c1{gap:var(--S6)}".to_string());
+        let css = generate_capsule_css(&config);
+
+        assert!(
+            css.contains("--S6:"),
+            "Composite CSS var(--S6) should cause --S6 to be included in :root"
+        );
+    }
+
+    #[test]
+    fn test_client_actions_js_included_when_enabled() {
+        let mut elements = HashSet::new();
+        elements.insert(0); // div
+
+        let mut events = HashSet::new();
+        events.insert(1); // click
+
+        let config = CapsuleConfig::new()
+            .has_client_actions(true);
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        // Client actions JS should be included
+        assert!(capsule.contains("fl2"), "Client actions JS vars should be present");
+        assert!(capsule.contains("uf2"), "Target update function should be present");
+        assert!(capsule.contains("us2"), "Selector update function should be present");
+    }
+
+    #[test]
+    fn test_client_actions_js_excluded_when_disabled() {
+        let mut elements = HashSet::new();
+        elements.insert(0); // div
+
+        let mut events = HashSet::new();
+        events.insert(1); // click
+
+        let config = CapsuleConfig::new()
+            .has_client_actions(false);
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        // Client actions update functions should NOT be included
+        assert!(!capsule.contains("function uf2"), "Target update function should not be present when disabled");
+        assert!(!capsule.contains("function us2"), "Selector update function should not be present when disabled");
+    }
+
+    #[test]
+    fn test_client_action_opcodes_in_runtime() {
+        let mut elements = HashSet::new();
+        elements.insert(0);
+        let mut events = HashSet::new();
+        events.insert(1);
+        let config = CapsuleConfig::new();
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        // Opcode constants should always be in the runtime
+        assert!(capsule.contains("IT:0x47"), "INIT_TARGET opcode should be in O object");
+        assert!(capsule.contains("BT:0x48"), "BIND_TARGET opcode should be in O object");
+        assert!(capsule.contains("TG:0x49"), "BIND_TOGGLE opcode should be in O object");
+        assert!(capsule.contains("IS:0x4A"), "INIT_SELECTOR opcode should be in O object");
+        assert!(capsule.contains("BS:0x4B"), "BIND_SELECTOR opcode should be in O object");
+        assert!(capsule.contains("SS2:0x4C"), "BIND_SELECT opcode should be in O object");
+    }
+
+    #[test]
+    fn test_timed_toggle_opcode_in_runtime() {
+        let mut elements = HashSet::new();
+        elements.insert(0);
+        let mut events = HashSet::new();
+        events.insert(1);
+        let config = CapsuleConfig::new();
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        assert!(capsule.contains("TT:0x4D"), "BIND_TIMED_TOGGLE opcode should be in O object");
+    }
+
+    #[test]
+    fn test_auto_toggle_opcode_in_runtime() {
+        let mut elements = HashSet::new();
+        elements.insert(0);
+        let mut events = HashSet::new();
+        events.insert(1);
+        let config = CapsuleConfig::new();
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+
+        assert!(capsule.contains("AT2:0x4E"), "AUTO_TOGGLE opcode should be in O object");
     }
 }

@@ -2,6 +2,10 @@
 //!
 //! Tab navigation with content panels.
 //!
+//! All tab panels are always rendered in the DOM. The active panel is visible,
+//! while inactive panels use `DisplayNone`. This ensures a stable DOM structure
+//! so that `emit_update_element` can patch in-place when the active tab changes.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -45,6 +49,7 @@ pub struct Tabs {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Tabs {
     /// Create a new tabs component.
     pub fn new() -> Self {
@@ -120,12 +125,19 @@ impl Tabs {
 
         container = container.append([tab_list]);
 
-        // Add active content panel
-        if let Some(active_tab) = self.tabs.into_iter().nth(self.active_index) {
+        // All content panels — always rendered, visibility toggled
+        for (idx, tab) in self.tabs.into_iter().enumerate() {
+            let is_active = idx == self.active_index;
+
+            let mut panel_tokens = vec![St::PySm, St::Px0];
+            if !is_active {
+                panel_tokens.push(St::DisplayNone);
+            }
+
             let panel = el(El::Div)
-                .st([St::PySm, St::Px0])
+                .st(panel_tokens)
                 .at(At::Role, Av::RoleTabpanel)
-                .append([active_tab.content]);
+                .append([tab.content]);
 
             container = container.append([panel]);
         }
@@ -164,4 +176,14 @@ mod tests {
         assert_eq!(tabs.active_index, 1);
     }
 
+    #[test]
+    fn test_tabs_renders_all_panels() {
+        // Should build with multiple tabs (all panels rendered)
+        let _tabs = Tabs::new()
+            .tab(Tab::new("A", el(El::Div).text("content a")))
+            .tab(Tab::new("B", el(El::Div).text("content b")))
+            .tab(Tab::new("C", el(El::Div).text("content c")))
+            .active(1)
+            .build();
+    }
 }

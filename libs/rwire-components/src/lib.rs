@@ -128,7 +128,7 @@ pub use card::{Card, CardPadding, CardShadow};
 pub use checkbox::Checkbox;
 pub use code::{Code, CodeMode};
 pub use container::{Container, ContainerSize};
-pub use copy_button::{CopyButton, COPY_BUTTON_CSS};
+pub use copy_button::CopyButton;
 pub use divider::{Divider, SpacingSize};
 pub use drawer::{Drawer, DrawerPosition};
 pub use dropdown::{DropdownItem, DropdownMenu};

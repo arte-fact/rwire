@@ -6,13 +6,14 @@
 use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
-    APPEND, BATCH_END, BIND_DEBOUNCED, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM,
-    CLEAR_CHILDREN, COMPOSITE_TABLE, CREATE, CREATE_SYNCED, DEF_LOCAL_HANDLER,
-    FORM_CLEAR_ERROR, FORM_SET_REQUIRED, FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID,
-    GET_SYNCED, INIT_LOCAL_STATE, ROUTE_PUSH, ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL,
-    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
-    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
-    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    APPEND, AUTO_TOGGLE, BATCH_END, BIND_DEBOUNCED, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM,
+    BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
+    COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
+    FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
+    ROUTE_PUSH, ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM,
+    SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
+    STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
+    SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 
@@ -299,38 +300,6 @@ impl OpcodeBuffer {
         ref_idx
     }
 
-    /// Initialize local state on the client.
-    ///
-    /// Format: [INIT_LOCAL_STATE, state_idx, len_hi, len_lo, json_bytes...]
-    pub fn init_local_state(&mut self, state_idx: u8, json: &str) -> &mut Self {
-        let bytes = json.as_bytes();
-        self.buf.put_u8(INIT_LOCAL_STATE);
-        self.buf.put_u8(state_idx);
-        // Length as 2 bytes (up to 65535 bytes of JSON)
-        self.buf.put_u8((bytes.len() >> 8) as u8);
-        self.buf.put_u8(bytes.len() as u8);
-        self.buf.put_slice(bytes);
-        self
-    }
-
-    /// Define a local handler with mutations.
-    ///
-    /// Format: [DEF_LOCAL_HANDLER, handler_idx, state_idx, mut_count, ...mutation_bytes]
-    pub fn def_local_handler(
-        &mut self,
-        handler_idx: u8,
-        state_idx: u8,
-        mutations: &[u8],
-        mutation_count: u8,
-    ) -> &mut Self {
-        self.buf.put_u8(DEF_LOCAL_HANDLER);
-        self.buf.put_u8(handler_idx);
-        self.buf.put_u8(state_idx);
-        self.buf.put_u8(mutation_count);
-        self.buf.put_slice(mutations);
-        self
-    }
-
     // ========================================================================
     // Form Operations
     // ========================================================================
@@ -544,6 +513,112 @@ impl OpcodeBuffer {
         self
     }
 
+    // ========================================================================
+    // Client Actions (Targets & Selectors)
+    // ========================================================================
+
+    /// Initialize a bool target with default value.
+    ///
+    /// Format: [INIT_TARGET, target_idx, default_u8]
+    pub fn init_target(&mut self, idx: u8, default: bool) -> &mut Self {
+        self.buf.put_u8(INIT_TARGET);
+        self.buf.put_u8(idx);
+        self.buf.put_u8(if default { 1 } else { 0 });
+        self
+    }
+
+    /// Bind an element's class to a target's boolean state.
+    ///
+    /// When target is true (or false if inverted), adds CSS class `u{st}` to the element.
+    ///
+    /// Format: [BIND_TARGET, ref_varint, target_idx, st_varint, invert_u8]
+    pub fn bind_target(&mut self, ref_idx: u32, idx: u8, st: u16, invert: bool) -> &mut Self {
+        self.buf.put_u8(BIND_TARGET);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(idx);
+        write_varint(&mut self.buf, st as u32);
+        self.buf.put_u8(if invert { 1 } else { 0 });
+        self
+    }
+
+    /// Bind an event to toggle a target.
+    ///
+    /// Format: [BIND_TOGGLE, ref_varint, ev_type, target_idx]
+    pub fn bind_toggle(&mut self, ref_idx: u32, ev_type: u8, idx: u8) -> &mut Self {
+        self.buf.put_u8(BIND_TOGGLE);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(ev_type);
+        self.buf.put_u8(idx);
+        self
+    }
+
+    /// Initialize an enum selector with default value.
+    ///
+    /// Format: [INIT_SELECTOR, sel_idx, default_val]
+    pub fn init_selector(&mut self, idx: u8, default: u8) -> &mut Self {
+        self.buf.put_u8(INIT_SELECTOR);
+        self.buf.put_u8(idx);
+        self.buf.put_u8(default);
+        self
+    }
+
+    /// Bind an element's class to a selector value match.
+    ///
+    /// When selector equals `match_val`, adds CSS class `u{st}` to the element.
+    ///
+    /// Format: [BIND_SELECTOR, ref_varint, sel_idx, match_val, st_varint]
+    pub fn bind_selector(&mut self, ref_idx: u32, idx: u8, match_val: u8, st: u16) -> &mut Self {
+        self.buf.put_u8(BIND_SELECTOR);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(idx);
+        self.buf.put_u8(match_val);
+        write_varint(&mut self.buf, st as u32);
+        self
+    }
+
+    /// Bind an event to set a selector value.
+    ///
+    /// Format: [BIND_SELECT, ref_varint, ev_type, sel_idx, val]
+    pub fn bind_select(&mut self, ref_idx: u32, ev_type: u8, idx: u8, val: u8) -> &mut Self {
+        self.buf.put_u8(BIND_SELECT);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(ev_type);
+        self.buf.put_u8(idx);
+        self.buf.put_u8(val);
+        self
+    }
+
+    /// Bind an event to set a target true, then revert to false after a delay.
+    /// Repeated events restart the timer.
+    ///
+    /// Format: [BIND_TIMED_TOGGLE, ref_varint, ev_type, target_idx, ms_hi, ms_lo]
+    pub fn bind_timed_toggle(
+        &mut self,
+        ref_idx: u32,
+        ev_type: u8,
+        idx: u8,
+        delay_ms: u16,
+    ) -> &mut Self {
+        self.buf.put_u8(BIND_TIMED_TOGGLE);
+        write_varint(&mut self.buf, ref_idx);
+        self.buf.put_u8(ev_type);
+        self.buf.put_u8(idx);
+        self.buf.put_u8((delay_ms >> 8) as u8);
+        self.buf.put_u8((delay_ms & 0xFF) as u8);
+        self
+    }
+
+    /// After delay from mount, flip target boolean once.
+    ///
+    /// Format: [AUTO_TOGGLE, target_idx, ms_hi, ms_lo]
+    pub fn auto_toggle(&mut self, idx: u8, delay_ms: u16) -> &mut Self {
+        self.buf.put_u8(AUTO_TOGGLE);
+        self.buf.put_u8(idx);
+        self.buf.put_u8((delay_ms >> 8) as u8);
+        self.buf.put_u8((delay_ms & 0xFF) as u8);
+        self
+    }
+
     /// End the batch.
     pub fn end(&mut self) -> &mut Self {
         self.buf.put_u8(BATCH_END);
@@ -574,5 +649,107 @@ impl OpcodeBuffer {
 impl Default for OpcodeBuffer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_target() {
+        let mut buf = OpcodeBuffer::new();
+        buf.init_target(0, true);
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], INIT_TARGET);
+        assert_eq!(bytes[1], 0); // target_idx
+        assert_eq!(bytes[2], 1); // default = true
+    }
+
+    #[test]
+    fn test_bind_target() {
+        let mut buf = OpcodeBuffer::new();
+        buf.bind_target(5, 0, 0xC0, false);
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], BIND_TARGET);
+        assert_eq!(bytes[1], 5); // ref (varint, single byte)
+        assert_eq!(bytes[2], 0); // target_idx
+        // St code 0xC0 as varint: 0x80 | ((0xC0-0x80)>>8) = 0x80, then low byte
+        // Actually 0xC0 = 192. 192 >= 128 so varint is 2 bytes: 0x80 + ((192-128)>>8)=0x80, (192-128)&255=64
+        // Wait: varint encoding: if v < 128 -> 1 byte. v=192 >= 128.
+        // v-128 = 64. 0x80 | (64>>8) = 0x80. Second byte: 64&255 = 64.
+        // So varint(192) = [0x80, 64]
+        assert_eq!(bytes[3], 0x80); // st varint high byte
+        assert_eq!(bytes[4], 64);  // st varint low byte
+        assert_eq!(bytes[5], 0);   // invert = false
+    }
+
+    #[test]
+    fn test_bind_toggle() {
+        let mut buf = OpcodeBuffer::new();
+        buf.bind_toggle(3, 1, 0); // ref=3, ev=click(1), target_idx=0
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], BIND_TOGGLE);
+        assert_eq!(bytes[1], 3); // ref
+        assert_eq!(bytes[2], 1); // ev_type
+        assert_eq!(bytes[3], 0); // target_idx
+    }
+
+    #[test]
+    fn test_init_selector() {
+        let mut buf = OpcodeBuffer::new();
+        buf.init_selector(2, 1); // idx=2, default=1
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], INIT_SELECTOR);
+        assert_eq!(bytes[1], 2);
+        assert_eq!(bytes[2], 1);
+    }
+
+    #[test]
+    fn test_bind_selector() {
+        let mut buf = OpcodeBuffer::new();
+        buf.bind_selector(7, 1, 2, 50); // ref=7, idx=1, match=2, st=50
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], BIND_SELECTOR);
+        assert_eq!(bytes[1], 7); // ref
+        assert_eq!(bytes[2], 1); // sel_idx
+        assert_eq!(bytes[3], 2); // match_val
+        assert_eq!(bytes[4], 50); // st varint (< 128 = 1 byte)
+    }
+
+    #[test]
+    fn test_bind_select() {
+        let mut buf = OpcodeBuffer::new();
+        buf.bind_select(4, 1, 0, 2); // ref=4, ev=click(1), sel_idx=0, val=2
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], BIND_SELECT);
+        assert_eq!(bytes[1], 4); // ref
+        assert_eq!(bytes[2], 1); // ev_type
+        assert_eq!(bytes[3], 0); // sel_idx
+        assert_eq!(bytes[4], 2); // val
+    }
+
+    #[test]
+    fn test_bind_timed_toggle() {
+        let mut buf = OpcodeBuffer::new();
+        buf.bind_timed_toggle(3, 1, 0, 2000); // ref=3, ev=click(1), target_idx=0, delay=2000ms
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], BIND_TIMED_TOGGLE);
+        assert_eq!(bytes[1], 3); // ref
+        assert_eq!(bytes[2], 1); // ev_type
+        assert_eq!(bytes[3], 0); // target_idx
+        assert_eq!(bytes[4], (2000 >> 8) as u8); // ms_hi = 7
+        assert_eq!(bytes[5], (2000 & 0xFF) as u8); // ms_lo = 208
+    }
+
+    #[test]
+    fn test_auto_toggle() {
+        let mut buf = OpcodeBuffer::new();
+        buf.auto_toggle(1, 5000); // target_idx=1, delay=5000ms
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], AUTO_TOGGLE);
+        assert_eq!(bytes[1], 1); // target_idx
+        assert_eq!(bytes[2], (5000 >> 8) as u8); // ms_hi = 19
+        assert_eq!(bytes[3], (5000 & 0xFF) as u8); // ms_lo = 136
     }
 }

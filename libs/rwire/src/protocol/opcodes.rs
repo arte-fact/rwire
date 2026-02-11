@@ -71,36 +71,34 @@ pub const BIND_DEBOUNCED: u8 = 0x33;
 pub const BIND_REMOTE_PARAM: u8 = 0x34;
 
 // ============================================================================
-// State Operations
+// Client Actions (Targets & Selectors)
 // ============================================================================
 
-/// Initialize local state on client. Format: [INIT_LOCAL_STATE, state_idx, len, json_bytes...]
-pub const INIT_LOCAL_STATE: u8 = 0x40;
+/// Initialize a bool target. Format: [INIT_TARGET, target_idx, default_u8]
+pub const INIT_TARGET: u8 = 0x47;
 
-/// Define a local handler. Format: [DEF_LOCAL_HANDLER, handler_idx, state_idx, mut_count, ...mutations]
-pub const DEF_LOCAL_HANDLER: u8 = 0x42;
+/// Bind element class to target state. Format: [BIND_TARGET, ref_varint, target_idx, st_varint, invert_u8]
+pub const BIND_TARGET: u8 = 0x48;
 
-// ============================================================================
-// Mutation Opcodes (for local state handlers)
-// ============================================================================
+/// On event, toggle target and update bindings. Format: [BIND_TOGGLE, ref_varint, ev_type, target_idx]
+pub const BIND_TOGGLE: u8 = 0x49;
 
-/// Toggle boolean field. Format: [MUT_TOGGLE, field_idx]
-pub const MUT_TOGGLE: u8 = 0x50;
+/// Initialize an enum selector. Format: [INIT_SELECTOR, sel_idx, default_val]
+pub const INIT_SELECTOR: u8 = 0x4A;
 
-/// Add i8 to numeric field. Format: [MUT_ADD_I8, field_idx, value_i8]
-pub const MUT_ADD_I8: u8 = 0x51;
+/// Bind element class to selector value. Format: [BIND_SELECTOR, ref_varint, sel_idx, match_val, st_varint]
+pub const BIND_SELECTOR: u8 = 0x4B;
 
-/// Add i32 to numeric field. Format: [MUT_ADD_I32, field_idx, b3, b2, b1, b0] (big-endian)
-pub const MUT_ADD_I32: u8 = 0x52;
+/// On event, set selector value and update bindings. Format: [BIND_SELECT, ref_varint, ev_type, sel_idx, val]
+pub const BIND_SELECT: u8 = 0x4C;
 
-/// Set boolean field. Format: [MUT_SET_BOOL, field_idx, 0|1]
-pub const MUT_SET_BOOL: u8 = 0x53;
+/// On event: set target to true, revert to false after delay. Repeated events restart timer.
+/// Format: [BIND_TIMED_TOGGLE, ref_varint, ev_type, target_idx, ms_hi, ms_lo]
+pub const BIND_TIMED_TOGGLE: u8 = 0x4D;
 
-/// Set i32 field. Format: [MUT_SET_I32, field_idx, b3, b2, b1, b0] (big-endian)
-pub const MUT_SET_I32: u8 = 0x54;
-
-/// Set string field. Format: [MUT_SET_STR, field_idx, len, bytes...]
-pub const MUT_SET_STR: u8 = 0x55;
+/// After delay from mount, flip target boolean once.
+/// Format: [AUTO_TOGGLE, target_idx, ms_hi, ms_lo]
+pub const AUTO_TOGGLE: u8 = 0x4E;
 
 // ============================================================================
 // Form Operations

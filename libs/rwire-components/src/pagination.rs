@@ -38,6 +38,7 @@ impl Default for Pagination {
     }
 }
 
+#[rwire::component]
 impl Pagination {
     /// Create a new pagination component.
     pub fn new() -> Self {

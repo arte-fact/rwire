@@ -33,18 +33,14 @@ struct AppState { count: i32 }
 #[derive(State, Default)]
 #[storage(persisted)]
 struct UserData { name: String }
-
-// Local -- runs entirely in the browser, no server round-trip
-#[derive(State, Default)]
-#[storage(local)]
-struct UIState { sidebar_open: bool }
 ```
 
 | Storage | Location | Lifetime | Use case |
 |---------|----------|----------|----------|
 | `memory` | Server RAM | Per connection | Session data, counters, form input |
 | `persisted` | Server disk | Across restarts | User profiles, saved documents |
-| `local` | Browser | Page session | Menu toggles, UI-only state |
+
+For purely visual state (menu toggles, tab switching), use [Client Actions](/docs/advanced/client-actions) instead of state -- they run entirely in the browser with zero server round-trips.
 
 ## Accessing State
 
@@ -73,12 +69,12 @@ An app can use multiple state structs with different storage types. Each handler
 
 ```rust
 #[derive(State, Default)]
-#[storage(local)]
-struct UIState { menu_open: bool }
-
-#[derive(State, Default)]
 #[storage(memory)]
 struct AppState { items: Vec<String> }
+
+#[derive(State, Default, Clone, Serialize, Deserialize)]
+#[storage(persisted, table = "prefs", key = "session_id")]
+struct UserPrefs { session_id: String, theme: String }
 ```
 
 The framework routes events to the correct handler based on the state type in its signature.

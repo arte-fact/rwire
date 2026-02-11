@@ -39,6 +39,7 @@ pub struct Stat {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Stat {
     /// Create a new stat with a value.
     pub fn new(value: impl Into<Cow<'static, str>>) -> Self {

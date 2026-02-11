@@ -76,19 +76,13 @@ fn toggle_item(state: &mut TodoState, ctx: &EventContext) {
 
 The `ItemRef` encodes as a compact varint (1-3 bytes) rather than a string, and the type parameter ensures you access the correct collection at compile time.
 
-## Local Handlers
+## Debounced Handlers
 
-For client-side state, use `#[handler(local)]`. These compile to browser-side mutations that execute instantly without a server round-trip:
+Use `.debounce(ms)` to delay handler execution until events stop arriving. This is useful for search-as-you-type or resize handlers:
 
 ```rust
-#[derive(State, Default)]
-#[storage(local)]
-struct UIState { menu_open: bool }
-
-#[handler(local)]
-fn toggle_menu(state: &mut UIState) {
-    state.menu_open = !state.menu_open;
-}
+el(El::Input)
+    .on(Ev::Input, search().debounce(300))
 ```
 
-Local handlers are limited to simple mutations (toggle, add, set) that can be expressed as binary opcodes.
+The handler fires 300ms after the last input event. If the user types more before the delay expires, the timer resets.

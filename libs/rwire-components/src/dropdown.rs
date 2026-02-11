@@ -2,6 +2,10 @@
 //!
 //! Action menu triggered by a button. Server-controlled open state.
 //!
+//! The full DOM structure (trigger, menu panel, items, backdrop) is always
+//! rendered. Visibility is toggled via opacity and pointer-events, enabling
+//! smooth CSS transitions when opening/closing.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -80,6 +84,7 @@ pub struct DropdownMenu {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl DropdownMenu {
     /// Create a new dropdown menu.
     pub fn new() -> Self {
@@ -151,6 +156,9 @@ impl DropdownMenu {
     }
 
     /// Build the dropdown into an ElementBuilder.
+    ///
+    /// Always renders the full DOM structure. Menu visibility is toggled
+    /// via opacity and pointer-events, enabling CSS transitions.
     pub fn build(self) -> ElementBuilder {
         let mut container = el(El::Div).st([St::PositionRelative, St::DisplayInlineBlock]);
 
@@ -166,51 +174,60 @@ impl DropdownMenu {
             container = container.append([trigger]);
         }
 
-        // Menu panel (only rendered when open)
-        if self.open {
-            let mut menu = el(El::Div)
-                .st(Self::compute_menu_tokens())
-                .attr("style", "top:100%;margin-top:4px;min-width:160px")
-                .at(At::Role, Av::RoleMenu);
-
-            for item in &self.items {
-                if item.divider_before {
-                    menu = menu.append([el(El::Hr).st([
-                        St::MySm,
-                        St::BorderNone,
-                        St::BorderTSubtle,
-                    ])]);
-                }
-
-                let mut item_tokens = Self::compute_item_tokens();
-                if item.destructive {
-                    item_tokens.push(St::TextError);
-                }
-
-                let mut btn = el(El::Button)
-                    .st(item_tokens)
-                    .hover([St::BgHover])
-                    .at(At::Type, Av::Button)
-                    .at(At::Role, Av::RoleMenuItem)
-                    .text(&item.label);
-
-                if let Some(handler) = item.on_click.clone() {
-                    btn = btn.on(Ev::Click, handler);
-                }
-
-                menu = menu.append([btn]);
+        // Invisible backdrop to close menu on outside click — always rendered
+        if let Some(handler) = self.on_toggle.clone() {
+            let mut backdrop = el(El::Div)
+                .st([St::PositionFixed, St::Inset0, St::Z40]);
+            if self.open {
+                backdrop = backdrop.on(Ev::Click, handler);
+            } else {
+                backdrop = backdrop.st([St::PointerEventsNone]);
             }
-
-            // Invisible backdrop to close menu on outside click
-            if let Some(handler) = self.on_toggle {
-                let backdrop = el(El::Div)
-                    .st([St::PositionFixed, St::Inset0, St::Z40])
-                    .on(Ev::Click, handler);
-                container = container.append([backdrop]);
-            }
-
-            container = container.append([menu]);
+            container = container.append([backdrop]);
         }
+
+        // Menu panel — always rendered, visibility toggled
+        let mut menu_tokens = Self::compute_menu_tokens();
+        menu_tokens.push(St::TransitionOpacity);
+
+        if !self.open {
+            menu_tokens.extend([St::Opacity0, St::PointerEventsNone, St::Invisible]);
+        }
+
+        let mut menu = el(El::Div)
+            .st(menu_tokens)
+            .attr("style", "top:100%;margin-top:4px;min-width:160px")
+            .at(At::Role, Av::RoleMenu);
+
+        for item in &self.items {
+            if item.divider_before {
+                menu = menu.append([el(El::Hr).st([
+                    St::MySm,
+                    St::BorderNone,
+                    St::BorderTSubtle,
+                ])]);
+            }
+
+            let mut item_tokens = Self::compute_item_tokens();
+            if item.destructive {
+                item_tokens.push(St::TextError);
+            }
+
+            let mut btn = el(El::Button)
+                .st(item_tokens)
+                .hover([St::BgHover])
+                .at(At::Type, Av::Button)
+                .at(At::Role, Av::RoleMenuItem)
+                .text(&item.label);
+
+            if let Some(handler) = item.on_click.clone() {
+                btn = btn.on(Ev::Click, handler);
+            }
+
+            menu = menu.append([btn]);
+        }
+
+        container = container.append([menu]);
 
         container
     }
@@ -266,5 +283,12 @@ mod tests {
             .item(DropdownItem::new("Edit"))
             .item(DropdownItem::new("Delete").destructive().divider());
         assert_eq!(menu.items.len(), 2);
+    }
+
+    #[test]
+    fn test_dropdown_always_renders_structure() {
+        // Both open and closed should build successfully (always-render)
+        let _open = DropdownMenu::new().open(true).build();
+        let _closed = DropdownMenu::new().open(false).build();
     }
 }

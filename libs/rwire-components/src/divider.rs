@@ -42,6 +42,7 @@ pub struct Divider {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Divider {
     /// Create a new horizontal divider.
     pub fn new() -> Self {

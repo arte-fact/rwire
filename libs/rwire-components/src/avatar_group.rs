@@ -28,6 +28,7 @@ pub struct AvatarGroup {
     size: AvatarSize,
 }
 
+#[rwire::component]
 impl AvatarGroup {
     /// Create a new avatar group.
     pub fn new() -> Self {

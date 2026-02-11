@@ -1140,7 +1140,7 @@ define_token_enum! {
 }
 
 /// Global CSS rules injected alongside pseudo tokens (e.g., @keyframes).
-pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}@keyframes rw-slide-in{from{transform:translateY(1rem);opacity:0}to{transform:translateY(0);opacity:1}}";
+pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}@keyframes rw-slide-in{from{transform:translateY(1rem);opacity:0}to{transform:translateY(0);opacity:1}}@keyframes rw-ping{75%,100%{transform:scale(2);opacity:0}}@keyframes rw-pulse{50%{opacity:.5}}@keyframes rw-bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}";
 
 // ============================================================================
 // CSS Generation Functions
@@ -1157,7 +1157,7 @@ pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
         if used.contains(&code) {
             use std::fmt::Write;
             let _ = write!(css, ".u{}{{{}}}", code, declaration);
-            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") {
+            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") || declaration.contains("rw-ping") || declaration.contains("rw-pulse") || declaration.contains("rw-bounce") {
                 needs_global_keyframes = true;
             }
         }
@@ -1199,7 +1199,7 @@ pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> Strin
                 ".h{}u{}{}{{{}}}",
                 pc_code, st_code, selector, declaration
             );
-            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") {
+            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") || declaration.contains("rw-ping") || declaration.contains("rw-pulse") || declaration.contains("rw-bounce") {
                 needs_spin_keyframes = true;
             }
         }
@@ -1432,5 +1432,32 @@ mod tests {
         let used = HashSet::new();
         let css = generate_breakpoint_css(&used);
         assert!(css.is_empty());
+    }
+
+    #[test]
+    fn test_animate_ping_includes_keyframes() {
+        let mut used = HashSet::new();
+        used.insert(St::AnimatePing.as_u16());
+        let css = generate_utility_css(&used);
+        assert!(css.contains("rw-ping"), "Missing rw-ping animation: {css}");
+        assert!(css.contains("@keyframes rw-ping"), "Missing rw-ping keyframes: {css}");
+    }
+
+    #[test]
+    fn test_animate_pulse_includes_keyframes() {
+        let mut used = HashSet::new();
+        used.insert(St::AnimatePulse.as_u16());
+        let css = generate_utility_css(&used);
+        assert!(css.contains("rw-pulse"), "Missing rw-pulse animation: {css}");
+        assert!(css.contains("@keyframes rw-pulse"), "Missing rw-pulse keyframes: {css}");
+    }
+
+    #[test]
+    fn test_animate_bounce_includes_keyframes() {
+        let mut used = HashSet::new();
+        used.insert(St::AnimateBounce.as_u16());
+        let css = generate_utility_css(&used);
+        assert!(css.contains("rw-bounce"), "Missing rw-bounce animation: {css}");
+        assert!(css.contains("@keyframes rw-bounce"), "Missing rw-bounce keyframes: {css}");
     }
 }

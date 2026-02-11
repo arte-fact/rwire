@@ -36,6 +36,7 @@ pub struct FormField {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl FormField {
     /// Create a new form field.
     pub fn new() -> Self {

@@ -65,6 +65,7 @@ pub struct Select {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Select {
     /// Create a new select dropdown.
     pub fn new() -> Self {

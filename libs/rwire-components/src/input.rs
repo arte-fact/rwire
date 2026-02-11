@@ -78,6 +78,7 @@ pub struct Input {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Input {
     /// Create a new text input.
     pub fn new() -> Self {

@@ -31,6 +31,7 @@ pub struct Slider {
     label: Option<String>,
 }
 
+#[rwire::component]
 impl Slider {
     /// Create a new slider (default 0-100).
     pub fn new() -> Self {

@@ -24,6 +24,7 @@ pub struct Spacer {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Spacer {
     /// Create a new spacer with the given size.
     pub fn new(size: SpacingSize) -> Self {

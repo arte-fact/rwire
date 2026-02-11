@@ -128,64 +128,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[renderer]
 fn root(state: &DesignSystemState) -> ElementBuilder {
-    let slug = if state.current_slug.is_empty() {
-        return el(El::Div)
-            .st([St::BgApp, St::TextDefault, St::MinHScreen])
-            .append([build_header(), build_landing(), build_footer()]);
+    let slug_str = &state.current_slug;
+    let on_landing = slug_str.is_empty();
+
+    // Mobile drawer: full sidebar on component pages, empty placeholder on landing
+    let mobile_drawer = if on_landing {
+        el(El::Div)
     } else {
-        &state.current_slug
+        Drawer::new()
+            .title("Components")
+            .position(DrawerPosition::Left)
+            .open(state.sidebar_open)
+            .on_close(toggle_sidebar())
+            .content(build_sidebar(slug_str))
+            .build()
     };
 
-    let entry = catalog::find(slug);
-
-    // Mobile drawer for sidebar
-    let mobile_drawer = Drawer::new()
-        .title("Components")
-        .position(DrawerPosition::Left)
-        .open(state.sidebar_open)
-        .on_close(toggle_sidebar())
-        .content(build_sidebar(slug))
-        .build();
-
-    // Desktop sidebar
-    let desktop_sidebar = el(El::Aside)
-        .st([
-            St::DisplayNone,
-            St::BgSidebar,
-            St::BorderRDefault,
-            St::OverflowYScroll,
-            St::PyMd,
-        ])
-        .md([St::DisplayBlock])
-        .attr(
-            "style",
-            "position:sticky;top:56px;height:calc(100vh - 56px);width:240px;flex-shrink:0",
-        )
-        .append([build_sidebar(slug)]);
-
-    // Main content
-    let main_content = if let Some(entry) = entry {
-        build_component_content(entry, state)
+    // Body content: landing page vs component page with sidebar
+    let body = if on_landing {
+        el(El::Div)
+            .st([St::DisplayFlex, St::MinHScreen])
+            .append([
+                el(El::Main).st([St::Flex1, St::MinW0]).append([build_landing()]),
+            ])
     } else {
-        el(El::Div).st([St::PMd]).append([
-            el(El::H1)
-                .st([St::Text2xl, St::FontBold, St::MbMd])
-                .text("Component Not Found"),
-            el(El::P)
-                .st([St::TextMuted])
-                .text(&format!("No component found with slug \"{slug}\"")),
-        ])
+        let entry = catalog::find(slug_str);
+
+        // Desktop sidebar
+        let desktop_sidebar = el(El::Aside)
+            .st([
+                St::DisplayNone,
+                St::BgSidebar,
+                St::BorderRDefault,
+                St::OverflowYScroll,
+                St::PyMd,
+            ])
+            .md([St::DisplayBlock])
+            .attr(
+                "style",
+                "position:sticky;top:56px;height:calc(100vh - 56px);width:240px;flex-shrink:0",
+            )
+            .append([build_sidebar(slug_str)]);
+
+        // Main content
+        let main_content = if let Some(entry) = entry {
+            build_component_content(entry, state)
+        } else {
+            el(El::Div).st([St::PMd]).append([
+                el(El::H1)
+                    .st([St::Text2xl, St::FontBold, St::MbMd])
+                    .text("Component Not Found"),
+                el(El::P)
+                    .st([St::TextMuted])
+                    .text(&format!("No component found with slug \"{slug_str}\"")),
+            ])
+        };
+
+        el(El::Div)
+            .st([St::DisplayFlex, St::MinHScreen])
+            .append([
+                desktop_sidebar,
+                el(El::Main)
+                    .st([St::Flex1, St::MinW0, St::PMd, St::PbXl])
+                    .append([main_content]),
+            ])
     };
 
-    let body = el(El::Div)
-        .st([St::DisplayFlex, St::MinHScreen])
-        .append([
-            desktop_sidebar,
-            el(El::Main)
-                .st([St::Flex1, St::MinW0, St::PMd, St::PbXl])
-                .append([main_content]),
-        ]);
-
+    // Always: Div > [Header, Drawer, Body, Footer] — stable 4-child structure
     el(El::Div)
         .st([St::BgApp, St::TextDefault, St::MinHScreen])
         .append([build_header(), mobile_drawer, body, build_footer()])
@@ -456,13 +465,41 @@ fn build_landing() -> ElementBuilder {
 // ============================================================================
 
 fn build_component_page(slug: &str) -> ElementBuilder {
-    // This is called at tree-shaking time; return a minimal placeholder
-    // that includes the component types so they get tree-shaken in.
-    if let Some(entry) = catalog::find(slug) {
-        (entry.build_demo)(&[], &[])
-    } else {
-        el(El::Div).text("Component")
-    }
+    let demo = catalog::find(slug)
+        .map(|e| (e.build_demo)(&[], &[]))
+        .unwrap_or_else(|| el(El::Div));
+
+    // Return a representative tree with all element types used in the full page
+    // layout so they get tree-shaken into the capsule.
+    el(El::Div).append([
+        // Sidebar: needs md:DisplayBlock for responsive visibility
+        el(El::Aside)
+            .st([St::DisplayNone])
+            .md([St::DisplayBlock])
+            .append([el(El::Nav).append([
+                Link::to("/", "x").hover([St::BgHover]),
+            ])]),
+        // Main content wrapper
+        el(El::Main).append([
+            // Breadcrumb
+            Breadcrumb::new()
+                .item("x", Some("/"))
+                .item("y", None::<&str>)
+                .build(),
+            // Playground controls (Input, Label via Checkbox)
+            Checkbox::new().label("x").build(),
+            // Code example
+            Code::block("x").language("rust").build(),
+            // Props table
+            Table::new().headers(["a"]).build(),
+            // Variant selector button (captures hover pseudo pair)
+            el(El::Button)
+                .st([St::BgSecondary])
+                .hover([St::BgSecondaryHover]),
+            // Component demo
+            demo,
+        ]),
+    ])
 }
 
 // ============================================================================
@@ -536,7 +573,7 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
                 } else {
                     vec![
                         St::BgSecondary, St::TextOnSecondary, St::PxSm, St::PySm,
-                        St::RoundedMd, St::TextXs, St::FontMedium, St::BorderDefault,
+                        St::RoundedMd, St::TextXs, St::FontMedium, St::BorderNone,
                         St::CursorPointer, St::TransitionColors,
                     ]
                 })

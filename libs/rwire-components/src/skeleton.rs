@@ -54,6 +54,7 @@ impl Default for Skeleton {
     }
 }
 
+#[rwire::component]
 impl Skeleton {
     /// Create a text line skeleton.
     pub fn text() -> Self {

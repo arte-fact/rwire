@@ -3,6 +3,10 @@
 //! This component creates a modal dialog with backdrop, focus management,
 //! and keyboard handling. The modal is server-controlled via state.
 //!
+//! The full DOM structure is always rendered regardless of open/closed state.
+//! Visibility is toggled via opacity and pointer-events CSS classes, which
+//! enables smooth CSS transitions when opening/closing.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -76,6 +80,7 @@ impl Default for Modal {
     }
 }
 
+#[rwire::component]
 impl Modal {
     /// Create a new modal.
     pub fn new() -> Self {
@@ -145,12 +150,10 @@ impl Modal {
     }
 
     /// Build the modal component.
+    ///
+    /// Always renders the full DOM structure. Open/close state is toggled
+    /// via opacity and pointer-events, enabling CSS transitions.
     pub fn build(self) -> ElementBuilder {
-        if !self.open {
-            // Modal is closed - return hidden container
-            return el(El::Div).st([St::DisplayNone]);
-        }
-
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size_tokens());
         tokens.push(St::MaxH90vh);
@@ -188,21 +191,36 @@ impl Modal {
             .at(At::Tabindex, Av::MinusOne)
             .append(modal_children);
 
-        // Backdrop
-        let mut backdrop_el = el(El::Div)
-            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50]);
+        // Backdrop — always present, visibility toggled
+        let mut backdrop = el(El::Div)
+            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50,
+                 St::TransitionOpacity]);
+
+        if !self.open {
+            backdrop = backdrop.st([St::Opacity0, St::PointerEventsNone]);
+        }
 
         if self.close_on_backdrop_click {
             if let Some(handler) = self.on_close.clone() {
-                backdrop_el = backdrop_el.on(rwire::Ev::Click, handler);
+                backdrop = backdrop.on(rwire::Ev::Click, handler);
             }
         }
 
-        // Container with backdrop and modal
+        // Outer container — always present, visibility toggled
+        let mut container_tokens = vec![
+            St::PositionFixed, St::Inset0, St::Z1400, St::TransitionOpacity,
+        ];
+
+        if self.open {
+            container_tokens.push(St::PointerEventsAuto);
+        } else {
+            container_tokens.extend([St::Opacity0, St::PointerEventsNone]);
+        }
+
         el(El::Div)
-            .st([St::PositionFixed, St::Inset0, St::PointerEventsAuto, St::Z1400])
+            .st(container_tokens)
             .append([
-                backdrop_el,
+                backdrop,
                 el(El::Div)
                     .st([St::PositionFixed, St::Inset0, St::DisplayFlex, St::ItemsCenter, St::JustifyCenter, St::PointerEventsNone, St::PMd])
                     .append([modal_inner])
@@ -302,4 +320,10 @@ mod tests {
         assert!(!modal.open);
     }
 
+    #[test]
+    fn test_modal_always_renders_structure() {
+        // Both open and closed should build successfully (always-render)
+        let _open = Modal::new().open(true).build();
+        let _closed = Modal::new().open(false).build();
+    }
 }

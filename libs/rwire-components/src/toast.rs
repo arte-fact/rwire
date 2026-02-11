@@ -17,8 +17,12 @@
 
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder, Ev, HandlerSpec};
+use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, Target};
 use std::borrow::Cow;
+
+/// Client-side target for auto-dismiss of toast container.
+#[derive(Target)]
+struct ToastAutoDismiss;
 
 /// Toast intent (visual style).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,6 +43,7 @@ pub struct Toast {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Toast {
     /// Create a new toast with a message.
     pub fn new(message: impl Into<Cow<'static, str>>) -> Self {
@@ -173,6 +178,7 @@ impl Toast {
 pub struct ToastContainer {
     toasts: Vec<Toast>,
     extra_class: Option<Cow<'static, str>>,
+    auto_dismiss_ms: Option<u16>,
 }
 
 impl ToastContainer {
@@ -190,6 +196,15 @@ impl ToastContainer {
     /// Add custom class.
     pub fn class(mut self, class: impl Into<Cow<'static, str>>) -> Self {
         self.extra_class = Some(class.into());
+        self
+    }
+
+    /// Set auto-dismiss delay for the entire container.
+    ///
+    /// After `ms` milliseconds, the container will be hidden via
+    /// client-side auto_toggle (no server round-trip needed).
+    pub fn auto_dismiss(mut self, ms: u16) -> Self {
+        self.auto_dismiss_ms = Some(ms);
         self
     }
 
@@ -215,6 +230,13 @@ impl ToastContainer {
 
         if let Some(ref extra) = self.extra_class {
             container = container.class(extra.as_ref());
+        }
+
+        // Auto-dismiss: hide container after delay
+        if let Some(ms) = self.auto_dismiss_ms {
+            container = container
+                .when::<ToastAutoDismiss>(St::DisplayNone)
+                .auto_toggle::<ToastAutoDismiss>(ms);
         }
 
         for toast in self.toasts {
@@ -293,5 +315,15 @@ mod tests {
             .toast(Toast::success("Saved"))
             .toast(Toast::error("Failed"));
         assert_eq!(container.toasts.len(), 2);
+    }
+
+    #[test]
+    fn test_toast_container_auto_dismiss() {
+        let container = ToastContainer::new()
+            .toast(Toast::info("Test"))
+            .auto_dismiss(5000);
+        assert_eq!(container.auto_dismiss_ms, Some(5000));
+        // Should build successfully with auto-dismiss
+        let _built = container.build();
     }
 }

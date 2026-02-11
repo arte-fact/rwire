@@ -44,12 +44,11 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::action::{Selector, Target};
 use crate::attr_tokens::{At, Av};
 use crate::item_ref::ItemRef;
 use crate::protocol::{El, Ev, OpcodeBuffer};
-use crate::state::{
-    ChangeSet, HandlerFn, HandlerSpec, LocalMutations, Renderer, RendererDeps, StorageType,
-};
+use crate::state::{ChangeSet, HandlerFn, HandlerSpec, Renderer, RendererDeps};
 
 /// A typed attribute: enum key + enum value, enum key + symbol value, or bool attr.
 #[derive(Clone, Debug)]
@@ -117,6 +116,33 @@ pub fn el(el_type: El) -> ElementBuilder {
     ElementBuilder::new(el_type)
 }
 
+/// Static token inventory extracted from a renderer's source code at compile time.
+///
+/// The `#[renderer]` proc macro scans the function body for `St::Variant`,
+/// `.hover([...])`, `.sm([...])` etc. and generates a const inventory of all
+/// tokens referenced across every branch. Tree-shaking uses this inventory
+/// instead of relying solely on default-state rendering.
+#[derive(Debug)]
+pub struct TokenInventory {
+    /// All `St` tokens referenced in the renderer body (as u16 codes).
+    pub styles: &'static [u16],
+    /// Pseudo-class pairs from `.hover()`, `.focus()`, `.active()` etc.
+    /// Each entry is `(Pc code, St code)`.
+    pub pseudo_pairs: &'static [(u8, u16)],
+    /// Breakpoint pairs from `.sm()`, `.md()`, `.lg()`, `.xl()`.
+    /// Each entry is `(Bp code, St code)`.
+    pub breakpoint_pairs: &'static [(u8, u16)],
+}
+
+impl TokenInventory {
+    /// Empty inventory (no tokens discovered).
+    pub const EMPTY: Self = Self {
+        styles: &[],
+        pseudo_pairs: &[],
+        breakpoint_pairs: &[],
+    };
+}
+
 /// Trait for type-erased synced renderers.
 ///
 /// This trait allows renderers to be stored and invoked without knowing
@@ -132,12 +158,18 @@ pub trait SyncedRenderer: Send + Sync {
     fn create_default_state(&self) -> Box<dyn Any + Send + Sync>;
     /// Get the dependency information for this renderer.
     fn deps(&self) -> RendererDeps;
+    /// Get the static token inventory extracted at compile time.
+    ///
+    /// Contains all `St`, pseudo, and breakpoint tokens referenced in the
+    /// renderer source code, across all branches.
+    fn token_inventory(&self) -> &'static TokenInventory;
 }
 
 /// Implementation of SyncedRenderer for a specific state type.
 struct SyncedRendererImpl<S: Default + Send + Sync + 'static> {
     render: Renderer<S>,
     deps: RendererDeps,
+    tokens: &'static TokenInventory,
 }
 
 impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S> {
@@ -149,6 +181,7 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
         Box::new(SyncedRendererImpl {
             render: self.render,
             deps: self.deps,
+            tokens: self.tokens,
         })
     }
 
@@ -163,12 +196,65 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
     fn deps(&self) -> RendererDeps {
         self.deps
     }
+
+    fn token_inventory(&self) -> &'static TokenInventory {
+        self.tokens
+    }
 }
 
 impl Clone for Box<dyn SyncedRenderer> {
     fn clone(&self) -> Self {
         self.clone_box()
     }
+}
+
+/// A binding from an element to a Target's boolean state.
+#[derive(Clone, Debug)]
+struct TargetBinding {
+    type_id: TypeId,
+    st: u16,
+    invert: bool,
+    default: bool,
+}
+
+/// A trigger that toggles a Target on an event.
+#[derive(Clone, Debug)]
+struct TargetToggle {
+    ev: Ev,
+    type_id: TypeId,
+}
+
+/// A binding from an element to a Selector variant match.
+#[derive(Clone, Debug)]
+struct SelectorBinding {
+    type_id: TypeId,
+    match_val: u8,
+    st: u16,
+    default_val: u8,
+}
+
+/// A trigger that sets a Selector value on an event.
+#[derive(Clone, Debug)]
+struct SelectorSet {
+    ev: Ev,
+    type_id: TypeId,
+    val: u8,
+}
+
+/// A trigger that sets a Target to true on event, then reverts to false after a delay.
+/// Repeated events restart the timer.
+#[derive(Clone, Debug)]
+struct TimedTargetToggle {
+    ev: Ev,
+    type_id: TypeId,
+    delay_ms: u16,
+}
+
+/// A delayed toggle that flips a Target boolean once after a delay from mount.
+#[derive(Clone, Debug)]
+struct AutoToggle {
+    type_id: TypeId,
+    delay_ms: u16,
 }
 
 /// Builder for constructing DOM elements with a fluent API.
@@ -191,6 +277,21 @@ pub struct ElementBuilder {
     pseudo_groups: Vec<(u8, Vec<u16>)>,
     /// Responsive breakpoint groups: (Bp code, St tokens)
     breakpoint_groups: Vec<(u8, Vec<u16>)>,
+    /// Component-level token inventory for deep tree-shaking.
+    /// Set by `#[component]` macro on component impl blocks.
+    component_tokens: Option<&'static TokenInventory>,
+    /// Target bindings: (TypeId, St code, invert, default)
+    target_bindings: Vec<TargetBinding>,
+    /// Target toggles: (Ev, TypeId)
+    target_toggles: Vec<TargetToggle>,
+    /// Selector bindings: (TypeId, match_val, St code, default_val)
+    selector_bindings: Vec<SelectorBinding>,
+    /// Selector sets: (Ev, TypeId, val)
+    selector_sets: Vec<SelectorSet>,
+    /// Timed target toggles: set true on event, revert after delay
+    timed_toggles: Vec<TimedTargetToggle>,
+    /// Auto toggles: flip target after delay from mount
+    auto_toggles: Vec<AutoToggle>,
 }
 
 impl ElementBuilder {
@@ -209,29 +310,45 @@ impl ElementBuilder {
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
             breakpoint_groups: Vec::new(),
+            component_tokens: None,
+            target_bindings: Vec::new(),
+            target_toggles: Vec::new(),
+            selector_bindings: Vec::new(),
+            selector_sets: Vec::new(),
+            timed_toggles: Vec::new(),
+            auto_toggles: Vec::new(),
         }
     }
 
     /// Create a synced element that will re-render when state changes.
     ///
     /// This is the legacy method that always re-renders on any state change.
-    /// Prefer using `synced_with_deps` for fine-grained reactivity.
+    /// Prefer using `synced_with_tokens` for proper tree-shaking support.
     pub fn synced<S: Default + Send + Sync + 'static>(render: Renderer<S>) -> Self {
-        Self::synced_with_deps::<S>(render, RendererDeps::always())
+        Self::synced_with_tokens::<S>(render, RendererDeps::always(), &TokenInventory::EMPTY)
     }
 
-    /// Create a synced element with explicit dependency tracking.
+    /// Create a synced element with explicit dependency tracking (legacy).
     ///
-    /// This is called by the `#[renderer]` macro with auto-detected or
-    /// explicitly specified dependencies.
-    ///
-    /// # Arguments
-    ///
-    /// * `render` - The render function that takes state and returns an ElementBuilder
-    /// * `deps` - Dependency information specifying which fields trigger re-renders
+    /// Prefer `synced_with_tokens` which also provides a token inventory
+    /// for tree-shaking.
     pub fn synced_with_deps<S: Default + Send + Sync + 'static>(
         render: Renderer<S>,
         deps: RendererDeps,
+    ) -> Self {
+        Self::synced_with_tokens::<S>(render, deps, &TokenInventory::EMPTY)
+    }
+
+    /// Create a synced element with dependency tracking and token inventory.
+    ///
+    /// This is the primary constructor called by the `#[renderer]` macro.
+    /// The token inventory contains all `St`, pseudo, and breakpoint tokens
+    /// found in the renderer's source code (across all branches), enabling
+    /// tree-shaking without relying on default-state rendering alone.
+    pub fn synced_with_tokens<S: Default + Send + Sync + 'static>(
+        render: Renderer<S>,
+        deps: RendererDeps,
+        tokens: &'static TokenInventory,
     ) -> Self {
         Self {
             el_type: El::Div, // Placeholder, will be replaced by rendered content
@@ -241,11 +358,18 @@ impl ElementBuilder {
             typed_attrs: Vec::new(),
             events: Vec::new(),
             children: Vec::new(),
-            synced: Some(Box::new(SyncedRendererImpl { render, deps })),
+            synced: Some(Box::new(SyncedRendererImpl { render, deps, tokens })),
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
             breakpoint_groups: Vec::new(),
+            component_tokens: None,
+            target_bindings: Vec::new(),
+            target_toggles: Vec::new(),
+            selector_bindings: Vec::new(),
+            selector_sets: Vec::new(),
+            timed_toggles: Vec::new(),
+            auto_toggles: Vec::new(),
         }
     }
 
@@ -565,11 +689,144 @@ impl ElementBuilder {
         &self.breakpoint_groups
     }
 
+    // ========================================================================
+    // Client Actions (Targets & Selectors)
+    // ========================================================================
+
+    /// Bind a CSS class to a Target's boolean state.
+    ///
+    /// When the target is `true`, adds the `St` class to this element.
+    /// Use with `.st([St::DisplayNone])` for hide-by-default patterns.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[derive(Target)]
+    /// struct ModalOpen;
+    ///
+    /// el(El::Div)
+    ///     .when::<ModalOpen>(St::DisplayFlex)
+    ///     .st([St::DisplayNone])  // hidden by default
+    /// ```
+    pub fn when<F: Target>(mut self, st: crate::style_tokens::St) -> Self {
+        self.target_bindings.push(TargetBinding {
+            type_id: TypeId::of::<F>(),
+            st: st.as_u16(),
+            invert: false,
+            default: F::default_value(),
+        });
+        self
+    }
+
+    /// Bind a CSS class to a Target's inverse state.
+    ///
+    /// When the target is `false`, adds the `St` class to this element.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Div).unless::<SidebarOpen>(St::DisplayNone)
+    /// ```
+    pub fn unless<F: Target>(mut self, st: crate::style_tokens::St) -> Self {
+        self.target_bindings.push(TargetBinding {
+            type_id: TypeId::of::<F>(),
+            st: st.as_u16(),
+            invert: true,
+            default: F::default_value(),
+        });
+        self
+    }
+
+    /// Toggle a Target on an event (e.g., click toggles modal open/close).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Button)
+    ///     .text("Open Modal")
+    ///     .toggle::<ModalOpen>(Ev::Click)
+    /// ```
+    pub fn toggle<F: Target>(mut self, ev: Ev) -> Self {
+        self.target_toggles.push(TargetToggle {
+            ev,
+            type_id: TypeId::of::<F>(),
+        });
+        self
+    }
+
+    /// Bind a CSS class to a Selector variant match.
+    ///
+    /// When the selector's value equals this variant, adds the `St` class.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Div).when_eq(ActiveTab::Home, St::DisplayBlock)
+    /// ```
+    pub fn when_eq<S: Selector>(mut self, variant: S, st: crate::style_tokens::St) -> Self {
+        self.selector_bindings.push(SelectorBinding {
+            type_id: TypeId::of::<S>(),
+            match_val: variant.variant_value(),
+            st: st.as_u16(),
+            default_val: S::default_value(),
+        });
+        self
+    }
+
+    /// Set a Selector value on an event (e.g., click activates a tab).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Button).select(ActiveTab::Settings, Ev::Click)
+    /// ```
+    pub fn select<S: Selector>(mut self, variant: S, ev: Ev) -> Self {
+        self.selector_sets.push(SelectorSet {
+            ev,
+            type_id: TypeId::of::<S>(),
+            val: variant.variant_value(),
+        });
+        self
+    }
+
+    /// Timed toggle: on event, set target to true, then revert to false after delay.
+    /// Repeated events restart the timer.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Button).toggle_timed::<CopyFeedback>(Ev::Click, 2000)
+    /// ```
+    pub fn toggle_timed<F: Target>(mut self, ev: Ev, delay_ms: u16) -> Self {
+        self.timed_toggles.push(TimedTargetToggle {
+            ev,
+            type_id: TypeId::of::<F>(),
+            delay_ms,
+        });
+        self
+    }
+
+    /// Auto toggle: flip target boolean once after delay from mount.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// el(El::Div)
+    ///     .when::<ToastDismiss>(St::DisplayNone)
+    ///     .auto_toggle::<ToastDismiss>(5000)
+    /// ```
+    pub fn auto_toggle<F: Target>(mut self, delay_ms: u16) -> Self {
+        self.auto_toggles.push(AutoToggle {
+            type_id: TypeId::of::<F>(),
+            delay_ms,
+        });
+        self
+    }
+
     /// Bind an event handler to this element.
     ///
     /// The handler function will be called when the event occurs.
-    /// For local state handlers, the event is handled entirely on the client.
-    /// For memory/persisted state handlers, the event triggers a server round-trip.
+    /// The event triggers a server round-trip where the handler runs.
     pub fn on(mut self, ev: Ev, handler: HandlerSpec) -> Self {
         self.events.push((ev, handler));
         self
@@ -661,6 +918,16 @@ impl ElementBuilder {
         &self.events
     }
 
+    /// Attach a compile-time token inventory to this element.
+    ///
+    /// Called by the `#[component]` macro on `build()` return values.
+    /// Enables tree-shaking to discover all tokens across all branches
+    /// of a component (not just the default configuration).
+    pub fn with_token_inventory(mut self, inv: &'static TokenInventory) -> Self {
+        self.component_tokens = Some(inv);
+        self
+    }
+
     /// Get the style utility tokens.
     pub fn get_style_utils(&self) -> &[u16] {
         &self.style_utils
@@ -703,6 +970,35 @@ impl ElementBuilder {
         for (ev, _) in &self.events {
             ev.as_u8().hash(hasher);
         }
+        // Hash target/selector bindings
+        for tb in &self.target_bindings {
+            tb.type_id.hash(hasher);
+            tb.st.hash(hasher);
+            tb.invert.hash(hasher);
+        }
+        for tt in &self.target_toggles {
+            tt.ev.as_u8().hash(hasher);
+            tt.type_id.hash(hasher);
+        }
+        for sb in &self.selector_bindings {
+            sb.type_id.hash(hasher);
+            sb.match_val.hash(hasher);
+            sb.st.hash(hasher);
+        }
+        for ss in &self.selector_sets {
+            ss.ev.as_u8().hash(hasher);
+            ss.type_id.hash(hasher);
+            ss.val.hash(hasher);
+        }
+        for tt in &self.timed_toggles {
+            tt.ev.as_u8().hash(hasher);
+            tt.type_id.hash(hasher);
+            tt.delay_ms.hash(hasher);
+        }
+        for at in &self.auto_toggles {
+            at.type_id.hash(hasher);
+            at.delay_ms.hash(hasher);
+        }
         for child in &self.children {
             child.hash_content(hasher);
         }
@@ -727,18 +1023,10 @@ pub struct BuildContext {
     symbol_map: HashMap<String, u32>,
     /// Remote handlers (Memory/Persisted state)
     handlers: Vec<HandlerFn>,
-    /// Local handlers with their mutations
-    local_handlers: Vec<LocalMutations>,
     synced_elements: Vec<SyncedElement>,
     next_synced_id: u32,
     used_elements: HashSet<u8>,
     used_events: HashSet<u8>,
-    /// Whether any local handlers are used (for tree shaking capsule)
-    has_local_handlers: bool,
-    /// Mapping from local state TypeId to state index
-    local_state_indices: HashMap<TypeId, u8>,
-    /// Next available local state index
-    next_local_state_idx: u8,
     /// Word frequency counts (built during collect_symbols)
     word_counts: HashMap<String, usize>,
     /// Word table: word -> index (built after collect_symbols, before emit)
@@ -768,6 +1056,20 @@ pub struct BuildContext {
     /// This avoids rendering synced elements twice, which would produce
     /// different generate_element_id() values between passes.
     synced_render_cache: HashMap<u32, ElementBuilder>,
+    /// Mapping from target TypeId to target index (u8)
+    target_indices: HashMap<TypeId, u8>,
+    /// Next available target index
+    next_target_idx: u8,
+    /// Mapping from selector TypeId to selector index (u8)
+    selector_indices: HashMap<TypeId, u8>,
+    /// Next available selector index
+    next_selector_idx: u8,
+    /// Whether any targets or selectors are used (for capsule tree-shaking)
+    has_client_actions: bool,
+    /// Target defaults: target_idx → default_value (for INIT_TARGET emission)
+    target_defaults: HashMap<u8, bool>,
+    /// Selector defaults: selector_idx → default_value (for INIT_SELECTOR emission)
+    selector_defaults: HashMap<u8, u8>,
 }
 
 /// Information about a synced element for later updates.
@@ -827,14 +1129,10 @@ impl BuildContext {
             symbols: Vec::new(),
             symbol_map: HashMap::new(),
             handlers: Vec::new(),
-            local_handlers: Vec::new(),
             synced_elements: Vec::new(),
             next_synced_id: 0,
             used_elements: HashSet::new(),
             used_events: HashSet::new(),
-            has_local_handlers: false,
-            local_state_indices: HashMap::new(),
-            next_local_state_idx: 0,
             word_counts: HashMap::new(),
             word_indices: HashMap::new(),
             words: Vec::new(),
@@ -848,6 +1146,13 @@ impl BuildContext {
             used_attr_values: HashSet::new(),
             composite_table: crate::style_groups::CompositeTable::new(),
             synced_render_cache: HashMap::new(),
+            target_indices: HashMap::new(),
+            next_target_idx: 0,
+            selector_indices: HashMap::new(),
+            next_selector_idx: 0,
+            has_client_actions: false,
+            target_defaults: HashMap::new(),
+            selector_defaults: HashMap::new(),
         }
     }
 
@@ -968,17 +1273,6 @@ impl BuildContext {
         &self.words
     }
 
-    /// Get or allocate a state index for a local state type.
-    fn get_or_create_local_state_idx(&mut self, state_type_id: TypeId) -> u8 {
-        if let Some(&idx) = self.local_state_indices.get(&state_type_id) {
-            return idx;
-        }
-        let idx = self.next_local_state_idx;
-        self.next_local_state_idx += 1;
-        self.local_state_indices.insert(state_type_id, idx);
-        idx
-    }
-
     /// Maximum number of unique symbols per render pass.
     /// Varint supports more, but this prevents unbounded memory growth from buggy renderers.
     const MAX_SYMBOLS: usize = 16_384;
@@ -1024,21 +1318,6 @@ impl BuildContext {
         idx
     }
 
-    fn register_local_handler(
-        &mut self,
-        mut mutations: LocalMutations,
-        state_type_id: Option<TypeId>,
-    ) -> u32 {
-        self.has_local_handlers = true;
-        // Assign state index if state type is known
-        if let Some(type_id) = state_type_id {
-            mutations.state_idx = self.get_or_create_local_state_idx(type_id);
-        }
-        let idx = self.local_handlers.len() as u32;
-        self.local_handlers.push(mutations);
-        idx
-    }
-
     /// Collect all symbols from an element tree (first pass).
     /// Also tracks used element and event types for tree shaking.
     ///
@@ -1049,6 +1328,8 @@ impl BuildContext {
         if let Some(renderer) = &el.synced {
             // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
+            // Collect compile-time token inventory (covers all branches)
+            self.collect_from_inventory(renderer.token_inventory());
             if let Some(rendered) = renderer.render_with_state(state) {
                 self.collect_symbols(&rendered, state);
             }
@@ -1108,6 +1389,12 @@ impl BuildContext {
                 }
             }
         }
+        // Merge component-level token inventory (from #[component] macro)
+        if let Some(inv) = el.component_tokens {
+            self.collect_from_inventory(inv);
+        }
+        // Register target/selector types for tree-shaking
+        self.register_client_actions(el);
         // Process synced children - just track the ID counter, no symbol interning needed
         for child in &el.children {
             if child.synced.is_some() {
@@ -1132,6 +1419,8 @@ impl BuildContext {
         if let Some(renderer) = &el.synced {
             // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
+            // Collect compile-time token inventory (covers all branches)
+            self.collect_from_inventory(renderer.token_inventory());
             let synced_id = self.next_synced_id;
             self.next_synced_id += 1;
 
@@ -1199,6 +1488,12 @@ impl BuildContext {
                 }
             }
         }
+        // Merge component-level token inventory (from #[component] macro)
+        if let Some(inv) = el.component_tokens {
+            self.collect_from_inventory(inv);
+        }
+        // Register target/selector types for tree-shaking
+        self.register_client_actions(el);
         // Process children
         for child in &el.children {
             self.collect_symbols_multi(child, states);
@@ -1211,6 +1506,19 @@ impl BuildContext {
     /// tree and records which El/Ev/St/At/Av/Pc codes are used, so the capsule
     /// includes all necessary lookup tables and CSS.
     pub fn collect_tokens_from(&mut self, el: &ElementBuilder) {
+        // Handle synced elements (renderers) in router views
+        if let Some(renderer) = &el.synced {
+            self.used_elements.insert(El::Span.as_u8());
+            // Collect compile-time token inventory (covers all branches)
+            self.collect_from_inventory(renderer.token_inventory());
+            // Also render with default state for runtime token discovery
+            let default_state = renderer.create_default_state();
+            if let Some(rendered) = renderer.render_with_state(default_state.as_ref()) {
+                self.collect_tokens_from(&rendered);
+            }
+            return;
+        }
+
         self.used_elements.insert(el.el_type.as_u8());
 
         for &util in &el.style_utils {
@@ -1244,6 +1552,12 @@ impl BuildContext {
         for (ev, _) in &el.events {
             self.used_events.insert(ev.as_u8());
         }
+        // Merge component-level token inventory (from #[component] macro)
+        if let Some(inv) = el.component_tokens {
+            self.collect_from_inventory(inv);
+        }
+        // Register target/selector types for tree-shaking
+        self.register_client_actions(el);
         for child in &el.children {
             self.collect_tokens_from(child);
         }
@@ -1276,6 +1590,11 @@ impl BuildContext {
         // Emit composite table if we have composites
         if !self.composite_table.is_empty() {
             self.buf.composite_table(&self.composite_table);
+        }
+
+        // Emit INIT_TARGET and INIT_SELECTOR for all registered types
+        if self.has_client_actions {
+            self.emit_client_action_inits();
         }
 
         self.emit_element(el, None, state)
@@ -1311,6 +1630,11 @@ impl BuildContext {
         // Emit composite table if we have composites
         if !self.composite_table.is_empty() {
             self.buf.composite_table(&self.composite_table);
+        }
+
+        // Emit INIT_TARGET and INIT_SELECTOR for all registered types
+        if self.has_client_actions {
+            self.emit_client_action_inits();
         }
 
         self.emit_element_multi(el, None)
@@ -1452,44 +1776,28 @@ impl BuildContext {
             self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
 
+
+        // Emit client action bindings (targets & selectors)
+        self.emit_client_action_bindings(ref_idx, el);
         // Bind events and track event type usage
         for (ev, handler_spec) in &el.events {
             self.used_events.insert(ev.as_u8());
 
-            match handler_spec.storage_type {
-                StorageType::Local => {
-                    // Local handler - register mutations and emit BIND_LOCAL
-                    if let Some(mutations) = &handler_spec.local_mutations {
-                        let handler_idx = self
-                            .register_local_handler(mutations.clone(), handler_spec.state_type_id);
-                        self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
-                    }
-                }
-                StorageType::Memory | StorageType::Persisted => {
-                    // Remote handler - register handler and emit BIND_REMOTE or BIND_REMOTE_PARAM
-                    if let Some(handler) = &handler_spec.remote_handler {
-                        let handler_idx = self.register_remote_handler(handler.clone());
+            if let Some(handler) = &handler_spec.remote_handler {
+                let handler_idx = self.register_remote_handler(handler.clone());
 
-                        // Use BIND_REMOTE_PARAM if we have param bytes,
-                        // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
-                        if let Some(param_bytes) = &handler_spec.param_bytes {
-                            self.buf.bind_remote_param(
-                                ref_idx,
-                                ev.as_u8(),
-                                handler_idx,
-                                param_bytes,
-                            );
-                        } else if handler_spec.debounce_ms > 0 {
-                            self.buf.bind_debounced(
-                                ref_idx,
-                                ev.as_u8(),
-                                handler_idx,
-                                handler_spec.debounce_ms,
-                            );
-                        } else {
-                            self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
-                        }
-                    }
+                if let Some(param_bytes) = &handler_spec.param_bytes {
+                    self.buf
+                        .bind_remote_param(ref_idx, ev.as_u8(), handler_idx, param_bytes);
+                } else if handler_spec.debounce_ms > 0 {
+                    self.buf.bind_debounced(
+                        ref_idx,
+                        ev.as_u8(),
+                        handler_idx,
+                        handler_spec.debounce_ms,
+                    );
+                } else {
+                    self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
                 }
             }
         }
@@ -1629,44 +1937,28 @@ impl BuildContext {
             self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
 
+
+        // Emit client action bindings (targets & selectors)
+        self.emit_client_action_bindings(ref_idx, el);
         // Bind events and track event type usage
         for (ev, handler_spec) in &el.events {
             self.used_events.insert(ev.as_u8());
 
-            match handler_spec.storage_type {
-                StorageType::Local => {
-                    // Local handler - register mutations and emit BIND_LOCAL
-                    if let Some(mutations) = &handler_spec.local_mutations {
-                        let handler_idx = self
-                            .register_local_handler(mutations.clone(), handler_spec.state_type_id);
-                        self.buf.bind_local(ref_idx, ev.as_u8(), handler_idx);
-                    }
-                }
-                StorageType::Memory | StorageType::Persisted => {
-                    // Remote handler - register handler and emit BIND_REMOTE or BIND_REMOTE_PARAM
-                    if let Some(handler) = &handler_spec.remote_handler {
-                        let handler_idx = self.register_remote_handler(handler.clone());
+            if let Some(handler) = &handler_spec.remote_handler {
+                let handler_idx = self.register_remote_handler(handler.clone());
 
-                        // Use BIND_REMOTE_PARAM if we have param bytes,
-                        // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
-                        if let Some(param_bytes) = &handler_spec.param_bytes {
-                            self.buf.bind_remote_param(
-                                ref_idx,
-                                ev.as_u8(),
-                                handler_idx,
-                                param_bytes,
-                            );
-                        } else if handler_spec.debounce_ms > 0 {
-                            self.buf.bind_debounced(
-                                ref_idx,
-                                ev.as_u8(),
-                                handler_idx,
-                                handler_spec.debounce_ms,
-                            );
-                        } else {
-                            self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
-                        }
-                    }
+                if let Some(param_bytes) = &handler_spec.param_bytes {
+                    self.buf
+                        .bind_remote_param(ref_idx, ev.as_u8(), handler_idx, param_bytes);
+                } else if handler_spec.debounce_ms > 0 {
+                    self.buf.bind_debounced(
+                        ref_idx,
+                        ev.as_u8(),
+                        handler_idx,
+                        handler_spec.debounce_ms,
+                    );
+                } else {
+                    self.buf.bind_remote(ref_idx, ev.as_u8(), handler_idx);
                 }
             }
         }
@@ -1686,21 +1978,6 @@ impl BuildContext {
         ref_idx
     }
 
-    /// Emit local handler definitions to the buffer.
-    ///
-    /// This should be called after emit() but before finish().
-    pub fn emit_local_handlers(&mut self) {
-        for (idx, mutations) in self.local_handlers.iter().enumerate() {
-            let encoded = mutations.encode();
-            self.buf.def_local_handler(
-                idx as u8,
-                mutations.state_idx,
-                &encoded,
-                mutations.mutations.len() as u8,
-            );
-        }
-    }
-
     /// Finish building and return the bytes.
     pub fn finish(mut self) -> Bytes {
         self.buf.end();
@@ -1712,19 +1989,26 @@ impl BuildContext {
         &self.handlers
     }
 
-    /// Get the registered local handlers.
-    pub fn local_handlers(&self) -> &[LocalMutations] {
-        &self.local_handlers
-    }
-
-    /// Check if any local handlers are registered.
-    pub fn has_local_handlers(&self) -> bool {
-        self.has_local_handlers
-    }
-
     /// Take the synced elements.
     pub fn take_synced_elements(&mut self) -> Vec<SyncedElement> {
         std::mem::take(&mut self.synced_elements)
+    }
+
+    /// Merge a static token inventory into the used token sets.
+    ///
+    /// Called during tree-shaking to incorporate tokens discovered at compile
+    /// time by the `#[renderer]` proc macro. This covers all branches in the
+    /// renderer source code, not just what the default-state render produces.
+    fn collect_from_inventory(&mut self, inv: &TokenInventory) {
+        for &st in inv.styles {
+            self.used_style_utils.insert(st);
+        }
+        for &(pc, st) in inv.pseudo_pairs {
+            self.used_pseudo_pairs.insert((pc, st));
+        }
+        for &(bp, st) in inv.breakpoint_pairs {
+            self.used_breakpoint_pairs.insert((bp, st));
+        }
     }
 
     /// Get the set of used element type byte codes.
@@ -1772,11 +2056,6 @@ impl BuildContext {
         &self.used_attr_values
     }
 
-    /// Get the local state type indices mapping.
-    pub fn local_state_indices(&self) -> &HashMap<TypeId, u8> {
-        &self.local_state_indices
-    }
-
     /// Get the symbol map for tracking sent symbols.
     ///
     /// This returns a clone of the symbol map after rendering, which can be
@@ -1786,19 +2065,104 @@ impl BuildContext {
         self.symbol_map.clone()
     }
 
-    /// Emit local state initialization opcodes.
-    ///
-    /// This should be called after emit() and emit_local_handlers() to initialize
-    /// client-side state. The `serializer` function takes a TypeId and returns
-    /// the JSON serialization of the default state for that type.
-    pub fn emit_local_state<F>(&mut self, serializer: F)
-    where
-        F: Fn(TypeId) -> Option<String>,
-    {
-        for (&type_id, &state_idx) in &self.local_state_indices {
-            if let Some(json) = serializer(type_id) {
-                self.buf.init_local_state(state_idx, &json);
-            }
+    /// Whether any client actions (targets or selectors) are used.
+    pub fn has_client_actions(&self) -> bool {
+        self.has_client_actions
+    }
+
+    /// Get or assign a u8 index for a target TypeId.
+    fn get_or_create_target_idx(&mut self, type_id: TypeId, default: bool) -> u8 {
+        if let Some(&idx) = self.target_indices.get(&type_id) {
+            return idx;
+        }
+        let idx = self.next_target_idx;
+        self.next_target_idx += 1;
+        self.target_indices.insert(type_id, idx);
+        self.target_defaults.insert(idx, default);
+        self.has_client_actions = true;
+        idx
+    }
+
+    /// Get or assign a u8 index for a selector TypeId.
+    fn get_or_create_selector_idx(&mut self, type_id: TypeId, default_val: u8) -> u8 {
+        if let Some(&idx) = self.selector_indices.get(&type_id) {
+            return idx;
+        }
+        let idx = self.next_selector_idx;
+        self.next_selector_idx += 1;
+        self.selector_indices.insert(type_id, idx);
+        self.selector_defaults.insert(idx, default_val);
+        self.has_client_actions = true;
+        idx
+    }
+
+    /// Register all target/selector types from an element's bindings.
+    /// Also tracks the St tokens used by bindings for tree-shaking.
+    fn register_client_actions(&mut self, el: &ElementBuilder) {
+        for tb in &el.target_bindings {
+            self.get_or_create_target_idx(tb.type_id, tb.default);
+            self.used_style_utils.insert(tb.st);
+        }
+        for tt in &el.target_toggles {
+            // Ensure the target type is registered even if only toggles exist
+            self.get_or_create_target_idx(tt.type_id, false);
+            self.used_events.insert(tt.ev.as_u8());
+        }
+        for sb in &el.selector_bindings {
+            self.get_or_create_selector_idx(sb.type_id, sb.default_val);
+            self.used_style_utils.insert(sb.st);
+        }
+        for ss in &el.selector_sets {
+            // Ensure the selector type is registered even if only sets exist
+            self.get_or_create_selector_idx(ss.type_id, 0);
+            self.used_events.insert(ss.ev.as_u8());
+        }
+        for tt in &el.timed_toggles {
+            self.get_or_create_target_idx(tt.type_id, false);
+            self.used_events.insert(tt.ev.as_u8());
+        }
+        for at in &el.auto_toggles {
+            self.get_or_create_target_idx(at.type_id, false);
+        }
+    }
+
+    /// Emit INIT_TARGET and INIT_SELECTOR opcodes for all registered types.
+    /// Called once at the start of the opcode stream.
+    fn emit_client_action_inits(&mut self) {
+        for (&idx, &default) in &self.target_defaults.clone() {
+            self.buf.init_target(idx, default);
+        }
+        for (&idx, &default) in &self.selector_defaults.clone() {
+            self.buf.init_selector(idx, default);
+        }
+    }
+
+    /// Emit target/selector binding and trigger opcodes for an element.
+    fn emit_client_action_bindings(&mut self, ref_idx: u32, el: &ElementBuilder) {
+        for tb in &el.target_bindings {
+            let idx = self.target_indices[&tb.type_id];
+            self.buf.bind_target(ref_idx, idx, tb.st, tb.invert);
+        }
+        for tt in &el.target_toggles {
+            let idx = self.target_indices[&tt.type_id];
+            self.buf.bind_toggle(ref_idx, tt.ev.as_u8(), idx);
+        }
+        for sb in &el.selector_bindings {
+            let idx = self.selector_indices[&sb.type_id];
+            self.buf.bind_selector(ref_idx, idx, sb.match_val, sb.st);
+        }
+        for ss in &el.selector_sets {
+            let idx = self.selector_indices[&ss.type_id];
+            self.buf.bind_select(ref_idx, ss.ev.as_u8(), idx, ss.val);
+        }
+        for tt in &el.timed_toggles {
+            let idx = self.target_indices[&tt.type_id];
+            self.buf
+                .bind_timed_toggle(ref_idx, tt.ev.as_u8(), idx, tt.delay_ms);
+        }
+        for at in &el.auto_toggles {
+            let idx = self.target_indices[&at.type_id];
+            self.buf.auto_toggle(idx, at.delay_ms);
         }
     }
 }

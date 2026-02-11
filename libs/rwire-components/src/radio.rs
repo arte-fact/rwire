@@ -42,6 +42,7 @@ pub struct Radio {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Radio {
     /// Create a new radio button.
     pub fn new() -> Self {

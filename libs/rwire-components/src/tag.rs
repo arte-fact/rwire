@@ -44,6 +44,7 @@ pub struct Tag {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Tag {
     /// Create a new tag with text.
     pub fn new(text: impl Into<Cow<'static, str>>) -> Self {

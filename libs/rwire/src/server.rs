@@ -661,7 +661,7 @@ where
             let mut all_style_utils = ctx.used_style_utils().clone();
             all_style_utils.extend(&config.extra_style_utils);
             let config = config
-                .has_local_handlers(ctx.has_local_handlers())
+                .has_client_actions(ctx.has_client_actions())
                 .with_style_utils(&all_style_utils)
                 .with_style_props(ctx.used_style_props())
                 .with_style_values(ctx.used_style_values())
@@ -692,7 +692,6 @@ where
             capsule_gen::generate_capsule(
                 ctx.used_elements(),
                 ctx.used_events(),
-                ctx.has_local_handlers(),
             )
         };
 
@@ -1056,13 +1055,6 @@ where
 
         // Drop cache_guard before continuing (it's automatically dropped at end of scope)
         drop(cache_guard);
-
-        // Emit local handlers if any
-        if ctx.has_local_handlers() {
-            ctx.emit_local_handlers();
-            // Emit default state for each local state type
-            ctx.emit_local_state(crate::state::get_local_state_default_json);
-        }
 
         // Re-extract handlers and synced elements (they should be the same)
         conn_state.handlers = ctx.handlers().to_vec();

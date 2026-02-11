@@ -47,6 +47,7 @@ pub struct Alert {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Alert {
     /// Create a new alert.
     pub fn new() -> Self {

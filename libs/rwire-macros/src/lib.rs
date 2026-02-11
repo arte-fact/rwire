@@ -6,12 +6,12 @@
 //! - `#[handler]` - registers a handler function with its state type
 //! - `#[renderer]` - transforms a render function into a synced element factory
 
-mod mutation_parser;
 mod schema_gen;
+mod token_scanner;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, FnArg, ItemFn, Type};
+use syn::{parse_macro_input, DeriveInput, FnArg, ItemFn, ItemImpl, Type};
 
 /// Derive macro for the `ClientState` marker trait (deprecated).
 ///
@@ -46,20 +46,12 @@ pub fn derive_client_state(input: TokenStream) -> TokenStream {
 /// Derive macro for the unified `State` trait.
 ///
 /// Use the `#[storage(...)]` attribute to specify storage type:
-/// - `#[storage(local)]` - Client-side state, no server round-trip
 /// - `#[storage(memory)]` - Server memory state (default if omitted)
 /// - `#[storage(persisted, table = "...")]` - Database-backed state
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // Local state (client-side, no round-trip)
-/// #[derive(State, Default)]
-/// #[storage(local)]
-/// struct UiState {
-///     sidebar_open: bool,
-/// }
-///
 /// // Memory state (server-side, default)
 /// #[derive(State, Default)]
 /// struct Counter {
@@ -92,32 +84,6 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         )
     };
 
-    // Extract field information for local state
-    let fields = match &input.data {
-        syn::Data::Struct(data) => match &data.fields {
-            syn::Fields::Named(fields) => fields.named.iter().collect::<Vec<_>>(),
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
-    };
-
-    // Generate field index constants for local state
-    let field_constants: Vec<_> = fields
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let field_name = f.ident.as_ref().unwrap();
-            let const_name = syn::Ident::new(
-                &format!("FIELD_{}", field_name.to_string().to_uppercase()),
-                field_name.span(),
-            );
-            let idx = i as u8;
-            quote! {
-                pub const #const_name: u8 = #idx;
-            }
-        })
-        .collect();
-
     // Generate the State trait implementation
     let table_name_str = if table_name.is_empty() {
         quote!("")
@@ -131,52 +97,10 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         quote!(#key_field)
     };
 
-    // Also generate MemoryState for backwards compatibility with memory storage
+    // Generate MemoryState marker for memory storage
     let marker_trait_impl = if storage_type.to_string().contains("Memory") {
         quote! {
             impl #impl_generics rwire::MemoryState for #name #ty_generics #where_clause {}
-        }
-    } else if storage_type.to_string().contains("Local") {
-        // Generate JSON serialization for local state default values
-        let field_json_parts: Vec<_> = fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                let field_name = f.ident.as_ref().unwrap().to_string();
-                let field_type = &f.ty;
-                let comma = if i > 0 { "," } else { "" };
-                // Generate JSON for default value based on type
-                quote! {
-                    format!(
-                        "{}\"{}\":{}",
-                        #comma,
-                        #field_name,
-                        <#field_type as rwire::LocalStateJson>::default_json()
-                    )
-                }
-            })
-            .collect();
-
-        quote! {
-            impl #impl_generics rwire::LocalState for #name #ty_generics #where_clause {}
-
-            impl #impl_generics #name #ty_generics #where_clause {
-                /// Return the default state as JSON.
-                ///
-                /// This is used to initialize client-side local state.
-                pub fn __local_state_default_json() -> String {
-                    // Register this type with the local state registry on first call
-                    static ONCE: std::sync::Once = std::sync::Once::new();
-                    ONCE.call_once(|| {
-                        rwire::register_local_state_default::<#name>(Self::__local_state_default_json);
-                    });
-
-                    let mut json = String::from("{");
-                    #(json.push_str(&#field_json_parts);)*
-                    json.push('}');
-                    json
-                }
-            }
         }
     } else {
         quote! {}
@@ -212,10 +136,6 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        impl #impl_generics #name #ty_generics #where_clause {
-            #(#field_constants)*
-        }
-
         impl #impl_generics rwire::State for #name #ty_generics #where_clause {
             const STORAGE_TYPE: rwire::StorageType = #storage_type;
             const TABLE_NAME: &'static str = #table_name_str;
@@ -239,9 +159,7 @@ fn parse_storage_attr(attr: &syn::Attribute) -> (proc_macro2::TokenStream, Strin
     let mut key_field = String::new();
 
     let _ = attr.parse_nested_meta(|meta| {
-        if meta.path.is_ident("local") {
-            storage_type = quote!(rwire::StorageType::Local);
-        } else if meta.path.is_ident("memory") {
+        if meta.path.is_ident("memory") {
             storage_type = quote!(rwire::StorageType::Memory);
         } else if meta.path.is_ident("persisted") {
             storage_type = quote!(rwire::StorageType::Persisted);
@@ -264,11 +182,7 @@ fn parse_storage_attr(attr: &syn::Attribute) -> (proc_macro2::TokenStream, Strin
 ///
 /// Transforms a function taking `&mut State` into a handler that can be used
 /// with event bindings. The macro determines behavior based on the state's
-/// storage type:
-///
-/// - **Memory/Persisted state**: Returns `HandlerSpec` with remote handler function
-/// - **Local state**: Parses the function body into mutations, returns `HandlerSpec`
-///   with local bytecode (no server round-trip)
+/// storage type. Returns a `HandlerSpec` with the remote handler function.
 ///
 /// # Example (Memory State - single parameter)
 ///
@@ -298,48 +212,19 @@ fn parse_storage_attr(attr: &syn::Attribute) -> (proc_macro2::TokenStream, Strin
 /// // Expands to HandlerSpec::from_fn_with_context
 /// ```
 ///
-/// # Example (Local State)
-///
-/// ```ignore
-/// #[derive(State, Default)]
-/// #[storage(local)]
-/// struct UiState { open: bool }
-///
-/// #[handler]
-/// fn toggle(state: &mut UiState) {
-///     state.open = !state.open;
-/// }
-/// // Expands to HandlerSpec::local with Toggle mutation
-/// ```
-///
-/// # Supported Local State Patterns
-///
-/// For local state, only these patterns are supported (compile error otherwise):
-/// - `state.field = !state.field` → Toggle
-/// - `state.field = true/false` → SetBool
-/// - `state.field += n` → AddI8/AddI32
-/// - `state.field -= n` → AddI8/AddI32 (negative)
-/// - `state.field = n` → SetI32
-/// - `state.field = "str"` → SetStr
 #[proc_macro_attribute]
-pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);
     let fn_name = &input.sig.ident;
     let inner_name = syn::Ident::new(&format!("__{}_inner", fn_name), fn_name.span());
     let vis = &input.vis;
     let block = &input.block;
 
-    // Check for #[handler(local)] attribute
-    let is_local_attr = !attr.is_empty() && {
-        let attr_str = attr.to_string();
-        attr_str.contains("local")
-    };
-
     // Check if this is a 2-parameter handler (state, ctx)
     let has_context_param = input.sig.inputs.len() == 2;
 
     // Extract the state type from the first parameter
-    let (state_type, param_pat, param_name) = match input.sig.inputs.first() {
+    let (state_type, param_pat, _param_name) = match input.sig.inputs.first() {
         Some(FnArg::Typed(pat_type)) => {
             // Extract the type from &mut T
             let ty = match pat_type.ty.as_ref() {
@@ -347,7 +232,6 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
                 other => other.clone(),
             };
             let pat = pat_type.pat.as_ref().clone();
-            // Get the parameter name as a string
             let name = match &pat {
                 syn::Pat::Ident(ident) => ident.ident.to_string(),
                 _ => "state".to_string(),
@@ -373,92 +257,6 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         None
     };
-
-    // For #[handler(local)], parse the body into mutations
-    if is_local_attr {
-        match mutation_parser::parse_mutations(&block.stmts, &param_name) {
-            Ok(mutations) => {
-                // Generate mutation literals
-                let mutation_exprs: Vec<_> = mutations.iter().map(|m| {
-                    match m {
-                        mutation_parser::MutationOp::Toggle { field_name } => {
-                            let field_const = syn::Ident::new(
-                                &format!("FIELD_{}", field_name.to_uppercase()),
-                                proc_macro2::Span::call_site(),
-                            );
-                            quote! {
-                                rwire::Mutation::Toggle { field: #state_type::#field_const }
-                            }
-                        }
-                        mutation_parser::MutationOp::AddI8 { field_name, value } => {
-                            let field_const = syn::Ident::new(
-                                &format!("FIELD_{}", field_name.to_uppercase()),
-                                proc_macro2::Span::call_site(),
-                            );
-                            quote! {
-                                rwire::Mutation::AddI8 { field: #state_type::#field_const, value: #value }
-                            }
-                        }
-                        mutation_parser::MutationOp::AddI32 { field_name, value } => {
-                            let field_const = syn::Ident::new(
-                                &format!("FIELD_{}", field_name.to_uppercase()),
-                                proc_macro2::Span::call_site(),
-                            );
-                            quote! {
-                                rwire::Mutation::AddI32 { field: #state_type::#field_const, value: #value }
-                            }
-                        }
-                        mutation_parser::MutationOp::SetBool { field_name, value } => {
-                            let field_const = syn::Ident::new(
-                                &format!("FIELD_{}", field_name.to_uppercase()),
-                                proc_macro2::Span::call_site(),
-                            );
-                            quote! {
-                                rwire::Mutation::SetBool { field: #state_type::#field_const, value: #value }
-                            }
-                        }
-                        mutation_parser::MutationOp::SetI32 { field_name, value } => {
-                            let field_const = syn::Ident::new(
-                                &format!("FIELD_{}", field_name.to_uppercase()),
-                                proc_macro2::Span::call_site(),
-                            );
-                            quote! {
-                                rwire::Mutation::SetI32 { field: #state_type::#field_const, value: #value }
-                            }
-                        }
-                        mutation_parser::MutationOp::SetStr { field_name, value } => {
-                            let field_const = syn::Ident::new(
-                                &format!("FIELD_{}", field_name.to_uppercase()),
-                                proc_macro2::Span::call_site(),
-                            );
-                            quote! {
-                                rwire::Mutation::SetStr { field: #state_type::#field_const, value: #value.to_string() }
-                            }
-                        }
-                    }
-                }).collect();
-
-                let expanded = quote! {
-                    #vis fn #fn_name() -> rwire::HandlerSpec {
-                        // Ensure local state type is registered with the local state registry.
-                        // This triggers the Once::call_once registration.
-                        let _ = #state_type::__local_state_default_json();
-
-                        rwire::HandlerSpec::local::<#state_type>(rwire::LocalMutations::new(vec![
-                            #(#mutation_exprs),*
-                        ]))
-                    }
-                };
-
-                return TokenStream::from(expanded);
-            }
-            Err(err) => {
-                return syn::Error::new(err.span, err.message)
-                    .to_compile_error()
-                    .into();
-            }
-        }
-    }
 
     // Always re-render: every handler triggers all synced elements.
     // This avoids fragile static analysis of field access patterns.
@@ -621,13 +419,224 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Every handler triggers all synced elements to re-render.
     let deps_expr = quote! { rwire::RendererDeps::always() };
 
+    // Scan function body for St::*, .hover(), .sm() etc. tokens
+    // to build a compile-time token inventory for tree-shaking.
+    let body_tokens: proc_macro2::TokenStream = block.stmts.iter().map(|s| quote! { #s }).collect();
+    let scan = token_scanner::scan_tokens(&body_tokens);
+    let inventory_expr = token_scanner::generate_inventory(&scan);
+
     let expanded = quote! {
         #vis fn #fn_name() -> rwire::ElementBuilder {
             const DEPS: rwire::RendererDeps = #deps_expr;
+            const TOKENS: rwire::TokenInventory = #inventory_expr;
             fn #inner_name(#param_pat: &#state_type) #return_type #block
-            rwire::ElementBuilder::synced_with_deps::<#state_type>(#inner_name, DEPS)
+            rwire::ElementBuilder::synced_with_tokens::<#state_type>(#inner_name, DEPS, &TOKENS)
         }
     };
 
     TokenStream::from(expanded)
+}
+
+/// Derive macro for the `Target` marker trait (bool toggle).
+///
+/// Must be applied to a unit struct:
+///
+/// ```ignore
+/// #[derive(Target)]
+/// pub struct ModalOpen;
+/// ```
+///
+/// Generates: `impl rwire::Target for ModalOpen {}`
+#[proc_macro_derive(Target)]
+pub fn derive_target(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    // Verify it's a unit struct
+    match &input.data {
+        syn::Data::Struct(data) => {
+            if !matches!(data.fields, syn::Fields::Unit) {
+                return syn::Error::new_spanned(
+                    &input,
+                    "Target can only be derived for unit structs (e.g., `struct ModalOpen;`)",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+        _ => {
+            return syn::Error::new_spanned(
+                &input,
+                "Target can only be derived for unit structs",
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let expanded = quote! {
+        impl #impl_generics rwire::Target for #name #ty_generics #where_clause {}
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Derive macro for the `Selector` trait (exclusive enum choice).
+///
+/// Must be applied to an enum with only unit variants.
+/// Use `#[default]` to mark the default variant.
+///
+/// ```ignore
+/// #[derive(Selector)]
+/// pub enum ActiveTab {
+///     #[default]
+///     Home,
+///     Settings,
+///     Profile,
+/// }
+/// ```
+///
+/// Generates variant u8 values (0, 1, 2, ...) and `impl rwire::Selector`.
+#[proc_macro_derive(Selector, attributes(default))]
+pub fn derive_selector(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let variants = match &input.data {
+        syn::Data::Enum(data) => &data.variants,
+        _ => {
+            return syn::Error::new_spanned(
+                &input,
+                "Selector can only be derived for enums",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // Verify all variants are unit variants and find default
+    let mut default_idx: Option<u8> = None;
+    let mut match_arms = Vec::new();
+
+    for (i, variant) in variants.iter().enumerate() {
+        if !matches!(variant.fields, syn::Fields::Unit) {
+            return syn::Error::new_spanned(
+                variant,
+                "Selector variants must be unit variants (no fields)",
+            )
+            .to_compile_error()
+            .into();
+        }
+
+        let idx = i as u8;
+        let vname = &variant.ident;
+
+        // Check for #[default] attribute
+        if variant.attrs.iter().any(|a| a.path().is_ident("default")) {
+            default_idx = Some(idx);
+        }
+
+        match_arms.push(quote! {
+            #name::#vname => #idx
+        });
+    }
+
+    let default_val = default_idx.unwrap_or(0);
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let expanded = quote! {
+        impl #impl_generics rwire::Selector for #name #ty_generics #where_clause {
+            fn default_value() -> u8 {
+                #default_val
+            }
+
+            fn variant_value(&self) -> u8 {
+                match self {
+                    #(#match_arms),*
+                }
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Attribute macro for component impl blocks.
+///
+/// Scans all method bodies in the impl block for style tokens (`St::*`),
+/// pseudo-class methods (`.hover()`, `.focus()`, etc.), and breakpoint
+/// methods (`.sm()`, `.md()`, etc.). Generates a compile-time
+/// `TokenInventory` that captures all tokens across every code branch.
+///
+/// The `build()` method's return value is automatically wrapped with
+/// `.with_token_inventory()` to attach the inventory to the output
+/// `ElementBuilder`, enabling complete tree-shaking without relying
+/// on default-state rendering alone.
+///
+/// # Example
+///
+/// ```ignore
+/// use rwire_macros::component;
+///
+/// #[component]
+/// impl Button {
+///     pub fn compute_tokens(&self) -> Vec<St> {
+///         match self.intent {
+///             ButtonIntent::Primary => vec![St::BgPrimary],
+///             ButtonIntent::Destructive => vec![St::BgDestructive],
+///         }
+///     }
+///
+///     pub fn build(self) -> ElementBuilder {
+///         el(El::Button).st(self.compute_tokens())
+///             .hover([St::BgPrimaryHover])
+///         // ↑ All St tokens, .hover(), .sm() etc. are discovered at compile time
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(item as ItemImpl);
+
+    // Scan ALL method bodies in the impl block for tokens
+    let all_methods_tokens: proc_macro2::TokenStream = input
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let syn::ImplItem::Fn(method) = item {
+                Some(quote! { #method })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let scan = token_scanner::scan_tokens(&all_methods_tokens);
+    let inventory_expr = token_scanner::generate_inventory(&scan);
+
+    // Find build() method and wrap its return value
+    for item in &mut input.items {
+        if let syn::ImplItem::Fn(method) = item {
+            if method.sig.ident == "build" {
+                let original_block = &method.block;
+                method.block = syn::parse_quote! {{
+                    let __component_result: rwire::ElementBuilder = #original_block;
+                    __component_result.with_token_inventory(&Self::__COMPONENT_TOKENS)
+                }};
+                break;
+            }
+        }
+    }
+
+    // Add the const inventory to the impl block
+    let const_item: syn::ImplItem = syn::parse_quote! {
+        /// Compile-time token inventory for tree-shaking (generated by `#[component]`).
+        #[doc(hidden)]
+        pub const __COMPONENT_TOKENS: rwire::TokenInventory = #inventory_expr;
+    };
+    input.items.push(const_item);
+
+    TokenStream::from(quote! { #input })
 }

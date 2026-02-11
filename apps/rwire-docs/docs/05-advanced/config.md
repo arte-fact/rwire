@@ -77,8 +77,7 @@ let config = CapsuleConfig::new()
             .accent("#5E81AC")
             .style(ThemeStyle::Soft)
     )
-    .font(FontFace::google("Inter", &[400, 500, 600]))
-    .has_local_handlers(true);
+    .font(FontFace::google("Inter", &[400, 500, 600]));
 ```
 
 ### .theme(Theme)
@@ -112,10 +111,6 @@ CapsuleConfig::new()
     .font(FontFace::google("Inter", &[400, 600]))
     .font(FontFace::google("JetBrains Mono", &[400]))
 ```
-
-### .has_local_handlers(bool)
-
-When `true`, includes the local mutation interpreter (~150 bytes) in the capsule JS. Required when using `#[storage(local)]` state.
 
 ## Health Check Endpoints
 

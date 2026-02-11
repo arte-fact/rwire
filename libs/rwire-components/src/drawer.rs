@@ -2,6 +2,9 @@
 //!
 //! Slide-in panel from edge of screen with backdrop overlay.
 //!
+//! The full DOM structure is always rendered. Visibility is toggled via
+//! transform (slide) and opacity (backdrop), enabling smooth CSS transitions.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -49,6 +52,7 @@ pub struct Drawer {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Drawer {
     /// Create a new drawer.
     pub fn new() -> Self {
@@ -110,22 +114,29 @@ impl Drawer {
     }
 
     /// Build the drawer into an ElementBuilder.
+    ///
+    /// Always renders the full DOM structure. Open/close state is toggled
+    /// via transform (slide) and opacity (backdrop), enabling CSS transitions.
     pub fn build(self) -> ElementBuilder {
-        if !self.open {
-            return el(El::Div).st([St::DisplayNone]);
-        }
-
         let mut panel_tokens = Self::compute_panel_tokens();
 
-        // Position the panel
-        let position_style = match self.position {
+        // Position the panel and set slide transform
+        match self.position {
             DrawerPosition::Left => {
                 panel_tokens.push(St::Left0);
-                "left:0"
+                if self.open {
+                    panel_tokens.push(St::TransformNone);
+                } else {
+                    panel_tokens.push(St::TranslateXNegFull);
+                }
             }
             DrawerPosition::Right => {
                 panel_tokens.push(St::Right0);
-                "right:0"
+                if self.open {
+                    panel_tokens.push(St::TransformNone);
+                } else {
+                    panel_tokens.push(St::TranslateXFull);
+                }
             }
         };
 
@@ -190,7 +201,6 @@ impl Drawer {
 
         let mut panel = el(El::Div)
             .st(panel_tokens)
-            .attr("style", position_style)
             .at(At::Role, Av::RoleDialog)
             .at(At::AriaModal, Av::True)
             .append(panel_children);
@@ -199,9 +209,14 @@ impl Drawer {
             panel = panel.class(extra.as_ref());
         }
 
-        // Backdrop
+        // Backdrop — always present, visibility toggled
         let mut backdrop = el(El::Div)
-            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50]);
+            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50,
+                 St::TransitionOpacity]);
+
+        if !self.open {
+            backdrop = backdrop.st([St::Opacity0, St::PointerEventsNone]);
+        }
 
         if let Some(handler) = self.on_close {
             backdrop = backdrop.on(Ev::Click, handler);
@@ -245,5 +260,12 @@ mod tests {
     fn test_drawer_open_state() {
         let drawer = Drawer::new().open(true);
         assert!(drawer.open);
+    }
+
+    #[test]
+    fn test_drawer_always_renders_structure() {
+        // Both open and closed should build successfully (always-render)
+        let _open = Drawer::new().open(true).build();
+        let _closed = Drawer::new().open(false).build();
     }
 }

@@ -25,6 +25,7 @@ pub struct Link {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Link {
     /// Create a new link with href.
     pub fn new(href: impl Into<Cow<'static, str>>) -> Self {

@@ -39,6 +39,7 @@ pub struct Code {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Code {
     /// Create an inline code element.
     pub fn inline(content: impl Into<Cow<'static, str>>) -> Self {

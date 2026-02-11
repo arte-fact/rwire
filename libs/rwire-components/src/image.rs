@@ -57,6 +57,7 @@ pub struct Image {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Image {
     /// Create a new image with a source URL.
     pub fn new(src: impl Into<Cow<'static, str>>) -> Self {

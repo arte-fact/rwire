@@ -34,6 +34,7 @@ pub struct List {
     children: Vec<ElementBuilder>,
 }
 
+#[rwire::component]
 impl List {
     /// Create a new unordered list (bulleted).
     pub fn new() -> Self {

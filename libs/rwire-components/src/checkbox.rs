@@ -36,6 +36,7 @@ pub struct Checkbox {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Checkbox {
     /// Create a new checkbox.
     pub fn new() -> Self {
@@ -120,7 +121,7 @@ impl Checkbox {
         });
 
         let mut tokens = self.compute_tokens();
-        tokens.extend([St::W1rem, St::H1rem, St::Border2Default]);
+        tokens.extend([St::AppearanceNone, St::W1rem, St::H1rem, St::Border2Default]);
         let mut input = el(El::Input)
             .st(tokens)
             .hover([St::BorderEmphasis])

@@ -48,6 +48,7 @@ pub struct NavMenu {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl NavMenu {
     /// Create a new navigation menu.
     pub fn new() -> Self {

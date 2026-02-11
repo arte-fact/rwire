@@ -76,6 +76,7 @@ pub struct Footer {
     copyright: Option<String>,
 }
 
+#[rwire::component]
 impl Footer {
     /// Create a new footer.
     pub fn new() -> Self {

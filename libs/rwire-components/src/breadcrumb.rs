@@ -43,6 +43,7 @@ pub struct Breadcrumb {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Breadcrumb {
     /// Create a new breadcrumb.
     pub fn new() -> Self {

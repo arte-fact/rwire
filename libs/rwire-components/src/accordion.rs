@@ -80,6 +80,7 @@ pub struct Accordion {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Accordion {
     /// Create a new accordion.
     pub fn new() -> Self {
@@ -126,6 +127,8 @@ impl Accordion {
     pub fn compute_content_open_tokens() -> Vec<St> {
         vec![
             St::OverflowHidden,
+            St::Opacity100,
+            St::MaxHScreen,
             St::PxMd,
             St::PbMd,
             St::TransitionAll,
@@ -137,8 +140,9 @@ impl Accordion {
         vec![
             St::OverflowHidden,
             St::MaxH0,
+            St::Opacity0,
             St::P0,
-            St::DisplayNone,
+            St::TransitionAll,
         ]
     }
 
@@ -230,6 +234,8 @@ mod tests {
     fn test_accordion_content_open_tokens() {
         let tokens = Accordion::compute_content_open_tokens();
         assert!(tokens.contains(&St::OverflowHidden));
+        assert!(tokens.contains(&St::Opacity100));
+        assert!(tokens.contains(&St::MaxHScreen));
         assert!(tokens.contains(&St::PxMd));
         assert!(tokens.contains(&St::TransitionAll));
     }
@@ -238,7 +244,9 @@ mod tests {
     fn test_accordion_content_closed_tokens() {
         let tokens = Accordion::compute_content_closed_tokens();
         assert!(tokens.contains(&St::MaxH0));
-        assert!(tokens.contains(&St::DisplayNone));
+        assert!(tokens.contains(&St::Opacity0));
+        assert!(tokens.contains(&St::TransitionAll));
+        assert!(!tokens.contains(&St::DisplayNone));
     }
 
     #[test]

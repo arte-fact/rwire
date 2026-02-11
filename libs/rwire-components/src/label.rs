@@ -22,6 +22,7 @@ pub struct Label {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Label {
     /// Create a new label with text.
     pub fn new(text: impl Into<Cow<'static, str>>) -> Self {

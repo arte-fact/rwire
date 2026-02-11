@@ -198,14 +198,9 @@ fn toggle_item(state: &mut TodoState, ctx: &EventContext) {
 
 ### State Storage Types
 
-rwire supports three storage types for state:
+rwire supports two storage types for state:
 
 ```rust
-// Local state - client-side only, no server round-trip
-#[derive(State, Default)]
-#[storage(local)]
-struct UIState { menu_open: bool }
-
 // Memory state - server-side, lost on restart
 #[derive(State, Default)]
 #[storage(memory)]
@@ -418,7 +413,7 @@ Kill existing process: `fuser -k 9000/tcp`
 ### State not updating
 - Ensure state type derives `State`
 - Check renderer is marked with `#[renderer]`
-- Verify storage type matches expected behavior (local vs memory)
+- Verify storage type matches expected behavior (memory vs persisted)
 
 ## Design Decisions
 

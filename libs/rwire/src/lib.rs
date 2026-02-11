@@ -53,6 +53,7 @@
 #[macro_use]
 mod token_macro;
 
+pub mod action;
 pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
@@ -77,16 +78,15 @@ pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 // Builder API exports
-pub use builder::{el, ElementBuilder};
+pub use builder::{el, ElementBuilder, TokenInventory};
 
 // Item reference exports
 pub use item_ref::{ItemRef, IterWithRef};
 
 // State exports
 pub use state::{
-    get_local_state_default_json, register_local_state_default, ChangeSet, EventContext,
-    EventPayload, HandlerFn, HandlerSpec, LocalMutations, LocalState, LocalStateJson, MemoryState,
-    Mutation, PersistedState, RendererDeps, State, StorageType,
+    ChangeSet, EventContext, EventPayload, HandlerFn, HandlerSpec, MemoryState, PersistedState,
+    RendererDeps, State, StorageType,
 };
 
 // Protocol exports
@@ -152,8 +152,11 @@ pub use metrics::{Counter, Gauge, Histogram, Metrics};
 // Session exports
 pub use session::{Session, SessionId};
 
+// Action exports (client-side targets & selectors)
+pub use action::{Selector, Target};
+
 // Macro re-exports
-pub use rwire_macros::{handler, renderer, theme, State};
+pub use rwire_macros::{component, handler, renderer, theme, Selector, State, Target};
 
 // Re-export common types for convenience
 pub use bytes::Bytes;

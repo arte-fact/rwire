@@ -37,6 +37,7 @@ pub struct Tooltip {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Tooltip {
     /// Create a new tooltip with text content.
     pub fn new(text: impl Into<Cow<'static, str>>) -> Self {

@@ -56,6 +56,7 @@ pub struct Table {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Table {
     /// Create a new table.
     pub fn new() -> Self {

@@ -40,6 +40,7 @@ pub struct Badge {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Badge {
     /// Create a new badge.
     pub fn new() -> Self {

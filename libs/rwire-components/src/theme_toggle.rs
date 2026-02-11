@@ -1,8 +1,8 @@
 //! ThemeToggle component for switching between light and dark themes.
 //!
 //! This component renders a button that toggles between light and dark themes.
-//! It uses local state to manage the theme and automatically updates the document
-//! theme attributes.
+//! It mutates the framework-provided `Theme` state, which reactively updates
+//! CSS variables via the synced element system.
 //!
 //! # Example
 //!
@@ -15,23 +15,14 @@
 //!
 //! # Integration with Application State
 //!
-//! The theme toggle needs to be connected to your application's theme state:
+//! The theme toggle needs a handler that mutates `&mut Theme`:
 //!
 //! ```ignore
-//! use rwire::{State, handler, renderer, ThemeMode};
-//!
-//! #[derive(State, Default)]
-//! #[storage(local)]
-//! struct AppState {
-//!     theme: ThemeMode,
-//! }
+//! use rwire::{handler, Theme};
 //!
 //! #[handler]
-//! fn toggle_theme(state: &mut AppState) {
-//!     state.theme = match state.theme {
-//!         ThemeMode::Light => ThemeMode::Dark,
-//!         ThemeMode::Dark => ThemeMode::Light,
-//!     };
+//! fn toggle_theme(theme: &mut Theme) {
+//!     theme.mode = theme.mode.toggle();
 //! }
 //! ```
 
@@ -78,6 +69,7 @@ pub enum ToggleSize {
     Lg,
 }
 
+#[rwire::component]
 impl ThemeToggle {
     /// Create a new theme toggle.
     pub fn new() -> Self {

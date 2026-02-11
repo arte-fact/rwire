@@ -67,6 +67,7 @@ pub struct Button {
     extra_class: Option<Cow<'static, str>>,
 }
 
+#[rwire::component]
 impl Button {
     /// Create a new button with default settings.
     pub fn new() -> Self {
