@@ -22,6 +22,9 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     buf.scale_uniform(state.camera_zoom);
 
     render_terrain(state, buf, cx, cy);
+    // Global darken for moody atmosphere (like the original)
+    buf.set_fill_rgba(0, 5, 10, 35);
+    buf.fill_rect(-1000, -1000, 12000, 12000);
     render_water(state, buf, cx, cy);
     render_zones(state, buf);
     render_aim_cone(state, buf);
@@ -35,6 +38,7 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
 
     render_minimap(state, buf);
     render_hud(state, buf);
+    render_victory_progress(state, buf);
 
     match &state.phase {
         GamePhase::Menu => render_menu(buf),
@@ -67,26 +71,30 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
             // Draw 1px larger to prevent subpixel seams
             let draw_ts = ts + 1;
 
+            // Alternate between tilemap1 and tilemap2 for variety
+            let tilemap = if (tx + ty) % 3 == 0 { tex::TILEMAP2 } else { tex::TILEMAP1 };
+
             match tile {
                 TileType::Grass | TileType::Forest => {
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    buf.draw_image(tilemap, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
                     if tile == TileType::Forest {
-                        buf.set_fill_rgba(0, 20, 0, 40);
+                        buf.set_fill_rgba(0, 15, 0, 50);
                         buf.fill_rect(dx, dy, draw_ts, draw_ts);
                     }
                 }
                 TileType::Road => {
-                    // Base grass
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
-                    // Road overlay with multiply blend
-                    buf.set_fill_rgba(196, 162, 101, 100);
+                    buf.draw_image(tilemap, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    buf.set_fill_rgba(196, 162, 101, 80);
                     buf.fill_rect(dx, dy, draw_ts, draw_ts);
                 }
                 TileType::Rock => {
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    buf.draw_image(tilemap, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    // Slight darkening for rocky areas
+                    buf.set_fill_rgba(30, 25, 20, 40);
+                    buf.fill_rect(dx, dy, draw_ts, draw_ts);
                 }
                 _ => {}
             }
@@ -394,18 +402,33 @@ fn render_zones(state: &GameState, buf: &mut CanvasBuffer) {
 }
 
 fn render_hp_bars(state: &GameState, buf: &mut CanvasBuffer) {
+    let bw: u16 = 48;
+    let bh: u16 = 6;
+
     for u in &state.units {
         if !u.alive || u.hp >= u.kind.max_hp() { continue; }
-        let bw: u16 = 36;
-        let bh: u16 = 4;
+
         let bx = u.x as i16 - bw as i16 / 2;
-        let by = u.y as i16 - 24;
-        let r = u.hp as f32 / u.kind.max_hp() as f32;
-        buf.set_fill_rgba(20, 20, 20, 200);
-        buf.fill_rect(bx - 1, by - 1, bw + 2, bh + 2);
-        let (cr, cg, cb) = if r > 0.5 { (51, 204, 51) } else if r > 0.25 { (230, 179, 26) } else { (230, 51, 26) };
+        let by = u.y as i16 - 28;
+        let ratio = u.hp as f32 / u.kind.max_hp() as f32;
+
+        // Background
+        buf.set_alpha(200);
+        buf.set_fill_rgb(51, 51, 51);
+        buf.fill_rect(bx, by, bw, bh);
+
+        // Health fill
+        let (cr, cg, cb) = if ratio > 0.5 {
+            (51, 204, 51)
+        } else if ratio > 0.25 {
+            (230, 179, 26)
+        } else {
+            (230, 51, 26)
+        };
+        buf.set_alpha(230);
         buf.set_fill_rgb(cr, cg, cb);
-        buf.fill_rect(bx, by, (r * bw as f32) as u16, bh);
+        buf.fill_rect(bx, by, (ratio * bw as f32) as u16, bh);
+        buf.set_alpha(255);
     }
 }
 
@@ -559,6 +582,40 @@ fn render_hud(state: &GameState, buf: &mut CanvasBuffer) {
     buf.set_text_align(0);
     buf.set_text_baseline(0);
     buf.fill_text(12, 12, "WASD: Move  Space: Attack  H/G/R: Orders");
+}
+
+fn render_victory_progress(state: &GameState, buf: &mut CanvasBuffer) {
+    if state.phase != GamePhase::Playing { return; }
+
+    // Check if either faction holds all zones
+    let all_blue = state.zones.iter().all(|z| z.owner == Some(Faction::Blue));
+    let all_red = state.zones.iter().all(|z| z.owner == Some(Faction::Red));
+    if !all_blue && !all_red { return; }
+
+    // Victory progress bar (300×24, top-center)
+    let bw: u16 = 300;
+    let bh: u16 = 24;
+    let bx = CW as i16 / 2 - bw as i16 / 2;
+    let by: i16 = 50;
+
+    buf.set_fill_rgba(0, 0, 0, 150);
+    buf.round_rect(bx, by, bw, bh, 6);
+
+    // Simulate victory timer (ticks toward 120s hold)
+    let hold_progress = (state.tick as f32 * 0.05 / 120.0).min(1.0); // rough approximation
+    let fill_w = (hold_progress * (bw - 4) as f32) as u16;
+
+    let (fr, fg, fb) = if all_blue { (70, 130, 230) } else { (220, 60, 60) };
+    buf.set_fill_rgba(fr, fg, fb, 230);
+    buf.round_rect(bx + 2, by + 2, fill_w, bh - 4, 4);
+
+    // Label
+    buf.set_fill_rgb(255, 255, 255);
+    buf.set_font(0);
+    buf.set_text_align(1);
+    buf.set_text_baseline(1);
+    let label = if all_blue { "Holding all zones..." } else { "Enemy holds all zones!" };
+    buf.fill_text(CW as i16 / 2, by + bh as i16 / 2, label);
 }
 
 fn render_menu(buf: &mut CanvasBuffer) {

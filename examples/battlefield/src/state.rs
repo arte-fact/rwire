@@ -207,6 +207,9 @@ impl GameState {
         // AI
         self.tick_ai(dt);
 
+        // Collision resolution — push overlapping units apart
+        self.resolve_collisions();
+
         // Zones
         self.tick_zones(dt);
 
@@ -380,6 +383,35 @@ impl GameState {
         }
     }
 
+    fn resolve_collisions(&mut self) {
+        let unit_radius = 28.0f32; // pixels
+        let min_dist = unit_radius * 2.0;
+
+        for i in 0..self.units.len() {
+            if !self.units[i].alive { continue; }
+            for j in (i + 1)..self.units.len() {
+                if !self.units[j].alive { continue; }
+                let dx = self.units[j].x - self.units[i].x;
+                let dy = self.units[j].y - self.units[i].y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist < min_dist && dist > 0.1 {
+                    let overlap = (min_dist - dist) * 0.5;
+                    let nx = dx / dist;
+                    let ny = dy / dist;
+                    // Push units apart (skip player for stability)
+                    if self.units[i].id != self.player_id {
+                        self.units[i].x -= nx * overlap;
+                        self.units[i].y -= ny * overlap;
+                    }
+                    if self.units[j].id != self.player_id {
+                        self.units[j].x += nx * overlap;
+                        self.units[j].y += ny * overlap;
+                    }
+                }
+            }
+        }
+    }
+
     fn tick_reinforcements(&mut self, dt: f32) {
         self.reinforce_timer -= dt;
         if self.reinforce_timer > 0.0 { return; }
@@ -390,14 +422,20 @@ impl GameState {
             if count >= MAX_UNITS { continue; }
 
             let (bx, by) = match faction {
-                Faction::Blue => (6.0 * TILE_SIZE, 6.0 * TILE_SIZE),
-                Faction::Red => ((GRID_SIZE as f32 - 8.0) * TILE_SIZE, (GRID_SIZE as f32 - 8.0) * TILE_SIZE),
+                Faction::Blue => (10.0 * TILE_SIZE, 10.0 * TILE_SIZE),
+                Faction::Red => ((GRID_SIZE as f32 - 10.0) * TILE_SIZE, (GRID_SIZE as f32 - 10.0) * TILE_SIZE),
             };
 
-            let wave = [UnitKind::Warrior, UnitKind::Warrior, UnitKind::Archer, UnitKind::Lancer];
+            // 7 units per wave like the original
+            let wave = [
+                UnitKind::Warrior, UnitKind::Warrior,
+                UnitKind::Lancer, UnitKind::Lancer,
+                UnitKind::Archer, UnitKind::Archer,
+                UnitKind::Monk,
+            ];
             for (i, &kind) in wave.iter().enumerate() {
-                let ox = (i % 2) as f32 * TILE_SIZE;
-                let oy = (i / 2) as f32 * TILE_SIZE;
+                let ox = (i % 3) as f32 * TILE_SIZE;
+                let oy = (i / 3) as f32 * TILE_SIZE;
                 self.units.push(Unit::new(self.next_id, kind, faction, bx + ox, by + oy));
                 self.next_id += 1;
             }
