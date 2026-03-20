@@ -21,11 +21,13 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     buf.translate(-cx as i16, -cy as i16);
     buf.scale_uniform(state.camera_zoom);
 
+    // Water rendered first as base layer
+    render_water(state, buf, cx, cy);
+    // Land tiles on top (autotiled edges blend over water)
     render_terrain(state, buf, cx, cy);
-    // Global darken for moody atmosphere (like the original)
+    // Global darken for moody atmosphere
     buf.set_fill_rgba(0, 5, 10, 35);
     buf.fill_rect(-1000, -1000, 12000, 12000);
-    render_water(state, buf, cx, cy);
     render_zones(state, buf);
     render_aim_cone(state, buf);
     render_rocks(state, buf, cx, cy);
@@ -115,23 +117,27 @@ fn render_water(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
         }
     }
 
-    // Foam on water edges
+    // Foam on land tiles adjacent to water
     let foam_frame = ((state.tick / 3) % 16) as u16;
     let foam_sx = foam_frame * 192;
 
     for ty in sty..ety {
         for tx in stx..etx {
-            if state.grid.get(tx, ty) != TileType::Water { continue; }
-            let has_land = [(0i32, -1), (0, 1), (-1, 0), (1, 0)].iter().any(|&(ddx, ddy)| {
+            // Draw foam on LAND tiles that border water
+            let tile = state.grid.get(tx, ty);
+            if tile == TileType::Water { continue; }
+            let has_water = [(0i32, -1), (0, 1), (-1, 0), (1, 0)].iter().any(|&(ddx, ddy)| {
                 let nx = tx as i32 + ddx;
                 let ny = ty as i32 + ddy;
                 if nx < 0 || ny < 0 { return false; }
-                state.grid.get(nx as usize, ny as usize) != TileType::Water
+                state.grid.get(nx as usize, ny as usize) == TileType::Water
             });
-            if !has_land { continue; }
+            if !has_water { continue; }
             let dx = (tx as f32 * TS) as i16 - 64;
             let dy = (ty as f32 * TS) as i16 - 64;
+            buf.set_alpha(180);
             buf.draw_image(tex::FOAM, foam_sx, 0, 192, 192, dx, dy, 192, 192);
+            buf.set_alpha(255);
         }
     }
 }
@@ -245,6 +251,18 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
 
 fn draw_unit(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
     let u = &state.units[idx];
+
+    // Check visibility for enemy units (fog of war)
+    if u.faction == Faction::Red {
+        let visible = state.units.iter()
+            .filter(|f| f.alive && f.faction == Faction::Blue)
+            .any(|f| {
+                let d = ((f.x - u.x).powi(2) + (f.y - u.y).powi(2)).sqrt() / TS;
+                d < 12.0
+            });
+        if !visible { return; }
+    }
+
     let a = match u.anim {
         UnitAnim::Idle => crate::sprites::unit_idle(u.faction, u.kind),
         UnitAnim::Run => crate::sprites::unit_run(u.faction, u.kind),
