@@ -184,12 +184,16 @@ impl Modal {
             );
         }
 
-        let modal_inner = el(El::Div)
+        let mut modal_inner = el(El::Div)
             .st(tokens)
             .at(At::Role, Av::RoleDialog)
             .at(At::AriaModal, Av::True)
             .at(At::Tabindex, Av::MinusOne)
             .append(modal_children);
+
+        if self.title.is_some() {
+            modal_inner = modal_inner.at_str(At::AriaLabelledby, "modal-title");
+        }
 
         // Backdrop — always present, visibility toggled
         let mut backdrop = el(El::Div)
@@ -235,6 +239,7 @@ impl Modal {
             header_children.push(
                 el(El::H2)
                     .st([St::M0, St::FontMedium, St::TextLg])
+                    .at_str(At::Id, "modal-title")
                     .text(title)
             );
         }

@@ -7,7 +7,7 @@ use rwire::icons::{icon, Icon};
 use rwire::router::{Link, Router};
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
-use rwire::{el, handler, renderer, theme, El, ElementBuilder, Ev, Server, State};
+use rwire::{el, handler, renderer, theme, At, El, ElementBuilder, Ev, Server, State};
 use rwire_components::catalog::{self, Category, ComponentEntry};
 use rwire_components::*;
 use rwire_markdown::{markdown_element_types, Markdown};
@@ -77,7 +77,7 @@ struct DesignSystemState {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::default().palette(palettes::nord())
+    Theme::default().palette(palettes::indigo())
 }
 
 #[async_std::main]
@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = Router::new()
         .page("/", |_| build_landing())
         .page("/components/:slug", |params| {
-            let slug = params.get("slug").unwrap_or("button");
+            let slug = params.get("slug").unwrap_or("");
             build_component_page(slug)
         });
 
@@ -217,6 +217,7 @@ fn build_header() -> ElementBuilder {
             St::P0,
         ])
         .md([St::DisplayNone])
+        .at_str(At::AriaLabel, "Open menu")
         .on(Ev::Click, toggle_sidebar())
         .append([icon(Icon::Menu)]);
 
@@ -295,10 +296,9 @@ fn render_style_switcher(theme: &Theme) -> ElementBuilder {
             Button::ghost(theme.style.label())
                 .size(ButtonSize::Sm)
                 .on_click(cycle_theme_style()),
-            Button::ghost(if theme.palette_ref().is_some() {
-                "Nord"
-            } else {
-                "Default"
+            Button::ghost({
+                let is_nord = theme.palette_ref().is_some_and(|p| p.accent.step(8) == "#5E81AC");
+                if is_nord { "Nord" } else if theme.palette_ref().is_some() { "Indigo" } else { "Default" }
             })
             .size(ButtonSize::Sm)
             .on_click(cycle_palette()),
@@ -465,9 +465,19 @@ fn build_landing() -> ElementBuilder {
 // ============================================================================
 
 fn build_component_page(slug: &str) -> ElementBuilder {
-    let demo = catalog::find(slug)
-        .map(|e| (e.build_demo)(&[], &[]))
-        .unwrap_or_else(|| el(El::Div));
+    // When called with empty slug (router tree-shaking), build ALL demos
+    // so every component's tokens get discovered.
+    let demo = if slug.is_empty() {
+        let demos: Vec<ElementBuilder> = catalog::catalog()
+            .iter()
+            .map(|e| (e.build_demo)(&[], &[]))
+            .collect();
+        el(El::Div).append(demos)
+    } else {
+        catalog::find(slug)
+            .map(|e| (e.build_demo)(&[], &[]))
+            .unwrap_or_else(|| el(El::Div))
+    };
 
     // Return a representative tree with all element types used in the full page
     // layout so they get tree-shaken into the capsule.
@@ -613,11 +623,14 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
                 .copied()
                 .unwrap_or(prop.default);
 
+            // Use click event (not change) so data-* attributes are sent to the server.
+            // The JS runtime only collects data-* on click events.
             let toggle = Checkbox::new()
                 .label(prop.name)
                 .checked(checked)
-                .on_change(toggle_bool_prop())
-                .data("idx", &bool_idx.to_string());
+                .build()
+                .data("idx", &bool_idx.to_string())
+                .on(Ev::Click, toggle_bool_prop());
 
             toggles.push(toggle);
         }
@@ -894,9 +907,14 @@ fn cycle_theme_style(theme: &mut Theme) {
 
 #[handler]
 fn cycle_palette(theme: &mut Theme) {
-    if theme.palette_ref().is_some() {
+    // Cycle: Indigo → Nord → default (no palette)
+    let is_nord = theme.palette_ref().is_some_and(|p| p.accent.step(8) == "#5E81AC");
+    let is_indigo = theme.palette_ref().is_some_and(|p| p.accent.step(8) == "#3730A3");
+    if is_indigo {
+        theme.set_palette(palettes::nord());
+    } else if is_nord {
         theme.clear_palette();
     } else {
-        theme.set_palette(palettes::nord());
+        theme.set_palette(palettes::indigo());
     }
 }

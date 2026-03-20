@@ -94,6 +94,7 @@ impl Tabs {
 
         for (idx, tab) in self.tabs.iter().enumerate() {
             let is_active = idx == self.active_index;
+            let panel_id = format!("tabpanel-{idx}");
             let mut button_tokens = vec![
                 St::BgTransparent, St::BorderNone, St::TextSm, St::FontMedium,
                 St::CursorPointer, St::TransitionAll,
@@ -112,6 +113,7 @@ impl Tabs {
                 .st(button_tokens)
                 .at(At::Role, Av::RoleTab)
                 .at(At::AriaSelected, if is_active { Av::True } else { Av::False })
+                .at_str(At::AriaControls, &panel_id)
                 .text(&tab.label);
 
             if is_active {
@@ -128,6 +130,7 @@ impl Tabs {
         // All content panels — always rendered, visibility toggled
         for (idx, tab) in self.tabs.into_iter().enumerate() {
             let is_active = idx == self.active_index;
+            let panel_id = format!("tabpanel-{idx}");
 
             let mut panel_tokens = vec![St::PySm, St::Px0];
             if !is_active {
@@ -137,6 +140,7 @@ impl Tabs {
             let panel = el(El::Div)
                 .st(panel_tokens)
                 .at(At::Role, Av::RoleTabpanel)
+                .at_str(At::Id, &panel_id)
                 .append([tab.content]);
 
             container = container.append([panel]);

@@ -62,6 +62,8 @@ define_token_enum! {
         AriaHidden = 0x2B => "aria-hidden",
         AriaExpanded = 0x2C => "aria-expanded",
         AriaControls = 0x2D => "aria-controls",
+        AriaChecked = 0x2E => "aria-checked",
+        AriaLabelledby = 0x2F => "aria-labelledby",
 
         // SVG (0x40-0x49)
         Xmlns = 0x40 => "xmlns",

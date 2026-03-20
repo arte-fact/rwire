@@ -112,19 +112,19 @@ impl Alert {
 
         match self.intent {
             AlertIntent::Info => {
-                tokens.push(St::BgBlue2);
+                tokens.push(St::BgInfoSubtle);
                 tokens.push(St::BorderBlue8);
             }
             AlertIntent::Success => {
-                tokens.push(St::BgGreen4);
+                tokens.push(St::BgSuccessSubtle);
                 tokens.push(St::BorderGreen8);
             }
             AlertIntent::Warning => {
-                tokens.push(St::BgAmber2);
+                tokens.push(St::BgWarningSubtle);
                 tokens.push(St::BorderAmber8);
             }
             AlertIntent::Error => {
-                tokens.push(St::BgRed4);
+                tokens.push(St::BgErrorSubtle);
                 tokens.push(St::BorderRed8);
             }
         }
@@ -180,7 +180,7 @@ mod tests {
         let tokens = alert.compute_tokens();
         assert!(tokens.contains(&St::DisplayFlex));
         assert!(tokens.contains(&St::FlexCol));
-        assert!(tokens.contains(&St::BgBlue2));
+        assert!(tokens.contains(&St::BgInfoSubtle));
         assert!(tokens.contains(&St::BorderBlue8));
     }
 
@@ -188,7 +188,7 @@ mod tests {
     fn test_alert_error_tokens() {
         let alert = Alert::error();
         let tokens = alert.compute_tokens();
-        assert!(tokens.contains(&St::BgRed4));
+        assert!(tokens.contains(&St::BgErrorSubtle));
         assert!(tokens.contains(&St::BorderRed8));
     }
 

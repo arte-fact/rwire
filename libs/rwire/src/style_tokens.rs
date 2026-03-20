@@ -885,6 +885,16 @@ define_token_enum! {
         GradientTheme = 0x338 => "background:var(--Qgr)",
         TransTheme = 0x339 => "transition:all var(--Qt) ease",
         TextShadowTheme = 0x33A => "text-shadow:var(--Qts)",
+
+        // Status subtle pairs — mode-aware (0x33B-0x344)
+        BgInfoSubtle = 0x33B => "background:var(--O)",
+        TextOnInfoSubtle = 0x33C => "color:var(--O1)",
+        BgSuccessSubtle = 0x33D => "background:var(--M)",
+        TextOnSuccessSubtle = 0x33E => "color:var(--M1)",
+        BgWarningSubtle = 0x33F => "background:var(--N)",
+        TextOnWarningSubtle = 0x340 => "color:var(--N1)",
+        BgErrorSubtle = 0x341 => "background:var(--P)",
+        TextOnErrorSubtle = 0x342 => "color:var(--P1)",
     }
 }
 

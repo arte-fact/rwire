@@ -294,10 +294,45 @@ pub fn one_dark() -> ColorPalette {
     }
 }
 
+/// Modern indigo palette.
+///
+/// High-contrast slate neutrals with a vibrant indigo accent.
+/// Designed for excellent readability in both light and dark modes.
+pub fn indigo() -> ColorPalette {
+    ColorPalette {
+        neutral: ColorScale::from_hex([
+            "#F8FAFC", "#F1F5F9", "#E2E8F0", "#CBD5E1",
+            "#94A3B8", "#64748B", "#475569", "#334155",
+            "#1E293B", "#0F172A", "#0C1322", "#080E1A",
+        ]),
+        accent: ColorScale::from_hex([
+            "#EEF2FF", "#E0E7FF", "#C7D2FE", "#A5B4FC",
+            "#818CF8", "#6366F1", "#4F46E5", "#4338CA",
+            "#3730A3", "#312E81", "#2E1065", "#1E1B4B",
+        ]),
+        red: ColorScale::from_hex([
+            "#FEF2F2", "#FEE2E2", "#FECACA", "#FCA5A5",
+            "#F87171", "#EF4444", "#DC2626", "#B91C1C",
+            "#991B1B", "#7F1D1D", "#6B1515", "#570D0D",
+        ]),
+        green: ColorScale::from_hex([
+            "#F0FDF4", "#DCFCE7", "#BBF7D0", "#86EFAC",
+            "#4ADE80", "#22C55E", "#16A34A", "#15803D",
+            "#166534", "#14532D", "#0F4025", "#0A2D1C",
+        ]),
+        amber: ColorScale::from_hex([
+            "#FFFBEB", "#FEF3C7", "#FDE68A", "#FCD34D",
+            "#FBBF24", "#F59E0B", "#D97706", "#B45309",
+            "#92400E", "#78350F", "#613010", "#4A2510",
+        ]),
+    }
+}
+
 /// Convenience enum for all palette presets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Palette {
     Nord,
+    Indigo,
     Catppuccin,
     Dracula,
     Solarized,
@@ -311,6 +346,7 @@ impl Palette {
     /// All palette variants.
     pub const ALL: &[Palette] = &[
         Palette::Nord,
+        Palette::Indigo,
         Palette::Catppuccin,
         Palette::Dracula,
         Palette::Solarized,
@@ -324,6 +360,7 @@ impl Palette {
     pub fn label(&self) -> &'static str {
         match self {
             Palette::Nord => "Nord",
+            Palette::Indigo => "Indigo",
             Palette::Catppuccin => "Catppuccin",
             Palette::Dracula => "Dracula",
             Palette::Solarized => "Solarized",
@@ -338,6 +375,7 @@ impl Palette {
     pub fn id(&self) -> &'static str {
         match self {
             Palette::Nord => "nord",
+            Palette::Indigo => "indigo",
             Palette::Catppuccin => "catppuccin",
             Palette::Dracula => "dracula",
             Palette::Solarized => "solarized",
@@ -353,6 +391,7 @@ impl IntoPalette for Palette {
     fn into_palette(self) -> ColorPalette {
         match self {
             Palette::Nord => nord(),
+            Palette::Indigo => indigo(),
             Palette::Catppuccin => catppuccin(),
             Palette::Dracula => dracula(),
             Palette::Solarized => solarized(),

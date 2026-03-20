@@ -92,10 +92,16 @@ impl IntoStyle for Style {
 // Solid Style (old "Default")
 // ============================================================================
 
-fn solid_color_css(css: &mut String, rp: &ResolvedPalette, _is_dark: bool) {
-    css_var(css, "v", &rp.accent[8]);   // primary
-    css_var(css, "w", &rp.white);       // on-primary
-    css_var(css, "x", &rp.accent[9]);   // primary-hover
+fn solid_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    if is_dark {
+        css_var(css, "v", &rp.accent[7]);   // primary (brighter for dark bg)
+        css_var(css, "w", &rp.white);       // on-primary
+        css_var(css, "x", &rp.accent[6]);   // primary-hover
+    } else {
+        css_var(css, "v", &rp.accent[8]);   // primary
+        css_var(css, "w", &rp.white);       // on-primary
+        css_var(css, "x", &rp.accent[9]);   // primary-hover
+    }
 }
 
 fn solid_q_css(css: &mut String, _is_dark: bool) {

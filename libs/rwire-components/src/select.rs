@@ -59,6 +59,7 @@ pub struct Select {
     value: Option<Cow<'static, str>>,
     name: Option<Cow<'static, str>>,
     id: Option<Cow<'static, str>>,
+    aria_label: Option<Cow<'static, str>>,
     disabled: bool,
     required: bool,
     invalid: bool,
@@ -93,6 +94,12 @@ impl Select {
     /// Set the id attribute.
     pub fn id(mut self, id: impl Into<Cow<'static, str>>) -> Self {
         self.id = Some(id.into());
+        self
+    }
+
+    /// Set an accessible label for screen readers.
+    pub fn aria_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
+        self.aria_label = Some(label.into());
         self
     }
 
@@ -150,6 +157,9 @@ impl Select {
         }
         if let Some(ref name) = self.name {
             select = select.at_str(At::Name, name);
+        }
+        if let Some(ref label) = self.aria_label {
+            select = select.at_str(At::AriaLabel, label);
         }
         if self.disabled {
             select = select.bool_attr(At::Disabled);

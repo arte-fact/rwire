@@ -481,7 +481,12 @@ pub fn generate_base_css() -> &'static str {
      line-height:var(--X3);color:var(--k);background:var(--a)}\
      button,input,select,textarea{font:inherit}\
      table{border-collapse:collapse}\
-     img{max-width:100%;height:auto}\n"
+     img{max-width:100%;height:auto}\
+     *{scrollbar-width:thin;scrollbar-color:var(--c) transparent}\
+     ::-webkit-scrollbar{width:6px;height:6px}\
+     ::-webkit-scrollbar-track{background:transparent}\
+     ::-webkit-scrollbar-thumb{background:var(--c);border-radius:3px}\
+     ::-webkit-scrollbar-thumb:hover{background:var(--e)}\n"
 }
 
 /// Generate complete theme CSS from a Theme value.
@@ -566,8 +571,33 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     css_var(&mut css, "F", &rp.red[8]);      // destructive
     css_var(&mut css, "G", &rp.white);       // on-destructive
     css_var(&mut css, "H", &rp.red[9]);      // destructive-hover
-    css_var(&mut css, "K", &rp.accent[7]);   // focus-ring
-    css_var(&mut css, "L", &rp.accent[6]);   // border-primary
+    // Semantic subtle pairs for status colors (mode-aware)
+    if is_dark {
+        css_var(&mut css, "M", &rp.green[9]);  // success-subtle bg
+        css_var(&mut css, "M1", &rp.green[2]); // on-success-subtle text
+        css_var(&mut css, "N", &rp.amber[9]);  // warning-subtle bg
+        css_var(&mut css, "N1", &rp.amber[2]); // on-warning-subtle text
+        css_var(&mut css, "O", &rp.accent[9]); // info-subtle bg
+        css_var(&mut css, "O1", &rp.accent[2]);// on-info-subtle text
+        css_var(&mut css, "P", &rp.red[9]);    // error-subtle bg (alias for --I)
+        css_var(&mut css, "P1", &rp.red[2]);   // on-error-subtle text
+    } else {
+        css_var(&mut css, "M", &rp.green[1]);
+        css_var(&mut css, "M1", &rp.green[10]);
+        css_var(&mut css, "N", &rp.amber[1]);
+        css_var(&mut css, "N1", &rp.amber[10]);
+        css_var(&mut css, "O", &rp.accent[1]);
+        css_var(&mut css, "O1", &rp.accent[10]);
+        css_var(&mut css, "P", &rp.red[1]);
+        css_var(&mut css, "P1", &rp.red[10]);
+    }
+    if is_dark {
+        css_var(&mut css, "K", &rp.accent[5]);   // focus-ring (brighter in dark)
+        css_var(&mut css, "L", &rp.accent[4]);   // border-primary (brighter in dark)
+    } else {
+        css_var(&mut css, "K", &rp.accent[7]);   // focus-ring
+        css_var(&mut css, "L", &rp.accent[6]);   // border-primary
+    }
 
     // --- Style preset: resolve primary/surface/border overrides inline ---
     (theme.style.color_css)(&mut css, &rp, is_dark);
@@ -613,15 +643,15 @@ fn vn(css: &mut String, prefix: &str, num: usize, value: &str) {
 
 fn soft_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
     if is_dark {
-        css_var(css, "v", &rp.accent[9]);
-        css_var(css, "w", &rp.accent[2]);
-        css_var(css, "x", &rp.accent[8]);
-        css_var(css, "F", &rp.red[9]);
-        css_var(css, "G", &rp.red[2]);
-        css_var(css, "H", &rp.red[8]);
-        css_var(css, "h", &rp.neutral[9]);
+        css_var(css, "v", &rp.accent[7]);  // primary — brighter for dark bg
+        css_var(css, "w", &rp.accent[0]);  // on-primary
+        css_var(css, "x", &rp.accent[6]);  // primary-hover
+        css_var(css, "F", &rp.red[7]);     // destructive
+        css_var(css, "G", &rp.red[0]);     // on-destructive
+        css_var(css, "H", &rp.red[6]);     // destructive-hover
+        css_var(css, "h", &rp.neutral[8]); // border-default
         css.push_str("--g:transparent;");
-        css_var(css, "t", &rp.neutral[9]);
+        css_var(css, "t", &rp.neutral[9]); // surface-raised
     } else {
         css_var(css, "v", &rp.accent[2]);
         css_var(css, "w", &rp.accent[10]);
@@ -685,7 +715,7 @@ mod tests {
     #[test]
     fn test_base_css_size() {
         let css = generate_base_css();
-        assert!(css.len() < 400, "Base CSS too large: {} bytes", css.len());
+        assert!(css.len() < 600, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]

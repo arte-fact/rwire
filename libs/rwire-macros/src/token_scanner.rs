@@ -47,6 +47,14 @@ pub struct ScanResult {
     pub pseudo_pairs: BTreeSet<(String, String)>,
     /// Breakpoint pairs: (Bp variant name, St variant name).
     pub breakpoint_pairs: BTreeSet<(String, String)>,
+    /// All `El::Variant` names found (element types).
+    pub elements: BTreeSet<String>,
+    /// All `Ev::Variant` names found (event types).
+    pub events: BTreeSet<String>,
+    /// All `At::Variant` names found (attribute keys).
+    pub attr_keys: BTreeSet<String>,
+    /// All `Av::Variant` names found (attribute values).
+    pub attr_values: BTreeSet<String>,
 }
 
 /// Scan a renderer function body for style tokens.
@@ -55,6 +63,10 @@ pub fn scan_tokens(body: &TokenStream) -> ScanResult {
         styles: BTreeSet::new(),
         pseudo_pairs: BTreeSet::new(),
         breakpoint_pairs: BTreeSet::new(),
+        elements: BTreeSet::new(),
+        events: BTreeSet::new(),
+        attr_keys: BTreeSet::new(),
+        attr_values: BTreeSet::new(),
     };
 
     let tokens: Vec<TokenTree> = body.clone().into_iter().collect();
@@ -68,10 +80,24 @@ fn scan_recursive(tokens: &[TokenTree], result: &mut ScanResult) {
     let mut i = 0;
     while i < tokens.len() {
         match &tokens[i] {
-            // Check for St::Variant pattern
-            TokenTree::Ident(ident) if ident == "St" => {
+            // Check for St/El/Ev/At/Av::Variant patterns
+            TokenTree::Ident(ident)
+                if ident == "St"
+                    || ident == "El"
+                    || ident == "Ev"
+                    || ident == "At"
+                    || ident == "Av" =>
+            {
                 if let Some(variant) = extract_path_variant(tokens, i) {
-                    result.styles.insert(variant);
+                    let name = ident.to_string();
+                    match name.as_str() {
+                        "St" => { result.styles.insert(variant); }
+                        "El" => { result.elements.insert(variant); }
+                        "Ev" => { result.events.insert(variant); }
+                        "At" => { result.attr_keys.insert(variant); }
+                        "Av" => { result.attr_values.insert(variant); }
+                        _ => {}
+                    }
                 }
                 i += 1;
             }
@@ -241,11 +267,51 @@ pub fn generate_inventory(result: &ScanResult) -> TokenStream {
         })
         .collect();
 
+    let el_entries: Vec<TokenStream> = result
+        .elements
+        .iter()
+        .map(|variant| {
+            let ident = syn::Ident::new(variant, proc_macro2::Span::call_site());
+            quote! { rwire::protocol::El::#ident as u8 }
+        })
+        .collect();
+
+    let ev_entries: Vec<TokenStream> = result
+        .events
+        .iter()
+        .map(|variant| {
+            let ident = syn::Ident::new(variant, proc_macro2::Span::call_site());
+            quote! { rwire::protocol::Ev::#ident as u8 }
+        })
+        .collect();
+
+    let at_entries: Vec<TokenStream> = result
+        .attr_keys
+        .iter()
+        .map(|variant| {
+            let ident = syn::Ident::new(variant, proc_macro2::Span::call_site());
+            quote! { rwire::attr_tokens::At::#ident as u8 }
+        })
+        .collect();
+
+    let av_entries: Vec<TokenStream> = result
+        .attr_values
+        .iter()
+        .map(|variant| {
+            let ident = syn::Ident::new(variant, proc_macro2::Span::call_site());
+            quote! { rwire::attr_tokens::Av::#ident as u8 }
+        })
+        .collect();
+
     quote! {
         rwire::TokenInventory {
             styles: &[#(#style_entries),*],
             pseudo_pairs: &[#(#pseudo_entries),*],
             breakpoint_pairs: &[#(#bp_entries),*],
+            elements: &[#(#el_entries),*],
+            events: &[#(#ev_entries),*],
+            attr_keys: &[#(#at_entries),*],
+            attr_values: &[#(#av_entries),*],
         }
     }
 }
@@ -350,11 +416,103 @@ mod tests {
         assert!(result.styles.is_empty());
         assert!(result.pseudo_pairs.is_empty());
         assert!(result.breakpoint_pairs.is_empty());
+        assert!(result.elements.is_empty());
+        assert!(result.events.is_empty());
+        assert!(result.attr_keys.is_empty());
+        assert!(result.attr_values.is_empty());
     }
 
     #[test]
-    fn ignores_non_st_paths() {
-        let result = scan("El::Div; Ev::Click; ButtonIntent::Primary");
+    fn finds_el_ev_tokens() {
+        let result = scan("el(El::Div).on(Ev::Click, handler())");
+        assert!(result.elements.contains("Div"));
+        assert!(result.events.contains("Click"));
+    }
+
+    #[test]
+    fn ignores_unknown_paths() {
+        let result = scan("ButtonIntent::Primary; Foo::Bar");
         assert!(result.styles.is_empty());
+        assert!(result.elements.is_empty());
+        assert!(result.events.is_empty());
+        assert!(result.attr_keys.is_empty());
+        assert!(result.attr_values.is_empty());
+    }
+
+    #[test]
+    fn finds_at_av_tokens() {
+        let result = scan(
+            r#"
+            el(El::Button)
+                .at(At::Type, Av::Button)
+                .bool_attr(At::Disabled)
+                .at_str(At::AriaLabel, "Close")
+            "#,
+        );
+        assert!(result.attr_keys.contains("Type"));
+        assert!(result.attr_keys.contains("Disabled"));
+        assert!(result.attr_keys.contains("AriaLabel"));
+        assert!(result.attr_values.contains("Button"));
+        assert!(result.elements.contains("Button"));
+    }
+
+    #[test]
+    fn finds_at_in_conditional_branches() {
+        let result = scan(
+            r#"
+            if self.disabled {
+                builder.bool_attr(At::Disabled)
+            } else {
+                builder.at(At::AriaExpanded, Av::True)
+            }
+            "#,
+        );
+        assert!(result.attr_keys.contains("Disabled"));
+        assert!(result.attr_keys.contains("AriaExpanded"));
+        assert!(result.attr_values.contains("True"));
+    }
+
+    #[test]
+    fn finds_tokens_in_full_method() {
+        // This mimics what #[component] feeds to the scanner:
+        // quote! { #method } for a full method definition
+        let result = scan(
+            r#"
+            pub fn build(self) -> ElementBuilder {
+                let mut builder = el(El::Button).st(tokens);
+                if self.disabled {
+                    builder = builder.bool_attr(At::Disabled);
+                }
+                if self.loading {
+                    builder = builder.at(At::AriaBusy, Av::True);
+                }
+                builder
+            }
+            pub fn on_click(self, handler: HandlerSpec) -> ElementBuilder {
+                self.build().on(Ev::Click, handler)
+            }
+            "#,
+        );
+        assert!(result.elements.contains("Button"), "El::Button missing");
+        assert!(result.attr_keys.contains("Disabled"), "At::Disabled missing");
+        assert!(result.attr_keys.contains("AriaBusy"), "At::AriaBusy missing");
+        assert!(result.attr_values.contains("True"), "Av::True missing");
+        assert!(result.events.contains("Click"), "Ev::Click missing");
+    }
+
+    #[test]
+    fn finds_el_in_match_arms() {
+        let result = scan(
+            r#"
+            match level {
+                1 => el(El::H1).text(text),
+                2 => el(El::H2).text(text),
+                _ => el(El::H3).text(text),
+            }
+            "#,
+        );
+        assert!(result.elements.contains("H1"));
+        assert!(result.elements.contains("H2"));
+        assert!(result.elements.contains("H3"));
     }
 }

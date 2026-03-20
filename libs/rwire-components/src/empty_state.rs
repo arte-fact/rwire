@@ -97,8 +97,8 @@ impl EmptyState {
 
         if let Some(title) = self.title {
             container = container.append([
-                el(El::H3)
-                    .st([St::TextLg, St::FontSemibold, St::TextDefault])
+                el(El::P)
+                    .st([St::TextLg, St::FontSemibold, St::TextDefault, St::M0])
                     .text(&title),
             ]);
         }

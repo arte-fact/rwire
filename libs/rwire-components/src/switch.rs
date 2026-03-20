@@ -130,7 +130,8 @@ impl Switch {
             .checked_after([St::TranslateXFull])
             .focus_visible([St::RingFocus])
             .at(At::Type, Av::Checkbox)
-            .at(At::Role, Av::RoleSwitch);
+            .at(At::Role, Av::RoleSwitch)
+            .at(At::AriaChecked, if self.checked { Av::True } else { Av::False });
 
         if self.disabled {
             input = input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);

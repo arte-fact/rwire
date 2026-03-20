@@ -113,7 +113,6 @@ impl Slider {
         // Range input (overlaid for accessibility)
         let mut input = el(El::Input)
             .st([St::SliderInput, St::SliderThumb])
-            .at(At::Type, rwire::attr_tokens::Av::Hidden) // type overridden below
             .attr("type", "range")
             .attr("min", &self.min.to_string())
             .attr("max", &self.max.to_string())

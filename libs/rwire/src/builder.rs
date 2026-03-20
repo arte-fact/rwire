@@ -132,6 +132,14 @@ pub struct TokenInventory {
     /// Breakpoint pairs from `.sm()`, `.md()`, `.lg()`, `.xl()`.
     /// Each entry is `(Bp code, St code)`.
     pub breakpoint_pairs: &'static [(u8, u16)],
+    /// All `El` tokens referenced (element types, as u8 codes).
+    pub elements: &'static [u8],
+    /// All `Ev` tokens referenced (event types, as u8 codes).
+    pub events: &'static [u8],
+    /// All `At` tokens referenced (attribute keys, as u8 codes).
+    pub attr_keys: &'static [u8],
+    /// All `Av` tokens referenced (attribute values, as u8 codes).
+    pub attr_values: &'static [u8],
 }
 
 impl TokenInventory {
@@ -140,6 +148,10 @@ impl TokenInventory {
         styles: &[],
         pseudo_pairs: &[],
         breakpoint_pairs: &[],
+        elements: &[],
+        events: &[],
+        attr_keys: &[],
+        attr_values: &[],
     };
 }
 
@@ -2008,6 +2020,18 @@ impl BuildContext {
         }
         for &(bp, st) in inv.breakpoint_pairs {
             self.used_breakpoint_pairs.insert((bp, st));
+        }
+        for &el in inv.elements {
+            self.used_elements.insert(el);
+        }
+        for &ev in inv.events {
+            self.used_events.insert(ev);
+        }
+        for &at in inv.attr_keys {
+            self.used_attr_keys.insert(at);
+        }
+        for &av in inv.attr_values {
+            self.used_attr_values.insert(av);
         }
     }
 

@@ -335,6 +335,7 @@ fn textarea_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn select_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Select;
     Select::new()
+        .aria_label("Country")
         .option("us", "United States")
         .option("uk", "United Kingdom")
         .option("ca", "Canada")

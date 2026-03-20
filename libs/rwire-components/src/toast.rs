@@ -114,19 +114,19 @@ impl Toast {
                 tokens.push(St::TextDefault);
             }
             ToastIntent::Success => {
-                tokens.push(St::BgGreen4);
+                tokens.push(St::BgSuccessSubtle);
                 tokens.push(St::BorderGreen8);
-                tokens.push(St::TextGreen11);
+                tokens.push(St::TextOnSuccessSubtle);
             }
             ToastIntent::Warning => {
-                tokens.push(St::BgAmber2);
+                tokens.push(St::BgWarningSubtle);
                 tokens.push(St::BorderAmber8);
-                tokens.push(St::TextAmber11);
+                tokens.push(St::TextOnWarningSubtle);
             }
             ToastIntent::Error => {
-                tokens.push(St::BgRed4);
+                tokens.push(St::BgErrorSubtle);
                 tokens.push(St::BorderRed8);
-                tokens.push(St::TextRed11);
+                tokens.push(St::TextOnErrorSubtle);
             }
         }
 
@@ -283,16 +283,16 @@ mod tests {
     fn test_toast_success_tokens() {
         let toast = Toast::success("test");
         let tokens = toast.compute_tokens();
-        assert!(tokens.contains(&St::BgGreen4));
-        assert!(tokens.contains(&St::TextGreen11));
+        assert!(tokens.contains(&St::BgSuccessSubtle));
+        assert!(tokens.contains(&St::TextOnSuccessSubtle));
     }
 
     #[test]
     fn test_toast_error_tokens() {
         let toast = Toast::error("test");
         let tokens = toast.compute_tokens();
-        assert!(tokens.contains(&St::BgRed4));
-        assert!(tokens.contains(&St::TextRed11));
+        assert!(tokens.contains(&St::BgErrorSubtle));
+        assert!(tokens.contains(&St::TextOnErrorSubtle));
     }
 
     #[test]
