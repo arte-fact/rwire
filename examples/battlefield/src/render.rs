@@ -3,7 +3,7 @@
 use crate::autotile;
 use crate::grid::{GRID_SIZE, TILE_SIZE, TileType};
 use crate::sprites::tex;
-use crate::state::{GamePhase, GameState};
+use crate::state::{BuildingKind, GamePhase, GameState};
 use crate::unit::{Facing, Faction, UnitAnim};
 use rwire_canvas::CanvasBuffer;
 
@@ -24,6 +24,7 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     render_terrain(state, buf, cx, cy);
     render_water(state, buf, cx, cy);
     render_zones(state, buf);
+    render_aim_cone(state, buf);
     render_rocks(state, buf, cx, cy);
     render_bushes(state, buf, cx, cy);
     render_foreground(state, buf, cx, cy);
@@ -156,8 +157,46 @@ fn render_bushes(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     }
 }
 
+fn render_aim_cone(state: &GameState, buf: &mut CanvasBuffer) {
+    let player = match state.units.iter().find(|u| u.id == state.player_id && u.alive) {
+        Some(p) => p,
+        None => return,
+    };
+    if state.phase != GamePhase::Playing { return; }
+
+    let px = player.x as i16;
+    let py = player.y as i16;
+    let radius: u16 = 40;
+
+    // Aim direction
+    let aim_angle = state.aim_y.atan2(state.aim_x);
+    let half_cone = std::f32::consts::FRAC_PI_3; // 60 degrees
+
+    // Yellow semi-transparent wedge
+    buf.set_fill_rgba(255, 255, 100, 30);
+    buf.begin_path();
+    buf.move_to(px, py);
+    buf.arc(px, py, radius, aim_angle - half_cone, aim_angle + half_cone);
+    buf.close_path();
+    buf.fill();
+
+    buf.set_stroke_rgba(255, 255, 100, 90);
+    buf.set_line_width(4);
+    buf.begin_path();
+    buf.move_to(px, py);
+    buf.arc(px, py, radius, aim_angle - half_cone, aim_angle + half_cone);
+    buf.close_path();
+    buf.stroke();
+
+    // Position indicator circle
+    buf.set_fill_rgba(255, 215, 0, 60);
+    buf.begin_path();
+    buf.arc_full(px, py + 12, 24);
+    buf.fill();
+}
+
 fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
-    enum D { Unit(usize), Tree(usize, usize) }
+    enum D { Unit(usize), Tree(usize, usize), Building(usize) }
     let mut items: Vec<(f32, D)> = Vec::new();
 
     for (i, u) in state.units.iter().enumerate() {
@@ -177,12 +216,21 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
         }
     }
 
+    // Buildings
+    for (i, b) in state.buildings.iter().enumerate() {
+        if b.x >= cx - 200.0 && b.x <= cx + CW as f32 + 200.0
+            && b.y >= cy - 300.0 && b.y <= cy + CH as f32 + 200.0 {
+            items.push((b.y + TS, D::Building(i)));
+        }
+    }
+
     items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
     for (_, item) in items {
         match item {
             D::Unit(i) => draw_unit(state, buf, i),
             D::Tree(tx, ty) => draw_tree(state, buf, tx, ty),
+            D::Building(i) => draw_building(state, buf, i),
         }
     }
 }
@@ -249,6 +297,25 @@ fn draw_tree(state: &GameState, buf: &mut CanvasBuffer, tx: usize, ty: usize) {
     buf.set_alpha(255);
 }
 
+fn draw_building(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
+    let b = &state.buildings[idx];
+    let (tex_id, sw, sh) = match (b.faction, b.kind) {
+        (Faction::Blue, BuildingKind::Barracks) => (tex::BARRACKS_BLUE, 192u16, 256u16),
+        (Faction::Red, BuildingKind::Barracks) => (tex::BARRACKS_RED, 192, 256),
+        (Faction::Blue, BuildingKind::Archery) => (tex::ARCHERY_BLUE, 192, 256),
+        (Faction::Red, BuildingKind::Archery) => (tex::ARCHERY_RED, 192, 256),
+        (Faction::Blue, BuildingKind::Monastery) => (tex::BARRACKS_BLUE, 192, 256), // fallback
+        (Faction::Red, BuildingKind::Monastery) => (tex::BARRACKS_RED, 192, 256),
+    };
+    // Draw building scaled, bottom-aligned
+    let scale = 3u16;
+    let dw = sw * scale / 2;
+    let dh = sh * scale / 2;
+    let dx = b.x as i16 - dw as i16 / 2;
+    let dy = b.y as i16 - dh as i16 + 32;
+    buf.draw_image(tex_id, 0, 0, sw, sh, dx, dy, dw, dh);
+}
+
 fn render_zones(state: &GameState, buf: &mut CanvasBuffer) {
     for zone in &state.zones {
         let zcx = zone.cx as i16;
@@ -286,11 +353,33 @@ fn render_zones(state: &GameState, buf: &mut CanvasBuffer) {
         };
         buf.fill_text(zcx, zcy - r as i16 - 22, label);
 
+        // Zone tower building
+        let tower_tex = match zone.owner {
+            Some(Faction::Blue) => tex::TOWER_BLUE,
+            Some(Faction::Red) => tex::TOWER_RED,
+            None => tex::TOWER_BLACK,
+        };
+        // Tower is 128×256 source, draw at 2×4 tiles, bottom-centered on zone
+        let tw: u16 = 128;
+        let th: u16 = 256;
+        let tdx = zcx - tw as i16 / 2;
+        let tdy = zcy - th as i16 + 48;
+        // Pulse opacity when capturing
+        let tower_alpha = if zone.owner.is_none() && zone.progress.abs() > 0.05 {
+            let pulse = ((state.tick as f32 * 0.15).sin() * 0.2 + 0.8) * 255.0;
+            pulse as u8
+        } else {
+            255
+        };
+        buf.set_alpha(tower_alpha);
+        buf.draw_image(tower_tex, 0, 0, 128, 256, tdx, tdy, tw, th);
+        buf.set_alpha(255);
+
         // Progress bar
         let bw: u16 = 60;
         let bh: u16 = 6;
         let bx = zcx - bw as i16 / 2;
-        let by = zcy - r as i16 - 18;
+        let by = tdy - 12;
         buf.set_fill_rgba(0, 0, 0, 100);
         buf.fill_rect(bx, by, bw, bh);
         if zone.progress > 0.01 {
@@ -322,36 +411,49 @@ fn render_hp_bars(state: &GameState, buf: &mut CanvasBuffer) {
 
 fn render_fog(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     let (stx, sty, etx, ety) = vis(cx, cy);
-    let player = state.units.iter().find(|u| u.id == state.player_id && u.alive);
-    let (px, py) = player.map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
-    let fov = 12.0; // tiles
 
-    for ty in sty..ety {
-        for tx in stx..etx {
-            let wx = tx as f32 * TS + TS / 2.0;
-            let wy = ty as f32 * TS + TS / 2.0;
-            let dist = ((wx - px).powi(2) + (wy - py).powi(2)).sqrt() / TS;
+    // Collect all friendly unit positions for multi-source visibility
+    let friendly_positions: Vec<(f32, f32)> = state.units.iter()
+        .filter(|u| u.alive && u.faction == Faction::Blue)
+        .map(|u| (u.x, u.y))
+        .collect();
 
-            if dist > fov {
-                let alpha = 140u8.min(((dist - fov) * 40.0) as u8 + 100);
-                buf.set_fill_rgba(15, 15, 25, alpha);
-                buf.fill_rect(
-                    (tx as f32 * TS) as i16,
-                    (ty as f32 * TS) as i16,
-                    TS as u16 + 1,
-                    TS as u16 + 1,
-                );
-            } else if dist > fov - 2.0 {
-                let alpha = (((dist - (fov - 2.0)) / 2.0) * 80.0) as u8;
-                buf.set_fill_rgba(15, 15, 25, alpha);
-                buf.fill_rect(
-                    (tx as f32 * TS) as i16,
-                    (ty as f32 * TS) as i16,
-                    TS as u16 + 1,
-                    TS as u16 + 1,
-                );
+    let fov = 12.0f32; // tiles
+    let soft_edge = 3.0f32; // tiles of gradient
+
+    // Use half-tile steps for smoother fog
+    let step = TS / 2.0;
+    let half = step as u16 + 1;
+
+    let start_wx = (stx as f32 * TS) as i32;
+    let start_wy = (sty as f32 * TS) as i32;
+    let end_wx = (etx as f32 * TS) as i32;
+    let end_wy = (ety as f32 * TS) as i32;
+
+    let mut wy = start_wy as f32;
+    while wy < end_wy as f32 {
+        let mut wx = start_wx as f32;
+        while wx < end_wx as f32 {
+            let cx_pos = wx + step / 2.0;
+            let cy_pos = wy + step / 2.0;
+
+            // Find minimum distance to any friendly unit
+            let min_dist = friendly_positions.iter()
+                .map(|&(px, py)| ((cx_pos - px).powi(2) + (cy_pos - py).powi(2)).sqrt() / TS)
+                .fold(f32::MAX, f32::min);
+
+            if min_dist > fov - soft_edge {
+                let t = ((min_dist - (fov - soft_edge)) / soft_edge).min(1.0);
+                let alpha = (t * 180.0) as u8;
+                if alpha > 5 {
+                    buf.set_fill_rgba(12, 12, 22, alpha);
+                    buf.fill_rect(wx as i16, wy as i16, half, half);
+                }
             }
+
+            wx += step;
         }
+        wy += step;
     }
 }
 
