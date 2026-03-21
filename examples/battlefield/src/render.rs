@@ -17,16 +17,21 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
 
     let cx = state.camera_x;
     let cy = state.camera_y;
+    let zoom = state.camera_zoom;
     buf.save();
-    buf.translate(-cx as i16, -cy as i16);
-    buf.scale_uniform(state.camera_zoom);
+    // Camera transform: scale then translate (world → screen)
+    // Screen pos = (world_pos - camera) * zoom
+    let offset_x = (-cx * zoom) as i16;
+    let offset_y = (-cy * zoom) as i16;
+    buf.translate(offset_x, offset_y);
+    buf.scale_uniform(zoom);
 
     // Water rendered first as base layer
     render_water(state, buf, cx, cy);
     // Land tiles on top (autotiled edges blend over water)
     render_terrain(state, buf, cx, cy);
-    // Global darken for moody atmosphere
-    buf.set_fill_rgba(0, 5, 10, 35);
+    // Subtle global darken for moody atmosphere (lighter than before)
+    buf.set_fill_rgba(0, 5, 10, 20);
     buf.fill_rect(-1000, -1000, 12000, 12000);
     render_zones(state, buf);
     render_aim_cone(state, buf);
@@ -60,10 +65,12 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
 }
 
 fn vis(cx: f32, cy: f32) -> (usize, usize, usize, usize) {
-    let stx = ((cx / TS) as i32).max(0) as usize;
-    let sty = ((cy / TS) as i32).max(0) as usize;
-    let etx = (((cx + CW as f32) / TS) as usize + 2).min(GRID_SIZE);
-    let ety = (((cy + CH as f32) / TS) as usize + 2).min(GRID_SIZE);
+    // Expand visible range to account for possible zoom out
+    let extra = 4; // extra tiles to render beyond viewport
+    let stx = ((cx / TS) as i32 - extra as i32).max(0) as usize;
+    let sty = ((cy / TS) as i32 - extra as i32).max(0) as usize;
+    let etx = (((cx + CW as f32 * 2.0) / TS) as usize + extra).min(GRID_SIZE);
+    let ety = (((cy + CH as f32 * 2.0) / TS) as usize + extra).min(GRID_SIZE);
     (stx, sty, etx, ety)
 }
 
@@ -82,30 +89,37 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
             // Draw 1px larger to prevent subpixel seams
             let draw_ts = ts + 1;
 
-            // Alternate between tilemap1 and tilemap2 for variety
-            let tilemap = if (tx + ty) % 3 == 0 { tex::TILEMAP2 } else { tex::TILEMAP1 };
-
+            // Use tilemap1 consistently (original uses one tilemap, flips for variety)
             match tile {
                 TileType::Grass | TileType::Forest => {
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tilemap, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    // Randomly flip tiles for variety (deterministic per position)
+                    let flip = ((tx.wrapping_mul(7) ^ ty.wrapping_mul(13)) % 3) == 0;
+                    if flip {
+                        buf.save();
+                        buf.translate(dx + draw_ts as i16, dy);
+                        buf.scale(-256, 256); // flip X
+                        buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, 0, 0, draw_ts, draw_ts);
+                        buf.restore();
+                    } else {
+                        buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    }
                     if tile == TileType::Forest {
-                        buf.set_fill_rgba(0, 15, 0, 50);
+                        buf.set_fill_rgba(0, 10, 0, 35);
                         buf.fill_rect(dx, dy, draw_ts, draw_ts);
                     }
                 }
                 TileType::Road => {
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tilemap, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
-                    buf.set_fill_rgba(196, 162, 101, 80);
+                    buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
+                    // Road tint overlay
+                    buf.set_fill_rgba(196, 162, 101, 60);
                     buf.fill_rect(dx, dy, draw_ts, draw_ts);
                 }
                 TileType::Rock => {
+                    // Draw grass underneath, then rock decoration
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tilemap, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
-                    // Slight darkening for rocky areas
-                    buf.set_fill_rgba(30, 25, 20, 40);
-                    buf.fill_rect(dx, dy, draw_ts, draw_ts);
+                    buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
                 }
                 _ => {}
             }
@@ -155,11 +169,27 @@ fn render_rocks(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     let (stx, sty, etx, ety) = vis(cx, cy);
     for ty in sty..ety {
         for tx in stx..etx {
-            if state.grid.get(tx, ty) != TileType::Rock { continue; }
-            let v = ((tx * 7 + ty * 13) % 4) as u8;
+            let tile = state.grid.get(tx, ty);
             let dx = (tx as f32 * TS) as i16;
             let dy = (ty as f32 * TS) as i16;
-            buf.draw_image(tex::ROCK1 + v, 0, 0, 64, 64, dx, dy, 64, 64);
+
+            if tile == TileType::Rock {
+                // Full rock decoration on rock tiles
+                let v = ((tx * 7 + ty * 13) % 4) as u8;
+                buf.draw_image(tex::ROCK1 + v, 0, 0, 64, 64, dx, dy, 64, 64);
+            } else if tile == TileType::Grass {
+                // Scattered small pebble decorations on grass (like original)
+                let hash = (tx.wrapping_mul(23) ^ ty.wrapping_mul(59)) % 12;
+                if hash == 0 {
+                    let v = ((tx * 3 + ty * 7) % 4) as u8;
+                    // Draw smaller (32x32) for subtle pebbles
+                    let ox = ((tx * 11 + ty * 17) % 32) as i16;
+                    let oy = ((tx * 19 + ty * 7) % 32) as i16;
+                    buf.set_alpha(200);
+                    buf.draw_image(tex::ROCK1 + v, 0, 0, 64, 64, dx + ox, dy + oy, 32, 32);
+                    buf.set_alpha(255);
+                }
+            }
         }
     }
 }
@@ -169,13 +199,17 @@ fn render_bushes(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     let bf = ((state.tick / 2) % 8) as u16;
     for ty in sty..ety {
         for tx in stx..etx {
-            if state.grid.get(tx, ty) != TileType::Forest { continue; }
-            if (tx.wrapping_mul(31) ^ ty.wrapping_mul(97)) % 5 != 0 { continue; }
+            // Bushes on some grass tiles too (not just forest)
+            let tile = state.grid.get(tx, ty);
+            if tile != TileType::Forest && tile != TileType::Grass { continue; }
+            let sparse = if tile == TileType::Forest { 7 } else { 15 };
+            if (tx.wrapping_mul(31) ^ ty.wrapping_mul(97)) % sparse != 0 { continue; }
             let v = ((tx * 3 + ty * 11) % 4) as u8;
             let sx = bf * 128;
-            let dx = (tx as f32 * TS) as i16 - 32;
-            let dy = (ty as f32 * TS) as i16 - 32;
-            buf.draw_image(tex::BUSH1 + v, sx, 0, 128, 128, dx, dy, 128, 128);
+            let dx = (tx as f32 * TS) as i16 - 16; // smaller offset
+            let dy = (ty as f32 * TS) as i16 - 16;
+            // Smaller bushes (64x64 draw size instead of 128x128)
+            buf.draw_image(tex::BUSH1 + v, sx, 0, 128, 128, dx, dy, 80, 80);
         }
     }
 }
@@ -234,7 +268,8 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
     for ty in sty..ety {
         for tx in stx..etx {
             if state.grid.get(tx, ty) != TileType::Forest { continue; }
-            if (tx.wrapping_mul(17) ^ ty.wrapping_mul(53)) % 4 != 0 { continue; }
+            // Sparser trees — only ~1 in 6 forest tiles get a tree (was 1 in 4)
+            if (tx.wrapping_mul(17) ^ ty.wrapping_mul(53)) % 6 != 0 { continue; }
             items.push(((ty as f32 + 1.0) * TS, D::Tree(tx, ty)));
         }
     }
@@ -468,42 +503,41 @@ fn render_fog(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
         .map(|u| (u.x, u.y))
         .collect();
 
-    let fov = 12.0f32; // tiles
-    let soft_edge = 3.0f32; // tiles of gradient
+    let fov = 15.0f32; // tiles — large visible area like the original
+    let soft_edge = 4.0f32; // tiles of soft gradient
 
-    // Use half-tile steps for smoother fog
-    let step = TS / 2.0;
-    let half = step as u16 + 1;
-
-    let start_wx = (stx as f32 * TS) as i32;
-    let start_wy = (sty as f32 * TS) as i32;
-    let end_wx = (etx as f32 * TS) as i32;
-    let end_wy = (ety as f32 * TS) as i32;
-
-    let mut wy = start_wy as f32;
-    while wy < end_wy as f32 {
-        let mut wx = start_wx as f32;
-        while wx < end_wx as f32 {
-            let cx_pos = wx + step / 2.0;
-            let cy_pos = wy + step / 2.0;
+    // Per-tile fog (full tile steps for performance, subtler alpha)
+    for ty in sty..ety {
+        for tx in stx..etx {
+            let wx = tx as f32 * TS + TS / 2.0;
+            let wy = ty as f32 * TS + TS / 2.0;
 
             // Find minimum distance to any friendly unit
             let min_dist = friendly_positions.iter()
-                .map(|&(px, py)| ((cx_pos - px).powi(2) + (cy_pos - py).powi(2)).sqrt() / TS)
+                .map(|&(px, py)| ((wx - px).powi(2) + (wy - py).powi(2)).sqrt() / TS)
                 .fold(f32::MAX, f32::min);
 
-            if min_dist > fov - soft_edge {
-                let t = ((min_dist - (fov - soft_edge)) / soft_edge).min(1.0);
-                let alpha = (t * 180.0) as u8;
-                if alpha > 5 {
-                    buf.set_fill_rgba(12, 12, 22, alpha);
-                    buf.fill_rect(wx as i16, wy as i16, half, half);
+            if min_dist > fov {
+                // Fully fogged
+                buf.set_fill_rgba(10, 10, 18, 180);
+                buf.fill_rect(
+                    (tx as f32 * TS) as i16, (ty as f32 * TS) as i16,
+                    TS as u16 + 1, TS as u16 + 1,
+                );
+            } else if min_dist > fov - soft_edge {
+                // Soft gradient
+                let t = (min_dist - (fov - soft_edge)) / soft_edge;
+                let alpha = (t * t * 160.0) as u8; // quadratic falloff for softer edge
+                if alpha > 3 {
+                    buf.set_fill_rgba(10, 10, 18, alpha);
+                    buf.fill_rect(
+                        (tx as f32 * TS) as i16, (ty as f32 * TS) as i16,
+                        TS as u16 + 1, TS as u16 + 1,
+                    );
                 }
             }
-
-            wx += step;
+            // Inside FOV — no fog at all (bright like original)
         }
-        wy += step;
     }
 }
 
