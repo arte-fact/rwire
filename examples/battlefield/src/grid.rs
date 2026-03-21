@@ -1,6 +1,6 @@
 //! Tile grid and terrain system.
 
-pub const GRID_SIZE: usize = 120;
+pub const GRID_SIZE: usize = 100;
 pub const TILE_SIZE: f32 = 64.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

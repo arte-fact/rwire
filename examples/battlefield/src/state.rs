@@ -277,15 +277,15 @@ impl GameState {
             if dx > 0 { player.facing = Facing::Right; }
             else if dx < 0 { player.facing = Facing::Left; }
 
-            // Camera follows player, clamped to world bounds
-            // Camera coords are in world space (before zoom transform)
-            self.camera_x = player.x - 480.0 / self.camera_zoom;
-            self.camera_y = player.y - 320.0 / self.camera_zoom;
+            // Camera center on player (world-space center point like original)
+            self.camera_x = player.x;
+            self.camera_y = player.y;
+            // Clamp so viewport stays within world bounds
             let world_max = GRID_SIZE as f32 * TILE_SIZE;
-            let vw = 960.0 / self.camera_zoom;
-            let vh = 640.0 / self.camera_zoom;
-            self.camera_x = self.camera_x.clamp(0.0, (world_max - vw).max(0.0));
-            self.camera_y = self.camera_y.clamp(0.0, (world_max - vh).max(0.0));
+            let half_vw = 480.0 / self.camera_zoom;
+            let half_vh = 320.0 / self.camera_zoom;
+            self.camera_x = self.camera_x.clamp(half_vw, world_max - half_vw);
+            self.camera_y = self.camera_y.clamp(half_vh, world_max - half_vh);
 
             // Player attack: find nearest enemy in range
             if input.attacking() {

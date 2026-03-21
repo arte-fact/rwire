@@ -19,10 +19,10 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     let cy = state.camera_y;
     let zoom = state.camera_zoom;
     buf.save();
-    // Camera transform: scale then translate (world → screen)
-    // Screen pos = (world_pos - camera) * zoom
-    let offset_x = (-cx * zoom) as i16;
-    let offset_y = (-cy * zoom) as i16;
+    // Match original: offset = round(canvas_half - zoom * camera_pos)
+    // This snaps to integer pixels for pixel-perfect tile alignment
+    let offset_x = (CW as f32 / 2.0 - zoom * cx).round() as i16;
+    let offset_y = (CH as f32 / 2.0 - zoom * cy).round() as i16;
     buf.translate(offset_x, offset_y);
     buf.scale_uniform(zoom);
 
@@ -67,12 +67,14 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
 }
 
 fn vis(cx: f32, cy: f32) -> (usize, usize, usize, usize) {
-    // Expand visible range to account for possible zoom out
-    let extra = 4; // extra tiles to render beyond viewport
-    let stx = ((cx / TS) as i32 - extra as i32).max(0) as usize;
-    let sty = ((cy / TS) as i32 - extra as i32).max(0) as usize;
-    let etx = (((cx + CW as f32 * 2.0) / TS) as usize + extra).min(GRID_SIZE);
-    let ety = (((cy + CH as f32 * 2.0) / TS) as usize + extra).min(GRID_SIZE);
+    // Camera is center point; compute visible rect edges
+    // Use a generous margin to account for zoom levels
+    let half_w = CW as f32; // generous: 2x viewport for zoom margin
+    let half_h = CH as f32;
+    let stx = (((cx - half_w) / TS).floor() as i32).max(0) as usize;
+    let sty = (((cy - half_h) / TS).floor() as i32).max(0) as usize;
+    let etx = (((cx + half_w) / TS).ceil() as i32 + 1).min(GRID_SIZE as i32) as usize;
+    let ety = (((cy + half_h) / TS).ceil() as i32 + 1).min(GRID_SIZE as i32) as usize;
     (stx, sty, etx, ety)
 }
 
@@ -95,8 +97,8 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
             match tile {
                 TileType::Grass | TileType::Forest => {
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    // Randomly flip tiles for variety (deterministic per position)
-                    let flip = ((tx.wrapping_mul(7) ^ ty.wrapping_mul(13)) % 3) == 0;
+                    // Use original game's exact tile flip hash for identical pattern
+                    let flip = (tx as u32).wrapping_mul(48271).wrapping_add((ty as u32).wrapping_mul(16807)) & 1 == 0;
                     if flip {
                         buf.save();
                         buf.translate(dx + draw_ts as i16, dy);
@@ -148,16 +150,16 @@ fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32)
                 buf.set_alpha(255);
             }
 
-            // Elevated surface tile (autotiled) — use tilemap3 for stone look
+            // Elevated surface tile (autotiled) — use tilemap1 (same as original)
             let (sx, sy) = autotile::elevated_src(&state.grid, tx, ty);
-            buf.draw_image(tex::TILEMAP3, sx, sy, 64, 64, dx, dy, ts, ts);
+            buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, ts, ts);
 
             // Cliff face on tile below (if that tile is not elevated)
             if ty + 1 < GRID_SIZE && state.grid.elev(tx, ty + 1) == 0 {
                 let (csx, csy) = autotile::cliff_src(&state.grid, tx, ty + 1);
                 let cdx = (tx as f32 * TS) as i16;
                 let cdy = ((ty + 1) as f32 * TS) as i16;
-                buf.draw_image(tex::TILEMAP3, csx, csy, 64, 64, cdx, cdy, ts, ts);
+                buf.draw_image(tex::TILEMAP1, csx, csy, 64, 64, cdx, cdy, ts, ts);
             }
         }
     }
@@ -377,13 +379,14 @@ fn draw_unit(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
     let fh = a.frame_h;
     let frame = u.anim_frame % a.frame_count;
     let sx = frame * fw;
+    // Match original: sprite centered on (unit.x, unit.y)
     let dx = u.x as i16 - fw as i16 / 2;
-    let dy = u.y as i16 - fh as i16 + 32;
+    let dy = u.y as i16 - fh as i16 / 2;
 
     if u.facing == Facing::Left {
         buf.save();
-        buf.translate(u.x as i16, u.y as i16 - fh as i16 / 2 + 32);
-        buf.scale(-256, 256);
+        buf.translate(u.x as i16, u.y as i16);
+        buf.scale(-256, 256); // flip X
         buf.draw_image(a.texture, sx, 0, fw, fh, -(fw as i16) / 2, -(fh as i16) / 2, fw, fh);
         buf.restore();
     } else {
