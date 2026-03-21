@@ -143,11 +143,12 @@ fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32,
             let dx = (tx as f32 * TS) as i16;
             let dy = (ty as f32 * TS) as i16;
 
-            // Shadow under elevated tile (drawn on the tile below)
+            // Shadow under elevated tile (matching original: 50% opacity, 192px centered)
             if ty + 1 < GRID_SIZE && state.grid.elev(tx, ty + 1) == 0 {
-                buf.set_alpha(130);
-                buf.draw_image(tex::SHADOW, 0, 0, 192, 192,
-                    dx - 64, dy + TS as i16 / 2 - 32, 192, 192);
+                buf.set_alpha(127); // 50% opacity
+                let sdx = (tx as f32 * TS + TS / 2.0 - 96.0) as i16;
+                let sdy = ((ty + 1) as f32 * TS + TS / 2.0 - 96.0) as i16;
+                buf.draw_image(tex::SHADOW, 0, 0, 192, 192, sdx, sdy, 192, 192);
                 buf.set_alpha(255);
             }
 
@@ -239,15 +240,35 @@ fn render_rocks(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
 
 fn render_bushes(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     let (stx, sty, etx, ety) = vis(cx, cy);
-    let bf = ((state.tick / 2) % 8) as u16;
+    let elapsed = state.tick as f32 * 0.05;
     for ty in sty..ety {
         for tx in stx..etx {
-            // Render bushes from decoration layer
-            if state.grid.decoration(tx, ty) == Some(Decoration::Bush) {
-                let v = ((tx * 3 + ty * 11) % 4) as u8;
-                let sx = bf * 128;
-                let dx = (tx as f32 * TS) as i16 - 16;
-                let dy = (ty as f32 * TS) as i16 - 16;
+            if state.grid.decoration(tx, ty) != Some(Decoration::Bush) { continue; }
+            let v = ((tx.wrapping_mul(41) + ty.wrapping_mul(23)) % 4) as u8;
+
+            // Wave-gated animation (matching original)
+            let wave_pos = elapsed * 0.15
+                + tx as f32 * 0.06
+                + ty as f32 * 0.04
+                + (tx ^ ty) as f32 * 0.01;
+            let frame = if (wave_pos * std::f32::consts::TAU).sin() > 0.3 {
+                ((elapsed * 10.0) as u16) % 8
+            } else {
+                0
+            };
+            let sx = frame * 128;
+            let dx = (tx as f32 * TS) as i16 - 16;
+            let dy = (ty as f32 * TS) as i16 - 16;
+
+            // Tile flip (matching original hash)
+            let flip = (tx as u32).wrapping_mul(48271).wrapping_add((ty as u32).wrapping_mul(16807)) & 1 == 0;
+            if flip {
+                buf.save();
+                buf.translate(dx + 40, dy + 40);
+                buf.scale(-256, 256);
+                buf.draw_image(tex::BUSH1 + v, sx, 0, 128, 128, -40, -40, 80, 80);
+                buf.restore();
+            } else {
                 buf.draw_image(tex::BUSH1 + v, sx, 0, 128, 128, dx, dy, 80, 80);
             }
         }
@@ -434,27 +455,44 @@ fn draw_unit(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
 fn draw_tree(state: &GameState, buf: &mut CanvasBuffer, tx: usize, ty: usize) {
     let v = ((tx * 7 + ty * 3) % 4) as u8;
     let (fw, fh): (u16, u16) = if v < 2 { (192, 256) } else { (192, 192) };
-    let tf = {
-        let phase = (tx * 17 + ty * 31) as u32;
-        ((state.tick + phase) % 24) / 3
-    } as u16 % 8;
-    let sx = tf * fw;
-    let dw = fw * 3 / 2;
-    let dh = fh * 3 / 2;
-    let dx = (tx as f32 * TS) as i16 + 32 - dw as i16 / 2;
-    let dy = ((ty + 1) as f32 * TS) as i16 - dh as i16;
 
-    // Fade trees near player
+    // Wave-gated animation (matching original: sine sweep across grid)
+    let elapsed = state.tick as f32 * 0.05; // 20 tick/s → seconds
+    let wave_pos = elapsed * 0.15
+        + tx as f32 * 0.06
+        + ty as f32 * 0.04
+        + (tx ^ ty) as f32 * 0.01;
+    let frame = if (wave_pos * std::f32::consts::TAU).sin() > 0.3 {
+        ((elapsed * 10.0) as u16) % 8
+    } else {
+        0 // idle frame when wave is low
+    };
+    let sx = frame * fw;
+
+    // Draw at 3× tile size, bottom-aligned (matching original)
+    let draw_w = TS * 3.0;
+    let draw_h = draw_w * (fh as f32 / fw as f32);
+    let dx = (tx as f32 * TS + TS / 2.0 - draw_w / 2.0) as i16;
+    let dy = ((ty + 1) as f32 * TS - draw_h) as i16;
+
+    // Tree transparency fade near player (exact original formula)
+    // fade_start = 2.5 tiles, fade_end = 1.0 tile
+    // At fade_end: α = 0.3, At fade_start: α = 1.0
     let player = state.units.iter().find(|u| u.id == state.player_id);
     if let Some(p) = player {
-        let dist = ((p.x - tx as f32 * TS - 32.0).powi(2) + (p.y - ty as f32 * TS - 32.0).powi(2)).sqrt() / TS;
-        if dist < 2.5 {
-            let alpha = if dist < 1.0 { 77 } else { (((dist - 1.0) / 1.5) * 255.0) as u8 };
-            buf.set_alpha(alpha);
+        let tree_cx = tx as f32 * TS + TS / 2.0;
+        let tree_cy = ty as f32 * TS + TS / 2.0;
+        let dist = ((p.x - tree_cx).powi(2) + (p.y - tree_cy).powi(2)).sqrt();
+        let fade_start = TS * 2.5;
+        let fade_end = TS * 1.0;
+        if dist < fade_start {
+            let t = ((dist - fade_end) / (fade_start - fade_end)).clamp(0.0, 1.0);
+            let alpha = (0.3 + t * 0.7) * 255.0;
+            buf.set_alpha(alpha as u8);
         }
     }
 
-    buf.draw_image(tex::TREE1 + v, sx, 0, fw, fh, dx, dy, dw, dh);
+    buf.draw_image(tex::TREE1 + v, sx, 0, fw, fh, dx, dy, draw_w as u16, draw_h as u16);
     buf.set_alpha(255);
 }
 
@@ -558,10 +596,10 @@ fn render_zones(state: &GameState, buf: &mut CanvasBuffer) {
         let th: u16 = 256;
         let tdx = zcx - tw as i16 / 2;
         let tdy = zcy - th as i16 + 48;
-        // Pulse opacity when capturing
-        let tower_alpha = if zone.owner.is_none() && zone.progress.abs() > 0.05 {
-            let pulse = ((state.tick as f32 * 0.15).sin() * 0.2 + 0.8) * 255.0;
-            pulse as u8
+        // Tower alpha: pulse based on capture progress (matching original)
+        let tower_alpha = if zone.owner.is_none() {
+            let a = (zone.progress.abs() * 0.5 + 0.5).clamp(0.5, 1.0);
+            (a * 255.0) as u8
         } else {
             255
         };
@@ -836,59 +874,106 @@ fn render_victory_progress(state: &GameState, buf: &mut CanvasBuffer) {
 }
 
 fn render_menu(buf: &mut CanvasBuffer) {
-    buf.set_fill_rgba(0, 0, 0, 190);
+    buf.set_fill_rgba(0, 0, 0, 191); // 75% opacity (matching original)
     buf.fill_rect(0, 0, CW, CH);
 
-    buf.set_fill_rgba(255, 215, 0, 255);
+    let cx = CW as i16 / 2;
+    let cy = CH as i16 / 2;
+
+    // Title with shadow (matching original: shadow at +3,+3)
     buf.set_font(2);
     buf.set_text_align(1);
     buf.set_text_baseline(1);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 - 60, "THE BATTLEFIELD");
+    buf.set_fill_rgba(0, 0, 0, 178); // shadow
+    buf.fill_text(cx + 3, cy - 57, "THE BATTLEFIELD");
+    buf.set_fill_rgba(255, 215, 0, 255); // gold
+    buf.fill_text(cx, cy - 60, "THE BATTLEFIELD");
 
-    // Play button
-    buf.set_fill_rgba(80, 180, 80, 255);
-    buf.round_rect(CW as i16 / 2 - 60, CH as i16 / 2 - 15, 120, 40, 8);
+    // Play button (matching original: green with white border)
+    buf.set_fill_rgba(70, 150, 70, 217);
+    buf.round_rect(cx - 100, cy - 20, 200, 50, 10);
+    buf.set_stroke_rgba(255, 255, 255, 102);
+    buf.set_line_width(8); // 2px
+    buf.stroke_rect(cx - 100, cy - 20, 200, 50);
     buf.set_fill_rgb(255, 255, 255);
     buf.set_font(3);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 + 5, "PLAY");
+    buf.fill_text(cx, cy + 5, "PLAY");
 
-    buf.set_fill_rgba(200, 200, 200, 150);
+    // Controls hint (matching original: 50% white, monospace)
+    buf.set_fill_rgba(255, 255, 255, 127);
     buf.set_font(4);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 + 60, "WASD: Move  Space: Attack  H/G/R/F: Orders");
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 + 80, "Press SPACE or click to start");
+    buf.fill_text(cx, cy + 55, "WASD: Move  Space: Attack  H/G/R/F: Orders");
+    buf.fill_text(cx, cy + 75, "Press SPACE or click to start");
 }
 
 fn render_death(buf: &mut CanvasBuffer) {
-    buf.set_fill_rgba(80, 0, 0, 150);
+    let cx = CW as i16 / 2;
+    let cy = CH as i16 / 2;
+
+    buf.set_fill_rgba(80, 0, 0, 153); // 60% opacity
     buf.fill_rect(0, 0, CW, CH);
-    buf.set_fill_rgba(204, 34, 34, 255);
+
+    // Title with shadow
     buf.set_font(5);
     buf.set_text_align(1);
     buf.set_text_baseline(1);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 - 20, "YOU DIED");
-    buf.set_fill_rgba(200, 200, 200, 200);
+    buf.set_fill_rgba(0, 0, 0, 178);
+    buf.fill_text(cx + 3, cy - 17, "YOU DIED");
+    buf.set_fill_rgba(204, 34, 34, 255);
+    buf.fill_text(cx, cy - 20, "YOU DIED");
+
+    // Retry button
+    buf.set_fill_rgba(180, 80, 40, 217);
+    buf.round_rect(cx - 100, cy + 10, 200, 50, 10);
+    buf.set_stroke_rgba(255, 255, 255, 102);
+    buf.set_line_width(8);
+    buf.stroke_rect(cx - 100, cy + 10, 200, 50);
+    buf.set_fill_rgb(255, 255, 255);
     buf.set_font(3);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 + 30, "Press SPACE to retry");
+    buf.fill_text(cx, cy + 35, "RETRY (Space)");
 }
 
 fn render_result(buf: &mut CanvasBuffer, winner: Faction) {
+    let cx = CW as i16 / 2;
+    let cy = CH as i16 / 2;
+
     let (overlay_r, overlay_g, overlay_b) = match winner {
         Faction::Blue => (0, 30, 60),
         Faction::Red => (40, 0, 0),
     };
-    buf.set_fill_rgba(overlay_r, overlay_g, overlay_b, 150);
+    buf.set_fill_rgba(overlay_r, overlay_g, overlay_b, 153); // 60%
     buf.fill_rect(0, 0, CW, CH);
 
     let (text, r, g, b) = match winner {
         Faction::Blue => ("VICTORY!", 78, 168, 255),
         Faction::Red => ("DEFEAT", 255, 85, 85),
     };
-    buf.set_fill_rgb(r, g, b);
+
+    // Title with shadow
     buf.set_font(5);
     buf.set_text_align(1);
     buf.set_text_baseline(1);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 - 20, text);
-    buf.set_fill_rgba(200, 200, 200, 200);
+    buf.set_fill_rgba(0, 0, 0, 178);
+    buf.fill_text(cx + 3, cy - 27, text);
+    buf.set_fill_rgb(r, g, b);
+    buf.fill_text(cx, cy - 30, text);
+
+    // Subtitle
+    buf.set_fill_rgba(255, 255, 255, 178);
+    buf.set_font(0);
+    let subtitle = match winner {
+        Faction::Blue => "All zones captured and held!",
+        Faction::Red => "The enemy has conquered all zones.",
+    };
+    buf.fill_text(cx, cy + 10, subtitle);
+
+    // Replay button
+    buf.set_fill_rgba(60, 120, 180, 217);
+    buf.round_rect(cx - 100, cy + 30, 200, 50, 10);
+    buf.set_stroke_rgba(255, 255, 255, 102);
+    buf.set_line_width(8);
+    buf.stroke_rect(cx - 100, cy + 30, 200, 50);
+    buf.set_fill_rgb(255, 255, 255);
     buf.set_font(3);
-    buf.fill_text(CW as i16 / 2, CH as i16 / 2 + 30, "Press SPACE to play again");
+    buf.fill_text(cx, cy + 55, "PLAY AGAIN (Space)");
 }
