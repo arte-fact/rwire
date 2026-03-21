@@ -36,6 +36,15 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     render_hp_bars(state, buf);
     render_fog(state, buf, cx, cy);
 
+    // Black borders beyond grid edges
+    let world = GRID_SIZE as f32 * TS;
+    let margin = 1000i16;
+    buf.set_fill_rgb(15, 15, 25);
+    buf.fill_rect(-margin, -margin, margin as u16, world as u16 + margin as u16 * 2);
+    buf.fill_rect(world as i16, -margin, margin as u16, world as u16 + margin as u16 * 2);
+    buf.fill_rect(0, -margin, world as u16, margin as u16);
+    buf.fill_rect(0, world as i16, world as u16, margin as u16);
+
     buf.restore();
 
     render_minimap(state, buf);
