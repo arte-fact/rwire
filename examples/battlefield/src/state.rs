@@ -64,9 +64,9 @@ impl GameState {
         let gs = GRID_SIZE as f32;
         let ts = TILE_SIZE;
 
-        // Blue base at top-left area
-        let bx = 12.0;
-        let by = 12.0;
+        // Blue base at top-left area (adjusted for 120×120 grid)
+        let bx = 14.0;
+        let by = 14.0;
 
         // Spawn player unit (blue warrior, front of formation)
         let px = (bx + 1.0) * ts;
@@ -101,8 +101,8 @@ impl GameState {
         }
 
         // Red base at bottom-right
-        let rx = gs - 12.0;
-        let ry = gs - 12.0;
+        let rx = gs - 14.0;
+        let ry = gs - 14.0;
 
         let red_spawn = [
             (UnitKind::Warrior, rx - 1.0, ry - 5.0),
@@ -129,24 +129,24 @@ impl GameState {
             next_id += 1;
         }
 
-        // 5 Capture zones across the map
+        // 5 Capture zones across the map (matching grid zone_centers)
         let mid = gs / 2.0 * ts;
         let zones = vec![
             ZoneState { cx: mid, cy: mid, radius: 4.0, progress: 0.0, owner: None },
-            ZoneState { cx: mid - 16.0 * ts, cy: mid - 8.0 * ts, radius: 3.5, progress: 0.0, owner: None },
-            ZoneState { cx: mid + 16.0 * ts, cy: mid + 8.0 * ts, radius: 3.5, progress: 0.0, owner: None },
-            ZoneState { cx: mid - 8.0 * ts, cy: mid + 12.0 * ts, radius: 3.0, progress: 0.0, owner: None },
-            ZoneState { cx: mid + 8.0 * ts, cy: mid - 12.0 * ts, radius: 3.0, progress: 0.0, owner: None },
+            ZoneState { cx: mid - 20.0 * ts, cy: mid - 10.0 * ts, radius: 3.5, progress: 0.0, owner: None },
+            ZoneState { cx: mid + 20.0 * ts, cy: mid + 10.0 * ts, radius: 3.5, progress: 0.0, owner: None },
+            ZoneState { cx: mid - 10.0 * ts, cy: mid + 15.0 * ts, radius: 3.0, progress: 0.0, owner: None },
+            ZoneState { cx: mid + 10.0 * ts, cy: mid - 15.0 * ts, radius: 3.0, progress: 0.0, owner: None },
         ];
 
         // Buildings at bases
         let buildings = vec![
-            Building { x: (bx - 3.0) * ts, y: (by + 1.0) * ts, faction: Faction::Blue, kind: BuildingKind::Barracks },
-            Building { x: (bx + 4.0) * ts, y: (by + 1.0) * ts, faction: Faction::Blue, kind: BuildingKind::Archery },
-            Building { x: (bx) * ts, y: (by - 1.0) * ts, faction: Faction::Blue, kind: BuildingKind::Monastery },
-            Building { x: (rx + 1.0) * ts, y: (ry - 1.0) * ts, faction: Faction::Red, kind: BuildingKind::Barracks },
-            Building { x: (rx - 5.0) * ts, y: (ry - 1.0) * ts, faction: Faction::Red, kind: BuildingKind::Archery },
-            Building { x: (rx - 2.0) * ts, y: (ry + 1.0) * ts, faction: Faction::Red, kind: BuildingKind::Monastery },
+            Building { x: (bx - 4.0) * ts, y: (by) * ts, faction: Faction::Blue, kind: BuildingKind::Barracks },
+            Building { x: (bx + 5.0) * ts, y: (by) * ts, faction: Faction::Blue, kind: BuildingKind::Archery },
+            Building { x: (bx) * ts, y: (by - 3.0) * ts, faction: Faction::Blue, kind: BuildingKind::Monastery },
+            Building { x: (rx + 2.0) * ts, y: (ry) * ts, faction: Faction::Red, kind: BuildingKind::Barracks },
+            Building { x: (rx - 6.0) * ts, y: (ry) * ts, faction: Faction::Red, kind: BuildingKind::Archery },
+            Building { x: (rx - 2.0) * ts, y: (ry + 3.0) * ts, faction: Faction::Red, kind: BuildingKind::Monastery },
         ];
 
         Self {
@@ -191,6 +191,14 @@ impl GameState {
         if dx != 0 || dy != 0 {
             self.aim_x = dx as f32;
             self.aim_y = dy as f32;
+        }
+
+        // Camera zoom with +/-
+        if input.key2(rwire_canvas::input::KEY2_ZOOM_IN) {
+            self.camera_zoom = (self.camera_zoom + 0.02).min(2.0);
+        }
+        if input.key2(rwire_canvas::input::KEY2_ZOOM_OUT) {
+            self.camera_zoom = (self.camera_zoom - 0.02).max(0.4);
         }
 
         self.tick += 1;
@@ -245,9 +253,13 @@ impl GameState {
             if dx > 0 { player.facing = Facing::Right; }
             else if dx < 0 { player.facing = Facing::Left; }
 
-            // Camera follows player
-            self.camera_x = player.x - 480.0;
-            self.camera_y = player.y - 320.0;
+            // Camera follows player, clamped to world bounds
+            let world_w = GRID_SIZE as f32 * TILE_SIZE;
+            let world_h = GRID_SIZE as f32 * TILE_SIZE;
+            let view_w = 960.0 / self.camera_zoom;
+            let view_h = 640.0 / self.camera_zoom;
+            self.camera_x = (player.x - view_w / 2.0).clamp(0.0, (world_w - view_w).max(0.0));
+            self.camera_y = (player.y - view_h / 2.0).clamp(0.0, (world_h - view_h).max(0.0));
 
             // Player attack: find nearest enemy in range
             if input.attacking() {
@@ -422,8 +434,8 @@ impl GameState {
             if count >= MAX_UNITS { continue; }
 
             let (bx, by) = match faction {
-                Faction::Blue => (10.0 * TILE_SIZE, 10.0 * TILE_SIZE),
-                Faction::Red => ((GRID_SIZE as f32 - 10.0) * TILE_SIZE, (GRID_SIZE as f32 - 10.0) * TILE_SIZE),
+                Faction::Blue => (12.0 * TILE_SIZE, 12.0 * TILE_SIZE),
+                Faction::Red => ((GRID_SIZE as f32 - 14.0) * TILE_SIZE, (GRID_SIZE as f32 - 14.0) * TILE_SIZE),
             };
 
             // 7 units per wave like the original
