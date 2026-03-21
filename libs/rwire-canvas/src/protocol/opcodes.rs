@@ -55,4 +55,5 @@ pub const TEXTURE_TABLE: u8 = 0xF0; // count:u8, [id:u8, path_len:u8, path_utf8.
 pub const COLOR_TABLE: u8 = 0xF1; // count:u8, [r:u8, g:u8, b:u8, a:u8]×n
 pub const FONT_TABLE: u8 = 0xF2; // count:u8, [len:u8, font_str_utf8...]×n
 pub const SPRITE_TABLE: u8 = 0xF3; // count_hi:u8, count_lo:u8, [tex:u8, sx:u16, sy:u16, sw:u16, sh:u16]×n
+pub const FOG_GRID: u8 = 0xF8; // x:u16, y:u16, w:u16, h:u16, tile_size:u8, [alpha:u8]×(w*h) — fog overlay grid
 pub const ENTITY_BATCH: u8 = 0xF9; // count_hi:u8, count_lo:u8, [id:u16, x:i16, y:i16, sprite:u16, flags:u8]×n

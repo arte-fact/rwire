@@ -444,6 +444,32 @@ impl CanvasBuffer {
         self
     }
 
+    /// Send a fog-of-war alpha grid. Each byte is the alpha (0-255) for one tile.
+    /// The JS runtime renders this to a small offscreen canvas, then draws it
+    /// upscaled with bilinear smoothing for soft fog edges.
+    ///
+    /// `world_x/y`: world-space pixel position of the grid origin.
+    /// `grid_w/h`: number of tiles in the grid.
+    /// `tile_size`: pixels per tile (typically 64).
+    /// `alphas`: row-major alpha values, one per tile (grid_w × grid_h bytes).
+    pub fn fog_grid(
+        &mut self,
+        world_x: i16, world_y: i16,
+        grid_w: u16, grid_h: u16,
+        tile_size: u8,
+        alphas: &[u8],
+    ) -> &mut Self {
+        self.buf.put_u8(FOG_GRID);
+        self.put_i16(world_x);
+        self.put_i16(world_y);
+        self.put_u16(grid_w);
+        self.put_u16(grid_h);
+        self.buf.put_u8(tile_size);
+        let len = (grid_w as usize) * (grid_h as usize);
+        self.buf.put_slice(&alphas[..len.min(alphas.len())]);
+        self
+    }
+
     /// Batch update entities. Each entry: (entity_id, x, y, sprite_id, flags).
     ///
     /// Flags: bit 0 = flip_x, bit 1 = visible, bit 2 = alive.

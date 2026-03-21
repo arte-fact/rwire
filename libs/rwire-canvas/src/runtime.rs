@@ -84,6 +84,7 @@ function exec(d){
     else if(o===0xF1){const n=d[i++];colors=[];for(let j=0;j<n;j++){colors.push(`rgba(${d[i]},${d[i+1]},${d[i+2]},${d[i+3]/255})`);i+=4}}
     else if(o===0xF2){const n=d[i++];fonts=[];for(let j=0;j<n;j++){const fl=d[i++];fonts.push(new TextDecoder().decode(d.subarray(i,i+fl)));i+=fl}}
     else if(o===0xF3){const n=u16(v,i);i+=2;spr=[];for(let j=0;j<n;j++){spr.push([d[i],u16(v,i+1),u16(v,i+3),u16(v,i+5),u16(v,i+7)]);i+=9}}
+    else if(o===0xF8){const wx=i16(v,i),wy=i16(v,i+2),gw=u16(v,i+4),gh=u16(v,i+6),ts=d[i+8];i+=9;if(!window.__fogCvs||window.__fogCvs.width!==gw||window.__fogCvs.height!==gh){window.__fogCvs=document.createElement('canvas');window.__fogCvs.width=gw;window.__fogCvs.height=gh}const fc=window.__fogCvs.getContext('2d');const id=fc.createImageData(gw,gh);for(let j=0;j<gw*gh;j++){const a=d[i++];id.data[j*4]=12;id.data[j*4+1]=12;id.data[j*4+2]=22;id.data[j*4+3]=a}fc.putImageData(id,0,0);const si=ctx.imageSmoothingEnabled;ctx.imageSmoothingEnabled=true;ctx.drawImage(window.__fogCvs,0,0,gw,gh,wx,wy,gw*ts,gh*ts);ctx.imageSmoothingEnabled=si}
     else if(o===0xF9){const n=u16(v,i);i+=2;prevEnts=Object.assign({},ents);for(let j=0;j<n;j++){const id=u16(v,i),x=i16(v,i+2),y=i16(v,i+4),sp=u16(v,i+6),fl=d[i+8];i+=9;ents[id]={x,y,sp,fl}}}
     else{console.warn('unknown canvas opcode',o,'at',i-1);break}
   }

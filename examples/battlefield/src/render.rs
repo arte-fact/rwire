@@ -685,49 +685,60 @@ fn render_order_labels(state: &GameState, buf: &mut CanvasBuffer) {
 
 fn render_fog(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     let (stx, sty, etx, ety) = vis(cx, cy);
+    let fog_w = etx - stx;
+    let fog_h = ety - sty;
+    if fog_w == 0 || fog_h == 0 { return; }
 
-    // Collect all friendly unit positions for multi-source visibility
+    // Collect all friendly unit positions
     let friendly_positions: Vec<(f32, f32)> = state.units.iter()
         .filter(|u| u.alive && u.faction == Faction::Blue)
         .map(|u| (u.x, u.y))
         .collect();
 
-    let fov = 15.0f32; // tiles — large visible area like the original
-    let soft_edge = 4.0f32; // tiles of soft gradient
+    let fov = 15.0f32;
+    let soft_edge = 4.0f32;
 
-    // Per-tile fog (full tile steps for performance, subtler alpha)
-    for ty in sty..ety {
-        for tx in stx..etx {
+    // Build fog alpha grid (1 byte per tile)
+    let mut alphas = vec![0u8; fog_w * fog_h];
+    for gy in 0..fog_h {
+        for gx in 0..fog_w {
+            let tx = stx + gx;
+            let ty = sty + gy;
             let wx = tx as f32 * TS + TS / 2.0;
             let wy = ty as f32 * TS + TS / 2.0;
 
-            // Find minimum distance to any friendly unit
             let min_dist = friendly_positions.iter()
                 .map(|&(px, py)| ((wx - px).powi(2) + (wy - py).powi(2)).sqrt() / TS)
                 .fold(f32::MAX, f32::min);
 
-            if min_dist > fov {
-                // Fully fogged
-                buf.set_fill_rgba(10, 10, 18, 180);
-                buf.fill_rect(
-                    (tx as f32 * TS) as i16, (ty as f32 * TS) as i16,
-                    TS as u16 + 1, TS as u16 + 1,
-                );
+            let alpha = if min_dist > fov {
+                180u8 // fully fogged
             } else if min_dist > fov - soft_edge {
-                // Soft gradient
                 let t = (min_dist - (fov - soft_edge)) / soft_edge;
-                let alpha = (t * t * 160.0) as u8; // quadratic falloff for softer edge
-                if alpha > 3 {
-                    buf.set_fill_rgba(10, 10, 18, alpha);
-                    buf.fill_rect(
-                        (tx as f32 * TS) as i16, (ty as f32 * TS) as i16,
-                        TS as u16 + 1, TS as u16 + 1,
-                    );
+                (t * t * 160.0) as u8
+            } else {
+                // Check for soft edge near fog (like original: fog neighbors affect visible tiles)
+                let vis_edge = fov - soft_edge - 1.0;
+                if min_dist > vis_edge {
+                    let t = (min_dist - vis_edge) / 1.0;
+                    (t * 20.0) as u8 // very subtle darkening at far vision edge
+                } else {
+                    0
                 }
-            }
-            // Inside FOV — no fog at all (bright like original)
+            };
+            alphas[gy * fog_w + gx] = alpha;
         }
     }
+
+    // Send as FOG_GRID — rendered with bilinear smoothing on client
+    buf.fog_grid(
+        (stx as f32 * TS) as i16,
+        (sty as f32 * TS) as i16,
+        fog_w as u16,
+        fog_h as u16,
+        TS as u8,
+        &alphas,
+    );
 }
 
 fn render_minimap(state: &GameState, buf: &mut CanvasBuffer) {
