@@ -8,6 +8,7 @@ use rwire_canvas::{CanvasBuffer, CanvasServer, GameLoop, InputState};
 mod autotile;
 mod state;
 mod grid;
+mod mapgen;
 mod unit;
 mod combat;
 mod render;

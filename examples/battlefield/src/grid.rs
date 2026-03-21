@@ -42,6 +42,10 @@ pub struct Grid {
 }
 
 impl Grid {
+    pub fn from_mapgen(tiles: Vec<TileType>, elevation: Vec<u8>, width: usize, height: usize) -> Self {
+        Self { tiles, elevation, width, height }
+    }
+
     pub fn new() -> Self {
         let w = GRID_SIZE;
         let h = GRID_SIZE;

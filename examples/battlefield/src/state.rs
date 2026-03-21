@@ -1,6 +1,7 @@
 //! Game state and tick logic.
 
 use crate::grid::{Grid, GRID_SIZE, TILE_SIZE};
+use crate::mapgen;
 use crate::unit::{Unit, UnitKind, Faction, Facing};
 use crate::combat;
 use rwire_canvas::InputState;
@@ -65,99 +66,106 @@ pub struct GameState {
     pub tick: u32,
     pub aim_x: f32,
     pub aim_y: f32,
+    pub blue_base: (f32, f32), // world coords
+    pub red_base: (f32, f32),
 }
 
 impl GameState {
     pub fn new() -> Self {
-        let grid = Grid::new();
+        let seed = 42u32; // deterministic for now
+        let (grid, layout) = mapgen::generate_battlefield(seed);
+
+        let ts = TILE_SIZE;
         let mut units = Vec::new();
         let mut next_id = 0u32;
-        let gs = GRID_SIZE as f32;
-        let ts = TILE_SIZE;
 
-        // Blue base at top-left area (adjusted for 120×120 grid)
-        let bx = 14.0;
-        let by = 14.0;
+        // Blue base from BSP layout
+        let (bcx, bcy) = layout.blue_base;
+        let bx = bcx as f32;
+        let by = bcy as f32 + 5.0; // spawn in front of base
 
-        // Spawn player unit (blue warrior, front of formation)
+        // Spawn player (blue warrior, front of formation)
         let px = (bx + 1.0) * ts;
-        let py = (by + 5.0) * ts;
+        let py = by * ts;
         units.push(Unit::new(next_id, UnitKind::Warrior, Faction::Blue, px, py));
         let player_id = next_id;
         next_id += 1;
 
         // Blue army: 5 warriors, 6 lancers, 5 archers, 2 monks = 18
         let blue_spawn = [
-            (UnitKind::Warrior, bx + 2.0, by + 5.0),
-            (UnitKind::Warrior, bx + 3.0, by + 5.0),
-            (UnitKind::Warrior, bx + 1.0, by + 6.0),
-            (UnitKind::Warrior, bx + 2.0, by + 6.0),
-            (UnitKind::Lancer, bx, by + 4.0),
-            (UnitKind::Lancer, bx + 1.0, by + 4.0),
-            (UnitKind::Lancer, bx + 2.0, by + 4.0),
-            (UnitKind::Lancer, bx, by + 3.0),
-            (UnitKind::Lancer, bx + 1.0, by + 3.0),
-            (UnitKind::Lancer, bx + 2.0, by + 3.0),
-            (UnitKind::Archer, bx - 1.0, by + 5.0),
-            (UnitKind::Archer, bx - 1.0, by + 6.0),
-            (UnitKind::Archer, bx - 2.0, by + 5.0),
-            (UnitKind::Archer, bx + 4.0, by + 5.0),
-            (UnitKind::Archer, bx + 4.0, by + 6.0),
-            (UnitKind::Monk, bx - 2.0, by + 4.0),
-            (UnitKind::Monk, bx - 2.0, by + 6.0),
+            (UnitKind::Warrior, bx + 1.0, by + 1.0),
+            (UnitKind::Warrior, bx + 1.0, by - 1.0),
+            (UnitKind::Warrior, bx + 1.0, by + 2.0),
+            (UnitKind::Warrior, bx + 1.0, by - 2.0),
+            (UnitKind::Lancer, bx, by),
+            (UnitKind::Lancer, bx, by + 1.0),
+            (UnitKind::Lancer, bx, by - 1.0),
+            (UnitKind::Lancer, bx, by + 2.0),
+            (UnitKind::Lancer, bx, by - 2.0),
+            (UnitKind::Lancer, bx, by - 3.0),
+            (UnitKind::Archer, bx - 1.0, by + 1.0),
+            (UnitKind::Archer, bx - 1.0, by - 1.0),
+            (UnitKind::Archer, bx - 2.0, by),
+            (UnitKind::Archer, bx - 2.0, by + 1.0),
+            (UnitKind::Archer, bx - 2.0, by - 1.0),
+            (UnitKind::Monk, bx - 2.0, by + 2.0),
+            (UnitKind::Monk, bx - 2.0, by - 2.0),
         ];
         for &(kind, x, y) in &blue_spawn {
             units.push(Unit::new(next_id, kind, Faction::Blue, x * ts, y * ts));
             next_id += 1;
         }
 
-        // Red base at bottom-right
-        let rx = gs - 14.0;
-        let ry = gs - 14.0;
+        // Red base from BSP layout
+        let (rcx, rcy) = layout.red_base;
+        let rx = rcx as f32;
+        let ry = rcy as f32 - 5.0; // spawn in front of base
 
         let red_spawn = [
-            (UnitKind::Warrior, rx - 1.0, ry - 5.0),
-            (UnitKind::Warrior, rx - 2.0, ry - 5.0),
-            (UnitKind::Warrior, rx - 3.0, ry - 5.0),
-            (UnitKind::Warrior, rx - 1.0, ry - 6.0),
-            (UnitKind::Warrior, rx - 2.0, ry - 6.0),
-            (UnitKind::Lancer, rx, ry - 4.0),
-            (UnitKind::Lancer, rx - 1.0, ry - 4.0),
-            (UnitKind::Lancer, rx - 2.0, ry - 4.0),
-            (UnitKind::Lancer, rx, ry - 3.0),
-            (UnitKind::Lancer, rx - 1.0, ry - 3.0),
-            (UnitKind::Lancer, rx - 2.0, ry - 3.0),
-            (UnitKind::Archer, rx + 1.0, ry - 5.0),
-            (UnitKind::Archer, rx + 1.0, ry - 6.0),
-            (UnitKind::Archer, rx + 2.0, ry - 5.0),
-            (UnitKind::Archer, rx - 4.0, ry - 5.0),
-            (UnitKind::Archer, rx - 4.0, ry - 6.0),
-            (UnitKind::Monk, rx + 2.0, ry - 4.0),
-            (UnitKind::Monk, rx + 2.0, ry - 6.0),
+            (UnitKind::Warrior, rx - 1.0, ry),
+            (UnitKind::Warrior, rx - 1.0, ry - 1.0),
+            (UnitKind::Warrior, rx - 1.0, ry + 1.0),
+            (UnitKind::Warrior, rx - 1.0, ry - 2.0),
+            (UnitKind::Warrior, rx - 1.0, ry + 2.0),
+            (UnitKind::Lancer, rx, ry),
+            (UnitKind::Lancer, rx, ry - 1.0),
+            (UnitKind::Lancer, rx, ry + 1.0),
+            (UnitKind::Lancer, rx, ry - 2.0),
+            (UnitKind::Lancer, rx, ry + 2.0),
+            (UnitKind::Lancer, rx, ry + 3.0),
+            (UnitKind::Archer, rx + 1.0, ry - 1.0),
+            (UnitKind::Archer, rx + 1.0, ry + 1.0),
+            (UnitKind::Archer, rx + 2.0, ry),
+            (UnitKind::Archer, rx + 2.0, ry - 1.0),
+            (UnitKind::Archer, rx + 2.0, ry + 1.0),
+            (UnitKind::Monk, rx + 2.0, ry - 2.0),
+            (UnitKind::Monk, rx + 2.0, ry + 2.0),
         ];
         for &(kind, x, y) in &red_spawn {
             units.push(Unit::new(next_id, kind, Faction::Red, x * ts, y * ts));
             next_id += 1;
         }
 
-        // 5 Capture zones across the map (matching grid zone_centers)
-        let mid = gs / 2.0 * ts;
-        let zones = vec![
-            ZoneState { cx: mid, cy: mid, radius: 4.0, progress: 0.0, owner: None },
-            ZoneState { cx: mid - 20.0 * ts, cy: mid - 10.0 * ts, radius: 3.5, progress: 0.0, owner: None },
-            ZoneState { cx: mid + 20.0 * ts, cy: mid + 10.0 * ts, radius: 3.5, progress: 0.0, owner: None },
-            ZoneState { cx: mid - 10.0 * ts, cy: mid + 15.0 * ts, radius: 3.0, progress: 0.0, owner: None },
-            ZoneState { cx: mid + 10.0 * ts, cy: mid - 15.0 * ts, radius: 3.0, progress: 0.0, owner: None },
-        ];
+        // Zones from BSP layout
+        let zones: Vec<ZoneState> = layout.zone_centers.iter().enumerate().map(|(i, &(zx, zy))| {
+            let radius = if i == 1 { 4.0 } else { 3.5 }; // center zone bigger
+            ZoneState {
+                cx: zx as f32 * ts,
+                cy: zy as f32 * ts,
+                radius,
+                progress: 0.0,
+                owner: None,
+            }
+        }).collect();
 
-        // Buildings at bases
+        // Buildings at BSP-derived base positions
         let buildings = vec![
-            Building { x: (bx - 4.0) * ts, y: (by) * ts, faction: Faction::Blue, kind: BuildingKind::Barracks },
-            Building { x: (bx + 5.0) * ts, y: (by) * ts, faction: Faction::Blue, kind: BuildingKind::Archery },
-            Building { x: (bx) * ts, y: (by - 3.0) * ts, faction: Faction::Blue, kind: BuildingKind::Monastery },
-            Building { x: (rx + 2.0) * ts, y: (ry) * ts, faction: Faction::Red, kind: BuildingKind::Barracks },
-            Building { x: (rx - 6.0) * ts, y: (ry) * ts, faction: Faction::Red, kind: BuildingKind::Archery },
-            Building { x: (rx - 2.0) * ts, y: (ry + 3.0) * ts, faction: Faction::Red, kind: BuildingKind::Monastery },
+            Building { x: (bcx as f32 - 4.0) * ts, y: bcy as f32 * ts, faction: Faction::Blue, kind: BuildingKind::Barracks },
+            Building { x: (bcx as f32 + 4.0) * ts, y: bcy as f32 * ts, faction: Faction::Blue, kind: BuildingKind::Archery },
+            Building { x: bcx as f32 * ts, y: (bcy as f32 - 3.0) * ts, faction: Faction::Blue, kind: BuildingKind::Monastery },
+            Building { x: (rcx as f32 + 4.0) * ts, y: rcy as f32 * ts, faction: Faction::Red, kind: BuildingKind::Barracks },
+            Building { x: (rcx as f32 - 4.0) * ts, y: rcy as f32 * ts, faction: Faction::Red, kind: BuildingKind::Archery },
+            Building { x: rcx as f32 * ts, y: (rcy as f32 + 3.0) * ts, faction: Faction::Red, kind: BuildingKind::Monastery },
         ];
 
         Self {
@@ -176,6 +184,8 @@ impl GameState {
             tick: 0,
             aim_x: 1.0,
             aim_y: 0.0,
+            blue_base: (bcx as f32 * ts, bcy as f32 * ts),
+            red_base: (rcx as f32 * ts, rcy as f32 * ts),
         }
     }
 
@@ -390,8 +400,8 @@ impl GameState {
             } else {
                 // March toward enemy base
                 let (bx, by) = match ufac {
-                    Faction::Blue => ((GRID_SIZE as f32 - 8.0) * TILE_SIZE, (GRID_SIZE as f32 - 8.0) * TILE_SIZE),
-                    Faction::Red => (8.0 * TILE_SIZE, 8.0 * TILE_SIZE),
+                    Faction::Blue => self.red_base,
+                    Faction::Red => self.blue_base,
                 };
                 self.units[i].move_toward(bx, by, dt, &self.grid);
             }
@@ -474,8 +484,8 @@ impl GameState {
             if count >= MAX_UNITS { continue; }
 
             let (bx, by) = match faction {
-                Faction::Blue => (12.0 * TILE_SIZE, 12.0 * TILE_SIZE),
-                Faction::Red => ((GRID_SIZE as f32 - 14.0) * TILE_SIZE, (GRID_SIZE as f32 - 14.0) * TILE_SIZE),
+                Faction::Blue => self.blue_base,
+                Faction::Red => self.red_base,
             };
 
             // 7 units per wave like the original
