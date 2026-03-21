@@ -249,7 +249,7 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
             if effective < water_threshold {
                 tiles[(y * w + x) as usize] = TileType::Water;
             } else if effective > hill_threshold {
-                elevation[(y * w + x) as usize] = 1;
+                elevation[(y * w + x) as usize] = 2; // elevation 2 = impassable (matching original)
             }
         }
     }
