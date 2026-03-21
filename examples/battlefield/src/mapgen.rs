@@ -3,7 +3,7 @@
 //! Uses simplex noise for terrain heightmap, cellular automata for
 //! forest clustering, and BSP for strategic zone placement.
 
-use crate::grid::{Grid, TileType, GRID_SIZE};
+use crate::grid::{Decoration, Grid, TileType, GRID_SIZE};
 
 // ============================================================================
 // Simplex noise (ported from the-battlefield/src/mapgen/simplex.rs)
@@ -317,19 +317,38 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
     zone_centers.push(flank1);
     zone_centers.push(flank2);
 
-    // Clear areas around bases and zones
-    clear_rect(&mut tiles, &mut elevation, blue_base.0.saturating_sub(7), blue_base.1.saturating_sub(7), 14, 14, w);
-    clear_rect(&mut tiles, &mut elevation, red_base.0.saturating_sub(7), red_base.1.saturating_sub(7), 14, 14, w);
+    // Clear areas around bases and zones (before decoration pass)
+    let mut decos_dummy: Vec<Option<Decoration>> = vec![None; (w * h) as usize];
+    clear_rect(&mut tiles, &mut elevation, &mut decos_dummy, blue_base.0.saturating_sub(7), blue_base.1.saturating_sub(7), 14, 14, w);
+    clear_rect(&mut tiles, &mut elevation, &mut decos_dummy, red_base.0.saturating_sub(7), red_base.1.saturating_sub(7), 14, 14, w);
     for &(cx, cy) in &zone_centers {
-        clear_circle(&mut tiles, &mut elevation, cx, cy, 6, w, h);
+        clear_circle(&mut tiles, &mut elevation, &mut decos_dummy, cx, cy, 6, w, h);
     }
 
-    let grid = Grid { tiles, elevation, width: w as usize, height: h as usize };
+    // Generate decorations AFTER clearing (so cleared areas have no decorations)
+    let mut decorations = vec![None; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) as usize;
+            match tiles[i] {
+                TileType::Grass if elevation[i] == 0 && rng.chance(0.04) => {
+                    decorations[i] = Some(Decoration::Bush);
+                }
+                TileType::Water if rng.chance(0.12) => {
+                    decorations[i] = Some(Decoration::WaterRock);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let grid = Grid { tiles, elevation, decorations, width: w as usize, height: h as usize };
     let layout = MapLayout { blue_base, red_base, zone_centers };
     (grid, layout)
 }
 
-fn clear_rect(tiles: &mut [TileType], elev: &mut [u8], x: u32, y: u32, rw: u32, rh: u32, w: u32) {
+#[allow(clippy::too_many_arguments)]
+fn clear_rect(tiles: &mut [TileType], elev: &mut [u8], decos: &mut [Option<Decoration>], x: u32, y: u32, rw: u32, rh: u32, w: u32) {
     for dy in 0..rh {
         for dx in 0..rw {
             let nx = x + dx;
@@ -338,12 +357,14 @@ fn clear_rect(tiles: &mut [TileType], elev: &mut [u8], x: u32, y: u32, rw: u32, 
             if i < tiles.len() {
                 tiles[i] = TileType::Grass;
                 elev[i] = 0;
+                decos[i] = None;
             }
         }
     }
 }
 
-fn clear_circle(tiles: &mut [TileType], elev: &mut [u8], cx: u32, cy: u32, radius: i32, w: u32, h: u32) {
+#[allow(clippy::too_many_arguments)]
+fn clear_circle(tiles: &mut [TileType], elev: &mut [u8], decos: &mut [Option<Decoration>], cx: u32, cy: u32, radius: i32, w: u32, h: u32) {
     for dy in -radius..=radius {
         for dx in -radius..=radius {
             if dx * dx + dy * dy > radius * radius { continue; }
@@ -353,6 +374,7 @@ fn clear_circle(tiles: &mut [TileType], elev: &mut [u8], cx: u32, cy: u32, radiu
                 let i = (ny as u32 * w + nx as u32) as usize;
                 tiles[i] = TileType::Grass;
                 elev[i] = 0;
+                decos[i] = None;
             }
         }
     }

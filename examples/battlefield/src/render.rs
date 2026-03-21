@@ -1,7 +1,7 @@
 //! Server-side rendering: GameState → CanvasBuffer draw commands.
 
 use crate::autotile;
-use crate::grid::{GRID_SIZE, TILE_SIZE, TileType};
+use crate::grid::{Decoration, GRID_SIZE, TILE_SIZE, TileType};
 use crate::particle::ParticleKind;
 use crate::sprites::tex;
 use crate::state::{BuildingKind, GamePhase, GameState};
@@ -38,6 +38,7 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     buf.fill_rect(-1000, -1000, 12000, 12000);
     render_zones(state, buf);
     render_aim_cone(state, buf);
+    render_water_rocks(state, buf, cx, cy);
     render_rocks(state, buf, cx, cy);
     render_bushes(state, buf, cx, cy);
     render_foreground(state, buf, cx, cy);
@@ -237,17 +238,31 @@ fn render_bushes(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     let bf = ((state.tick / 2) % 8) as u16;
     for ty in sty..ety {
         for tx in stx..etx {
-            // Bushes on some grass tiles too (not just forest)
-            let tile = state.grid.get(tx, ty);
-            if tile != TileType::Forest && tile != TileType::Grass { continue; }
-            let sparse = if tile == TileType::Forest { 7 } else { 15 };
-            if (tx.wrapping_mul(31) ^ ty.wrapping_mul(97)) % sparse != 0 { continue; }
-            let v = ((tx * 3 + ty * 11) % 4) as u8;
-            let sx = bf * 128;
-            let dx = (tx as f32 * TS) as i16 - 16; // smaller offset
-            let dy = (ty as f32 * TS) as i16 - 16;
-            // Smaller bushes (64x64 draw size instead of 128x128)
-            buf.draw_image(tex::BUSH1 + v, sx, 0, 128, 128, dx, dy, 80, 80);
+            // Render bushes from decoration layer
+            if state.grid.decoration(tx, ty) == Some(Decoration::Bush) {
+                let v = ((tx * 3 + ty * 11) % 4) as u8;
+                let sx = bf * 128;
+                let dx = (tx as f32 * TS) as i16 - 16;
+                let dy = (ty as f32 * TS) as i16 - 16;
+                buf.draw_image(tex::BUSH1 + v, sx, 0, 128, 128, dx, dy, 80, 80);
+            }
+        }
+    }
+}
+
+fn render_water_rocks(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
+    let (stx, sty, etx, ety) = vis(cx, cy);
+    let _ = state.tick; // tick available for future animation
+    for ty in sty..ety {
+        for tx in stx..etx {
+            if state.grid.decoration(tx, ty) != Some(Decoration::WaterRock) { continue; }
+            let v = ((tx * 7 + ty * 3) % 4) as u8;
+            let dx = (tx as f32 * TS) as i16;
+            let dy = (ty as f32 * TS) as i16;
+            // Render small rock in water (reuse rock textures at smaller size)
+            buf.set_alpha(200);
+            buf.draw_image(tex::ROCK1 + v, 0, 0, 64, 64, dx + 8, dy + 8, 48, 48);
+            buf.set_alpha(255);
         }
     }
 }
@@ -520,17 +535,12 @@ fn render_zones(state: &GameState, buf: &mut CanvasBuffer) {
         buf.begin_path().arc_full(zcx, zcy, r).stroke();
         buf.clear_line_dash();
 
-        // Zone label
+        // Zone label (matching original: zone name like "Zone A")
         buf.set_fill_rgba(255, 255, 255, 180);
         buf.set_font(1);
         buf.set_text_align(1);
         buf.set_text_baseline(2);
-        let label = match zone.owner {
-            Some(Faction::Blue) => "BLUE",
-            Some(Faction::Red) => "RED",
-            None => "NEUTRAL",
-        };
-        buf.fill_text(zcx, zcy - r as i16 - 22, label);
+        buf.fill_text(zcx, zcy - r as i16 - 22, zone.name);
 
         // Zone tower building
         let tower_tex = match zone.owner {

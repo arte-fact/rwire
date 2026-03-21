@@ -32,6 +32,7 @@ pub struct ZoneState {
     pub radius: f32,
     pub progress: f32, // -1.0 (red) to +1.0 (blue)
     pub owner: Option<Faction>,
+    pub name: &'static str,
 }
 
 pub struct Building {
@@ -159,14 +160,16 @@ impl GameState {
         }
 
         // Zones from BSP layout
+        let zone_names = ["Zone A", "Zone B", "Zone C", "Zone D", "Zone E"];
         let zones: Vec<ZoneState> = layout.zone_centers.iter().enumerate().map(|(i, &(zx, zy))| {
-            let radius = if i == 1 { 4.0 } else { 3.5 }; // center zone bigger
+            let radius = if i == 1 { 4.0 } else { 3.5 };
             ZoneState {
                 cx: zx as f32 * ts,
                 cy: zy as f32 * ts,
                 radius,
                 progress: 0.0,
                 owner: None,
+                name: zone_names.get(i).unwrap_or(&"Zone"),
             }
         }).collect();
 

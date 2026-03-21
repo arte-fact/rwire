@@ -24,9 +24,17 @@ impl TileType {
     }
 }
 
+/// Decorative elements on tiles (separate from tile type).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decoration {
+    Bush,
+    WaterRock,
+}
+
 pub struct Grid {
     pub tiles: Vec<TileType>,
-    pub elevation: Vec<u8>, // 0 = flat, 1 = elevated
+    pub elevation: Vec<u8>,
+    pub decorations: Vec<Option<Decoration>>,
     pub width: usize,
     pub height: usize,
 }
@@ -42,6 +50,11 @@ impl Grid {
     pub fn elev(&self, x: usize, y: usize) -> u8 {
         if x >= self.width || y >= self.height { return 0; }
         self.elevation[y * self.width + x]
+    }
+
+    pub fn decoration(&self, x: usize, y: usize) -> Option<Decoration> {
+        if x >= self.width || y >= self.height { return None; }
+        self.decorations[y * self.width + x]
     }
 
     pub fn tile_at_world(&self, wx: f32, wy: f32) -> TileType {
