@@ -2,13 +2,19 @@
 
 use crate::grid::{Grid, GRID_SIZE, TILE_SIZE};
 use crate::mapgen;
-use crate::unit::{Unit, UnitKind, Faction, Facing};
+use crate::unit::{Unit, UnitKind, Faction, Facing, OrderKind};
 use crate::combat;
 use rwire_canvas::InputState;
 
 const REINFORCE_INTERVAL: f32 = 20.0;
 const MAX_UNITS: usize = 35;
 const AI_VISION: f32 = 10.0; // tiles
+const VICTORY_HOLD_TIME: f32 = 120.0; // seconds to hold all zones for victory
+const ORDER_RADIUS: f32 = 7.0; // tiles — radius for order broadcasting
+const MONK_SAFE_DIST: f32 = 3.0; // tiles — monks flee from enemies within this range
+const ARROW_SPEED: f32 = 600.0; // pixels per second
+const ARC_BASE: f32 = 30.0;
+const ARC_DIST_FACTOR: f32 = 0.25;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum GamePhase {
@@ -41,12 +47,13 @@ pub enum BuildingKind {
 }
 
 pub struct Projectile {
-    pub x: f32,
-    pub y: f32,
+    pub start_x: f32,
+    pub start_y: f32,
     pub target_x: f32,
     pub target_y: f32,
-    pub progress: f32, // 0.0 to 1.0
-    pub speed: f32,    // progress per second
+    pub progress: f32,   // 0.0 to 1.0
+    pub duration: f32,   // total flight time in seconds
+    pub arc_height: f32, // peak height of parabolic arc
 }
 
 pub struct GameState {
@@ -65,8 +72,9 @@ pub struct GameState {
     pub tick: u32,
     pub aim_x: f32,
     pub aim_y: f32,
-    pub blue_base: (f32, f32), // world coords
+    pub blue_base: (f32, f32),
     pub red_base: (f32, f32),
+    pub victory_hold_timer: f32, // counts up while holding all zones
 }
 
 impl GameState {
@@ -185,6 +193,7 @@ impl GameState {
             aim_y: 0.0,
             blue_base: (bcx as f32 * ts, bcy as f32 * ts),
             red_base: (rcx as f32 * ts, rcy as f32 * ts),
+            victory_hold_timer: 0.0,
         }
     }
 
@@ -214,20 +223,22 @@ impl GameState {
             self.aim_y = dy as f32;
         }
 
-        // Camera zoom with +/-
+        // Camera zoom with +/- (snap to 1/64 increments like original)
         if input.key2(rwire_canvas::input::KEY2_ZOOM_IN) {
-            self.camera_zoom = (self.camera_zoom + 0.02).min(2.0);
+            self.camera_zoom = (self.camera_zoom + 0.02).min(4.0);
         }
         if input.key2(rwire_canvas::input::KEY2_ZOOM_OUT) {
-            self.camera_zoom = (self.camera_zoom - 0.02).max(0.4);
+            self.camera_zoom = (self.camera_zoom - 0.02).max(0.5);
         }
+        self.camera_zoom = (self.camera_zoom * 64.0).round() / 64.0;
 
         self.tick += 1;
 
-        // Cooldowns, animation, death fade, hit flash
+        // Cooldowns, animation, death fade, hit/order flash
         for u in &mut self.units {
             if u.cooldown > 0.0 { u.cooldown -= dt; }
             if u.hit_flash > 0.0 { u.hit_flash -= dt; }
+            if u.order_flash > 0.0 { u.order_flash -= dt; }
             if !u.alive && u.death_fade > 0.0 {
                 u.death_fade += dt;
             }
@@ -245,7 +256,9 @@ impl GameState {
 
         // Update projectiles
         self.projectiles.retain_mut(|p| {
-            p.progress += p.speed * dt;
+            if p.duration > 0.0 {
+                p.progress += dt / p.duration;
+            }
             p.progress < 1.0
         });
 
@@ -266,60 +279,93 @@ impl GameState {
             return;
         }
 
-        // Victory check
-        if self.zones.iter().all(|z| z.owner == Some(Faction::Blue)) {
-            self.phase = GamePhase::Victory(Faction::Blue);
-        } else if self.zones.iter().all(|z| z.owner == Some(Faction::Red)) {
-            self.phase = GamePhase::Victory(Faction::Red);
+        // Victory check — must hold ALL zones for VICTORY_HOLD_TIME seconds
+        let all_blue = self.zones.iter().all(|z| z.owner == Some(Faction::Blue));
+        let all_red = self.zones.iter().all(|z| z.owner == Some(Faction::Red));
+        if all_blue || all_red {
+            self.victory_hold_timer += dt;
+            if self.victory_hold_timer >= VICTORY_HOLD_TIME {
+                self.phase = GamePhase::Victory(if all_blue { Faction::Blue } else { Faction::Red });
+            }
+        } else {
+            self.victory_hold_timer = 0.0;
         }
     }
 
     fn tick_player(&mut self, input: &InputState, dt: f32) {
+        let pidx = match self.units.iter().position(|u| u.id == self.player_id) {
+            Some(i) => i,
+            None => return,
+        };
+        if !self.units[pidx].alive { return; }
+
+        // Movement
         let (dx, dy) = input.move_dir();
-        if let Some(player) = self.units.iter_mut().find(|u| u.id == self.player_id) {
-            if !player.alive { return; }
-            let speed = player.kind.speed() * TILE_SIZE * dt;
-            let nx = player.x + dx as f32 * speed;
-            let ny = player.y + dy as f32 * speed;
-            if self.grid.passable_at(nx, player.y) { player.x = nx; }
-            if self.grid.passable_at(player.x, ny) { player.y = ny; }
-            if dx > 0 { player.facing = Facing::Right; }
-            else if dx < 0 { player.facing = Facing::Left; }
+        let speed = self.units[pidx].kind.speed() * TILE_SIZE * dt;
+        let nx = self.units[pidx].x + dx as f32 * speed;
+        let ny = self.units[pidx].y + dy as f32 * speed;
+        if self.grid.passable_at(nx, self.units[pidx].y) { self.units[pidx].x = nx; }
+        if self.grid.passable_at(self.units[pidx].x, ny) { self.units[pidx].y = ny; }
+        if dx > 0 { self.units[pidx].facing = Facing::Right; }
+        else if dx < 0 { self.units[pidx].facing = Facing::Left; }
 
-            // Camera center on player (world-space center point like original)
-            self.camera_x = player.x;
-            self.camera_y = player.y;
-            // Clamp so viewport stays within world bounds
-            let world_max = GRID_SIZE as f32 * TILE_SIZE;
-            let half_vw = 480.0 / self.camera_zoom;
-            let half_vh = 320.0 / self.camera_zoom;
-            self.camera_x = self.camera_x.clamp(half_vw, world_max - half_vw);
-            self.camera_y = self.camera_y.clamp(half_vh, world_max - half_vh);
+        // Camera
+        self.camera_x = self.units[pidx].x;
+        self.camera_y = self.units[pidx].y;
+        let world_max = GRID_SIZE as f32 * TILE_SIZE;
+        let half_vw = 480.0 / self.camera_zoom;
+        let half_vh = 320.0 / self.camera_zoom;
+        self.camera_x = self.camera_x.clamp(half_vw, world_max - half_vw);
+        self.camera_y = self.camera_y.clamp(half_vh, world_max - half_vh);
 
-            // Player attack: find nearest enemy in range
-            if input.attacking() {
-                let px = player.x;
-                let py = player.y;
-                let pfac = player.faction;
-                let range = player.kind.range();
-                let pidx = self.units.iter().position(|u| u.id == self.player_id).unwrap();
-
-                let target_idx = self.units.iter().enumerate()
-                    .filter(|(i, u)| *i != pidx && u.alive && u.faction != pfac)
-                    .filter(|(_, u)| {
-                        let d = ((u.x - px).powi(2) + (u.y - py).powi(2)).sqrt() / TILE_SIZE;
-                        d <= range
-                    })
-                    .min_by(|(_, a), (_, b)| {
-                        let da = (a.x - px).powi(2) + (a.y - py).powi(2);
-                        let db = (b.x - px).powi(2) + (b.y - py).powi(2);
-                        da.partial_cmp(&db).unwrap()
-                    })
-                    .map(|(i, _)| i);
-
-                if let Some(ti) = target_idx {
-                    combat::resolve_attack(pidx, ti, &mut self.units, &self.grid);
+        // Issue orders (H/G/R/F)
+        let order = if input.key(rwire_canvas::input::KEY_ORDER_HOLD) {
+            Some(OrderKind::Hold)
+        } else if input.key(rwire_canvas::input::KEY_ORDER_GO) {
+            Some(OrderKind::Go)
+        } else if input.key(rwire_canvas::input::KEY_ORDER_RETREAT) {
+            Some(OrderKind::Retreat)
+        } else if input.key2(rwire_canvas::input::KEY2_ORDER_FOLLOW) {
+            Some(OrderKind::Follow)
+        } else {
+            None
+        };
+        if let Some(order_kind) = order {
+            let px = self.units[pidx].x;
+            let py = self.units[pidx].y;
+            let radius_sq = (ORDER_RADIUS * TILE_SIZE).powi(2);
+            for u in &mut self.units {
+                if u.id == self.player_id || !u.alive || u.faction != Faction::Blue { continue; }
+                let dsq = (u.x - px).powi(2) + (u.y - py).powi(2);
+                if dsq < radius_sq {
+                    u.order = Some(order_kind);
+                    u.order_flash = 1.0;
                 }
+            }
+        }
+
+        // Attack nearest enemy in range
+        if input.attacking() {
+            let px = self.units[pidx].x;
+            let py = self.units[pidx].y;
+            let pfac = self.units[pidx].faction;
+            let range = self.units[pidx].kind.range();
+
+            let target_idx = self.units.iter().enumerate()
+                .filter(|(i, u)| *i != pidx && u.alive && u.faction != pfac)
+                .filter(|(_, u)| {
+                    let d = ((u.x - px).powi(2) + (u.y - py).powi(2)).sqrt() / TILE_SIZE;
+                    d <= range
+                })
+                .min_by(|(_, a), (_, b)| {
+                    let da = (a.x - px).powi(2) + (a.y - py).powi(2);
+                    let db = (b.x - px).powi(2) + (b.y - py).powi(2);
+                    da.partial_cmp(&db).unwrap()
+                })
+                .map(|(i, _)| i);
+
+            if let Some(ti) = target_idx {
+                combat::resolve_attack(pidx, ti, &mut self.units, &self.grid);
             }
         }
     }
@@ -348,8 +394,21 @@ impl GameState {
                 }
             }
 
-            // Monk: find wounded ally to heal
+            // Monk behavior: heal wounded allies, flee from enemies
             if ukind.is_healer() {
+                // Flee from nearby enemies (MONK_SAFE_DIST)
+                if let Some(ei) = nearest_enemy {
+                    if nearest_dist < MONK_SAFE_DIST {
+                        let ex = self.units[ei].x;
+                        let ey = self.units[ei].y;
+                        // Move away from enemy
+                        let flee_x = ux + (ux - ex);
+                        let flee_y = uy + (uy - ey);
+                        self.units[i].move_toward(flee_x, flee_y, dt, &self.grid);
+                        continue;
+                    }
+                }
+                // Find wounded ally
                 let mut nearest_wounded = None;
                 let mut wound_dist = f32::MAX;
                 for j in 0..unit_count {
@@ -373,20 +432,74 @@ impl GameState {
                 }
             }
 
-            // Attack or move toward enemy
+            // Blue units with orders — follow the order instead of default behavior
+            let unit_order = self.units[i].order;
+            if ufac == Faction::Blue {
+                if let Some(order) = unit_order {
+                    match order {
+                        OrderKind::Hold => {
+                            // Hold: attack enemies within range, don't move
+                            if let Some(ei) = nearest_enemy {
+                                if nearest_dist <= ukind.range() {
+                                    combat::resolve_attack(i, ei, &mut self.units, &self.grid);
+                                }
+                            }
+                            continue;
+                        }
+                        OrderKind::Follow => {
+                            // Follow player, attack nearby enemies
+                            if let Some(pi) = self.units.iter().position(|u| u.id == self.player_id) {
+                                let px = self.units[pi].x;
+                                let py = self.units[pi].y;
+                                let pdist = ((ux - px).powi(2) + (uy - py).powi(2)).sqrt() / TILE_SIZE;
+                                if let Some(ei) = nearest_enemy {
+                                    if nearest_dist <= ukind.range() {
+                                        combat::resolve_attack(i, ei, &mut self.units, &self.grid);
+                                    }
+                                }
+                                if pdist > 3.0 {
+                                    self.units[i].move_toward(px, py, dt, &self.grid);
+                                }
+                            }
+                            continue;
+                        }
+                        OrderKind::Retreat => {
+                            // Retreat to base, only melee self-defense
+                            let (bx, by) = self.blue_base;
+                            if let Some(ei) = nearest_enemy {
+                                if nearest_dist <= 1.5 {
+                                    combat::resolve_attack(i, ei, &mut self.units, &self.grid);
+                                }
+                            }
+                            self.units[i].move_toward(bx, by, dt, &self.grid);
+                            continue;
+                        }
+                        OrderKind::Go => {
+                            // Advance toward nearest zone, engage enemies
+                            // (falls through to default behavior below)
+                        }
+                    }
+                }
+            }
+
+            // Default behavior: attack or move toward enemy
             if let Some(ei) = nearest_enemy {
                 if nearest_dist <= ukind.range() {
                     // Spawn arrow projectile for ranged units
                     if ukind.is_ranged() && self.units[i].can_attack() {
+                        let sx = self.units[i].x;
+                        let sy = self.units[i].y;
                         let tx = self.units[ei].x;
                         let ty = self.units[ei].y;
+                        let dist = ((tx - sx).powi(2) + (ty - sy).powi(2)).sqrt();
                         self.projectiles.push(Projectile {
-                            x: self.units[i].x,
-                            y: self.units[i].y,
+                            start_x: sx,
+                            start_y: sy,
                             target_x: tx,
                             target_y: ty,
                             progress: 0.0,
-                            speed: 2.0, // 0.5s flight time
+                            duration: dist / ARROW_SPEED,
+                            arc_height: ARC_BASE + dist * ARC_DIST_FACTOR,
                         });
                     }
                     combat::resolve_attack(i, ei, &mut self.units, &self.grid);

@@ -56,6 +56,15 @@ pub enum UnitAnim {
     Attack,
 }
 
+/// Player orders that can be issued to nearby friendly units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderKind {
+    Hold,    // defend current position
+    Go,      // advance toward nearest zone
+    Retreat, // fall back toward base
+    Follow,  // stay near player
+}
+
 pub struct Unit {
     pub id: u32,
     pub kind: UnitKind,
@@ -71,8 +80,10 @@ pub struct Unit {
     pub anim: UnitAnim,
     pub anim_frame: u16,
     pub anim_timer: f32,
-    pub death_fade: f32,    // 0.0 = alive, counts up to DEATH_FADE_DURATION then removed
-    pub hit_flash: f32,     // counts down from 0.3 on hit
+    pub death_fade: f32,
+    pub hit_flash: f32,
+    pub order: Option<OrderKind>,
+    pub order_flash: f32, // visual flash when order received
 }
 
 pub const DEATH_FADE_DURATION: f32 = 0.3; // matches original
@@ -91,6 +102,8 @@ impl Unit {
             anim_timer: 0.0,
             death_fade: 0.0,
             hit_flash: 0.0,
+            order: None,
+            order_flash: 0.0,
         }
     }
 

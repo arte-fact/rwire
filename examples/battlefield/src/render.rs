@@ -41,6 +41,7 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     render_bushes(state, buf, cx, cy);
     render_foreground(state, buf, cx, cy);
     render_hp_bars(state, buf);
+    render_order_labels(state, buf);
     render_fog(state, buf, cx, cy);
 
     // Black borders beyond grid edges
@@ -293,7 +294,7 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
 
     // Projectiles
     for (i, p) in state.projectiles.iter().enumerate() {
-        let cur_y = p.y + (p.target_y - p.y) * p.progress;
+        let cur_y = p.start_y + (p.target_y - p.start_y) * p.progress;
         items.push((cur_y, D::Projectile(i)));
     }
 
@@ -430,25 +431,24 @@ fn draw_tree(state: &GameState, buf: &mut CanvasBuffer, tx: usize, ty: usize) {
     buf.set_alpha(255);
 }
 
-fn draw_projectile(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
-    let p = &state.projectiles[idx];
+fn draw_projectile(_state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
+    let p = &_state.projectiles[idx];
     let t = p.progress;
 
-    // Interpolate position
-    let cur_x = p.x + (p.target_x - p.x) * t;
-    let cur_y = p.y + (p.target_y - p.y) * t;
+    // Interpolate position along trajectory
+    let cur_x = p.start_x + (p.target_x - p.start_x) * t;
+    let cur_y = p.start_y + (p.target_y - p.start_y) * t;
 
-    // Parabolic arc height
-    let dist = ((p.target_x - p.x).powi(2) + (p.target_y - p.y).powi(2)).sqrt();
-    let arc_height = 30.0 + dist * 0.25;
-    let arc_y = cur_y - arc_height * 4.0 * t * (1.0 - t); // parabola peaks at t=0.5
+    // Parabolic arc: z = arc_height * 4 * t * (1 - t), peaks at t=0.5
+    let arc_y = cur_y - p.arc_height * 4.0 * t * (1.0 - t);
 
-    // Calculate rotation angle from velocity
-    let dx = p.target_x - p.x;
-    let dy = p.target_y - p.y;
-    let angle = dy.atan2(dx);
+    // Rotation from tangent of arc trajectory
+    let dx = p.target_x - p.start_x;
+    let dy = p.target_y - p.start_y;
+    // Vertical component includes arc derivative: -arc_height * 4 * (1 - 2t)
+    let arc_slope = -p.arc_height * 4.0 * (1.0 - 2.0 * t);
+    let angle = (dy + arc_slope).atan2(dx);
 
-    // Draw arrow sprite rotated
     buf.save();
     buf.translate(cur_x as i16, arc_y as i16);
     buf.rotate(angle);
@@ -583,6 +583,31 @@ fn render_hp_bars(state: &GameState, buf: &mut CanvasBuffer) {
         let fill_h = bh - 2; // 2px inset
         buf.fill_rect(bx, by - fill_h as i16 / 2, (ratio * bw as f32) as u16, fill_h);
         buf.set_alpha(255);
+    }
+}
+
+fn render_order_labels(state: &GameState, buf: &mut CanvasBuffer) {
+    for u in &state.units {
+        if !u.alive || u.order_flash <= 0.0 { continue; }
+        if let Some(order) = u.order {
+            let label = match order {
+                crate::unit::OrderKind::Hold => "HOLD",
+                crate::unit::OrderKind::Go => "GO",
+                crate::unit::OrderKind::Retreat => "RETREAT",
+                crate::unit::OrderKind::Follow => "FOLLOW",
+            };
+            let alpha = (u.order_flash * 255.0).min(255.0) as u8;
+            // Gold text with black outline (matching original)
+            buf.set_font(0); // bold 14px sans-serif
+            buf.set_text_align(1); // center
+            buf.set_text_baseline(2); // bottom
+            let oy = u.y as i16 - (TS * 1.0) as i16;
+            buf.set_stroke_rgba(0, 0, 0, (alpha as f32 * 0.9) as u8);
+            buf.set_line_width(12); // 3px
+            buf.stroke_text(u.x as i16, oy, label);
+            buf.set_fill_rgba(255, 215, 0, alpha);
+            buf.fill_text(u.x as i16, oy, label);
+        }
     }
 }
 
@@ -739,7 +764,8 @@ fn render_hud(state: &GameState, buf: &mut CanvasBuffer) {
 fn render_victory_progress(state: &GameState, buf: &mut CanvasBuffer) {
     if state.phase != GamePhase::Playing { return; }
 
-    // Check if either faction holds all zones
+    if state.victory_hold_timer <= 0.0 { return; }
+
     let all_blue = state.zones.iter().all(|z| z.owner == Some(Faction::Blue));
     let all_red = state.zones.iter().all(|z| z.owner == Some(Faction::Red));
     if !all_blue && !all_red { return; }
@@ -753,21 +779,26 @@ fn render_victory_progress(state: &GameState, buf: &mut CanvasBuffer) {
     buf.set_fill_rgba(0, 0, 0, 150);
     buf.round_rect(bx, by, bw, bh, 6);
 
-    // Simulate victory timer (ticks toward 120s hold)
-    let hold_progress = (state.tick as f32 * 0.05 / 120.0).min(1.0); // rough approximation
+    // Use actual hold timer
+    let hold_progress = (state.victory_hold_timer / 120.0).min(1.0);
     let fill_w = (hold_progress * (bw - 4) as f32) as u16;
 
     let (fr, fg, fb) = if all_blue { (70, 130, 230) } else { (220, 60, 60) };
     buf.set_fill_rgba(fr, fg, fb, 230);
     buf.round_rect(bx + 2, by + 2, fill_w, bh - 4, 4);
 
-    // Label
+    // Label with time remaining
+    let remaining = (120.0 - state.victory_hold_timer).max(0.0) as u32;
     buf.set_fill_rgb(255, 255, 255);
     buf.set_font(0);
     buf.set_text_align(1);
     buf.set_text_baseline(1);
-    let label = if all_blue { "Holding all zones..." } else { "Enemy holds all zones!" };
-    buf.fill_text(CW as i16 / 2, by + bh as i16 / 2, label);
+    let label = if all_blue {
+        format!("Holding all zones... {}s", remaining)
+    } else {
+        format!("Enemy holds all zones! {}s", remaining)
+    };
+    buf.fill_text(CW as i16 / 2, by + bh as i16 / 2, &label);
 }
 
 fn render_menu(buf: &mut CanvasBuffer) {
