@@ -30,7 +30,9 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     render_water(state, buf, cx, cy);
     // Land tiles on top (autotiled edges blend over water)
     render_terrain(state, buf, cx, cy);
-    // Subtle global darken for moody atmosphere (lighter than before)
+    // Elevated terrain layer (on top of flat ground)
+    render_elevation(state, buf, cx, cy);
+    // Subtle global darken for moody atmosphere
     buf.set_fill_rgba(0, 5, 10, 20);
     buf.fill_rect(-1000, -1000, 12000, 12000);
     render_zones(state, buf);
@@ -122,6 +124,40 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
                     buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
                 }
                 _ => {}
+            }
+        }
+    }
+}
+
+fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
+    let (stx, sty, etx, ety) = vis(cx, cy);
+    let ts = TS as u16 + 1;
+
+    for ty in sty..ety {
+        for tx in stx..etx {
+            if state.grid.elev(tx, ty) == 0 { continue; }
+
+            let dx = (tx as f32 * TS) as i16;
+            let dy = (ty as f32 * TS) as i16;
+
+            // Shadow under elevated tile (drawn on the tile below)
+            if ty + 1 < GRID_SIZE && state.grid.elev(tx, ty + 1) == 0 {
+                buf.set_alpha(130);
+                buf.draw_image(tex::SHADOW, 0, 0, 192, 192,
+                    dx - 64, dy + TS as i16 / 2 - 32, 192, 192);
+                buf.set_alpha(255);
+            }
+
+            // Elevated surface tile (autotiled) — use tilemap2 for contrast
+            let (sx, sy) = autotile::elevated_src(&state.grid, tx, ty);
+            buf.draw_image(tex::TILEMAP2, sx, sy, 64, 64, dx, dy, ts, ts);
+
+            // Cliff face on tile below (if that tile is not elevated)
+            if ty + 1 < GRID_SIZE && state.grid.elev(tx, ty + 1) == 0 {
+                let (csx, csy) = autotile::cliff_src(&state.grid, tx, ty + 1);
+                let cdx = (tx as f32 * TS) as i16;
+                let cdy = ((ty + 1) as f32 * TS) as i16;
+                buf.draw_image(tex::TILEMAP2, csx, csy, 64, 64, cdx, cdy, ts, ts);
             }
         }
     }

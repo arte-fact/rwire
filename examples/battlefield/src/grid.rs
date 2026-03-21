@@ -36,6 +36,7 @@ impl TileType {
 
 pub struct Grid {
     pub tiles: Vec<TileType>,
+    pub elevation: Vec<u8>, // 0 = flat, 1 = elevated
     pub width: usize,
     pub height: usize,
 }
@@ -142,7 +143,19 @@ impl Grid {
             }
         }
 
-        Self { tiles, width: w, height: h }
+        // Generate elevation: rock tiles become elevated terrain
+        let mut elevation = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                if tiles[y * w + x] == TileType::Rock {
+                    elevation[y * w + x] = 1;
+                    // Make rock tiles into elevated grass
+                    tiles[y * w + x] = TileType::Grass;
+                }
+            }
+        }
+
+        Self { tiles, elevation, width: w, height: h }
     }
 
     pub fn get(&self, x: usize, y: usize) -> TileType {
@@ -150,6 +163,11 @@ impl Grid {
             return TileType::Water;
         }
         self.tiles[y * self.width + x]
+    }
+
+    pub fn elev(&self, x: usize, y: usize) -> u8 {
+        if x >= self.width || y >= self.height { return 0; }
+        self.elevation[y * self.width + x]
     }
 
     pub fn tile_at_world(&self, wx: f32, wy: f32) -> TileType {

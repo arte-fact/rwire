@@ -59,3 +59,41 @@ pub fn road_src(grid: &Grid, x: usize, y: usize) -> (u16, u16) {
     let (col, row) = FLAT_GROUND[mask as usize];
     (col * 64, row * 64)
 }
+
+/// Elevated ground autotile (cols 5-8 of tilemap).
+const ELEVATED: [(u16, u16); 16] = [
+    (8, 3), (8, 2), (5, 3), (5, 2),
+    (8, 0), (8, 1), (5, 0), (5, 1),
+    (7, 3), (7, 2), (6, 3), (6, 2),
+    (7, 0), (7, 1), (6, 0), (6, 1),
+];
+
+/// Cliff face tiles (row 4, cols 5-8).
+const CLIFF: [(u16, u16); 4] = [
+    (7, 4), // isolated
+    (5, 4), // E neighbor elevated
+    (8, 4), // W neighbor elevated
+    (6, 4), // both
+];
+
+/// Get the tilemap source rect for an elevated tile top.
+pub fn elevated_src(grid: &Grid, x: usize, y: usize) -> (u16, u16) {
+    let mask = cardinal_mask(grid, x, y, |nx, ny| {
+        grid.elev(nx, ny) >= 1
+    });
+    let (col, row) = ELEVATED[mask as usize];
+    (col * 64, row * 64)
+}
+
+/// Get the cliff face tile source rect.
+/// Called on the tile BELOW an elevated tile.
+pub fn cliff_src(grid: &Grid, x: usize, y: usize) -> (u16, u16) {
+    let mut mask = 0u8;
+    // Check if east and west neighbors are also elevated (at the row above)
+    if y > 0 {
+        if x + 1 < GRID_SIZE && grid.elev(x + 1, y - 1) >= 1 { mask |= 1; }
+        if x > 0 && grid.elev(x - 1, y - 1) >= 1 { mask |= 2; }
+    }
+    let (col, row) = CLIFF[mask as usize];
+    (col * 64, row * 64)
+}
