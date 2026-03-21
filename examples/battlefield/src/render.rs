@@ -28,11 +28,11 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     buf.scale_uniform(zoom);
 
     // Water rendered first as base layer
-    render_water(state, buf, cx, cy);
+    render_water(state, buf, cx, cy, zoom);
     // Land tiles on top (autotiled edges blend over water)
-    render_terrain(state, buf, cx, cy);
+    render_terrain(state, buf, cx, cy, zoom);
     // Elevated terrain layer (on top of flat ground)
-    render_elevation(state, buf, cx, cy);
+    render_elevation(state, buf, cx, cy, zoom);
     // Subtle global darken for moody atmosphere
     buf.set_fill_rgba(0, 5, 10, 20);
     buf.fill_rect(-1000, -1000, 12000, 12000);
@@ -41,7 +41,7 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     render_water_rocks(state, buf, cx, cy);
     render_rocks(state, buf, cx, cy);
     render_bushes(state, buf, cx, cy);
-    render_foreground(state, buf, cx, cy);
+    render_foreground(state, buf, cx, cy, zoom);
     render_hp_bars(state, buf);
     render_order_labels(state, buf);
     render_fog(state, buf, cx, cy);
@@ -69,11 +69,10 @@ pub fn render_frame(state: &GameState, buf: &mut CanvasBuffer) {
     }
 }
 
-fn vis(cx: f32, cy: f32) -> (usize, usize, usize, usize) {
-    // Camera is center point; compute visible rect edges
-    // Use a generous margin to account for zoom levels
-    let half_w = CW as f32; // generous: 2x viewport for zoom margin
-    let half_h = CH as f32;
+fn vis_zoom(cx: f32, cy: f32, zoom: f32) -> (usize, usize, usize, usize) {
+    // Camera center → visible tile range, accounting for zoom
+    let half_w = CW as f32 / (2.0 * zoom) + TS * 3.0; // margin for sprites that overlap edges
+    let half_h = CH as f32 / (2.0 * zoom) + TS * 3.0;
     let stx = (((cx - half_w) / TS).floor() as i32).max(0) as usize;
     let sty = (((cy - half_h) / TS).floor() as i32).max(0) as usize;
     let etx = (((cx + half_w) / TS).ceil() as i32 + 1).min(GRID_SIZE as i32) as usize;
@@ -81,8 +80,13 @@ fn vis(cx: f32, cy: f32) -> (usize, usize, usize, usize) {
     (stx, sty, etx, ety)
 }
 
-fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
-    let (stx, sty, etx, ety) = vis(cx, cy);
+fn vis(cx: f32, cy: f32) -> (usize, usize, usize, usize) {
+    // Default: assume zoom ~0.85 for generous margin
+    vis_zoom(cx, cy, 0.5)
+}
+
+fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32, zoom: f32) {
+    let (stx, sty, etx, ety) = vis_zoom(cx, cy, zoom);
     let ts = TS as u16;
 
     for ty in sty..ety {
@@ -128,8 +132,8 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
     }
 }
 
-fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
-    let (stx, sty, etx, ety) = vis(cx, cy);
+fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32, zoom: f32) {
+    let (stx, sty, etx, ety) = vis_zoom(cx, cy, zoom);
     let ts = TS as u16 + 1;
 
     for ty in sty..ety {
@@ -162,8 +166,8 @@ fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32)
     }
 }
 
-fn render_water(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
-    let (stx, sty, etx, ety) = vis(cx, cy);
+fn render_water(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32, zoom: f32) {
+    let (stx, sty, etx, ety) = vis_zoom(cx, cy, zoom);
     let ts = TS as u16 + 1;
 
     for ty in sty..ety {
@@ -304,7 +308,7 @@ fn render_aim_cone(state: &GameState, buf: &mut CanvasBuffer) {
     buf.stroke();
 }
 
-fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
+fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32, zoom: f32) {
     enum D { Unit(usize), Tree(usize, usize), Building(usize), Projectile(usize), Particle(usize) }
     let mut items: Vec<(f32, D)> = Vec::new();
 
@@ -319,10 +323,12 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
         items.push((p.y + TS * 0.5, D::Particle(i)));
     }
 
+    // Viewport culling: cx,cy is camera CENTER, so visible range is ±half_viewport/zoom
+    let hvw = CW as f32 / (2.0 * zoom) + 200.0; // half viewport width in world + margin
+    let hvh = CH as f32 / (2.0 * zoom) + 200.0;
     for (i, u) in state.units.iter().enumerate() {
-        if !u.alive { continue; }
-        if u.x >= cx - 200.0 && u.x <= cx + CW as f32 + 200.0
-            && u.y >= cy - 200.0 && u.y <= cy + CH as f32 + 200.0 {
+        if !u.alive && u.death_fade >= crate::unit::DEATH_FADE_DURATION { continue; }
+        if (u.x - cx).abs() < hvw && (u.y - cy).abs() < hvh {
             items.push((u.y + TS * 0.5, D::Unit(i)));
         }
     }
@@ -339,8 +345,7 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
 
     // Buildings
     for (i, b) in state.buildings.iter().enumerate() {
-        if b.x >= cx - 200.0 && b.x <= cx + CW as f32 + 200.0
-            && b.y >= cy - 300.0 && b.y <= cy + CH as f32 + 200.0 {
+        if (b.x - cx).abs() < hvw + 100.0 && (b.y - cy).abs() < hvh + 100.0 {
             items.push((b.y + TS, D::Building(i)));
         }
     }
