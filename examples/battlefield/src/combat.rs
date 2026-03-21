@@ -34,8 +34,10 @@ pub fn resolve_attack(attacker_idx: usize, defender_idx: usize, units: &mut [Uni
     }
 
     units[defender_idx].hp -= dmg;
+    units[defender_idx].hit_flash = 0.3;
     if units[defender_idx].hp <= 0 {
         units[defender_idx].alive = false;
+        units[defender_idx].death_fade = 0.01; // start fading
     }
 
     dmg

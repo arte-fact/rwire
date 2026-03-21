@@ -39,11 +39,22 @@ pub enum BuildingKind {
     Monastery,
 }
 
+pub struct Projectile {
+    pub x: f32,
+    pub y: f32,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub progress: f32, // 0.0 to 1.0
+    pub speed: f32,    // progress per second
+    pub faction: Faction,
+}
+
 pub struct GameState {
     pub grid: Grid,
     pub units: Vec<Unit>,
     pub zones: Vec<ZoneState>,
     pub buildings: Vec<Building>,
+    pub projectiles: Vec<Projectile>,
     pub phase: GamePhase,
     pub player_id: u32,
     pub camera_x: f32,
@@ -154,6 +165,7 @@ impl GameState {
             units,
             zones,
             buildings,
+            projectiles: Vec::new(),
             phase: GamePhase::Menu,
             player_id,
             camera_x: px - 480.0,
@@ -203,9 +215,13 @@ impl GameState {
 
         self.tick += 1;
 
-        // Cooldowns and animation
+        // Cooldowns, animation, death fade, hit flash
         for u in &mut self.units {
             if u.cooldown > 0.0 { u.cooldown -= dt; }
+            if u.hit_flash > 0.0 { u.hit_flash -= dt; }
+            if !u.alive && u.death_fade > 0.0 {
+                u.death_fade += dt;
+            }
             u.update_anim(dt);
         }
 
@@ -218,14 +234,22 @@ impl GameState {
         // Collision resolution — push overlapping units apart
         self.resolve_collisions();
 
+        // Update projectiles
+        self.projectiles.retain_mut(|p| {
+            p.progress += p.speed * dt;
+            p.progress < 1.0
+        });
+
         // Zones
         self.tick_zones(dt);
 
         // Reinforcements
         self.tick_reinforcements(dt);
 
-        // Remove dead units (keep IDs stable)
-        self.units.retain(|u| u.alive || u.id == self.player_id);
+        // Remove dead units after fade completes
+        self.units.retain(|u| {
+            u.alive || u.id == self.player_id || u.death_fade < crate::unit::DEATH_FADE_DURATION
+        });
 
         // Player death check
         if !self.units.iter().any(|u| u.id == self.player_id && u.alive) {
@@ -343,6 +367,20 @@ impl GameState {
             // Attack or move toward enemy
             if let Some(ei) = nearest_enemy {
                 if nearest_dist <= ukind.range() {
+                    // Spawn arrow projectile for ranged units
+                    if ukind.is_ranged() && self.units[i].can_attack() {
+                        let tx = self.units[ei].x;
+                        let ty = self.units[ei].y;
+                        self.projectiles.push(Projectile {
+                            x: self.units[i].x,
+                            y: self.units[i].y,
+                            target_x: tx,
+                            target_y: ty,
+                            progress: 0.0,
+                            speed: 2.0, // 0.5s flight time
+                            faction: ufac,
+                        });
+                    }
                     combat::resolve_attack(i, ei, &mut self.units, &self.grid);
                 } else {
                     let tx = self.units[ei].x;

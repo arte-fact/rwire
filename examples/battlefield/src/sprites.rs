@@ -61,9 +61,12 @@ pub mod tex {
     pub const BARRACKS_RED: u8 = 45;
     pub const ARCHERY_BLUE: u8 = 46;
     pub const ARCHERY_RED: u8 = 47;
+    // Extra tilemaps for elevation variety
+    pub const TILEMAP3: u8 = 48;
+    pub const TILEMAP4: u8 = 49;
     // Particles
-    pub const DUST: u8 = 48;
-    pub const ARROW: u8 = 49;
+    pub const DUST: u8 = 50;
+    pub const ARROW: u8 = 51;
 }
 
 /// Build the texture table for the setup message.
@@ -118,6 +121,8 @@ pub fn texture_table() -> Vec<(u8, &'static str)> {
         (tex::BARRACKS_RED, "assets/buildings/red/barracks.png"),
         (tex::ARCHERY_BLUE, "assets/buildings/blue/archery.png"),
         (tex::ARCHERY_RED, "assets/buildings/red/archery.png"),
+        (tex::TILEMAP3, "assets/terrain/tileset/tilemap3.png"),
+        (tex::TILEMAP4, "assets/terrain/tileset/tilemap4.png"),
         (tex::DUST, "assets/particles/dust.png"),
         (tex::ARROW, "assets/particles/arrow.png"),
     ]

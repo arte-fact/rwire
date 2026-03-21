@@ -148,16 +148,16 @@ fn render_elevation(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32)
                 buf.set_alpha(255);
             }
 
-            // Elevated surface tile (autotiled) — use tilemap2 for contrast
+            // Elevated surface tile (autotiled) — use tilemap3 for stone look
             let (sx, sy) = autotile::elevated_src(&state.grid, tx, ty);
-            buf.draw_image(tex::TILEMAP2, sx, sy, 64, 64, dx, dy, ts, ts);
+            buf.draw_image(tex::TILEMAP3, sx, sy, 64, 64, dx, dy, ts, ts);
 
             // Cliff face on tile below (if that tile is not elevated)
             if ty + 1 < GRID_SIZE && state.grid.elev(tx, ty + 1) == 0 {
                 let (csx, csy) = autotile::cliff_src(&state.grid, tx, ty + 1);
                 let cdx = (tx as f32 * TS) as i16;
                 let cdy = ((ty + 1) as f32 * TS) as i16;
-                buf.draw_image(tex::TILEMAP2, csx, csy, 64, 64, cdx, cdy, ts, ts);
+                buf.draw_image(tex::TILEMAP3, csx, csy, 64, 64, cdx, cdy, ts, ts);
             }
         }
     }
@@ -289,8 +289,14 @@ fn render_aim_cone(state: &GameState, buf: &mut CanvasBuffer) {
 }
 
 fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
-    enum D { Unit(usize), Tree(usize, usize), Building(usize) }
+    enum D { Unit(usize), Tree(usize, usize), Building(usize), Projectile(usize) }
     let mut items: Vec<(f32, D)> = Vec::new();
+
+    // Projectiles
+    for (i, p) in state.projectiles.iter().enumerate() {
+        let cur_y = p.y + (p.target_y - p.y) * p.progress;
+        items.push((cur_y, D::Projectile(i)));
+    }
 
     for (i, u) in state.units.iter().enumerate() {
         if !u.alive { continue; }
@@ -325,6 +331,7 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
             D::Unit(i) => draw_unit(state, buf, i),
             D::Tree(tx, ty) => draw_tree(state, buf, tx, ty),
             D::Building(i) => draw_building(state, buf, i),
+            D::Projectile(i) => draw_projectile(state, buf, i),
         }
     }
 }
@@ -332,15 +339,32 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
 fn draw_unit(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
     let u = &state.units[idx];
 
+    // Skip fully faded dead units
+    if !u.alive && u.death_fade >= crate::unit::DEATH_FADE_DURATION { return; }
+
     // Check visibility for enemy units (fog of war)
     if u.faction == Faction::Red {
         let visible = state.units.iter()
             .filter(|f| f.alive && f.faction == Faction::Blue)
             .any(|f| {
                 let d = ((f.x - u.x).powi(2) + (f.y - u.y).powi(2)).sqrt() / TS;
-                d < 12.0
+                d < 15.0
             });
         if !visible { return; }
+    }
+
+    // Death fade opacity
+    if !u.alive {
+        let fade = 1.0 - (u.death_fade / crate::unit::DEATH_FADE_DURATION);
+        buf.set_alpha((fade * 255.0) as u8);
+    }
+
+    // Hit flash — dim the unit briefly
+    if u.hit_flash > 0.0 {
+        let flash_frame = (u.hit_flash * 20.0) as u32;
+        if flash_frame % 2 == 1 {
+            buf.set_alpha(80);
+        }
     }
 
     let a = match u.anim {
@@ -366,8 +390,11 @@ fn draw_unit(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
         buf.draw_image(a.texture, sx, 0, fw, fh, dx, dy, fw, fh);
     }
 
+    // Reset alpha after death/hit effects
+    buf.set_alpha(255);
+
     // Player highlight
-    if u.id == state.player_id {
+    if u.id == state.player_id && u.alive {
         buf.set_stroke_rgba(255, 215, 0, 200);
         buf.set_line_width(8);
         buf.begin_path();
@@ -401,6 +428,32 @@ fn draw_tree(state: &GameState, buf: &mut CanvasBuffer, tx: usize, ty: usize) {
 
     buf.draw_image(tex::TREE1 + v, sx, 0, fw, fh, dx, dy, dw, dh);
     buf.set_alpha(255);
+}
+
+fn draw_projectile(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
+    let p = &state.projectiles[idx];
+    let t = p.progress;
+
+    // Interpolate position
+    let cur_x = p.x + (p.target_x - p.x) * t;
+    let cur_y = p.y + (p.target_y - p.y) * t;
+
+    // Parabolic arc height
+    let dist = ((p.target_x - p.x).powi(2) + (p.target_y - p.y).powi(2)).sqrt();
+    let arc_height = 30.0 + dist * 0.25;
+    let arc_y = cur_y - arc_height * 4.0 * t * (1.0 - t); // parabola peaks at t=0.5
+
+    // Calculate rotation angle from velocity
+    let dx = p.target_x - p.x;
+    let dy = p.target_y - p.y;
+    let angle = dy.atan2(dx);
+
+    // Draw arrow sprite rotated
+    buf.save();
+    buf.translate(cur_x as i16, arc_y as i16);
+    buf.rotate(angle);
+    buf.draw_image(tex::ARROW, 0, 0, 64, 64, -16, -16, 32, 32);
+    buf.restore();
 }
 
 fn draw_building(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {

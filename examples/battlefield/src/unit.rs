@@ -80,7 +80,11 @@ pub struct Unit {
     pub anim: UnitAnim,
     pub anim_frame: u16,
     pub anim_timer: f32,
+    pub death_fade: f32,    // 0.0 = alive, counts up to DEATH_FADE_DURATION then removed
+    pub hit_flash: f32,     // counts down from 0.3 on hit
 }
+
+pub const DEATH_FADE_DURATION: f32 = 0.5;
 
 impl Unit {
     pub fn new(id: u32, kind: UnitKind, faction: Faction, x: f32, y: f32) -> Self {
@@ -94,6 +98,8 @@ impl Unit {
             anim: UnitAnim::Idle,
             anim_frame: 0,
             anim_timer: 0.0,
+            death_fade: 0.0,
+            hit_flash: 0.0,
         }
     }
 
