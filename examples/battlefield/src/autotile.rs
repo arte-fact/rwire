@@ -31,7 +31,7 @@ const FLAT_GROUND: [(u16, u16); 16] = [
     (1, 1), // 15: all → center fill
 ];
 
-fn cardinal_mask(grid: &Grid, x: usize, y: usize, is_same: impl Fn(usize, usize) -> bool) -> u8 {
+fn cardinal_mask(_grid: &Grid, x: usize, y: usize, is_same: impl Fn(usize, usize) -> bool) -> u8 {
     let mut mask = 0u8;
     if y == 0 || is_same(x, y - 1) { mask |= N; }
     if x + 1 >= GRID_SIZE || is_same(x + 1, y) { mask |= E; }
@@ -46,15 +46,6 @@ pub fn flat_ground_src(grid: &Grid, x: usize, y: usize) -> (u16, u16) {
     let mask = cardinal_mask(grid, x, y, |nx, ny| {
         let t = grid.get(nx, ny);
         t != TileType::Water && t != TileType::Rock
-    });
-    let (col, row) = FLAT_GROUND[mask as usize];
-    (col * 64, row * 64)
-}
-
-/// Get the tilemap source rect for a road tile (uses tilemap2).
-pub fn road_src(grid: &Grid, x: usize, y: usize) -> (u16, u16) {
-    let mask = cardinal_mask(grid, x, y, |nx, ny| {
-        grid.get(nx, ny) == TileType::Road
     });
     let (col, row) = FLAT_GROUND[mask as usize];
     (col * 64, row * 64)

@@ -8,15 +8,6 @@ pub enum Faction {
     Red,
 }
 
-impl Faction {
-    pub fn enemy(self) -> Self {
-        match self {
-            Faction::Blue => Faction::Red,
-            Faction::Red => Faction::Blue,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnitKind {
     Warrior,
@@ -143,14 +134,6 @@ impl Unit {
             UnitAnim::Attack => sprites::unit_attack(self.faction, self.kind),
         };
         a.frame_count
-    }
-
-    pub fn tile_x(&self) -> usize {
-        (self.x / TILE_SIZE) as usize
-    }
-
-    pub fn tile_y(&self) -> usize {
-        (self.y / TILE_SIZE) as usize
     }
 
     pub fn distance_to(&self, other: &Unit) -> f32 {

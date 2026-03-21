@@ -209,6 +209,8 @@ impl CanvasBuffer {
     // ========================================================================
 
     /// Draw a region of a texture to a destination rectangle.
+    /// Parameters map directly to the Canvas 2D API's 9-argument drawImage().
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_image(
         &mut self,
         texture: u8,

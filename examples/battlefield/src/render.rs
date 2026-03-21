@@ -114,13 +114,6 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
                         buf.fill_rect(dx, dy, draw_ts, draw_ts);
                     }
                 }
-                TileType::Road => {
-                    let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    buf.draw_image(tex::TILEMAP1, sx, sy, 64, 64, dx, dy, draw_ts, draw_ts);
-                    // Road tint overlay
-                    buf.set_fill_rgba(196, 162, 101, 60);
-                    buf.fill_rect(dx, dy, draw_ts, draw_ts);
-                }
                 TileType::Rock => {
                     // Draw grass underneath, then rock decoration
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
@@ -181,7 +174,7 @@ fn render_water(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
 
     // Foam on land tiles adjacent to water (8 FPS with spatial decorrelation)
     // Original: foam_fps=8, frame offset = (gx*7 + gy*13) % 16
-    let global_frame = (state.tick * 20 / 50) as u32; // ~8fps at 20 tick/s * (8/20)
+    let global_frame = state.tick * 20 / 50; // ~8fps at 20 tick/s * (8/20)
 
     for ty in sty..ety {
         for tx in stx..etx {
@@ -659,7 +652,6 @@ fn render_minimap(state: &GameState, buf: &mut CanvasBuffer) {
                 TileType::Water => (40, 80, 150),
                 TileType::Forest => (50, 95, 45),
                 TileType::Rock => (100, 95, 85),
-                TileType::Road => (160, 145, 105),
             };
             buf.set_fill_rgb(r, g, b);
             let px = mx + (tx as f32 * scale) as i16;

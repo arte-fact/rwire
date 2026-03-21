@@ -85,7 +85,6 @@ impl CanvasServer {
             let game = Arc::clone(&game);
             let capsule = Arc::clone(&capsule);
             let static_dir = static_dir.clone();
-            let tick_ms = tick_ms;
 
             tokio::spawn(async move {
                 if let Err(e) = handle_connection(stream, peer, game, capsule, static_dir, tick_ms).await {
@@ -190,7 +189,7 @@ async fn handle_websocket<G: GameLoop>(
     game.setup(&mut setup_buf);
     let setup_bytes = setup_buf.finish();
     if !setup_bytes.is_empty() {
-        ws_write.send(Message::Binary(setup_bytes.to_vec().into())).await?;
+        ws_write.send(Message::Binary(setup_bytes.to_vec())).await?;
     }
 
     let dt = tick_ms as f32 / 1000.0;
@@ -211,7 +210,7 @@ async fn handle_websocket<G: GameLoop>(
                 buf.frame_end();
 
                 let bytes = buf.finish();
-                if ws_write.send(Message::Binary(bytes.to_vec().into())).await.is_err() {
+                if ws_write.send(Message::Binary(bytes.to_vec())).await.is_err() {
                     break;
                 }
 

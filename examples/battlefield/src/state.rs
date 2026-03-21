@@ -47,7 +47,6 @@ pub struct Projectile {
     pub target_y: f32,
     pub progress: f32, // 0.0 to 1.0
     pub speed: f32,    // progress per second
-    pub faction: Faction,
 }
 
 pub struct GameState {
@@ -388,7 +387,6 @@ impl GameState {
                             target_y: ty,
                             progress: 0.0,
                             speed: 2.0, // 0.5s flight time
-                            faction: ufac,
                         });
                     }
                     combat::resolve_attack(i, ei, &mut self.units, &self.grid);
