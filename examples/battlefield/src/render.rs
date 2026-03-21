@@ -97,8 +97,9 @@ fn render_terrain(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
             match tile {
                 TileType::Grass | TileType::Forest => {
                     let (sx, sy) = autotile::flat_ground_src(&state.grid, tx, ty);
-                    // Use original game's exact tile flip hash for identical pattern
-                    let flip = (tx as u32).wrapping_mul(48271).wrapping_add((ty as u32).wrapping_mul(16807)) & 1 == 0;
+                    // Only flip CENTER tiles (col=1,row=1 = 64,64) like the original
+                    let is_center = sx == 64 && sy == 64;
+                    let flip = is_center && (tx as u32).wrapping_mul(48271).wrapping_add((ty as u32).wrapping_mul(16807)) & 1 == 0;
                     if flip {
                         buf.save();
                         buf.translate(dx + draw_ts as i16, dy);
@@ -178,13 +179,12 @@ fn render_water(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
         }
     }
 
-    // Foam on land tiles adjacent to water
-    let foam_frame = ((state.tick / 3) % 16) as u16;
-    let foam_sx = foam_frame * 192;
+    // Foam on land tiles adjacent to water (8 FPS with spatial decorrelation)
+    // Original: foam_fps=8, frame offset = (gx*7 + gy*13) % 16
+    let global_frame = (state.tick * 20 / 50) as u32; // ~8fps at 20 tick/s * (8/20)
 
     for ty in sty..ety {
         for tx in stx..etx {
-            // Draw foam on LAND tiles that border water
             let tile = state.grid.get(tx, ty);
             if tile == TileType::Water { continue; }
             let has_water = [(0i32, -1), (0, 1), (-1, 0), (1, 0)].iter().any(|&(ddx, ddy)| {
@@ -194,11 +194,16 @@ fn render_water(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
                 state.grid.get(nx as usize, ny as usize) == TileType::Water
             });
             if !has_water { continue; }
-            let dx = (tx as f32 * TS) as i16 - 64;
-            let dy = (ty as f32 * TS) as i16 - 64;
-            buf.set_alpha(180);
+
+            // Per-tile frame offset for decorrelation (matching original)
+            let tile_offset = (tx.wrapping_mul(7).wrapping_add(ty.wrapping_mul(13))) as u32 % 16;
+            let frame = (global_frame + tile_offset) % 16;
+            let foam_sx = (frame as u16) * 192;
+
+            // Centered on tile (matching original: tile_center - foam_size/2)
+            let dx = (tx as f32 * TS + TS / 2.0 - 96.0) as i16;
+            let dy = (ty as f32 * TS + TS / 2.0 - 96.0) as i16;
             buf.draw_image(tex::FOAM, foam_sx, 0, 192, 192, dx, dy, 192, 192);
-            buf.set_alpha(255);
         }
     }
 }
@@ -261,33 +266,32 @@ fn render_aim_cone(state: &GameState, buf: &mut CanvasBuffer) {
 
     let px = player.x as i16;
     let py = player.y as i16;
+
+    // Position indicator circle (matching original: 24px radius, yellow 20% alpha)
+    buf.set_fill_rgba(255, 255, 51, 51); // rgba(255,255,51,0.2)
+    buf.begin_path();
+    buf.arc_full(px, py, 24);
+    buf.fill();
+
+    // Aim cone wedge (matching original: 40px radius, PI/3 half-angle)
+    let aim_angle = state.aim_y.atan2(state.aim_x);
+    let half_cone = std::f32::consts::FRAC_PI_3;
     let radius: u16 = 40;
 
-    // Aim direction
-    let aim_angle = state.aim_y.atan2(state.aim_x);
-    let half_cone = std::f32::consts::FRAC_PI_3; // 60 degrees
-
-    // Yellow semi-transparent wedge
-    buf.set_fill_rgba(255, 255, 100, 30);
+    buf.set_fill_rgba(255, 255, 100, 30); // rgba(255,255,100,0.12)
     buf.begin_path();
     buf.move_to(px, py);
     buf.arc(px, py, radius, aim_angle - half_cone, aim_angle + half_cone);
     buf.close_path();
     buf.fill();
 
-    buf.set_stroke_rgba(255, 255, 100, 90);
-    buf.set_line_width(4);
+    buf.set_stroke_rgba(255, 255, 100, 89); // rgba(255,255,100,0.35)
+    buf.set_line_width(4); // 1.0 at native
     buf.begin_path();
     buf.move_to(px, py);
     buf.arc(px, py, radius, aim_angle - half_cone, aim_angle + half_cone);
     buf.close_path();
     buf.stroke();
-
-    // Position indicator circle
-    buf.set_fill_rgba(255, 215, 0, 60);
-    buf.begin_path();
-    buf.arc_full(px, py + 12, 24);
-    buf.fill();
 }
 
 fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
@@ -361,11 +365,11 @@ fn draw_unit(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
         buf.set_alpha((fade * 255.0) as u8);
     }
 
-    // Hit flash — dim the unit briefly
+    // Hit flash — 30% opacity on alternating frames (matching original)
     if u.hit_flash > 0.0 {
-        let flash_frame = (u.hit_flash * 20.0) as u32;
-        if flash_frame % 2 == 1 {
-            buf.set_alpha(80);
+        let flash_frame = (u.hit_flash * 30.0) as i32;
+        if flash_frame % 2 == 0 {
+            buf.set_alpha(77); // 0.3 * 255
         }
     }
 
@@ -484,20 +488,21 @@ fn render_zones(state: &GameState, buf: &mut CanvasBuffer) {
         let zcy = zone.cy as i16;
         let r = (zone.radius * TS) as u16;
 
+        // Exact zone colors from original (very low fill opacity)
         let (zr, zg, zb, za) = match zone.owner {
-            Some(Faction::Blue) => (60, 120, 255, 40),
-            Some(Faction::Red) => (255, 60, 60, 40),
-            None => (200, 200, 200, 20),
+            Some(Faction::Blue) => (60, 120, 255, 30),  // 0.12 * 255
+            Some(Faction::Red) => (255, 60, 60, 30),
+            None => (200, 200, 200, 15),  // 0.06 * 255
         };
         buf.set_fill_rgba(zr, zg, zb, za);
         buf.begin_path().arc_full(zcx, zcy, r).fill();
 
-        let (sr, sg, sb) = match zone.owner {
-            Some(Faction::Blue) => (60, 120, 255),
-            Some(Faction::Red) => (255, 60, 60),
-            None => (180, 180, 180),
+        let (sr, sg, sb, sa) = match zone.owner {
+            Some(Faction::Blue) => (60, 120, 255, 127),  // 0.5
+            Some(Faction::Red) => (255, 60, 60, 127),
+            None => (200, 200, 200, 64),  // 0.25
         };
-        buf.set_stroke_rgba(sr, sg, sb, 160);
+        buf.set_stroke_rgba(sr, sg, sb, sa);
         buf.set_line_width(8);
         buf.set_line_dash(&[8, 4]);
         buf.begin_path().arc_full(zcx, zcy, r).stroke();
@@ -562,16 +567,17 @@ fn render_hp_bars(state: &GameState, buf: &mut CanvasBuffer) {
     for u in &state.units {
         if !u.alive || u.hp >= u.kind.max_hp() { continue; }
 
+        // Position: 0.85 tiles above unit center (matching original)
         let bx = u.x as i16 - bw as i16 / 2;
-        let by = u.y as i16 - 28;
+        let by = u.y as i16 - (TS * 0.85) as i16;
         let ratio = u.hp as f32 / u.kind.max_hp() as f32;
 
-        // Background
-        buf.set_alpha(200);
+        // Background (80% alpha, matching original)
+        buf.set_alpha(204);
         buf.set_fill_rgb(51, 51, 51);
-        buf.fill_rect(bx, by, bw, bh);
+        buf.fill_rect(bx, by - bh as i16 / 2, bw, bh);
 
-        // Health fill
+        // Health fill with 2px inset (matching original: bar_height - 2)
         let (cr, cg, cb) = if ratio > 0.5 {
             (51, 204, 51)
         } else if ratio > 0.25 {
@@ -581,7 +587,8 @@ fn render_hp_bars(state: &GameState, buf: &mut CanvasBuffer) {
         };
         buf.set_alpha(230);
         buf.set_fill_rgb(cr, cg, cb);
-        buf.fill_rect(bx, by, (ratio * bw as f32) as u16, bh);
+        let fill_h = bh - 2; // 2px inset
+        buf.fill_rect(bx, by - fill_h as i16 / 2, (ratio * bw as f32) as u16, fill_h);
         buf.set_alpha(255);
     }
 }

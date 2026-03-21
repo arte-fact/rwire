@@ -84,7 +84,7 @@ pub struct Unit {
     pub hit_flash: f32,     // counts down from 0.3 on hit
 }
 
-pub const DEATH_FADE_DURATION: f32 = 0.5;
+pub const DEATH_FADE_DURATION: f32 = 0.3; // matches original
 
 impl Unit {
     pub fn new(id: u32, kind: UnitKind, faction: Faction, x: f32, y: f32) -> Self {
