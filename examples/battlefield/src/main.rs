@@ -6,13 +6,15 @@
 use rwire_canvas::{CanvasBuffer, CanvasServer, GameLoop, InputState};
 
 mod autotile;
-mod state;
+mod combat;
+mod flowfield;
 mod grid;
 mod mapgen;
-mod unit;
-mod combat;
+mod particle;
 mod render;
 mod sprites;
+mod state;
+mod unit;
 
 use state::GameState;
 

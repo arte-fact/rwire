@@ -1,7 +1,9 @@
 //! Game state and tick logic.
 
+use crate::flowfield::FactionFlow;
 use crate::grid::{Grid, GRID_SIZE, TILE_SIZE};
 use crate::mapgen;
+use crate::particle::{Particle, ParticleKind};
 use crate::unit::{Unit, UnitKind, Faction, Facing, OrderKind};
 use crate::combat;
 use rwire_canvas::InputState;
@@ -70,11 +72,14 @@ pub struct GameState {
     pub next_id: u32,
     pub reinforce_timer: f32,
     pub tick: u32,
+    pub particles: Vec<Particle>,
     pub aim_x: f32,
     pub aim_y: f32,
     pub blue_base: (f32, f32),
     pub red_base: (f32, f32),
-    pub victory_hold_timer: f32, // counts up while holding all zones
+    pub victory_hold_timer: f32,
+    pub blue_flow: FactionFlow,
+    pub red_flow: FactionFlow,
 }
 
 impl GameState {
@@ -191,9 +196,12 @@ impl GameState {
             tick: 0,
             aim_x: 1.0,
             aim_y: 0.0,
+            particles: Vec::new(),
             blue_base: (bcx as f32 * ts, bcy as f32 * ts),
             red_base: (rcx as f32 * ts, rcy as f32 * ts),
             victory_hold_timer: 0.0,
+            blue_flow: FactionFlow::new(),
+            red_flow: FactionFlow::new(),
         }
     }
 
@@ -248,8 +256,16 @@ impl GameState {
         // Player movement
         self.tick_player(input, dt);
 
+        // Update flow fields for AI pathfinding
+        self.blue_flow.update_if_needed(&self.grid, self.red_base.0, self.red_base.1);
+        self.red_flow.update_if_needed(&self.grid, self.blue_base.0, self.blue_base.1);
+
         // AI
         self.tick_ai(dt);
+
+        // Update particles
+        for p in &mut self.particles { p.update(dt); }
+        self.particles.retain(|p| !p.finished);
 
         // Collision resolution — push overlapping units apart
         self.resolve_collisions();
@@ -502,19 +518,47 @@ impl GameState {
                             arc_height: ARC_BASE + dist * ARC_DIST_FACTOR,
                         });
                     }
-                    combat::resolve_attack(i, ei, &mut self.units, &self.grid);
+                    let dmg = combat::resolve_attack(i, ei, &mut self.units, &self.grid);
+                    if dmg > 0 {
+                        // Dust particle on melee hit
+                        let hx = self.units[ei].x;
+                        let hy = self.units[ei].y;
+                        self.particles.push(Particle::new(hx, hy, ParticleKind::Dust));
+                        // Explosion on kill
+                        if !self.units[ei].alive {
+                            self.particles.push(Particle::new(hx, hy, ParticleKind::ExplosionSmall));
+                        }
+                    }
                 } else {
                     let tx = self.units[ei].x;
                     let ty = self.units[ei].y;
                     self.units[i].move_toward(tx, ty, dt, &self.grid);
                 }
             } else {
-                // March toward enemy base
-                let (bx, by) = match ufac {
-                    Faction::Blue => self.red_base,
-                    Faction::Red => self.blue_base,
+                // March toward enemy base using flow field
+                let flow = match ufac {
+                    Faction::Blue => &self.blue_flow,
+                    Faction::Red => &self.red_flow,
                 };
-                self.units[i].move_toward(bx, by, dt, &self.grid);
+                if let Some(ref field) = flow.field {
+                    let (fdx, fdy) = field.world_direction(ux, uy);
+                    if fdx != 0.0 || fdy != 0.0 {
+                        let speed = ukind.speed() * TILE_SIZE * dt;
+                        let nx = ux + fdx * speed;
+                        let ny = uy + fdy * speed;
+                        if self.grid.passable_at(nx, uy) { self.units[i].x = nx; }
+                        if self.grid.passable_at(self.units[i].x, ny) { self.units[i].y = ny; }
+                        if fdx > 0.0 { self.units[i].facing = Facing::Right; }
+                        else if fdx < 0.0 { self.units[i].facing = Facing::Left; }
+                    }
+                } else {
+                    // Fallback: direct movement
+                    let (bx, by) = match ufac {
+                        Faction::Blue => self.red_base,
+                        Faction::Red => self.blue_base,
+                    };
+                    self.units[i].move_toward(bx, by, dt, &self.grid);
+                }
             }
         }
     }

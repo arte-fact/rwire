@@ -2,6 +2,7 @@
 
 use crate::autotile;
 use crate::grid::{GRID_SIZE, TILE_SIZE, TileType};
+use crate::particle::ParticleKind;
 use crate::sprites::tex;
 use crate::state::{BuildingKind, GamePhase, GameState};
 use crate::unit::{Facing, Faction, UnitAnim};
@@ -289,13 +290,18 @@ fn render_aim_cone(state: &GameState, buf: &mut CanvasBuffer) {
 }
 
 fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32) {
-    enum D { Unit(usize), Tree(usize, usize), Building(usize), Projectile(usize) }
+    enum D { Unit(usize), Tree(usize, usize), Building(usize), Projectile(usize), Particle(usize) }
     let mut items: Vec<(f32, D)> = Vec::new();
 
     // Projectiles
     for (i, p) in state.projectiles.iter().enumerate() {
         let cur_y = p.start_y + (p.target_y - p.start_y) * p.progress;
         items.push((cur_y, D::Projectile(i)));
+    }
+
+    // Particles
+    for (i, p) in state.particles.iter().enumerate() {
+        items.push((p.y + TS * 0.5, D::Particle(i)));
     }
 
     for (i, u) in state.units.iter().enumerate() {
@@ -332,6 +338,7 @@ fn render_foreground(state: &GameState, buf: &mut CanvasBuffer, cx: f32, cy: f32
             D::Tree(tx, ty) => draw_tree(state, buf, tx, ty),
             D::Building(i) => draw_building(state, buf, i),
             D::Projectile(i) => draw_projectile(state, buf, i),
+            D::Particle(i) => draw_particle(state, buf, i),
         }
     }
 }
@@ -454,6 +461,18 @@ fn draw_projectile(_state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
     buf.rotate(angle);
     buf.draw_image(tex::ARROW, 0, 0, 64, 64, -16, -16, 32, 32);
     buf.restore();
+}
+
+fn draw_particle(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
+    let p = &state.particles[idx];
+    let (tex_id, frame_size) = match p.kind {
+        ParticleKind::Dust => (tex::DUST, 64u16),
+        ParticleKind::ExplosionSmall => (tex::DUST, 64), // reuse dust for now
+    };
+    let sx = p.frame * frame_size;
+    let half = frame_size as i16 / 2;
+    buf.draw_image(tex_id, sx, 0, frame_size, frame_size,
+        p.x as i16 - half, p.y as i16 - half, frame_size, frame_size);
 }
 
 fn draw_building(state: &GameState, buf: &mut CanvasBuffer, idx: usize) {
