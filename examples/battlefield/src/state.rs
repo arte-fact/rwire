@@ -4,7 +4,7 @@ use crate::flowfield::FactionFlow;
 use crate::grid::{Grid, GRID_SIZE, TILE_SIZE};
 use crate::mapgen;
 use crate::particle::{Particle, ParticleKind};
-use crate::unit::{Unit, UnitKind, Faction, Facing, OrderKind};
+use crate::unit::{Unit, UnitKind, Faction, OrderKind};
 use crate::combat;
 use rwire_canvas::InputState;
 
@@ -318,15 +318,12 @@ impl GameState {
         };
         if !self.units[pidx].alive { return; }
 
-        // Movement
+        // Movement (circle collision, speed factor from terrain)
         let (dx, dy) = input.move_dir();
-        let speed = self.units[pidx].kind.speed() * TILE_SIZE * dt;
-        let nx = self.units[pidx].x + dx as f32 * speed;
-        let ny = self.units[pidx].y + dy as f32 * speed;
-        if self.grid.passable_at(nx, self.units[pidx].y) { self.units[pidx].x = nx; }
-        if self.grid.passable_at(self.units[pidx].x, ny) { self.units[pidx].y = ny; }
-        if dx > 0 { self.units[pidx].facing = Facing::Right; }
-        else if dx < 0 { self.units[pidx].facing = Facing::Left; }
+        if dx != 0 || dy != 0 {
+            let len = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
+            self.units[pidx].move_dir(dx as f32 / len, dy as f32 / len, dt, &self.grid);
+        }
 
         // Camera
         self.camera_x = self.units[pidx].x;
@@ -546,13 +543,7 @@ impl GameState {
                 if let Some(ref field) = flow.field {
                     let (fdx, fdy) = field.world_direction(ux, uy);
                     if fdx != 0.0 || fdy != 0.0 {
-                        let speed = ukind.speed() * TILE_SIZE * dt;
-                        let nx = ux + fdx * speed;
-                        let ny = uy + fdy * speed;
-                        if self.grid.passable_at(nx, uy) { self.units[i].x = nx; }
-                        if self.grid.passable_at(self.units[i].x, ny) { self.units[i].y = ny; }
-                        if fdx > 0.0 { self.units[i].facing = Facing::Right; }
-                        else if fdx < 0.0 { self.units[i].facing = Facing::Left; }
+                        self.units[i].move_dir(fdx, fdy, dt, &self.grid);
                     }
                 } else {
                     // Fallback: direct movement
@@ -604,8 +595,8 @@ impl GameState {
     }
 
     fn resolve_collisions(&mut self) {
-        let unit_radius = 28.0f32; // pixels
-        let min_dist = unit_radius * 2.0;
+        let radius = 28.0f32;
+        let min_dist = radius * 2.0;
 
         for i in 0..self.units.len() {
             if !self.units[i].alive { continue; }
@@ -614,21 +605,54 @@ impl GameState {
                 let dx = self.units[j].x - self.units[i].x;
                 let dy = self.units[j].y - self.units[i].y;
                 let dist = (dx * dx + dy * dy).sqrt();
-                if dist < min_dist && dist > 0.1 {
-                    let overlap = (min_dist - dist) * 0.5;
+                if dist < min_dist && dist > 0.001 {
+                    let overlap = (min_dist - dist) / 2.0;
                     let nx = dx / dist;
                     let ny = dy / dist;
-                    // Push units apart (skip player for stability)
-                    if self.units[i].id != self.player_id {
-                        self.units[i].x -= nx * overlap;
-                        self.units[i].y -= ny * overlap;
-                    }
-                    if self.units[j].id != self.player_id {
-                        self.units[j].x += nx * overlap;
-                        self.units[j].y += ny * overlap;
-                    }
+
+                    // Softer push between same-faction units (matching original)
+                    let strength = if self.units[i].faction == self.units[j].faction {
+                        0.4
+                    } else {
+                        1.0
+                    };
+                    let push = overlap * strength;
+
+                    // Wall-sliding push with terrain collision
+                    Self::try_push(&self.grid, &mut self.units[i], -nx * push, -ny * push);
+                    // Need split_at_mut to borrow two elements
+                    let push_x = nx * push;
+                    let push_y = ny * push;
+                    let uj = &mut self.units[j];
+                    Self::try_push_unit(&self.grid, uj, push_x, push_y);
                 }
             }
+        }
+    }
+
+    /// Push a unit with wall-sliding fallback (matching original try_push).
+    fn try_push(grid: &Grid, unit: &mut Unit, push_x: f32, push_y: f32) {
+        Self::try_push_unit(grid, unit, push_x, push_y);
+    }
+
+    fn try_push_unit(grid: &Grid, unit: &mut Unit, push_x: f32, push_y: f32) {
+        let radius = 28.0f32;
+        let ox = unit.x;
+        let oy = unit.y;
+        // Try full push
+        if grid.is_circle_passable(ox + push_x, oy + push_y, radius) {
+            unit.x = ox + push_x;
+            unit.y = oy + push_y;
+            return;
+        }
+        // Wall slide X only
+        if push_x.abs() > 0.001 && grid.is_circle_passable(ox + push_x, oy, radius) {
+            unit.x = ox + push_x;
+            return;
+        }
+        // Wall slide Y only
+        if push_y.abs() > 0.001 && grid.is_circle_passable(ox, oy + push_y, radius) {
+            unit.y = oy + push_y;
         }
     }
 

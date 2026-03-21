@@ -65,5 +65,40 @@ impl Grid {
 
     pub fn passable_at(&self, wx: f32, wy: f32) -> bool {
         self.tile_at_world(wx, wy).passable()
+            && self.elev_at_world(wx, wy) <= 1
+    }
+
+    fn elev_at_world(&self, wx: f32, wy: f32) -> u8 {
+        let tx = (wx / TILE_SIZE) as usize;
+        let ty = (wy / TILE_SIZE) as usize;
+        self.elev(tx, ty)
+    }
+
+    /// Circle passability check — tests 9 points around the circle perimeter.
+    /// Matches original: center + 4 cardinal + 4 diagonal at unit radius.
+    pub fn is_circle_passable(&self, wx: f32, wy: f32, radius: f32) -> bool {
+        let d = radius * 0.707; // cos(45°)
+        let points = [
+            (wx, wy),
+            (wx + radius, wy), (wx - radius, wy),
+            (wx, wy + radius), (wx, wy - radius),
+            (wx + d, wy + d), (wx + d, wy - d),
+            (wx - d, wy + d), (wx - d, wy - d),
+        ];
+        points.iter().all(|&(px, py)| self.passable_at(px, py))
+    }
+
+    /// Speed multiplier at world position.
+    pub fn speed_factor_at(&self, wx: f32, wy: f32) -> f32 {
+        let tx = (wx / TILE_SIZE) as usize;
+        let ty = (wy / TILE_SIZE) as usize;
+        match self.get(tx, ty) {
+            TileType::Forest => 0.5,
+            TileType::Rock => 0.75,
+            TileType::Grass => {
+                if self.decoration(tx, ty) == Some(Decoration::Bush) { 0.75 } else { 1.0 }
+            }
+            TileType::Water => 0.0,
+        }
     }
 }

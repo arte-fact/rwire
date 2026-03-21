@@ -163,24 +163,42 @@ impl Unit {
         self.distance_to(target) <= self.kind.range()
     }
 
+    /// Move speed in pixels/sec (matching original formula).
+    pub fn move_speed(&self) -> f32 {
+        TILE_SIZE * self.kind.speed() / 0.9
+    }
+
     pub fn move_toward(&mut self, tx: f32, ty: f32, dt: f32, grid: &Grid) {
         let dx = tx - self.x;
         let dy = ty - self.y;
         let dist = (dx * dx + dy * dy).sqrt();
         if dist < 1.0 { return; }
 
-        let speed = self.kind.speed() * TILE_SIZE * dt;
-        let nx = self.x + dx / dist * speed;
-        let ny = self.y + dy / dist * speed;
+        let dir_x = dx / dist;
+        let dir_y = dy / dist;
+        self.move_dir(dir_x, dir_y, dt, grid);
+    }
 
-        if grid.passable_at(nx, self.y) {
+    /// Move in a direction with split-axis circle collision (matching original).
+    pub fn move_dir(&mut self, dir_x: f32, dir_y: f32, dt: f32, grid: &Grid) {
+        let speed = self.move_speed()
+            * grid.speed_factor_at(self.x, self.y).max(0.25) // never fully freeze
+            * dt;
+        let vx = dir_x * speed;
+        let vy = dir_y * speed;
+
+        // Split-axis collision with circle passability (9 points, radius 28)
+        let radius = 28.0f32;
+        let nx = self.x + vx;
+        if grid.is_circle_passable(nx, self.y, radius) {
             self.x = nx;
         }
-        if grid.passable_at(self.x, ny) {
+        let ny = self.y + vy;
+        if grid.is_circle_passable(self.x, ny, radius) {
             self.y = ny;
         }
 
-        if dx > 0.0 { self.facing = Facing::Right; }
-        else if dx < 0.0 { self.facing = Facing::Left; }
+        if dir_x > 0.01 { self.facing = Facing::Right; }
+        else if dir_x < -0.01 { self.facing = Facing::Left; }
     }
 }
