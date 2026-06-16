@@ -51,6 +51,7 @@ rwire/
 │   │   ├── store.rs         # State persistence (MemoryStore, JsonFileStore)
 │   │   ├── style.rs         # CSS-in-Rust styling utilities
 │   │   ├── style_tokens.rs  # St (u16), Pc (u8), Bp (u8) enums + CSS mappings
+│   │   ├── attr_tokens.rs   # At/Av attribute token enums (binary attr opcodes)
 │   │   ├── theme.rs         # Theme as state, ThemeProvider, CSS variable generation
 │   │   └── tokens/          # Design tokens
 │   │       ├── css.rs       # CSS custom property generation
@@ -59,7 +60,8 @@ rwire/
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
 │   ├── rwire-components/    # UI component library (52 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
-│   └── rwire-themes/        # Predefined styles and palettes
+│   ├── rwire-themes/        # Predefined styles and palettes
+│   └── rwire-canvas/        # Binary Canvas2D protocol for games / real-time rendering
 ├── apps/
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
@@ -69,7 +71,8 @@ rwire/
     ├── counter/             # Simple counter app
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef dynamic binding
-    └── fine-grained/        # Fine-grained reactivity demo
+    ├── fine-grained/        # Fine-grained reactivity demo
+    └── battlefield/         # Real-time RTS game on rwire-canvas (SceneLoop)
 ```
 
 ## Binary Protocol
@@ -279,7 +282,7 @@ fn toggle_mode(theme: &mut Theme) {
 
 ### Style Tokens
 
-`St` enum (`#[repr(u16)]`) provides 590+ CSS utility tokens. Each maps to a CSS class `.u{code}{declaration}`:
+`St` enum (`#[repr(u16)]`) provides 720+ CSS utility tokens (codes up to `0x342`). Each maps to a CSS class `.u{code}{declaration}`:
 
 ```rust
 // In style_tokens.rs
@@ -293,9 +296,94 @@ el(El::Div).st([St::BgApp, St::Px4, St::Py2])
 
 ### Adding a New Style Token
 
-1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x32D`+)
+1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x343`+)
 2. Add CSS mapping to `St::css()` method
 3. Add `(u16_code, "css")` to `UTIL_MAPPINGS` const
+
+## Canvas Framework (rwire-canvas)
+
+`libs/rwire-canvas/` is a **separate framework** from the DOM one above. The server
+owns game/visualization state and streams **Canvas 2D draw commands** to the browser
+over its own binary protocol; a ~3KB JS runtime (`runtime.rs`) executes them at 60fps
+and sends input back. Consumed by `examples/battlefield/`.
+
+> Note: rwire-canvas and battlefield live only on this `canvas-battlefield-wip` branch.
+> They were removed from `main` to keep it focused on the core DOM framework.
+
+### Two render modes
+
+**Immediate mode — `GameLoop`** (server redraws the whole scene each tick):
+- `init() -> State`, `setup(&state, buf)` (asset tables), `tick(&mut state, input, dt)`, `render(&state, buf)`
+- `CanvasServer::…​.run(game)`
+
+**Retained mode — `SceneLoop`** (the battlefield path; server keeps a `Scene` of
+sprites, framework diffs it against each connection's `ClientView` and sends only changes):
+- `init`, `setup_scene(&mut state, &mut Scene, buf)`, `tick`, `update_scene(&state, &mut Scene)`,
+  `camera(&state) -> (cx, cy, zoom)`, `render_overlay(&state, buf)` (immediate-mode HUD)
+- `CanvasServer::…​.run_scene(game)`
+
+### Server
+
+```rust
+CanvasServer::bind("0.0.0.0:9000")?
+    .canvas_size(960, 640)
+    .tick_rate(60)
+    .static_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/")) // serves PNG assets
+    .run_scene(MyGame)
+    .await
+```
+
+Public API (`lib.rs`): `CanvasServer`, `GameLoop`, `SceneLoop`, `CanvasBuffer` (opcode
+encoder), `Scene` / `ClientView` / `SpriteState`, `InputState`, `Color`,
+`SpriteSheet` / `SpriteId` / `SpriteRect` / `TextureId`.
+
+### Binary canvas protocol
+
+Single-byte opcodes, distinct from the DOM protocol, built via `CanvasBuffer`:
+
+| Range | Group | Examples |
+|-------|-------|----------|
+| `0x00`–`0x02` | Frame | FRAME_BEGIN, FRAME_END, CLEAR |
+| `0x10`–`0x14` | Transform | SAVE, RESTORE, TRANSLATE, SCALE_XY, ROTATE |
+| `0x20`–`0x2A` | Paths/shapes | FILL_RECT, ARC, ROUND_RECT, FILL, STROKE |
+| `0x30`–`0x32` | Images | DRAW_IMAGE, DRAW_IMAGE_SIMPLE, DRAW_SPRITE |
+| `0x40`–`0x41` | Text | FILL_TEXT, STROKE_TEXT |
+| `0x50`–`0x5B` | Draw state | SET_FILL_RGBA, SET_ALPHA, SET_FONT, SET_COMPOSITE, … |
+| `0x60`–`0x68` | Scene/layers | LAYER_CREATE, CAMERA, SCENE_TICK/END, LAYER_TARGET, TICK_INTERVAL, LAYER_DRAW |
+| `0x70`–`0x7D` | Retained sprites | SPRITE_CREATE/DELETE/MOVE/FRAME/UPDATE/ALPHA, *_BATCH, SPRITE_ANIM, TILEMAP_REGION, MINIMAP_DATA/DRAW, DRAW_SPRITES, DRAW_ANIM_SPRITES |
+| `0xF0`–`0xF9` | Tables/overlays | TEXTURE_TABLE, COLOR_TABLE, FONT_TABLE, SPRITE_TABLE, FOG_GRID, ENTITY_BATCH |
+
+Full byte layouts: `libs/rwire-canvas/src/protocol/opcodes.rs`. Adding an opcode =
+const in `opcodes.rs` + encoder method in `protocol/encoder.rs` + handler branch in
+the JS runtime (`runtime.rs`).
+
+### Retained-mode scene flow
+
+1. `setup_scene` declares layers (`LAYER_CREATE`; flags bit0=cacheable, bit1=visible,
+   bit2=world-space), renders static terrain into cached layers, sends the minimap
+   (`MINIMAP_DATA`), and registers animated decoration sprites (`SPRITE_ANIM` — client
+   auto-cycles frames, zero per-frame cost).
+2. Each tick: `update_scene` mutates the `Scene`; `scene_diff` emits the minimal
+   `SPRITE_*` opcodes vs the `ClientView`; `camera` + `render_overlay` are appended.
+   The client interpolates positions and replays the overlay buffer every rAF.
+
+Cacheable layers render once into an offscreen canvas (`LAYER_TARGET` / `LAYER_TARGET_MAIN`,
+later blitted with `LAYER_DRAW`); world-space layers move with the camera.
+
+### Known issues (WIP — see the wip commit message)
+
+- Offscreen layer canvases are allocated at a fixed `12800×12800` (~655 MB each) —
+  should be sized to world extent.
+- Decoration sprite IDs (0-based) share the client sprite map with unit IDs
+  (`UNIT_SPRITE_ID_BASE = 10000`) — collision risk if decorations exceed 10000.
+- Dead code: `scene_diff::_sprite_changed`; unused `UnitAnim` fields.
+
+### battlefield example
+
+`examples/battlefield/src/`: `mapgen` (simplex + cellular automata + BSP), `autotile`,
+`flowfield` (flow-field pathfinding), `grid`, `unit`/`combat`, `particle`,
+`rng` (deterministic ChaCha), `sprites` (sheet/frame tables), `state` (game logic),
+`render` (scene setup + per-frame overlay).
 
 ## Testing
 

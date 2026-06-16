@@ -168,6 +168,35 @@ fn toggle_item(state: &mut TodoState, ctx: &EventContext) {
 }
 ```
 
+## Canvas (rwire-canvas)
+
+Alongside the DOM framework, `libs/rwire-canvas/` streams **Canvas 2D draw commands**
+from the server to a ~3KB browser runtime over a separate binary protocol — for games
+and real-time visualizations. See `examples/battlefield/`, a real-time RTS.
+
+Games implement one of two traits:
+
+- **`GameLoop`** (immediate mode): the server redraws every frame.
+- **`SceneLoop`** (retained mode): the server maintains a `Scene` of sprites; the
+  framework diffs it per connection and sends only what changed.
+
+```rust
+use rwire_canvas::{CanvasServer, SceneLoop, Scene, CanvasBuffer, InputState};
+
+CanvasServer::bind("0.0.0.0:9000")?
+    .canvas_size(960, 640)
+    .tick_rate(60)
+    .run_scene(MyGame)
+    .await
+```
+
+The opcode set covers transforms, paths, images, text, layers/camera, retained sprites,
+tilemaps, fog, and minimap — full reference in
+`libs/rwire-canvas/src/protocol/opcodes.rs` and `CLAUDE.md`.
+
+> Note: rwire-canvas and battlefield live only on this `canvas-battlefield-wip` branch;
+> they were removed from `main` to keep it framework-focused.
+
 ## Project Structure
 
 ```
