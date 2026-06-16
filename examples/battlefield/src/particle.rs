@@ -2,15 +2,15 @@
 
 #[derive(Clone, Copy, Debug)]
 pub enum ParticleKind {
-    Dust,           // 8 frames, 64×64
-    ExplosionSmall, // 8 frames, 192×192
+    Dust,           // 8 frames, 64x64
+    ExplosionLarge, // 10 frames, 192x192 (matching original)
 }
 
 impl ParticleKind {
     pub fn frame_count(self) -> u16 {
         match self {
             ParticleKind::Dust => 8,
-            ParticleKind::ExplosionSmall => 8,
+            ParticleKind::ExplosionLarge => 10,
         }
     }
 

@@ -45,7 +45,7 @@ fn cardinal_mask(_grid: &Grid, x: usize, y: usize, is_same: impl Fn(usize, usize
 pub fn flat_ground_src(grid: &Grid, x: usize, y: usize) -> (u16, u16) {
     let mask = cardinal_mask(grid, x, y, |nx, ny| {
         let t = grid.get(nx, ny);
-        t != TileType::Water && t != TileType::Rock
+        t != TileType::Water
     });
     let (col, row) = FLAT_GROUND[mask as usize];
     (col * 64, row * 64)

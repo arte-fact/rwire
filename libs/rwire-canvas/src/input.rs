@@ -28,6 +28,10 @@ pub struct InputState {
     pub touch_y: i16,
     /// Whether the touch/mouse is active.
     pub touching: bool,
+    /// Client canvas width in physical pixels (0 = unknown).
+    pub viewport_w: u16,
+    /// Client canvas height in physical pixels (0 = unknown).
+    pub viewport_h: u16,
 }
 
 impl InputState {
@@ -54,18 +58,29 @@ impl InputState {
         self.key(KEY_ATTACK)
     }
 
-    /// Decode from binary message bytes (after channel prefix).
-    /// Format: [keys:u8, keys2:u8, touch_x_hi:u8, touch_x_lo:u8, touch_y_hi:u8, touch_y_lo:u8, touching:u8]
+    /// Decode from binary message bytes.
+    /// Format: [keys:u8, keys2:u8, touch_x:i16, touch_y:i16, touching:u8, viewport_w:u16, viewport_h:u16]
+    /// viewport_w/h are optional (backward compat with 7-byte messages).
     pub fn decode(data: &[u8]) -> Self {
         if data.len() < 7 {
             return Self::default();
         }
+        let (vw, vh) = if data.len() >= 11 {
+            (
+                u16::from_be_bytes([data[7], data[8]]),
+                u16::from_be_bytes([data[9], data[10]]),
+            )
+        } else {
+            (0, 0)
+        };
         Self {
             keys: data[0],
             keys2: data[1],
             touch_x: i16::from_be_bytes([data[2], data[3]]),
             touch_y: i16::from_be_bytes([data[4], data[5]]),
             touching: data[6] != 0,
+            viewport_w: vw,
+            viewport_h: vh,
         }
     }
 }

@@ -486,6 +486,276 @@ impl CanvasBuffer {
         }
         self
     }
+
+    // ── Retained-mode scene opcodes ──────────────────────────────────
+
+    /// Send a cached minimap image. Client renders to an offscreen canvas once.
+    /// Each pixel is (r, g, b). The minimap is drawn at screen position (x, y).
+    pub fn minimap_data(
+        &mut self,
+        x: i16,
+        y: i16,
+        w: u16,
+        h: u16,
+        pixels: &[(u8, u8, u8)],
+    ) -> &mut Self {
+        self.buf.put_u8(MINIMAP_DATA);
+        self.put_i16(x);
+        self.put_i16(y);
+        self.put_u16(w);
+        self.put_u16(h);
+        let len = (w as usize) * (h as usize);
+        for &(r, g, b) in &pixels[..len.min(pixels.len())] {
+            self.buf.put_u8(r);
+            self.buf.put_u8(g);
+            self.buf.put_u8(b);
+        }
+        self
+    }
+
+    /// Draw the cached minimap image at screen position (x, y) scaled to (w, h).
+    /// Must have previously sent `minimap_data` to cache the image.
+    pub fn minimap_draw(&mut self, x: i16, y: i16, w: u16, h: u16) -> &mut Self {
+        self.buf.put_u8(MINIMAP_DRAW);
+        self.put_i16(x);
+        self.put_i16(y);
+        self.put_u16(w);
+        self.put_u16(h);
+        self
+    }
+
+    /// Create a layer with z-order and flags.
+    /// Flags: bit0=cacheable, bit1=visible, bit2=world-space.
+    pub fn layer_create(&mut self, layer: u8, flags: u8) -> &mut Self {
+        self.buf.put_u8(LAYER_CREATE);
+        self.buf.put_u8(layer);
+        self.buf.put_u8(flags);
+        self
+    }
+
+    /// Invalidate a cached layer, forcing re-render.
+    pub fn layer_invalidate(&mut self, layer: u8) -> &mut Self {
+        self.buf.put_u8(LAYER_INVALIDATE);
+        self.buf.put_u8(layer);
+        self
+    }
+
+    /// Set camera position for world-space layers.
+    /// Zoom is fixed-point 8.8 (256 = 1.0×).
+    pub fn camera(&mut self, cx: i16, cy: i16, zoom: u16) -> &mut Self {
+        self.buf.put_u8(CAMERA);
+        self.put_i16(cx);
+        self.put_i16(cy);
+        self.put_u16(zoom);
+        self
+    }
+
+    /// Set the client tick interval for interpolation timing and input send rate.
+    pub fn tick_interval(&mut self, ms: u16) -> &mut Self {
+        self.buf.put_u8(TICK_INTERVAL);
+        self.put_u16(ms);
+        self
+    }
+
+    /// Draw a cached layer's canvas at (0,0) in the current transform.
+    pub fn layer_draw(&mut self, layer: u8) -> &mut Self {
+        self.buf.put_u8(LAYER_DRAW);
+        self.buf.put_u8(layer);
+        self
+    }
+
+    /// Redirect draw commands to a layer's offscreen canvas.
+    /// All subsequent draw opcodes will target this layer until `layer_target_main()`.
+    pub fn layer_target(&mut self, layer: u8) -> &mut Self {
+        self.buf.put_u8(LAYER_TARGET);
+        self.buf.put_u8(layer);
+        self
+    }
+
+    /// Restore draw context to the main canvas.
+    pub fn layer_target_main(&mut self) -> &mut Self {
+        self.buf.put_u8(LAYER_TARGET_MAIN);
+        self
+    }
+
+    /// Begin a scene tick — client snapshots prev positions for interpolation.
+    pub fn scene_tick(&mut self, tick: u32) -> &mut Self {
+        self.buf.put_u8(SCENE_TICK);
+        self.buf.put_u32(tick);
+        self
+    }
+
+    /// End of scene updates for this tick.
+    pub fn scene_end(&mut self) -> &mut Self {
+        self.buf.put_u8(SCENE_END);
+        self
+    }
+
+    /// Create a retained sprite on a layer.
+    /// Flags: bit0=flip_x, bit1=visible.
+    pub fn sprite_create(
+        &mut self,
+        id: u16,
+        layer: u8,
+        sprite_id: u16,
+        x: i16,
+        y: i16,
+        flags: u8,
+    ) -> &mut Self {
+        self.buf.put_u8(SPRITE_CREATE);
+        self.put_u16(id);
+        self.buf.put_u8(layer);
+        self.put_u16(sprite_id);
+        self.put_i16(x);
+        self.put_i16(y);
+        self.buf.put_u8(flags);
+        self
+    }
+
+    /// Delete a retained sprite.
+    pub fn sprite_delete(&mut self, id: u16) -> &mut Self {
+        self.buf.put_u8(SPRITE_DELETE);
+        self.put_u16(id);
+        self
+    }
+
+    /// Update sprite position only (most common update).
+    pub fn sprite_move(&mut self, id: u16, x: i16, y: i16) -> &mut Self {
+        self.buf.put_u8(SPRITE_MOVE);
+        self.put_u16(id);
+        self.put_i16(x);
+        self.put_i16(y);
+        self
+    }
+
+    /// Update sprite image (animation frame change).
+    pub fn sprite_frame(&mut self, id: u16, sprite_id: u16) -> &mut Self {
+        self.buf.put_u8(SPRITE_FRAME);
+        self.put_u16(id);
+        self.put_u16(sprite_id);
+        self
+    }
+
+    /// Full sprite update: position + sprite + flags.
+    pub fn sprite_update(
+        &mut self,
+        id: u16,
+        x: i16,
+        y: i16,
+        sprite_id: u16,
+        flags: u8,
+    ) -> &mut Self {
+        self.buf.put_u8(SPRITE_UPDATE);
+        self.put_u16(id);
+        self.put_i16(x);
+        self.put_i16(y);
+        self.put_u16(sprite_id);
+        self.buf.put_u8(flags);
+        self
+    }
+
+    /// Update sprite alpha (for fade effects).
+    pub fn sprite_alpha(&mut self, id: u16, alpha: u8) -> &mut Self {
+        self.buf.put_u8(SPRITE_ALPHA);
+        self.put_u16(id);
+        self.buf.put_u8(alpha);
+        self
+    }
+
+    /// Create an auto-animating sprite. The client cycles through frames locally.
+    /// Flags: bit0=flip_x, bit1=visible, bit2=wave_gated (sine-threshold animation).
+    /// Phase: 0-255 mapped to 0-2π for animation decorrelation.
+    pub fn sprite_anim(
+        &mut self,
+        id: u16,
+        layer: u8,
+        first_sprite: u16,
+        frame_count: u8,
+        fps: u8,
+        phase: u8,
+        x: i16,
+        y: i16,
+        flags: u8,
+    ) -> &mut Self {
+        self.buf.put_u8(SPRITE_ANIM);
+        self.put_u16(id);
+        self.buf.put_u8(layer);
+        self.put_u16(first_sprite);
+        self.buf.put_u8(frame_count);
+        self.buf.put_u8(fps);
+        self.buf.put_u8(phase);
+        self.put_i16(x);
+        self.put_i16(y);
+        self.buf.put_u8(flags);
+        self
+    }
+
+    /// Draw animated sprites on a specific layer in the current transform context.
+    pub fn draw_anim_sprites(&mut self, layer: u8) -> &mut Self {
+        self.buf.put_u8(DRAW_ANIM_SPRITES);
+        self.buf.put_u8(layer);
+        self
+    }
+
+    /// Draw retained (non-animated) sprites on a layer, y-sorted.
+    pub fn draw_sprites(&mut self, layer: u8) -> &mut Self {
+        self.buf.put_u8(DRAW_SPRITES);
+        self.buf.put_u8(layer);
+        self
+    }
+
+    /// Batch position-only updates (most bandwidth-critical).
+    pub fn sprite_move_batch(&mut self, moves: &[(u16, i16, i16)]) -> &mut Self {
+        self.buf.put_u8(SPRITE_MOVE_BATCH);
+        self.buf.put_u8(moves.len() as u8);
+        for &(id, x, y) in moves {
+            self.put_u16(id);
+            self.put_i16(x);
+            self.put_i16(y);
+        }
+        self
+    }
+
+    /// Batch full updates: position + sprite + flags.
+    pub fn sprite_update_batch(&mut self, updates: &[(u16, i16, i16, u16, u8)]) -> &mut Self {
+        self.buf.put_u8(SPRITE_UPDATE_BATCH);
+        self.buf.put_u8(updates.len() as u8);
+        for &(id, x, y, sprite_id, flags) in updates {
+            self.put_u16(id);
+            self.put_i16(x);
+            self.put_i16(y);
+            self.put_u16(sprite_id);
+            self.buf.put_u8(flags);
+        }
+        self
+    }
+
+    /// Send tile data for a rectangular region to a cached layer.
+    /// Each tile: (sprite_id, flags). Flags: bit0=flip_x.
+    pub fn tilemap_region(
+        &mut self,
+        layer: u8,
+        grid_x: u16,
+        grid_y: u16,
+        grid_w: u16,
+        grid_h: u16,
+        tile_size: u16,
+        tiles: &[(u16, u8)],
+    ) -> &mut Self {
+        self.buf.put_u8(TILEMAP_REGION);
+        self.buf.put_u8(layer);
+        self.put_u16(grid_x);
+        self.put_u16(grid_y);
+        self.put_u16(grid_w);
+        self.put_u16(grid_h);
+        self.put_u16(tile_size);
+        let len = (grid_w as usize) * (grid_h as usize);
+        for &(sprite_id, flags) in &tiles[..len.min(tiles.len())] {
+            self.put_u16(sprite_id);
+            self.buf.put_u8(flags);
+        }
+        self
+    }
 }
 
 impl Default for CanvasBuffer {

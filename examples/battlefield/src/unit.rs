@@ -107,32 +107,54 @@ impl Unit {
         }
     }
 
+    /// Trigger attack animation (called when an attack is performed).
+    pub fn play_attack_anim(&mut self) {
+        if self.anim != UnitAnim::Attack {
+            self.anim = UnitAnim::Attack;
+            self.anim_frame = 0;
+            self.anim_timer = 0.0;
+        }
+    }
+
     /// Update animation state based on movement.
     pub fn update_anim(&mut self, dt: f32) {
         let dx = self.x - self.prev_x;
         let dy = self.y - self.prev_y;
         let moved = (dx * dx + dy * dy).sqrt() > 0.5;
 
-        let new_anim = if self.cooldown > self.kind.attack_cooldown() - 0.3 {
-            UnitAnim::Attack
-        } else if moved {
-            UnitAnim::Run
+        // If attack animation is playing, let it finish all frames before transitioning
+        if self.anim == UnitAnim::Attack {
+            self.anim_timer += dt;
+            let fps = 12.0;
+            if self.anim_timer >= 1.0 / fps {
+                self.anim_timer -= 1.0 / fps;
+                let max_frames = self.anim_frame_count();
+                self.anim_frame += 1;
+                if self.anim_frame >= max_frames {
+                    // Attack animation finished — transition to idle/run
+                    self.anim_frame = 0;
+                    self.anim = if moved { UnitAnim::Run } else { UnitAnim::Idle };
+                    self.anim_timer = 0.0;
+                }
+            }
         } else {
-            UnitAnim::Idle
-        };
-
-        if new_anim != self.anim {
-            self.anim = new_anim;
-            self.anim_frame = 0;
-            self.anim_timer = 0.0;
-        }
-
-        self.anim_timer += dt;
-        let fps = 10.0;
-        if self.anim_timer >= 1.0 / fps {
-            self.anim_timer -= 1.0 / fps;
-            let max_frames = self.anim_frame_count();
-            self.anim_frame = (self.anim_frame + 1) % max_frames;
+            let new_anim = if moved { UnitAnim::Run } else { UnitAnim::Idle };
+            if new_anim != self.anim {
+                self.anim = new_anim;
+                self.anim_frame = 0;
+                self.anim_timer = 0.0;
+            }
+            self.anim_timer += dt;
+            let fps = match self.anim {
+                UnitAnim::Idle => 10.0,
+                UnitAnim::Run => 12.0,
+                UnitAnim::Attack => 12.0,
+            };
+            if self.anim_timer >= 1.0 / fps {
+                self.anim_timer -= 1.0 / fps;
+                let max_frames = self.anim_frame_count();
+                self.anim_frame = (self.anim_frame + 1) % max_frames;
+            }
         }
 
         self.prev_x = self.x;
@@ -181,14 +203,21 @@ impl Unit {
 
     /// Move in a direction with split-axis circle collision (matching original).
     pub fn move_dir(&mut self, dir_x: f32, dir_y: f32, dt: f32, grid: &Grid) {
+        self.move_dir_opts(dir_x, dir_y, dt, grid, true);
+    }
+
+    /// Move in a direction. If `update_facing` is false, facing is not changed
+    /// (used for the player, whose facing is controlled by aim direction).
+    pub fn move_dir_opts(&mut self, dir_x: f32, dir_y: f32, dt: f32, grid: &Grid, update_facing: bool) {
         let speed = self.move_speed()
-            * grid.speed_factor_at(self.x, self.y).max(0.25) // never fully freeze
+            * grid.speed_factor_at(self.x, self.y).max(0.25)
             * dt;
         let vx = dir_x * speed;
         let vy = dir_y * speed;
 
-        // Split-axis collision with circle passability (9 points, radius 28)
         let radius = 28.0f32;
+
+        // Split-axis collision
         let nx = self.x + vx;
         if grid.is_circle_passable(nx, self.y, radius) {
             self.x = nx;
@@ -198,7 +227,9 @@ impl Unit {
             self.y = ny;
         }
 
-        if dir_x > 0.01 { self.facing = Facing::Right; }
-        else if dir_x < -0.01 { self.facing = Facing::Left; }
+        if update_facing {
+            if dir_x > 0.01 { self.facing = Facing::Right; }
+            else if dir_x < -0.01 { self.facing = Facing::Left; }
+        }
     }
 }

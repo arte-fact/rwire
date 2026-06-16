@@ -54,12 +54,15 @@ pub mod game_loop;
 pub mod input;
 pub mod protocol;
 pub mod runtime;
+pub mod scene;
+pub mod scene_diff;
 pub mod server;
 pub mod sprite;
 
 pub use color::Color;
-pub use game_loop::GameLoop;
+pub use game_loop::{GameLoop, SceneLoop};
 pub use input::InputState;
 pub use protocol::encoder::CanvasBuffer;
+pub use scene::{ClientView, Scene, SpriteState};
 pub use server::CanvasServer;
 pub use sprite::{SpriteId, SpriteRect, SpriteSheet, TextureId};

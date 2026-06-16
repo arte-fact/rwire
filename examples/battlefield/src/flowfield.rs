@@ -31,7 +31,11 @@ impl FlowField {
         let mut integration = vec![u32::MAX; size];
         let mut directions = vec![(0i8, 0i8); size];
 
-        if goal_x >= w || goal_y >= h || !grid.get(goal_x, goal_y).passable() {
+        let passable = |x: usize, y: usize| -> bool {
+            grid.get(x, y).passable() && grid.elev(x, y) <= 1
+        };
+
+        if goal_x >= w || goal_y >= h || !passable(goal_x, goal_y) {
             return Self { directions, width: w, height: h };
         }
 
@@ -49,10 +53,10 @@ impl FlowField {
                 if nx < 0 || ny < 0 || nx as usize >= w || ny as usize >= h { continue; }
                 let nx = nx as usize;
                 let ny = ny as usize;
-                if !grid.get(nx, ny).passable() { continue; }
+                if !passable(nx, ny) { continue; }
                 // Diagonal corner-cutting check
                 if dx != 0 && dy != 0
-                    && (!grid.get(x, ny).passable() || !grid.get(nx, y).passable())
+                    && (!passable(x, ny) || !passable(nx, y))
                 {
                     continue;
                 }
@@ -100,13 +104,35 @@ impl FlowField {
     }
 
     /// Get the world-space movement direction for a unit at (wx, wy).
+    /// If the current tile has no direction, sample neighboring tiles to find
+    /// the best escape direction (prevents units stuck on (0,0) tiles).
     pub fn world_direction(&self, wx: f32, wy: f32) -> (f32, f32) {
         let gx = (wx / TILE_SIZE) as usize;
         let gy = (wy / TILE_SIZE) as usize;
         let (dx, dy) = self.direction_at(gx, gy);
-        if dx == 0 && dy == 0 { return (0.0, 0.0); }
-        let len = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
-        (dx as f32 / len, dy as f32 / len)
+        if dx != 0 || dy != 0 {
+            let len = ((dx as f32).powi(2) + (dy as f32).powi(2)).sqrt();
+            return (dx as f32 / len, dy as f32 / len);
+        }
+        // Current tile has no direction — sample neighbors to find escape
+        let mut best_dir = (0.0f32, 0.0f32);
+        let mut found = false;
+        for &(ndx, ndy, _) in &DIRS {
+            let nx = gx as i32 + ndx;
+            let ny = gy as i32 + ndy;
+            if nx < 0 || ny < 0 || nx as usize >= self.width || ny as usize >= self.height {
+                continue;
+            }
+            let (d2x, d2y) = self.direction_at(nx as usize, ny as usize);
+            if d2x != 0 || d2y != 0 {
+                // Neighbor has a valid direction — move toward that neighbor
+                let len = ((ndx as f32).powi(2) + (ndy as f32).powi(2)).sqrt();
+                best_dir = (ndx as f32 / len, ndy as f32 / len);
+                found = true;
+                break;
+            }
+        }
+        if found { best_dir } else { (0.0, 0.0) }
     }
 }
 

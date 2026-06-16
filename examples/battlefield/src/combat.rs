@@ -25,16 +25,18 @@ pub fn resolve_attack(attacker_idx: usize, defender_idx: usize, units: &mut [Uni
     };
 
     units[attacker_idx].cooldown = units[attacker_idx].kind.attack_cooldown();
+    units[attacker_idx].anim = crate::unit::UnitAnim::Attack;
 
-    // Face the target
-    if units[defender_idx].x > units[attacker_idx].x {
+    // Face the target (AI only — player facing controlled by aim direction)
+    let dx = units[defender_idx].x - units[attacker_idx].x;
+    if dx > 0.0 {
         units[attacker_idx].facing = crate::unit::Facing::Right;
-    } else {
+    } else if dx < 0.0 {
         units[attacker_idx].facing = crate::unit::Facing::Left;
     }
 
     units[defender_idx].hp -= dmg;
-    units[defender_idx].hit_flash = 0.3;
+    units[defender_idx].hit_flash = 0.15;
     if units[defender_idx].hp <= 0 {
         units[defender_idx].alive = false;
         units[defender_idx].death_fade = 0.01; // start fading

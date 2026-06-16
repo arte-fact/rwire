@@ -1,6 +1,8 @@
 //! Tile grid and terrain system.
 
-pub const GRID_SIZE: usize = 100;
+pub const PLAYABLE_SIZE: usize = 128;
+pub const BORDER_SIZE: usize = 16;
+pub const GRID_SIZE: usize = PLAYABLE_SIZE + 2 * BORDER_SIZE; // 160
 pub const TILE_SIZE: f32 = 64.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,7 +15,8 @@ pub enum TileType {
 
 impl TileType {
     pub fn passable(self) -> bool {
-        !matches!(self, TileType::Water | TileType::Rock)
+        // Rock IS passable (movement cost 1) — only Water blocks movement
+        !matches!(self, TileType::Water)
     }
 
     pub fn defense_bonus(self) -> i32 {
@@ -35,6 +38,7 @@ pub struct Grid {
     pub tiles: Vec<TileType>,
     pub elevation: Vec<u8>,
     pub decorations: Vec<Option<Decoration>>,
+    pub building_occupied: Vec<bool>,
     pub width: usize,
     pub height: usize,
 }
@@ -64,14 +68,35 @@ impl Grid {
     }
 
     pub fn passable_at(&self, wx: f32, wy: f32) -> bool {
+        let tx = (wx / TILE_SIZE) as usize;
+        let ty = (wy / TILE_SIZE) as usize;
         self.tile_at_world(wx, wy).passable()
             && self.elev_at_world(wx, wy) <= 1
+            && !self.is_building_occupied(tx, ty)
     }
 
     fn elev_at_world(&self, wx: f32, wy: f32) -> u8 {
         let tx = (wx / TILE_SIZE) as usize;
         let ty = (wy / TILE_SIZE) as usize;
         self.elev(tx, ty)
+    }
+
+    fn is_building_occupied(&self, x: usize, y: usize) -> bool {
+        if x >= self.width || y >= self.height { return false; }
+        self.building_occupied[y * self.width + x]
+    }
+
+    /// Mark a rectangular footprint of tiles as building-occupied.
+    pub fn mark_building(&mut self, cx: usize, cy: usize, half_w: usize, half_h: usize) {
+        for dy in 0..half_h * 2 {
+            for dx in 0..half_w * 2 {
+                let x = cx.saturating_sub(half_w) + dx;
+                let y = cy.saturating_sub(half_h) + dy;
+                if x < self.width && y < self.height {
+                    self.building_occupied[y * self.width + x] = true;
+                }
+            }
+        }
     }
 
     /// Circle passability check — tests 9 points around the circle perimeter.

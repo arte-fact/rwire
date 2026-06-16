@@ -84,7 +84,14 @@
       "WebFetch(domain:ethanschoonover.com)",
       "WebFetch(domain:mobbin.com)",
       "WebFetch(domain:brandfetch.com)",
-      "mcp__plugin_playwright_playwright__browser_hover"
+      "mcp__plugin_playwright_playwright__browser_hover",
+      "Bash(/tmp/check_components_v2.sh:*)",
+      "Bash(ps:*)",
+      "Bash(cargo clean:*)",
+      "Bash(cargo expand:*)",
+      "Bash(nm target/release/rwire-design-system)",
+      "Read(//home/artefact/Workspace/rwire/**)",
+      "Read(//tmp/**)"
     ]
   }
 }

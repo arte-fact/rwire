@@ -57,3 +57,32 @@ pub const FONT_TABLE: u8 = 0xF2; // count:u8, [len:u8, font_str_utf8...]×n
 pub const SPRITE_TABLE: u8 = 0xF3; // count_hi:u8, count_lo:u8, [tex:u8, sx:u16, sy:u16, sw:u16, sh:u16]×n
 pub const FOG_GRID: u8 = 0xF8; // x:u16, y:u16, w:u16, h:u16, tile_size:u8, [alpha:u8]×(w*h) — fog overlay grid
 pub const ENTITY_BATCH: u8 = 0xF9; // count_hi:u8, count_lo:u8, [id:u16, x:i16, y:i16, sprite:u16, flags:u8]×n
+
+// Retained-mode scene (0x60-0x7F)
+pub const LAYER_CREATE: u8 = 0x60; // layer:u8, flags:u8 (bit0=cacheable, bit1=visible, bit2=world-space)
+pub const LAYER_INVALIDATE: u8 = 0x61; // layer:u8
+pub const CAMERA: u8 = 0x62; // cx:i16, cy:i16, zoom:u16 (fixed 8.8)
+pub const SCENE_TICK: u8 = 0x63; // tick:u32
+pub const SCENE_END: u8 = 0x64;
+pub const LAYER_TARGET: u8 = 0x65; // layer:u8 — redirect draw commands to layer's offscreen canvas
+pub const LAYER_TARGET_MAIN: u8 = 0x66; // — restore draw context to main canvas
+pub const TICK_INTERVAL: u8 = 0x67; // ms:u16 — set client tick interval for interpolation + input rate
+pub const LAYER_DRAW: u8 = 0x68; // layer:u8 — draw layer's cached canvas at (0,0) in current transform
+
+pub const SPRITE_CREATE: u8 = 0x70; // id:u16, layer:u8, sprite:u16, x:i16, y:i16, flags:u8
+pub const SPRITE_DELETE: u8 = 0x71; // id:u16
+pub const SPRITE_MOVE: u8 = 0x72; // id:u16, x:i16, y:i16
+pub const SPRITE_FRAME: u8 = 0x73; // id:u16, sprite:u16
+pub const SPRITE_UPDATE: u8 = 0x74; // id:u16, x:i16, y:i16, sprite:u16, flags:u8
+pub const SPRITE_ALPHA: u8 = 0x75; // id:u16, alpha:u8
+pub const SPRITE_MOVE_BATCH: u8 = 0x76; // count:u8, [id:u16, x:i16, y:i16]×n
+pub const SPRITE_UPDATE_BATCH: u8 = 0x77; // count:u8, [id:u16, x:i16, y:i16, sprite:u16, flags:u8]×n
+
+pub const TILEMAP_REGION: u8 = 0x78; // layer:u8, gx:u16, gy:u16, gw:u16, gh:u16, tile_size:u16, [sprite:u16, flags:u8]×(w*h)
+pub const MINIMAP_DATA: u8 = 0x79; // x:i16, y:i16, w:u16, h:u16, [r:u8, g:u8, b:u8]×(w*h)
+pub const MINIMAP_DRAW: u8 = 0x7A; // x:i16, y:i16, w:u16, h:u16 — draw cached minimap image
+pub const SPRITE_ANIM: u8 = 0x7B;
+pub const DRAW_ANIM_SPRITES: u8 = 0x7C; // layer:u8 — Draw animated sprites on this layer in current transform
+pub const DRAW_SPRITES: u8 = 0x7D; // layer:u8 — Draw retained (non-animated) sprites on this layer, y-sorted // id:u16, layer:u8, first_sprite:u16, frame_count:u8, fps:u8, phase:u8, x:i16, y:i16, flags:u8
+                                   // flags: bit0=flip_x, bit1=visible, bit2=wave_gated
+                                   // Client auto-cycles frames. 0 bytes/frame after creation.

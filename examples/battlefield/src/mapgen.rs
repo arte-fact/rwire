@@ -3,7 +3,7 @@
 //! Uses simplex noise for terrain heightmap, cellular automata for
 //! forest clustering, and BSP for strategic zone placement.
 
-use crate::grid::{Decoration, Grid, TileType, GRID_SIZE};
+use crate::grid::{Decoration, Grid, TileType, GRID_SIZE, BORDER_SIZE, PLAYABLE_SIZE};
 
 // ============================================================================
 // Simplex noise (ported from the-battlefield/src/mapgen/simplex.rs)
@@ -22,14 +22,11 @@ struct Simplex { perm: [u8; 512] }
 
 impl Simplex {
     fn new(seed: u64) -> Self {
-        let mut perm_base = [0u8; 256];
-        for (i, slot) in perm_base.iter_mut().enumerate() { *slot = i as u8; }
-        let mut s = seed.wrapping_add(1);
-        for i in (1..256).rev() {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let j = (s >> 33) as usize % (i + 1);
-            perm_base.swap(i, j);
-        }
+        use rand::SeedableRng;
+        use rand::seq::SliceRandom;
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+        let mut perm_base: Vec<u8> = (0..=255).collect();
+        perm_base.shuffle(&mut rng);
         let mut perm = [0u8; 512];
         for i in 0..512 { perm[i] = perm_base[i & 255]; }
         Self { perm }
@@ -216,7 +213,7 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
     let mut tiles = vec![TileType::Grass; (w * h) as usize];
     let mut elevation = vec![0u8; (w * h) as usize];
 
-    let border = 3u32;
+    let border = BORDER_SIZE as u32;
 
     // Phase A: Simplex noise heightmap
     let elev_scale = 0.04;
@@ -225,21 +222,34 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
 
     for y in 0..h {
         for x in 0..w {
-            // Border ring is always water
-            if x < border || y < border || x >= w - border || y >= h - border {
-                tiles[(y * w + x) as usize] = TileType::Water;
+            let i = (y * w + x) as usize;
+
+            // Border region: organic fill with noise-driven forests/rocks/water
+            let in_border = x < border || y < border || x >= w - border || y >= h - border;
+            if in_border {
+                let val = noise.octave(x as f64 * 0.06, y as f64 * 0.06, 3, 0.5);
+                if val < -0.2 {
+                    tiles[i] = TileType::Water;
+                } else if val < 0.1 {
+                    tiles[i] = TileType::Forest;
+                } else if val > 0.4 {
+                    tiles[i] = TileType::Rock;
+                    elevation[i] = 2;
+                } else {
+                    tiles[i] = TileType::Forest;
+                }
                 continue;
             }
 
             let val = noise.octave(x as f64 * elev_scale, y as f64 * elev_scale, 4, 0.5);
 
-            // Edge bias: more water near grid edges
-            let dx = (x as f64).min((w - 1 - x) as f64) / border as f64;
-            let dy = (y as f64).min((h - 1 - y) as f64) / border as f64;
-            let edge_dist = dx.min(dy).clamp(0.0, 1.0);
-            let edge_bias = if edge_dist < 16.0 {
-                let t = 1.0 - edge_dist;
-                t * t
+            // Edge bias: more water/forest near border transition
+            let dx = (x as f64 - border as f64).min((w - 1 - border - x) as f64);
+            let dy = (y as f64 - border as f64).min((h - 1 - border - y) as f64);
+            let edge_dist = dx.min(dy) / 8.0; // normalize over 8 tiles
+            let edge_bias = if edge_dist < 1.0 {
+                let t = 1.0 - edge_dist.max(0.0);
+                -t * t * 0.3 // push toward water threshold near edges
             } else {
                 0.0
             };
@@ -247,9 +257,9 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
             let effective = val + edge_bias;
 
             if effective < water_threshold {
-                tiles[(y * w + x) as usize] = TileType::Water;
+                tiles[i] = TileType::Water;
             } else if effective > hill_threshold {
-                elevation[(y * w + x) as usize] = 2; // elevation 2 = impassable (matching original)
+                elevation[i] = 2; // elevation 2 = impassable (matching original)
             }
         }
     }
@@ -280,10 +290,10 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
 
     // Phase C: BSP layout for zones and bases
     let playable_start = border;
-    let playable_size = w - 2 * border;
+    let playable_size = PLAYABLE_SIZE as u32;
     let playable_rect = Rect { x: playable_start, y: playable_start, w: playable_size, h: playable_size };
     let mut bsp_rng = Rng::new(seed.wrapping_add(0xBEEF));
-    let leaves = bsp_split(&mut bsp_rng, playable_rect, 0, 4, 15);
+    let leaves = bsp_split(&mut bsp_rng, playable_rect, 0, 4, 20);
 
     // Sort leaves by distance to top-left to assign bases
     let top_left = (border as f32, border as f32);
@@ -342,7 +352,8 @@ pub fn generate_battlefield(seed: u32) -> (Grid, MapLayout) {
         }
     }
 
-    let grid = Grid { tiles, elevation, decorations, width: w as usize, height: h as usize };
+    let building_occupied = vec![false; (w * h) as usize];
+    let grid = Grid { tiles, elevation, decorations, building_occupied, width: w as usize, height: h as usize };
     let layout = MapLayout { blue_base, red_base, zone_centers };
     (grid, layout)
 }
