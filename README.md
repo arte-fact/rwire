@@ -168,36 +168,68 @@ fn toggle_item(state: &mut TodoState, ctx: &EventContext) {
 }
 ```
 
+## Styling & Theming
+
+### Style Tokens
+
+Styles are applied with the `St` token enum (720+ utility tokens) rather than CSS files. Tokens compile to compact CSS classes and are tree-shaken per app:
+
+```rust
+el(El::Div)
+    .st([St::BgApp, St::Px4, St::Py2])
+    .hover([St::BgSubtle])   // pseudo-class styles
+    .sm([St::Px6]);          // responsive breakpoint
+```
+
+### Theme as State
+
+The theme is a framework-provided state type. Handlers mutate `&mut Theme`, and a built-in renderer converts it to CSS variables — so mode/accent/palette changes are reactive, with no page reload:
+
+```rust
+Server::bind("127.0.0.1:9000")?
+    .root(app)
+    .theme(Theme::dark().palette(palettes::nord()))
+    .run()
+    .await
+
+#[handler]
+fn toggle_mode(theme: &mut Theme) {
+    theme.mode = theme.mode.toggle();
+}
+```
+
+`rwire-themes` ships ready-made palettes: `nord`, `indigo`, `catppuccin`, `dracula`, `solarized`, `gruvbox`, `tokyo_night`, `rose_pine`, `one_dark`.
+
+### Component Library
+
+`rwire-components` provides 52 prebuilt components (buttons, cards, modals, navigation, forms, …), all built from `St` tokens.
+
 ## Project Structure
 
 ```
 rwire/
-├── rwire/               # Core library
-│   ├── src/
-│   │   ├── builder.rs   # Fluent element builder API
-│   │   ├── capsule.rs   # HTTP capsule serving
-│   │   ├── capsule_gen.rs # Tree-shaken capsule generation
-│   │   ├── config.rs    # Server configuration
-│   │   ├── form.rs      # Form handling utilities
-│   │   ├── health.rs    # Health check endpoints
-│   │   ├── item_ref.rs  # ItemRef for dynamic content
-│   │   ├── metrics.rs   # Prometheus metrics
-│   │   ├── protocol/    # Binary opcode encoder/decoder
-│   │   ├── registry.rs  # Connection registry
-│   │   ├── router.rs    # URL-based routing
-│   │   ├── server.rs    # WebSocket server
-│   │   ├── session.rs   # Session management
-│   │   ├── state.rs     # Reactive state management
-│   │   ├── store.rs     # State persistence
-│   │   └── style.rs     # Styling utilities
-├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
+├── libs/
+│   ├── rwire/               # Core framework: builder, protocol, state, router,
+│   │                        #   store, theme, style_tokens, attr_tokens, tokens/
+│   ├── rwire-macros/        # Proc macros: #[handler], #[renderer], #[derive(State)], #[theme]
+│   ├── rwire-components/    # UI component library (52 components)
+│   ├── rwire-themes/        # Predefined palettes + style presets
+│   └── rwire-markdown/      # Markdown rendering for docs
+├── apps/
+│   ├── rwire-website/       # Marketing landing page
+│   ├── rwire-docs/          # Documentation site
+│   ├── rwire-design-system/ # Component catalog / showcase
+│   └── rwire-examples/      # Examples gallery
 └── examples/
-    ├── counter/         # Counter example app
-    ├── todolist/        # Todo list with filtering
-    └── todo-combined/   # Todo list with ItemRef
+    ├── counter/             # Simple counter
+    ├── todolist/            # Todo list with filtering
+    ├── todo-combined/       # Todo list with ItemRef + SQLite persistence
+    └── fine-grained/        # Fine-grained reactivity demo
 ```
 
 ## Supported Elements
+
+A common subset (see the `El` enum for the full list):
 
 | Type | Tag |
 |------|-----|
@@ -219,6 +251,8 @@ rwire/
 
 ## Supported Events
 
+A common subset (see the `Ev` enum for the full list):
+
 | Type | Event |
 |------|-------|
 | `Ev::Click` | click |
@@ -237,9 +271,11 @@ rwire/
 ## Roadmap
 
 ### Completed
-- [x] Multi-state support (local, memory, persisted)
+- [x] Multi-state support (memory, persisted)
 - [x] ItemRef for dynamic list binding
-- [x] Local handler mutations (client-side)
+- [x] Style token system + reactive theming (palettes, dark/light, style presets)
+- [x] Component library (52 components)
+- [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics
 

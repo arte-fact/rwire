@@ -51,6 +51,7 @@ rwire/
 │   │   ├── store.rs         # State persistence (MemoryStore, JsonFileStore)
 │   │   ├── style.rs         # CSS-in-Rust styling utilities
 │   │   ├── style_tokens.rs  # St (u16), Pc (u8), Bp (u8) enums + CSS mappings
+│   │   ├── attr_tokens.rs   # At/Av attribute token enums (binary attr opcodes)
 │   │   ├── theme.rs         # Theme as state, ThemeProvider, CSS variable generation
 │   │   └── tokens/          # Design tokens
 │   │       ├── css.rs       # CSS custom property generation
@@ -279,7 +280,7 @@ fn toggle_mode(theme: &mut Theme) {
 
 ### Style Tokens
 
-`St` enum (`#[repr(u16)]`) provides 590+ CSS utility tokens. Each maps to a CSS class `.u{code}{declaration}`:
+`St` enum (`#[repr(u16)]`) provides 720+ CSS utility tokens (codes up to `0x342`). Each maps to a CSS class `.u{code}{declaration}`:
 
 ```rust
 // In style_tokens.rs
@@ -293,7 +294,7 @@ el(El::Div).st([St::BgApp, St::Px4, St::Py2])
 
 ### Adding a New Style Token
 
-1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x32D`+)
+1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x343`+)
 2. Add CSS mapping to `St::css()` method
 3. Add `(u16_code, "css")` to `UTIL_MAPPINGS` const
 
