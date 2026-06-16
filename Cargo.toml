@@ -13,7 +13,5 @@ members = [
     "examples/todolist",
     "examples/todo-combined",
     "examples/fine-grained",
-    "libs/rwire-canvas",
-    "examples/battlefield",
 ]
 resolver = "2"

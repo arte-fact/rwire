@@ -1,8 +1,0 @@
-[package]
-name = "battlefield"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-rwire-canvas = { path = "../../libs/rwire-canvas" }
-tokio = { version = "1", features = ["full"] }
