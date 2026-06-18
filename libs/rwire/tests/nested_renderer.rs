@@ -189,17 +189,18 @@ fn test_collect_symbols_finds_nested_synced() {
     println!("Found {} synced elements", synced.len());
 }
 
-/// This test verifies that nested synced elements are properly wrapped during updates.
+/// Verifies how a nested synced element is emitted when both it and its parent
+/// update. The sequence:
+/// 1. Parent (id=0) gets its own GET_SYNCED + CLEAR_CHILDREN; its renderer runs.
+/// 2. Encountering the nested child, the parent emits a CREATE_SYNCED *placeholder*
+///    for it (no content). The client morph matches it to the live nested span by
+///    id and preserves that span (it never recurses into `__synced_` regions).
+/// 3. The child (id=1) ALSO gets its own GET_SYNCED + CLEAR_CHILDREN + rebuild from
+///    the main loop, so its children are reconciled - including removals.
 ///
-/// The sequence of events during an update:
-/// 1. Parent synced element (id=0) gets GET_SYNCED, clears its children
-/// 2. Parent renderer is called, returns content with nested synced element
-/// 3. emit_update_element() recognizes nested synced element and uses CREATE_SYNCED
-/// 4. Child synced element gets wrapper with its original ID (id=1)
-/// 5. Child is marked as "already rendered" and skipped in main loop
-///
-/// This avoids the bug where GET_SYNCED(1) would fail because the original
-/// wrapper was destroyed when parent cleared its children.
+/// Previously the parent rebuilt the child's content inline (and the child got no
+/// GET_SYNCED). The client's nested-region short-circuit then discarded that
+/// content, so a nested list that shrank never dropped its removed rows.
 #[test]
 fn test_nested_update_preserves_structure() {
     let mut ctx = BuildContext::new();
@@ -224,20 +225,24 @@ fn test_nested_update_preserves_structure() {
 
     let bytes = update_bytes.as_ref();
 
-    // Parent (id=0) should have GET_SYNCED to find its existing wrapper
+    // Parent (id=0) gets GET_SYNCED for its own standalone update.
     let has_synced_0 = has_get_synced_for_id(bytes, 0);
     assert!(has_synced_0, "Update should have GET_SYNCED for parent (id 0)");
 
-    // Nested child (id=1) should NOT have GET_SYNCED - it's rendered via CREATE_SYNCED
-    // as part of parent's content, avoiding the destroyed-wrapper bug
+    // The nested child (id=1) ALSO gets its own GET_SYNCED standalone update, so its
+    // children reconcile (including removals) via its own CLEAR_CHILDREN+rebuild. The
+    // parent additionally emits a CREATE_SYNCED placeholder the client morph uses to
+    // preserve the live nested span.
     let has_synced_1 = has_get_synced_for_id(bytes, 1);
-    assert!(!has_synced_1, "Nested child should NOT have GET_SYNCED (uses CREATE_SYNCED instead)");
+    assert!(has_synced_1, "Nested child should get its own GET_SYNCED standalone update");
 
-    // Verify CREATE_SYNCED is present for the nested element
     let has_create_synced_1 = has_create_synced_for_id(bytes, 1);
-    assert!(has_create_synced_1, "Update should have CREATE_SYNCED for nested child (id 1)");
+    assert!(
+        has_create_synced_1,
+        "Parent should emit a CREATE_SYNCED placeholder for the nested child (id 1)"
+    );
 
-    println!("Parent uses GET_SYNCED, nested child uses CREATE_SYNCED");
+    println!("Parent + nested child each get GET_SYNCED; parent emits a nested placeholder");
 }
 
 /// Test that nested synced elements are wrapped with correct IDs during update emission.
@@ -361,28 +366,30 @@ fn test_deeply_nested_synced_elements() {
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
     let bytes = update_bytes.as_ref();
 
-    // Only top-level (id=0) gets GET_SYNCED
-    // Nested elements (id=1, id=2) get CREATE_SYNCED as part of parent's content
+    // Every level gets its own GET_SYNCED standalone update (so each reconciles its
+    // own children, removals included). Each nested level is additionally emitted as
+    // a CREATE_SYNCED placeholder by its parent, which the client morph uses to
+    // preserve the live span while that level's own update owns its content.
     assert!(
         has_get_synced_for_id(bytes, 0),
         "Should have GET_SYNCED for top-level (id 0)"
     );
     assert!(
-        !has_get_synced_for_id(bytes, 1),
-        "Nested id=1 should NOT have GET_SYNCED"
+        has_get_synced_for_id(bytes, 1),
+        "Nested id=1 should have its own GET_SYNCED"
     );
     assert!(
-        !has_get_synced_for_id(bytes, 2),
-        "Nested id=2 should NOT have GET_SYNCED"
+        has_get_synced_for_id(bytes, 2),
+        "Nested id=2 should have its own GET_SYNCED"
     );
 
-    // Nested elements should use CREATE_SYNCED with their original IDs
+    // Nested levels are emitted as CREATE_SYNCED placeholders by their parents.
     assert!(
         has_create_synced_for_id(bytes, 1),
-        "Should have CREATE_SYNCED for nested id=1"
+        "Should have CREATE_SYNCED placeholder for nested id=1"
     );
     assert!(
         has_create_synced_for_id(bytes, 2),
-        "Should have CREATE_SYNCED for nested id=2"
+        "Should have CREATE_SYNCED placeholder for nested id=2"
     );
 }

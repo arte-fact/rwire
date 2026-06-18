@@ -2113,8 +2113,12 @@ pub fn build_synced_update_with_known_symbols(
         }
     }
 
-    // Emit pass: use cached renders (no second render call)
-    let mut rendered_ids: HashSet<u32> = HashSet::new();
+    // Emit pass: use cached renders (no second render call).
+    //
+    // Each region is emitted at most once (the cache entry is taken below). Nested
+    // synced regions are NOT folded into their parent's emission: the parent emits a
+    // CREATE_SYNCED placeholder (so the morph preserves the live span) while the
+    // nested region's own entry here emits its standalone GET_SYNCED + rebuild.
 
     // Build a map of state_type_id -> list of synced element IDs (in order)
     let mut ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
@@ -2132,14 +2136,9 @@ pub fn build_synced_update_with_known_symbols(
         .unwrap_or(0);
 
     for se in synced {
-        // Skip elements already rendered as nested or not in cache
-        if rendered_ids.contains(&se.id) {
-            continue;
-        }
-
-        // Use the cached render result (rendered exactly once above)
+        // Use the cached render result (rendered exactly once above; taking the
+        // entry guarantees each region is emitted at most once).
         if let Some(rendered) = rendered_cache.remove(&se.id) {
-            rendered_ids.insert(se.id);
             let idx = next_idx_by_type.entry(se.state_type_id).or_insert(0);
             *idx += 1;
 
@@ -2154,7 +2153,6 @@ pub fn build_synced_update_with_known_symbols(
                 handlers,
                 &ids_by_type,
                 &mut next_idx_by_type,
-                &mut rendered_ids,
                 &mut emit_synced_counter,
                 states,
             );
@@ -2195,8 +2193,9 @@ fn wire_handler_id(spec: &HandlerSpec, handler: &HandlerFn) -> u32 {
 /// Event handlers are rebound using existing handler indices, or new handlers
 /// are registered if they weren't present during initial render.
 ///
-/// For nested synced elements, this finds their original ID by matching state type
-/// and order, then marks them as already rendered to avoid duplicate updates.
+/// For an EXISTING nested synced element, this emits a CREATE_SYNCED placeholder
+/// only (the morph preserves the live span; the region's own standalone update owns
+/// its children). A genuinely new nested region is built inline.
 #[allow(clippy::too_many_arguments)]
 fn emit_update_element(
     el: &ElementBuilder,
@@ -2206,7 +2205,6 @@ fn emit_update_element(
     handlers: &mut std::collections::HashMap<u32, HandlerFn>,
     ids_by_type: &HashMap<TypeId, Vec<u32>>,
     next_idx_by_type: &mut HashMap<TypeId, usize>,
-    rendered_ids: &mut HashSet<u32>,
     synced_counter: &mut u32,
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
 ) -> u32 {
@@ -2214,37 +2212,43 @@ fn emit_update_element(
     if let Some(renderer) = &el.synced {
         let state_type_id = renderer.state_type_id();
 
-        // Find the original synced element ID by matching state_type_id and order
-        let synced_id = if let Some(ids) = ids_by_type.get(&state_type_id) {
+        // Resolve the wire id (matched to initial-render ids by state-type + order)
+        // and whether this nested region already exists on the client.
+        let (synced_id, is_existing) = if let Some(ids) = ids_by_type.get(&state_type_id) {
             let idx = next_idx_by_type.entry(state_type_id).or_insert(0);
             if *idx < ids.len() {
                 let id = ids[*idx];
                 *idx += 1;
-                // Mark as rendered so it won't be processed in main loop
-                rendered_ids.insert(id);
-                id
+                (id, true)
             } else {
-                // More nested elements than original - assign new ID
+                // More nested elements than at initial render - a new region.
                 let id = *synced_counter;
                 *synced_counter += 1;
-                id
+                (id, false)
             }
         } else {
             // Truly new synced element type, assign new ID
             let id = *synced_counter;
             *synced_counter += 1;
-            id
+            (id, false)
         };
 
-        // Find the state for this renderer's state type
-        if let Some(state) = states.get(&state_type_id) {
-            if let Some(rendered) = renderer.render_with_state(*state) {
-                // Always use CREATE_SYNCED for nested synced elements within an update.
-                // The parent's CLEAR_CHILDREN destroys the old wrapper, so GET_SYNCED
-                // would fail (the element no longer exists in the DOM).
-                let wrapper_ref = buf.create_synced(synced_id);
+        let wrapper_ref = buf.create_synced(synced_id);
 
-                // Emit the rendered content as a child of the wrapper
+        if is_existing {
+            // The region already exists on the client. Emit ONLY the wrapper as a
+            // placeholder: the parent morph preserves the live span (the client's
+            // `me` skips recursing into `__synced_` regions), and the region's OWN
+            // standalone update reconciles its children - including removals.
+            //
+            // We deliberately do NOT mark it rendered, so the main emit loop still
+            // emits its standalone CLEAR_CHILDREN + rebuild when its deps changed.
+            // Rebuilding its content here instead would be discarded by that same
+            // client short-circuit, leaving stale / append-only content.
+        } else if let Some(state) = states.get(&state_type_id) {
+            // A genuinely new nested region: no standalone update covers it, so
+            // build its content inline.
+            if let Some(rendered) = renderer.render_with_state(*state) {
                 emit_update_element(
                     &rendered,
                     wrapper_ref,
@@ -2253,18 +2257,14 @@ fn emit_update_element(
                     handlers,
                     ids_by_type,
                     next_idx_by_type,
-                    rendered_ids,
                     synced_counter,
                     states,
                 );
-
-                buf.append(parent_ref, wrapper_ref);
-
-                return wrapper_ref;
             }
         }
-        // If state not found or render failed, skip this synced element
-        return 0;
+
+        buf.append(parent_ref, wrapper_ref);
+        return wrapper_ref;
     }
 
     // Create the element
@@ -2364,7 +2364,6 @@ fn emit_update_element(
             handlers,
             ids_by_type,
             next_idx_by_type,
-            rendered_ids,
             synced_counter,
             states,
         );
