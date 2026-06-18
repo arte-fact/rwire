@@ -1063,8 +1063,6 @@ pub struct BuildContext {
     handlers: HashMap<u32, HandlerFn>,
     synced_elements: Vec<SyncedElement>,
     next_synced_id: u32,
-    used_elements: HashSet<u8>,
-    used_events: HashSet<u8>,
     /// Word frequency counts (built during collect_symbols)
     word_counts: HashMap<String, usize>,
     /// Word table: word -> index (built after collect_symbols, before emit)
@@ -1073,20 +1071,6 @@ pub struct BuildContext {
     words: Vec<String>,
     /// Text encoding decisions (text -> encoding)
     text_encodings: HashMap<String, TextEncoding>,
-    /// Used style utility tokens (for tree-shaking)
-    used_style_utils: HashSet<u16>,
-    /// Used style property codes (for tree-shaking)
-    used_style_props: HashSet<u8>,
-    /// Used style value codes (for tree-shaking)
-    used_style_values: HashSet<u8>,
-    /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
-    used_pseudo_pairs: HashSet<(u8, u16)>,
-    /// Used breakpoint (Bp, St) pairs (for tree-shaking)
-    used_breakpoint_pairs: HashSet<(u8, u16)>,
-    /// Used attribute key codes (for tree-shaking)
-    used_attr_keys: HashSet<u8>,
-    /// Used attribute value codes (for tree-shaking)
-    used_attr_values: HashSet<u8>,
     /// Composite style table (pre-analyzed patterns for compression)
     composite_table: crate::style_groups::CompositeTable,
     /// Cache for synced element renders (single-render path).
@@ -1169,19 +1153,10 @@ impl BuildContext {
             handlers: HashMap::new(),
             synced_elements: Vec::new(),
             next_synced_id: 0,
-            used_elements: HashSet::new(),
-            used_events: HashSet::new(),
             word_counts: HashMap::new(),
             word_indices: HashMap::new(),
             words: Vec::new(),
             text_encodings: HashMap::new(),
-            used_style_utils: HashSet::new(),
-            used_style_props: HashSet::new(),
-            used_style_values: HashSet::new(),
-            used_pseudo_pairs: HashSet::new(),
-            used_breakpoint_pairs: HashSet::new(),
-            used_attr_keys: HashSet::new(),
-            used_attr_values: HashSet::new(),
             composite_table: crate::style_groups::CompositeTable::new(),
             synced_render_cache: HashMap::new(),
             target_indices: HashMap::new(),
@@ -1359,16 +1334,11 @@ impl BuildContext {
     pub fn collect_symbols(&mut self, el: &ElementBuilder, state: &dyn Any) {
         // If this is a synced element, render it first with state
         if let Some(renderer) = &el.synced {
-            // Track the span wrapper element type (still used by CREATE_SYNCED)
-            self.used_elements.insert(El::Span.as_u8());
             if let Some(rendered) = renderer.render_with_state(state) {
                 self.collect_symbols(&rendered, state);
             }
             return;
         }
-
-        // Track element type usage
-        self.used_elements.insert(el.el_type.as_u8());
 
         if let Some(ref text) = el.text {
             self.analyze_text(text);
@@ -1387,40 +1357,7 @@ impl BuildContext {
                 self.intern(value);
             }
         }
-        // Track event type usage
-        for (ev, _) in &el.events {
-            self.used_events.insert(ev.as_u8());
-        }
-        // Track style tokens for tree-shaking
-        for &st in &el.style_utils {
-            self.used_style_utils.insert(st);
-        }
-        for &(prop, value) in &el.style_props {
-            self.used_style_props.insert(prop);
-            self.used_style_values.insert(value);
-        }
-        for (pc_code, st_codes) in &el.pseudo_groups {
-            for &st in st_codes {
-                self.used_pseudo_pairs.insert((*pc_code, st));
-            }
-        }
-        for (bp_code, st_codes) in &el.breakpoint_groups {
-            for &st in st_codes {
-                self.used_breakpoint_pairs.insert((*bp_code, st));
-            }
-        }
-        for ta in &el.typed_attrs {
-            match ta {
-                TypedAttr::Enum(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                    self.used_attr_values.insert(value.as_u8());
-                }
-                TypedAttr::Bool(key) | TypedAttr::KeySym(key, _) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                }
-            }
-        }
-        // Register target/selector types for tree-shaking
+        // Register target/selector types and client actions
         self.register_client_actions(el);
         // Process synced children - just track the ID counter, no symbol interning needed
         for child in &el.children {
@@ -1444,8 +1381,6 @@ impl BuildContext {
     ) {
         // If this is a synced element, render it once and cache for emit pass
         if let Some(renderer) = &el.synced {
-            // Track the span wrapper element type (still used by CREATE_SYNCED)
-            self.used_elements.insert(El::Span.as_u8());
             let synced_id = self.next_synced_id;
             self.next_synced_id += 1;
 
@@ -1459,9 +1394,6 @@ impl BuildContext {
             }
             return;
         }
-
-        // Track element type usage
-        self.used_elements.insert(el.el_type.as_u8());
 
         if let Some(ref text) = el.text {
             self.analyze_text(text);
@@ -1480,101 +1412,11 @@ impl BuildContext {
                 self.intern(value);
             }
         }
-        // Track event type usage
-        for (ev, _) in &el.events {
-            self.used_events.insert(ev.as_u8());
-        }
-        // Track style tokens for tree-shaking
-        for &st in &el.style_utils {
-            self.used_style_utils.insert(st);
-        }
-        for &(prop, value) in &el.style_props {
-            self.used_style_props.insert(prop);
-            self.used_style_values.insert(value);
-        }
-        for (pc_code, st_codes) in &el.pseudo_groups {
-            for &st in st_codes {
-                self.used_pseudo_pairs.insert((*pc_code, st));
-            }
-        }
-        for (bp_code, st_codes) in &el.breakpoint_groups {
-            for &st in st_codes {
-                self.used_breakpoint_pairs.insert((*bp_code, st));
-            }
-        }
-        for ta in &el.typed_attrs {
-            match ta {
-                TypedAttr::Enum(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                    self.used_attr_values.insert(value.as_u8());
-                }
-                TypedAttr::Bool(key) | TypedAttr::KeySym(key, _) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                }
-            }
-        }
-        // Register target/selector types for tree-shaking
+        // Register target/selector types and client actions
         self.register_client_actions(el);
         // Process children
         for child in &el.children {
             self.collect_symbols_multi(child, states);
-        }
-    }
-
-    /// Collect only used token sets from an element tree (no symbol interning).
-    ///
-    /// Used for tree-shaking view functions registered via Router. Walks the
-    /// tree and records which El/Ev/St/At/Av/Pc codes are used, so the capsule
-    /// includes all necessary lookup tables and CSS.
-    pub fn collect_tokens_from(&mut self, el: &ElementBuilder) {
-        // Handle synced elements (renderers) in router views
-        if let Some(renderer) = &el.synced {
-            self.used_elements.insert(El::Span.as_u8());
-            // Also render with default state for runtime token discovery
-            let default_state = renderer.create_default_state();
-            if let Some(rendered) = renderer.render_with_state(default_state.as_ref()) {
-                self.collect_tokens_from(&rendered);
-            }
-            return;
-        }
-
-        self.used_elements.insert(el.el_type.as_u8());
-
-        for &util in &el.style_utils {
-            self.used_style_utils.insert(util);
-        }
-        for &(prop, value) in &el.style_props {
-            self.used_style_props.insert(prop);
-            self.used_style_values.insert(value);
-        }
-        for (pc_code, st_codes) in &el.pseudo_groups {
-            for &st in st_codes {
-                self.used_pseudo_pairs.insert((*pc_code, st));
-            }
-        }
-        for (bp_code, st_codes) in &el.breakpoint_groups {
-            for &st in st_codes {
-                self.used_breakpoint_pairs.insert((*bp_code, st));
-            }
-        }
-        for ta in &el.typed_attrs {
-            match ta {
-                TypedAttr::Enum(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                    self.used_attr_values.insert(value.as_u8());
-                }
-                TypedAttr::Bool(key) | TypedAttr::KeySym(key, _) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                }
-            }
-        }
-        for (ev, _) in &el.events {
-            self.used_events.insert(ev.as_u8());
-        }
-        // Register target/selector types for tree-shaking
-        self.register_client_actions(el);
-        for child in &el.children {
-            self.collect_tokens_from(child);
         }
     }
 
@@ -1687,9 +1529,6 @@ impl BuildContext {
             });
 
             if let Some(rendered) = renderer.render_with_state(state) {
-                // Track span element usage for synced wrapper
-                self.used_elements.insert(El::Span.as_u8());
-
                 // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
                 let ref_idx = self.buf.create_synced(synced_id);
 
@@ -1706,9 +1545,6 @@ impl BuildContext {
                 return ref_idx;
             }
         }
-
-        // Track element type usage
-        self.used_elements.insert(el.el_type.as_u8());
 
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
@@ -1731,16 +1567,12 @@ impl BuildContext {
         for ta in &el.typed_attrs {
             match ta {
                 TypedAttr::Enum(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                    self.used_attr_values.insert(value.as_u8());
                     self.buf.set_attr_enum(ref_idx, key.as_u8(), value.as_u8());
                 }
                 TypedAttr::Bool(key) => {
-                    self.used_attr_keys.insert(key.as_u8());
                     self.buf.set_attr_bool(ref_idx, key.as_u8());
                 }
                 TypedAttr::KeySym(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
                     let val_sym = self.get_or_intern_symbol(value);
                     self.buf.set_attr_key_sym(ref_idx, key.as_u8(), val_sym);
                 }
@@ -1749,11 +1581,6 @@ impl BuildContext {
 
         // Emit style tokens (binary-encoded styles)
         if !el.style_utils.is_empty() {
-            // Track used utilities for tree-shaking
-            for &util in &el.style_utils {
-                self.used_style_utils.insert(util);
-            }
-
             // Check if this pattern has a composite
             if let Some(composite_id) = self.composite_table.get_composite_id(&el.style_utils) {
                 self.buf.style_composite(ref_idx, composite_id);
@@ -1770,34 +1597,24 @@ impl BuildContext {
 
         // Emit style property+value pairs
         for &(prop, value) in &el.style_props {
-            self.used_style_props.insert(prop);
-            self.used_style_values.insert(value);
             self.buf.style_prop(ref_idx, prop, value);
         }
 
         // Emit pseudo-class groups
         for (pc_code, st_codes) in &el.pseudo_groups {
-            for &st in st_codes {
-                self.used_pseudo_pairs.insert((*pc_code, st));
-            }
             self.buf.style_pseudo(ref_idx, *pc_code, st_codes);
         }
 
         // Emit breakpoint groups
         for (bp_code, st_codes) in &el.breakpoint_groups {
-            for &st in st_codes {
-                self.used_breakpoint_pairs.insert((*bp_code, st));
-            }
             self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
 
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
-        // Bind events and track event type usage
+        // Bind events
         for (ev, handler_spec) in &el.events {
-            self.used_events.insert(ev.as_u8());
-
             if let Some(handler) = &handler_spec.remote_handler {
                 let handler_idx = self.register_remote_handler(handler_spec, handler);
 
@@ -1853,7 +1670,6 @@ impl BuildContext {
 
             // Use cached render from collect_symbols_multi (single-render path)
             if let Some(rendered) = self.synced_render_cache.remove(&synced_id) {
-                self.used_elements.insert(El::Span.as_u8());
                 let ref_idx = self.buf.create_synced(synced_id);
                 self.emit_element_multi(&rendered, Some(ref_idx));
 
@@ -1867,9 +1683,6 @@ impl BuildContext {
             }
             return 0;
         }
-
-        // Track element type usage
-        self.used_elements.insert(el.el_type.as_u8());
 
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
@@ -1892,16 +1705,12 @@ impl BuildContext {
         for ta in &el.typed_attrs {
             match ta {
                 TypedAttr::Enum(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
-                    self.used_attr_values.insert(value.as_u8());
                     self.buf.set_attr_enum(ref_idx, key.as_u8(), value.as_u8());
                 }
                 TypedAttr::Bool(key) => {
-                    self.used_attr_keys.insert(key.as_u8());
                     self.buf.set_attr_bool(ref_idx, key.as_u8());
                 }
                 TypedAttr::KeySym(key, value) => {
-                    self.used_attr_keys.insert(key.as_u8());
                     let val_sym = self.get_or_intern_symbol(value);
                     self.buf.set_attr_key_sym(ref_idx, key.as_u8(), val_sym);
                 }
@@ -1910,11 +1719,6 @@ impl BuildContext {
 
         // Emit style tokens (binary-encoded styles)
         if !el.style_utils.is_empty() {
-            // Track used utilities for tree-shaking
-            for &util in &el.style_utils {
-                self.used_style_utils.insert(util);
-            }
-
             // Check if this pattern has a composite
             if let Some(composite_id) = self.composite_table.get_composite_id(&el.style_utils) {
                 self.buf.style_composite(ref_idx, composite_id);
@@ -1931,34 +1735,24 @@ impl BuildContext {
 
         // Emit style property+value pairs
         for &(prop, value) in &el.style_props {
-            self.used_style_props.insert(prop);
-            self.used_style_values.insert(value);
             self.buf.style_prop(ref_idx, prop, value);
         }
 
         // Emit pseudo-class groups
         for (pc_code, st_codes) in &el.pseudo_groups {
-            for &st in st_codes {
-                self.used_pseudo_pairs.insert((*pc_code, st));
-            }
             self.buf.style_pseudo(ref_idx, *pc_code, st_codes);
         }
 
         // Emit breakpoint groups
         for (bp_code, st_codes) in &el.breakpoint_groups {
-            for &st in st_codes {
-                self.used_breakpoint_pairs.insert((*bp_code, st));
-            }
             self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
 
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
-        // Bind events and track event type usage
+        // Bind events
         for (ev, handler_spec) in &el.events {
-            self.used_events.insert(ev.as_u8());
-
             if let Some(handler) = &handler_spec.remote_handler {
                 let handler_idx = self.register_remote_handler(handler_spec, handler);
 
@@ -2025,51 +1819,6 @@ impl BuildContext {
         std::mem::take(&mut self.synced_elements)
     }
 
-    /// Get the set of used element type byte codes.
-    pub fn used_elements(&self) -> &HashSet<u8> {
-        &self.used_elements
-    }
-
-    /// Get the set of used event type byte codes.
-    pub fn used_events(&self) -> &HashSet<u8> {
-        &self.used_events
-    }
-
-    /// Get the set of used style utility token codes.
-    pub fn used_style_utils(&self) -> &HashSet<u16> {
-        &self.used_style_utils
-    }
-
-    /// Get the set of used style property codes.
-    pub fn used_style_props(&self) -> &HashSet<u8> {
-        &self.used_style_props
-    }
-
-    /// Get the set of used style value codes.
-    pub fn used_style_values(&self) -> &HashSet<u8> {
-        &self.used_style_values
-    }
-
-    /// Get the set of used pseudo-class tokens.
-    pub fn used_pseudo_pairs(&self) -> &HashSet<(u8, u16)> {
-        &self.used_pseudo_pairs
-    }
-
-    /// Get the set of used breakpoint tokens.
-    pub fn used_breakpoint_pairs(&self) -> &HashSet<(u8, u16)> {
-        &self.used_breakpoint_pairs
-    }
-
-    /// Get the set of used attribute key codes.
-    pub fn used_attr_keys(&self) -> &HashSet<u8> {
-        &self.used_attr_keys
-    }
-
-    /// Get the set of used attribute value codes.
-    pub fn used_attr_values(&self) -> &HashSet<u8> {
-        &self.used_attr_values
-    }
-
     /// Get the symbol map for tracking sent symbols.
     ///
     /// This returns a clone of the symbol map after rendering, which can be
@@ -2111,29 +1860,23 @@ impl BuildContext {
     }
 
     /// Register all target/selector types from an element's bindings.
-    /// Also tracks the St tokens used by bindings for tree-shaking.
     fn register_client_actions(&mut self, el: &ElementBuilder) {
         for tb in &el.target_bindings {
             self.get_or_create_target_idx(tb.type_id, tb.default);
-            self.used_style_utils.insert(tb.st);
         }
         for tt in &el.target_toggles {
             // Ensure the target type is registered even if only toggles exist
             self.get_or_create_target_idx(tt.type_id, false);
-            self.used_events.insert(tt.ev.as_u8());
         }
         for sb in &el.selector_bindings {
             self.get_or_create_selector_idx(sb.type_id, sb.default_val);
-            self.used_style_utils.insert(sb.st);
         }
         for ss in &el.selector_sets {
             // Ensure the selector type is registered even if only sets exist
             self.get_or_create_selector_idx(ss.type_id, 0);
-            self.used_events.insert(ss.ev.as_u8());
         }
         for tt in &el.timed_toggles {
             self.get_or_create_target_idx(tt.type_id, false);
-            self.used_events.insert(tt.ev.as_u8());
         }
         for at in &el.auto_toggles {
             self.get_or_create_target_idx(at.type_id, false);

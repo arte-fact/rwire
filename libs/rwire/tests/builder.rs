@@ -79,23 +79,6 @@ fn test_el_builder_nested() {
 fn test_build_context_new() {
     let ctx = BuildContext::new();
     assert!(ctx.handlers().is_empty());
-    assert!(ctx.used_elements().is_empty());
-    assert!(ctx.used_events().is_empty());
-}
-
-#[test]
-fn test_build_context_tracks_elements() {
-    let elem = el(El::Div).append([el(El::Button), el(El::Span)]);
-
-    let mut ctx = BuildContext::new();
-    let state: () = ();
-    ctx.collect_symbols(&elem, &state);
-
-    let used = ctx.used_elements();
-    assert!(used.contains(&El::Div.as_u8()));
-    assert!(used.contains(&El::Button.as_u8()));
-    assert!(used.contains(&El::Span.as_u8()));
-    assert_eq!(used.len(), 3);
 }
 
 #[test]
@@ -197,14 +180,6 @@ fn test_complex_tree() {
     let state: () = ();
     ctx.collect_symbols(&form, &state);
     ctx.emit(&form, &state);
-
-    // Check used elements before finish() consumes the context
-    let used = ctx.used_elements();
-    assert!(used.contains(&El::Form.as_u8()));
-    assert!(used.contains(&El::Div.as_u8()));
-    assert!(used.contains(&El::Span.as_u8()));
-    assert!(used.contains(&El::Input.as_u8()));
-    assert!(used.contains(&El::Button.as_u8()));
 
     let bytes = ctx.finish();
 

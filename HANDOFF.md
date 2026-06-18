@@ -1,5 +1,14 @@
 # Handoff — rwire limitations plan (resume after compaction)
 
+> **HISTORICAL (2026-06-18).** All 7 plan tasks are done. The "REMAINING"
+> section further down is superseded narrative — keep for history only. Note:
+> the startup **CSS tree-shaking pass was since removed entirely** (no
+> `collect_symbols` filtering / `tree_shake_views` / `extra_elements`); the
+> capsule now ships token maps whole and delivers CSS lazily over the wire
+> (`STYLE_DEF` / per-connection `sent_css`). See `docs/reactivity.md` and the
+> docs-site "Capsule Size" page. Later work also added stable handler ids, DOM
+> morphing on updates, and client input debounce + focused-input preservation.
+
 ## Context
 - **Goal:** rewrite `llama-monitor` using the `rwire` framework, then harden rwire.
 - **App:** `/artefact/llama-modnitor-rwire` (edition 2024). Depends on rwire via path.

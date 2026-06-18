@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use rwire::builder::{build_synced_update_multi, BuildContext, SyncedElement};
 use rwire::state::ChangeSet;
-use rwire::{el, El, Ev, HandlerFn, MemoryState};
+use rwire::{el, El, HandlerFn, MemoryState};
 
 #[derive(Default)]
 struct TestState;
@@ -68,38 +68,6 @@ fn test_handler_fn_id_different_functions() {
 
     // Different functions should have different fn_ids
     assert_ne!(h1.fn_id(), h2.fn_id());
-}
-
-#[test]
-fn test_build_context_tracks_elements() {
-    let mut ctx = BuildContext::new();
-    let state = ();
-
-    let el = el(El::Div).append([el(El::Span).text("hello"), el(El::Button).text("click")]);
-
-    ctx.collect_symbols(&el, &state);
-
-    // Should have tracked Div, Span, and Button
-    let used = ctx.used_elements();
-    assert!(used.contains(&El::Div.as_u8()));
-    assert!(used.contains(&El::Span.as_u8()));
-    assert!(used.contains(&El::Button.as_u8()));
-}
-
-#[test]
-fn test_build_context_tracks_events() {
-    let mut ctx = BuildContext::new();
-    let state = TestState;
-
-    let handler_spec = rwire::state::HandlerSpec::memory(test_handler);
-
-    let el = el(El::Button).text("click").on(Ev::Click, handler_spec);
-
-    ctx.collect_symbols(&el, &state);
-
-    // Should have tracked Click event
-    let used = ctx.used_events();
-    assert!(used.contains(&Ev::Click.as_u8()));
 }
 
 #[test]

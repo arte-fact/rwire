@@ -99,6 +99,9 @@ The JS runtime integrates with the browser history API:
 
 This means bookmarks, browser history, and the back button all work as expected.
 
-## Tree Shaking
+## Capsule coverage across routes
 
-The `.routes()` method enables automatic tree shaking. At server startup, every registered view function is called with empty params. This collects all element types, style tokens, and events used across all pages, ensuring the capsule includes everything needed for any route -- without manual `extra_elements` configuration.
+You don't need to declare anything per route. The capsule ships the element/event
+token maps whole (~1-2 KB total) and delivers CSS lazily over the WebSocket as
+each route first renders, so every page has what it needs regardless of which
+routes exist. See [Capsule size](/docs/05-advanced/tree-shaking).

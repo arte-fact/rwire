@@ -762,14 +762,6 @@ where
             }
         }
 
-        // Tree-shake router views: call every registered view with default
-        // params and collect their tokens (El, Ev, St, At, Av, Pc).
-        if let Some(ref router) = self.router {
-            for view_tree in router.tree_shake_views() {
-                ctx.collect_tokens_from(&view_tree);
-            }
-        }
-
         // Resolve initial theme if provider is set
         let initial_theme = self.theme_provider.as_ref().map(|p| p.init());
 
@@ -791,13 +783,11 @@ where
                 .has_client_actions(ctx.has_client_actions())
                 .with_composite_css(composite_css);
 
-            // Generate CSS and embed in capsule HTML <style> tag. The element/event
-            // params on the capsule fns are retained for API stability but ignored
-            // (maps are shipped whole).
+            // Generate CSS and embed in capsule HTML <style> tag.
             let css = capsule_gen::generate_capsule_css(&config);
-            capsule_gen::generate_styled_capsule(ctx.used_elements(), ctx.used_events(), &config, &css)
+            capsule_gen::generate_styled_capsule(&config, &css)
         } else {
-            capsule_gen::generate_capsule(ctx.used_elements(), ctx.used_events())
+            capsule_gen::generate_capsule()
         };
 
         let capsule_size = capsule.len();
@@ -805,11 +795,7 @@ where
         let composite_table = Arc::new(ctx.composite_table().clone());
 
         println!("Server listening on http://{}", self.addr);
-        println!(
-            "Capsule: {} bytes ({} style utilities tree-shaken)",
-            capsule_size,
-            ctx.used_style_utils().len()
-        );
+        println!("Capsule: {capsule_size} bytes");
 
         let root = Arc::new(self.root);
         let route_handler = self.route_handler.map(Arc::new);

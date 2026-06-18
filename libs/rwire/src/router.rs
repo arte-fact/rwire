@@ -275,23 +275,6 @@ impl Router {
         }
     }
 
-    /// Call all registered view functions with default params and return
-    /// the resulting element trees. Used at startup for tree-shaking.
-    pub fn tree_shake_views(&self) -> Vec<ElementBuilder> {
-        let default_params = RouteParams::new();
-        let mut trees: Vec<ElementBuilder> = self
-            .routes
-            .iter()
-            .map(|r| (r.view)(&default_params))
-            .collect();
-
-        if let Some(ref not_found) = self.not_found {
-            trees.push(not_found(&default_params));
-        }
-
-        trees
-    }
-
     /// Get all route patterns (for diagnostics).
     pub fn patterns(&self) -> Vec<&str> {
         self.routes.iter().map(|r| r.pattern.pattern()).collect()
@@ -426,23 +409,5 @@ mod tests {
         assert!(router.match_path("/").is_some());
         assert!(router.match_path("/users").is_some());
         assert!(router.match_path("/posts").is_none());
-    }
-
-    #[test]
-    fn test_router_tree_shake() {
-        let router = Router::new()
-            .page("/", |_| {
-                use crate::builder::el;
-                use crate::protocol::El;
-                el(El::H1).text("Home")
-            })
-            .page("/about", |_| {
-                use crate::builder::el;
-                use crate::protocol::El;
-                el(El::H2).text("About")
-            });
-
-        let trees = router.tree_shake_views();
-        assert_eq!(trees.len(), 2);
     }
 }

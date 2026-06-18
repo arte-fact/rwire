@@ -1,12 +1,9 @@
-//! Generate minimal capsule HTML with tree-shaken element and event mappings.
+//! Generate capsule HTML with the element and event mappings.
 //!
-//! This module generates a capsule that contains only the element types and
-//! event types actually used by the application, reducing the capsule size.
-//!
-//! For styled capsules, CSS is embedded in a `<style>` tag within `<head>`,
-//! tree-shaken to include only the styles for components actually used.
-
-use std::collections::HashSet;
+//! The small u8 token enum maps (elements, events, attribute keys/values, style
+//! props/values) are shipped whole. For styled capsules, composite and global
+//! CSS is embedded in a `<style>` tag within `<head>`; utility/pseudo/breakpoint
+//! rules are delivered lazily over the WebSocket (STYLE_DEF).
 
 use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
 use crate::theme::Theme;
@@ -191,9 +188,8 @@ function xi(d,i){return i}"#;
 
 /// Generate a minimal (unstyled) capsule HTML with the full element/event maps.
 ///
-/// The `_used_*` params are retained for API stability; the small u8 enum maps
-/// are shipped whole (see `generate_js_map`), so they are ignored.
-pub fn generate_capsule(_used_elements: &HashSet<u8>, _used_events: &HashSet<u8>) -> String {
+/// The small u8 enum maps are shipped whole (see `generate_js_map`).
+pub fn generate_capsule() -> String {
     let elements_js = generate_js_map(ELEMENT_MAPPINGS);
     let events_js = generate_js_map(EVENT_MAPPINGS);
     let svg_js = generate_svg_set();
@@ -479,19 +475,15 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 ///
 /// This is the recommended way to generate capsules for styled applications.
 /// Includes:
-/// - Tree-shaken element/event mappings
+/// - Full element/event mappings (small u8 enum maps shipped whole)
 /// - Theme data attributes on root element
-/// - CSS embedded in `<style>` tag (tree-shaken utility + semantic + theme CSS)
+/// - CSS embedded in `<style>` tag (composite + global CSS; utility/pseudo/
+///   breakpoint rules are delivered lazily over the wire)
 ///
 /// CSS is embedded directly in the capsule HTML `<style>` tag within `<head>`.
 /// This ensures styles are available immediately when the page loads,
 /// without waiting for the WebSocket connection.
-pub fn generate_styled_capsule(
-    _used_elements: &HashSet<u8>,
-    _used_events: &HashSet<u8>,
-    config: &CapsuleConfig,
-    css: &str,
-) -> String {
+pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
     use crate::attr_tokens::{AT_MAPPINGS, AV_MAPPINGS};
     use crate::style_tokens::{PROP_MAPPINGS, VALUE_MAPPINGS};
 
@@ -582,18 +574,11 @@ mod tests {
 
     #[test]
     fn test_styled_capsule_structure() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-        elements.insert(2); // button
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
         let config = CapsuleConfig::new()
             .theme(Theme::dark().accent("#00FF00"));
 
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // Should have HTML structure
         assert!(capsule.contains("<!DOCTYPE html>"));
@@ -616,16 +601,10 @@ mod tests {
 
     #[test]
     fn test_styled_capsule_contains_css() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
         let config = CapsuleConfig::new();
 
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // CSS should be in <style> tag within <head>
         assert!(capsule.contains("<style>"));
@@ -637,16 +616,9 @@ mod tests {
 
     #[test]
     fn test_styled_capsule_size() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-        elements.insert(2); // button
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
         let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // Capsule includes CSS in <style> tag - should be reasonable size
         println!("Styled capsule size: {} bytes (CSS embedded)", capsule.len());
@@ -672,13 +644,7 @@ mod tests {
 
     #[test]
     fn test_generate_capsule() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
-        let capsule = generate_capsule(&elements, &events);
+        let capsule = generate_capsule();
         // Maps are shipped whole now, so they contain every entry (not just div/click).
         assert!(capsule.contains("0:'div'"));
         assert!(capsule.contains("1:'span'"));
@@ -703,16 +669,11 @@ mod tests {
 
     #[test]
     fn test_composite_css_included_in_capsule() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-
-        let events = HashSet::new();
-
         let config = CapsuleConfig::new()
             .with_composite_css(".c256{display:flex;flex-direction:column;gap:var(--S4)}".to_string());
 
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // Composite CSS should be embedded in the <style> tag
         assert!(css.contains(".c256{"), "Composite CSS missing from generated CSS");
@@ -774,16 +735,10 @@ mod tests {
 
     #[test]
     fn test_client_actions_js_included_when_enabled() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
         let config = CapsuleConfig::new()
             .has_client_actions(true);
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // Client actions JS should be included
         assert!(capsule.contains("fl2"), "Client actions JS vars should be present");
@@ -793,16 +748,10 @@ mod tests {
 
     #[test]
     fn test_client_actions_js_excluded_when_disabled() {
-        let mut elements = HashSet::new();
-        elements.insert(0); // div
-
-        let mut events = HashSet::new();
-        events.insert(1); // click
-
         let config = CapsuleConfig::new()
             .has_client_actions(false);
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // Client actions update functions should NOT be included
         assert!(!capsule.contains("function uf2"), "Target update function should not be present when disabled");
@@ -811,13 +760,9 @@ mod tests {
 
     #[test]
     fn test_client_action_opcodes_in_runtime() {
-        let mut elements = HashSet::new();
-        elements.insert(0);
-        let mut events = HashSet::new();
-        events.insert(1);
         let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         // Opcode constants should always be in the runtime
         assert!(capsule.contains("IT:0x47"), "INIT_TARGET opcode should be in O object");
@@ -830,26 +775,18 @@ mod tests {
 
     #[test]
     fn test_timed_toggle_opcode_in_runtime() {
-        let mut elements = HashSet::new();
-        elements.insert(0);
-        let mut events = HashSet::new();
-        events.insert(1);
         let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         assert!(capsule.contains("TT:0x4D"), "BIND_TIMED_TOGGLE opcode should be in O object");
     }
 
     #[test]
     fn test_auto_toggle_opcode_in_runtime() {
-        let mut elements = HashSet::new();
-        elements.insert(0);
-        let mut events = HashSet::new();
-        events.insert(1);
         let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&elements, &events, &config, &css);
+        let capsule = generate_styled_capsule(&config, &css);
 
         assert!(capsule.contains("AT2:0x4E"), "AUTO_TOGGLE opcode should be in O object");
     }

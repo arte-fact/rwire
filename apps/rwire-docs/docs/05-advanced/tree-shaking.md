@@ -1,93 +1,56 @@
 ---
-title: Tree Shaking
-description: How rwire generates minimal client bundles
+title: Capsule Size
+description: How rwire keeps the client bundle small
 order: 4
 ---
-# Tree Shaking
+# Capsule Size
 
-rwire generates a custom JavaScript capsule for each application, containing only the code needed for that specific app. A counter app gets ~1.5KB of JS. A full documentation site gets more, but never includes unused element types or event handlers.
+rwire serves a small JavaScript "capsule" — the entire client runtime — inline in
+the first HTML response. It stays small (single-digit KB) without any per-app
+configuration. rwire does **not** statically tree-shake the runtime; instead it
+keeps the bundle small two ways:
 
-```
-Full runtime:  ~2.5KB (all elements, events, styles)
-Counter app:   ~1.5KB (div, button, span + click event)
-Savings:       ~40% smaller capsule
-```
+> **Note:** Earlier versions filtered per-app lookup tables at startup
+> (`collect_symbols` / `Router::tree_shake_views` / `CapsuleConfig::extra_elements`).
+> That machinery was removed — it's unnecessary with the strategy below, and those
+> APIs no longer exist.
 
-## What Gets Tree-Shaken
+## 1. Token maps are shipped whole
 
-The capsule contains lookup tables that map binary opcodes to DOM operations. Tree shaking filters these tables to include only what the app uses:
+The capsule contains compact `u8`/`u16` lookup tables mapping binary opcodes to
+DOM operations:
 
 | Table | Maps From | Maps To |
 |-------|-----------|---------|
-| Elements (E) | `u8` opcode | `"div"`, `"button"`, etc. |
-| Events (V) | `u8` opcode | `"click"`, `"input"`, etc. |
-| Style Utilities (U) | `u16` token | CSS class name |
+| Elements (E) | `u8` opcode | `"div"`, `"button"`, … |
+| Events (V) | `u8` opcode | `"click"`, `"input"`, … |
 | Style Props (P) | `u8` code | CSS property |
 | Style Values (Y) | `u8` code | CSS value |
-| Pseudo Classes | `(u8, u16)` pair | Pseudo CSS rule |
-| Breakpoints | `(u8, u16)` pair | `@media` CSS rule |
-| Attributes (AT/AV) | `u8` code | Attribute key/value |
+| Attributes (AT/AV) | `u8` code | attribute key/value |
 
-## How It Works
+The full set is only ~1–2 KB, and a missing entry would be a structural break, so
+these are **shipped whole** — filtering them isn't worth the complexity or risk.
 
-At server startup, the framework calls your root function and all registered router views to build the complete element tree:
+## 2. CSS is delivered lazily over the wire
 
-```rust
-Server::bind("0.0.0.0:9000")?
-    .root(root)
-    .routes(
-        Router::new()
-            .page("/", |_| build_home())
-            .page("/about", |_| build_about())
-    )
-    .run()
-    .await
-```
+Utility / pseudo / breakpoint rules (`.u` / `.h` / `.b` classes) are the part that
+*would* grow with app size, so they are **not** embedded in the capsule. The
+static capsule ships only globals (reset, CSS variables, theme, keyframes,
+composites). Each class rule is sent over the WebSocket via the `STYLE_DEF` opcode
+the first time a connection actually references it, deduped per connection
+(`ConnectionState.sent_css`).
 
-`BuildContext::collect_symbols()` walks each tree and records every element type, event type, style token, and attribute used. The capsule generator then emits JS lookup tables filtered to only those entries.
+So the delivered CSS is **exact and automatic**: a rule used only in a
+deeply-nested or conditionally-rendered branch arrives the moment that branch
+first renders — across any route, with nothing to declare. A hard refresh starts a
+fresh connection that re-receives every referenced rule in the initial batch, so
+the set cannot drift.
 
-## Router Integration
+Composite classes (`.c{id}`, detected by a one-time startup analysis) are part of
+the static globals, so they are always present.
 
-Without a router, tree shaking only sees the root view. If other pages use additional element types (e.g., `El::Table` only on `/reports`), those elements would be missing from the capsule.
+## Practical effect
 
-The `.routes()` method solves this. It calls every registered view function with default parameters at startup:
-
-```rust
-// Router::tree_shake_views() calls each view with empty RouteParams
-let trees = router.tree_shake_views();
-```
-
-All element types, events, and tokens discovered across all pages are merged into the capsule.
-
-## Manual Extras
-
-For dynamic content that is not part of the static render tree (e.g., markdown rendering that creates elements at runtime), you can manually include additional entries:
-
-```rust
-use rwire::protocol::El;
-
-let config = CapsuleConfig::new()
-    .extra_elements([El::Pre as u8, El::Code as u8].into())
-    .extra_style_utils([St::BgSubtle as u16, St::PxMd as u16].into());
-```
-
-This is rarely needed when the router covers all pages.
-
-## Capsule Size Breakdown
-
-For a typical counter application:
-
-```
-Symbol table decoder:    ~100 bytes
-Element creation:        ~80 bytes  (3 element types)
-Event binding:           ~120 bytes (click only)
-DOM operations:          ~200 bytes (append, set_text, set_class)
-WebSocket connection:    ~150 bytes
-Style token decoder:     ~100 bytes (if using St tokens)
-Route handler:           ~80 bytes  (if using router)
-Client actions:          ~250 bytes (if using targets/selectors)
-─────────────────────────────────
-Total:                   ~1.0-1.5KB
-```
-
-Every feature has a cost, but that cost is only paid when the feature is used. An app without routing, client actions, or style tokens gets a smaller capsule.
+- No `extra_elements` / `extra_style_utils` / router-based collection needed.
+- Capsule size is dominated by the (whole) token maps + runtime, not by your app's
+  styling — a large app pays for CSS only as the user actually navigates into it.
