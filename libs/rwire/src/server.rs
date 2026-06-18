@@ -88,11 +88,7 @@ pub struct SharedServerState {
 ///
 /// Persisted state is keyed per session; shared state has one global instance.
 /// This is the single source of truth used by every render and mutation path.
-fn shared_cache_key(
-    storage: StorageType,
-    table: Option<&str>,
-    session_id: &str,
-) -> Option<String> {
+fn shared_cache_key(storage: StorageType, table: Option<&str>, session_id: &str) -> Option<String> {
     match storage {
         StorageType::Memory => None,
         StorageType::Persisted => table.map(|t| format!("{t}:{session_id}")),
@@ -137,7 +133,10 @@ impl SharedServerState {
     }
 
     /// Create new shared server state with custom broadcast capacity.
-    pub fn with_broadcast_capacity(persist_interval: Duration, broadcast_capacity: usize) -> Arc<Self> {
+    pub fn with_broadcast_capacity(
+        persist_interval: Duration,
+        broadcast_capacity: usize,
+    ) -> Arc<Self> {
         Arc::new(Self {
             shared_cache: RwLock::new(HashMap::new()),
             dirty_keys: RwLock::new(HashSet::new()),
@@ -220,7 +219,8 @@ impl SharedServerState {
 
     /// Check if any keys are dirty.
     pub fn has_dirty(&self) -> bool {
-        !self.dirty_keys
+        !self
+            .dirty_keys
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .is_empty()
@@ -236,9 +236,7 @@ impl SharedServerState {
 
     /// Drain all dirty keys for persistence.
     pub fn drain_dirty(&self) -> Vec<String> {
-        let mut dirty = self.dirty_keys
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut dirty = self.dirty_keys.write().unwrap_or_else(|e| e.into_inner());
         dirty.drain().collect()
     }
 
@@ -258,7 +256,8 @@ impl SharedServerState {
             .remove(&conn_id);
 
         // Remove from all subscriptions
-        let mut subs = self.subscriptions
+        let mut subs = self
+            .subscriptions
             .write()
             .unwrap_or_else(|e| e.into_inner());
         for conn_ids in subs.values_mut() {
@@ -280,7 +279,10 @@ impl SharedServerState {
     ///
     /// This loads all persisted state from the database into memory.
     /// Should be called at server startup before accepting connections.
-    pub fn hydrate(&self, store: &crate::persist::SqliteStore) -> Result<usize, crate::persist::PersistError> {
+    pub fn hydrate(
+        &self,
+        store: &crate::persist::SqliteStore,
+    ) -> Result<usize, crate::persist::PersistError> {
         // Ensure schemas exist
         store.ensure_schema()?;
 
@@ -288,9 +290,7 @@ impl SharedServerState {
         let states = store.hydrate_all()?;
         let count = states.len();
 
-        let mut cache = self.shared_cache
-            .write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.shared_cache.write().unwrap_or_else(|e| e.into_inner());
         for (key, state) in states {
             cache.insert(key, state);
         }
@@ -312,10 +312,9 @@ impl SharedServerState {
             changes,
         };
 
-        let subs = self.subscriptions
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
-        let senders = self.broadcast_senders
+        let subs = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
+        let senders = self
+            .broadcast_senders
             .read()
             .unwrap_or_else(|e| e.into_inner());
 
@@ -355,21 +354,31 @@ impl SharedServerState {
     }
 
     /// Cache session state on disconnect for later reconnection.
-    pub fn cache_session(&self, session_id: &str, states: HashMap<TypeId, Box<dyn Any + Send + Sync>>) {
+    pub fn cache_session(
+        &self,
+        session_id: &str,
+        states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    ) {
         if states.is_empty() {
             return;
         }
         self.session_state_cache
             .write()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(session_id.to_string(), CachedSession {
-                states,
-                cached_at: Instant::now(),
-            });
+            .insert(
+                session_id.to_string(),
+                CachedSession {
+                    states,
+                    cached_at: Instant::now(),
+                },
+            );
     }
 
     /// Restore cached session state on reconnect (removes from cache).
-    pub fn restore_session(&self, session_id: &str) -> Option<HashMap<TypeId, Box<dyn Any + Send + Sync>>> {
+    pub fn restore_session(
+        &self,
+        session_id: &str,
+    ) -> Option<HashMap<TypeId, Box<dyn Any + Send + Sync>>> {
         self.session_state_cache
             .write()
             .unwrap_or_else(|e| e.into_inner())
@@ -389,14 +398,19 @@ impl SharedServerState {
     ///
     /// This is called by the background persist task and during graceful shutdown.
     /// Returns the number of keys successfully persisted.
-    pub fn persist_dirty(&self, store: &crate::persist::SqliteStore) -> Result<usize, crate::persist::PersistError> {
+    pub fn persist_dirty(
+        &self,
+        store: &crate::persist::SqliteStore,
+    ) -> Result<usize, crate::persist::PersistError> {
         let dirty_keys = self.drain_dirty();
         if dirty_keys.is_empty() {
             return Ok(0);
         }
 
         let conn = store.connection();
-        let conn = conn.lock().map_err(|_| crate::persist::PersistError::LockPoisoned)?;
+        let conn = conn
+            .lock()
+            .map_err(|_| crate::persist::PersistError::LockPoisoned)?;
 
         // Start transaction
         conn.execute("BEGIN TRANSACTION", [])?;
@@ -445,18 +459,21 @@ impl SharedServerState {
 
         // Get persistable type info from registry
         let registry = store.registry();
-        let registry = registry.lock().map_err(|_| crate::persist::PersistError::LockPoisoned)?;
+        let registry = registry
+            .lock()
+            .map_err(|_| crate::persist::PersistError::LockPoisoned)?;
         let persistable = registry
             .get_by_table(table_name)
             .ok_or_else(|| crate::persist::PersistError::TypeNotFound(table_name.to_string()))?;
 
         // Get state from cache
-        let cache = self.shared_cache
+        let cache = self
+            .shared_cache
             .read()
             .map_err(|_| crate::persist::PersistError::LockPoisoned)?;
-        let state = cache
-            .get(key)
-            .ok_or_else(|| crate::persist::PersistError::ConnectionError(format!("State not in cache: {}", key)))?;
+        let state = cache.get(key).ok_or_else(|| {
+            crate::persist::PersistError::ConnectionError(format!("State not in cache: {}", key))
+        })?;
 
         // Save to database using the persistable's save function
         (persistable.save_fn)(conn, session_id, &**state)
@@ -480,7 +497,10 @@ impl SharedServerState {
             attempts += 1;
 
             let dirty_count = self.dirty_count();
-            eprintln!("Flushing {} dirty keys (attempt {})...", dirty_count, attempts);
+            eprintln!(
+                "Flushing {} dirty keys (attempt {})...",
+                dirty_count, attempts
+            );
 
             match self.persist_dirty(store) {
                 Ok(count) => {
@@ -561,6 +581,7 @@ pub struct ServerWithRoot<F> {
     route_handler: Option<HandlerFn>,
     router: Option<crate::router::Router>,
     theme_provider: Option<ThemeProvider>,
+    auth: Option<AuthGate>,
 }
 
 impl Server {
@@ -601,6 +622,7 @@ impl ServerBuilder {
             route_handler: None,
             router: None,
             theme_provider: None,
+            auth: None,
         }
     }
 }
@@ -614,6 +636,17 @@ where
     /// Use this when you need to hydrate state from a database before running
     /// the server. This allows persistence to be configured before accepting
     /// connections.
+    /// Gate all access — the page *and* the WebSocket — behind a login form.
+    ///
+    /// Unauthenticated page requests get the login page; a successful `POST
+    /// /login` issues a random session cookie that subsequent requests (and the
+    /// WebSocket upgrade) must present. `GET /logout` clears it. Off by default;
+    /// wire it from env in the application so local development stays open.
+    pub fn auth(mut self, user: impl Into<String>, password: impl Into<String>) -> Self {
+        self.auth = Some(AuthGate::new(user.into(), password.into()));
+        self
+    }
+
     pub fn with_shared_state(mut self, shared: Arc<SharedServerState>) -> Self {
         self.shared = Some(shared);
         self
@@ -800,6 +833,10 @@ where
         let root = Arc::new(self.root);
         let route_handler = self.route_handler.map(Arc::new);
         let initial_theme = initial_theme.map(Arc::new);
+        let auth = Arc::new(self.auth);
+        if auth.is_some() {
+            println!("Auth: HTTP Basic enabled");
+        }
 
         // Spawn session eviction task (5-minute TTL)
         {
@@ -814,8 +851,20 @@ where
             let route_handler = route_handler.clone();
             let initial_theme = initial_theme.clone();
             let composite_table = Arc::clone(&composite_table);
+            let auth = Arc::clone(&auth);
             task::spawn(async move {
-                handle_client(stream, peer_addr, root, capsule, shared, route_handler, initial_theme, composite_table).await;
+                handle_client(
+                    stream,
+                    peer_addr,
+                    root,
+                    capsule,
+                    shared,
+                    route_handler,
+                    initial_theme,
+                    composite_table,
+                    auth,
+                )
+                .await;
             });
         }
 
@@ -847,6 +896,161 @@ fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
     Ok(TcpListener::from(std_listener))
 }
 
+/// Auth session cookie name.
+const AUTH_COOKIE: &str = "rwire_auth";
+/// How long an issued login session stays valid.
+const AUTH_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Form-login auth gate: the expected credential plus the set of issued,
+/// unexpired session tokens (the cookie value clients present after logging in).
+pub(crate) struct AuthGate {
+    user: String,
+    password: String,
+    tokens: std::sync::Mutex<HashMap<String, std::time::Instant>>,
+}
+
+impl AuthGate {
+    fn new(user: String, password: String) -> Self {
+        Self {
+            user,
+            password,
+            tokens: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Whether the request carries a valid, unexpired session cookie.
+    fn has_session(&self, request: &str) -> bool {
+        let Some(token) = cookie_value(request, AUTH_COOKIE) else {
+            return false;
+        };
+        let mut tokens = self
+            .tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        tokens.retain(|_, issued| issued.elapsed() < AUTH_TTL);
+        tokens.contains_key(&token)
+    }
+
+    /// Validate posted credentials; on success, issue and store a session token.
+    /// Both field comparisons run regardless of the first, so timing does not
+    /// reveal which field was wrong.
+    fn login(&self, body: &str) -> Option<String> {
+        let mut user = None;
+        let mut password = None;
+        for pair in body.split('&') {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            match key {
+                "username" => user = Some(url_decode(value)),
+                "password" => password = Some(url_decode(value)),
+                _ => {}
+            }
+        }
+        let user_ok = ct_eq(user?.as_bytes(), self.user.as_bytes());
+        let pass_ok = ct_eq(password?.as_bytes(), self.password.as_bytes());
+        if user_ok & pass_ok {
+            let token = generate_token();
+            self.tokens
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(token.clone(), std::time::Instant::now());
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    /// Invalidate the session presented by this request, if any.
+    fn logout(&self, request: &str) {
+        if let Some(token) = cookie_value(request, AUTH_COOKIE) {
+            self.tokens
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&token);
+        }
+    }
+}
+
+/// Constant-time byte equality (avoids leaking the credential via timing).
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Extract a cookie value by name from a raw HTTP request.
+fn cookie_value(request: &str, name: &str) -> Option<String> {
+    let header = extract_cookie_from_request(request)?;
+    for part in header.split(';') {
+        if let Some(rest) = part.trim().strip_prefix(name) {
+            if let Some(value) = rest.strip_prefix('=') {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Percent-decode an `application/x-www-form-urlencoded` field value.
+fn url_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                let hi = char::from(bytes[i + 1]).to_digit(16);
+                let lo = char::from(bytes[i + 2]).to_digit(16);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi * 16 + lo) as u8);
+                    i += 3;
+                } else {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Mint a 256-bit random session token (hex) from the OS CSPRNG. Falls back to a
+/// weaker time-based token only if `/dev/urandom` is unavailable.
+fn generate_token() -> String {
+    use std::fmt::Write as _;
+    use std::io::Read as _;
+    let mut buf = [0u8; 32];
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .is_ok()
+    {
+        let mut token = String::with_capacity(64);
+        for byte in buf {
+            let _ = write!(token, "{byte:02x}");
+        }
+        token
+    } else {
+        crate::session::SessionId::generate().as_str().to_string()
+    }
+}
+
+/// Parse the method and path from the request line (`"GET /path HTTP/1.1"`).
+fn request_line(request: &str) -> (&str, &str) {
+    let line = request.lines().next().unwrap_or("");
+    let mut parts = line.split(' ');
+    (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
+}
+
+/// Return the body that follows the header terminator, if present.
+fn request_body(request: &str) -> &str {
+    request.split_once("\r\n\r\n").map_or("", |(_, body)| body)
+}
+
 /// Extract Cookie header value from HTTP request.
 fn extract_cookie_from_request(request: &str) -> Option<String> {
     for line in request.lines() {
@@ -867,6 +1071,7 @@ async fn handle_client<F>(
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
+    auth: Arc<Option<AuthGate>>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -882,28 +1087,88 @@ async fn handle_client<F>(
 
     let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
 
+    // Auth gate (page + WebSocket): handle the login lifecycle and reject any
+    // request that lacks a valid session cookie.
+    if let Some(gate) = auth.as_ref() {
+        let (method, path) = request_line(&peek_str);
+        let is_ws = capsule::is_websocket_upgrade(&peek_str);
+
+        if method == "POST" && path == "/login" {
+            // Drain the request (headers + small form body) before responding.
+            let mut buf = vec![0u8; n];
+            let _ = stream.read_exact(&mut buf).await;
+            let request = String::from_utf8_lossy(&buf);
+            if let Some(token) = gate.login(request_body(&request)) {
+                println!("[{peer_addr}] login OK");
+                let cookie = format!(
+                    "{AUTH_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+                    AUTH_TTL.as_secs()
+                );
+                let _ = capsule::serve_redirect(stream, "/", Some(&cookie)).await;
+            } else {
+                println!("[{peer_addr}] login failed");
+                let _ = capsule::serve_login(stream, true).await;
+            }
+            return;
+        }
+
+        if method == "GET" && path == "/logout" {
+            gate.logout(&peek_str);
+            let mut buf = vec![0u8; n];
+            let _ = stream.read_exact(&mut buf).await;
+            let expired = format!("{AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+            let _ = capsule::serve_redirect(stream, "/", Some(&expired)).await;
+            return;
+        }
+
+        if !gate.has_session(&peek_str) {
+            if is_ws {
+                println!("[{peer_addr}] WebSocket rejected (no session)");
+                let _ = capsule::serve_unauthorized(stream).await;
+            } else {
+                let mut buf = vec![0u8; n];
+                let _ = stream.read_exact(&mut buf).await;
+                let _ = capsule::serve_login(stream, false).await;
+            }
+            return;
+        }
+        // Valid session: fall through to normal capsule/WebSocket handling.
+    }
+
     // Extract session ID from cookie, or generate new one
-    let (session_id, is_new_session) = if let Some(cookie_value) = extract_cookie_from_request(&peek_str) {
-        if let Some(sid) = SessionId::from_cookie(&cookie_value) {
-            println!("[{}] Found session: {}", peer_addr, sid);
-            (sid, false)
+    let (session_id, is_new_session) =
+        if let Some(cookie_value) = extract_cookie_from_request(&peek_str) {
+            if let Some(sid) = SessionId::from_cookie(&cookie_value) {
+                println!("[{}] Found session: {}", peer_addr, sid);
+                (sid, false)
+            } else {
+                let sid = SessionId::generate();
+                println!("[{}] New session (no valid cookie): {}", peer_addr, sid);
+                (sid, true)
+            }
         } else {
             let sid = SessionId::generate();
-            println!("[{}] New session (no valid cookie): {}", peer_addr, sid);
+            println!("[{}] New session: {}", peer_addr, sid);
             (sid, true)
-        }
-    } else {
-        let sid = SessionId::generate();
-        println!("[{}] New session: {}", peer_addr, sid);
-        (sid, true)
-    };
+        };
 
     // Check if this is a WebSocket upgrade request
     if capsule::is_websocket_upgrade(&peek_str) {
         println!("[{}] WebSocket connection", peer_addr);
         match accept_async(stream).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(ws_stream, peer_addr, root, shared, session_id, route_handler, initial_theme, composite_table).await {
+                if let Err(e) = handle_websocket(
+                    ws_stream,
+                    peer_addr,
+                    root,
+                    shared,
+                    session_id,
+                    route_handler,
+                    initial_theme,
+                    composite_table,
+                )
+                .await
+                {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
                 }
             }
@@ -1105,10 +1370,9 @@ where
     // Pre-populate theme state with initial value (before state initialization)
     if let Some(ref theme) = initial_theme {
         use crate::theme::Theme;
-        conn_state.states.insert(
-            TypeId::of::<Theme>(),
-            Box::new(theme.as_ref().clone()),
-        );
+        conn_state
+            .states
+            .insert(TypeId::of::<Theme>(), Box::new(theme.as_ref().clone()));
     }
 
     // Restore cached session state if available, otherwise initialize fresh
@@ -1159,7 +1423,8 @@ where
         let mut ctx = BuildContext::new();
 
         // Acquire read lock on shared cache
-        let cache_guard = shared.shared_cache
+        let cache_guard = shared
+            .shared_cache
             .read()
             .map_err(|_| "shared cache lock poisoned")?;
 
@@ -1238,7 +1503,7 @@ where
         // the affected state type and push the diff. Per-region hash dedup keeps
         // unchanged renders off the wire.
         let read_result = if broadcast_open {
-            use futures::future::{Either, select};
+            use futures::future::{select, Either};
             let read_fut = timeout(HEARTBEAT_INTERVAL, read.next());
             let bcast_fut = broadcast_rx.recv();
             futures::pin_mut!(read_fut, bcast_fut);
@@ -1248,14 +1513,20 @@ where
                     broadcast_open = false;
                     continue;
                 }
-                Either::Right((Ok(BroadcastMsg::StateChanged { key, state_type_id, changes }), _)) => {
+                Either::Right((
+                    Ok(BroadcastMsg::StateChanged {
+                        key,
+                        state_type_id,
+                        changes,
+                    }),
+                    _,
+                )) => {
                     let update = {
-                        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                            conn_state
-                                .states
-                                .iter()
-                                .map(|(k, v)| (*k, v.as_ref()))
-                                .collect();
+                        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
+                            .states
+                            .iter()
+                            .map(|(k, v)| (*k, v.as_ref()))
+                            .collect();
 
                         // Keyed (persisted) updates read the authoritative copy
                         // from the shared cache; keyless (global) updates render
@@ -1338,7 +1609,8 @@ where
 
                         if let Some(key) = &cache_key {
                             // Shared/persisted: get from shared cache, execute, write back
-                            let mut cache = shared.shared_cache
+                            let mut cache = shared
+                                .shared_cache
                                 .write()
                                 .map_err(|_| "shared cache lock poisoned")?;
                             let state = cache
@@ -1382,9 +1654,12 @@ where
                         let update = {
                             // Acquire read lock on shared cache (if needed)
                             let cache_guard = if cache_key.is_some() {
-                                Some(shared.shared_cache
-                                    .read()
-                                    .map_err(|_| "shared cache lock poisoned")?)
+                                Some(
+                                    shared
+                                        .shared_cache
+                                        .read()
+                                        .map_err(|_| "shared cache lock poisoned")?,
+                                )
                             } else {
                                 None
                             };
@@ -1461,12 +1736,11 @@ where
                         // Re-render synced elements
                         let changes = handler.changes();
                         let update = {
-                            let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                                conn_state
-                                    .states
-                                    .iter()
-                                    .map(|(k, v)| (*k, v.as_ref()))
-                                    .collect();
+                            let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
+                                .states
+                                .iter()
+                                .map(|(k, v)| (*k, v.as_ref()))
+                                .collect();
 
                             build_synced_update_with_known_symbols(
                                 &conn_state.synced_elements,
@@ -1513,6 +1787,48 @@ where
 }
 
 #[cfg(test)]
+mod auth_tests {
+    use super::{request_body, request_line, url_decode, AuthGate};
+
+    #[test]
+    fn url_decode_handles_plus_and_percent() {
+        assert_eq!(url_decode("hello"), "hello");
+        assert_eq!(url_decode("a+b"), "a b");
+        assert_eq!(url_decode("p%40ss%2Fword"), "p@ss/word");
+    }
+
+    #[test]
+    fn request_line_and_body_parse() {
+        let req = "POST /login HTTP/1.1\r\nHost: x\r\n\r\nusername=a&password=b";
+        assert_eq!(request_line(req), ("POST", "/login"));
+        assert_eq!(request_body(req), "username=a&password=b");
+        assert_eq!(request_line("GET / HTTP/1.1\r\n\r\n"), ("GET", "/"));
+    }
+
+    #[test]
+    fn login_issues_token_only_for_correct_credentials() {
+        let gate = AuthGate::new("admin".to_string(), "secret".to_string());
+        assert!(gate.login("username=admin&password=secret").is_some());
+        assert!(gate.login("username=admin&password=wrong").is_none());
+        assert!(gate.login("username=other&password=secret").is_none());
+        assert!(gate.login("password=secret").is_none());
+    }
+
+    #[test]
+    fn session_valid_only_with_issued_cookie() {
+        let gate = AuthGate::new("admin".to_string(), "secret".to_string());
+        let token = gate.login("username=admin&password=secret").expect("login");
+        let signed = format!("GET / HTTP/1.1\r\nCookie: rwire_auth={token}\r\n\r\n");
+        assert!(gate.has_session(&signed));
+        assert!(!gate.has_session("GET / HTTP/1.1\r\n\r\n"));
+        assert!(!gate.has_session("GET / HTTP/1.1\r\nCookie: rwire_auth=forged\r\n\r\n"));
+        // Logout invalidates the token.
+        gate.logout(&signed);
+        assert!(!gate.has_session(&signed));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1553,7 +1869,10 @@ mod tests {
 
     #[test]
     fn shared_cache_key_per_storage_type() {
-        assert_eq!(shared_cache_key(StorageType::Memory, Some("t"), "sess"), None);
+        assert_eq!(
+            shared_cache_key(StorageType::Memory, Some("t"), "sess"),
+            None
+        );
         assert_eq!(
             shared_cache_key(StorageType::Persisted, Some("notes"), "sess"),
             Some("notes:sess".to_string())
@@ -1763,7 +2082,9 @@ mod tests {
         let conn = store.connection();
         let conn = conn.lock().unwrap();
         let value: i32 = conn
-            .query_row("SELECT value FROM counters WHERE id = 'test1'", [], |row| row.get(0))
+            .query_row("SELECT value FROM counters WHERE id = 'test1'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(value, 42);
     }
@@ -1800,7 +2121,10 @@ mod tests {
         // Multiple cookies
         let request = "GET / HTTP/1.1\r\nCookie: foo=bar; rwire_sid=xyz789; other=value\r\n\r\n";
         let cookie = super::extract_cookie_from_request(request);
-        assert_eq!(cookie, Some("foo=bar; rwire_sid=xyz789; other=value".to_string()));
+        assert_eq!(
+            cookie,
+            Some("foo=bar; rwire_sid=xyz789; other=value".to_string())
+        );
     }
 
     #[test]
