@@ -1288,6 +1288,64 @@ pub fn lookup_util_css(code: u16) -> Option<&'static str> {
         .map(|(_, css)| *css)
 }
 
+/// Identifies a single class-referenced CSS rule for lazy (per-connection)
+/// delivery via the `STYLE_DEF` opcode.
+///
+/// Composites are intentionally excluded: composite ids are only created by the
+/// startup render's pattern analysis, so the set of emittable `.c{id}` classes is
+/// fixed at startup and their CSS stays in the static capsule. See
+/// `docs/tree-shaking-redesign.md` (Phase 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum StyleKey {
+    /// `.u{code}` utility class.
+    Util(u16),
+    /// `.h{pc}u{st}` pseudo-class rule.
+    Pseudo(u8, u16),
+    /// `.b{bp}u{st}` responsive rule (wrapped in `@media`).
+    Breakpoint(u8, u16),
+}
+
+impl StyleKey {
+    /// Render this key as a complete CSS rule (selector + declaration), matching
+    /// the bulk generators (`generate_utility_css`/`generate_pseudo_css`/
+    /// `generate_breakpoint_css`). Returns `None` if the token has no declaration.
+    pub fn to_css_rule(self) -> Option<String> {
+        match self {
+            StyleKey::Util(code) => {
+                let decl = lookup_util_css(code)?;
+                Some(format!(".u{}{{{}}}", code, decl))
+            }
+            StyleKey::Pseudo(pc, st) => {
+                let decl = lookup_util_css(st)?;
+                if decl.is_empty() {
+                    return None;
+                }
+                let selector = PC_MAPPINGS
+                    .iter()
+                    .find(|(c, _)| *c == pc)
+                    .map(|(_, s)| *s)
+                    .unwrap_or("");
+                Some(format!(".h{}u{}{}{{{}}}", pc, st, selector, decl))
+            }
+            StyleKey::Breakpoint(bp, st) => {
+                let decl = lookup_util_css(st)?;
+                if decl.is_empty() {
+                    return None;
+                }
+                let min_width = BP_MAPPINGS
+                    .iter()
+                    .find(|(c, _)| *c == bp)
+                    .map(|(_, s)| *s)
+                    .unwrap_or("0");
+                Some(format!(
+                    "@media(min-width:{}px){{.b{}u{}{{{}}}}}",
+                    min_width, bp, st, decl
+                ))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

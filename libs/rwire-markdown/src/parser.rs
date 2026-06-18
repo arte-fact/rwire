@@ -342,22 +342,6 @@ fn slugify(text: &str) -> String {
         .join("-")
 }
 
-/// All element types the markdown parser can produce.
-///
-/// Use with `CapsuleConfig::extra_elements()` to ensure tree-shaking
-/// includes these types even if the startup page has no tables/lists/etc.
-pub fn markdown_element_types() -> Vec<El> {
-    vec![
-        El::Div, El::Span, El::P, El::A, El::Img,
-        El::H1, El::H2, El::H3,
-        El::Pre, El::Code,
-        El::Ul, El::Ol, El::Li,
-        El::Em, El::Strong,
-        El::Blockquote, El::Hr,
-        El::Table, El::Thead, El::Tbody, El::Tr, El::Th, El::Td,
-    ]
-}
-
 fn heading_level_to_u8(level: HeadingLevel) -> u8 {
     match level {
         HeadingLevel::H1 => 1,

@@ -21,7 +21,7 @@
 
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder};
+use rwire::{el, El, ElementBuilder, Style};
 use std::borrow::Cow;
 
 /// Progress bar builder.
@@ -106,10 +106,14 @@ impl Progress {
             container = container.at_str(At::AriaLabel, &label_text);
         }
 
-        // Progress bar inner element - width% must remain dynamic
+        // Progress bar inner element. The width is data-driven so it uses the
+        // typed `Style` value builder (not a raw `style` attr); a min-width token
+        // keeps a sliver visible at 0%. Rounded to one decimal so sub-percent
+        // jitter does not churn the bytes pushed on every re-render — identical
+        // rounded values hash-dedup to no update at all.
         let bar = el(El::Div)
             .st([St::HFull, St::BgPrimary, St::RoundedFull, St::TransitionAll, St::MinW05rem])
-            .attr("style", &format!("width:{}%", percentage));
+            .style(Style::new().width(&format!("{percentage:.1}%")));
 
         container.append([bar])
     }

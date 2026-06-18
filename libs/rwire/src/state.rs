@@ -462,6 +462,14 @@ pub enum StorageType {
     Memory,
     /// Database-backed state (survives disconnects)
     Persisted,
+    /// Process-global in-memory state, shared by every connection.
+    ///
+    /// One instance exists for the whole server (not one per connection like
+    /// `Memory`), but it is never persisted to a database like `Persisted`.
+    /// Ideal for live server-wide data such as metrics polled by a background
+    /// task. Mutate from a handler (`&mut T`) or, off-connection, via
+    /// [`SharedServerState::update_shared`](crate::SharedServerState::update_shared).
+    Shared,
 }
 
 // ============================================================================
@@ -580,6 +588,15 @@ pub struct HandlerSpec {
     /// Debounce delay in milliseconds (0 = no debounce).
     /// When > 0, uses BIND_DEBOUNCED opcode instead of BIND_REMOTE.
     pub debounce_ms: u16,
+    /// Stable, content-derived handler identity (FNV-1a of the handler's
+    /// module path + name, set by the `#[handler]` macro).
+    ///
+    /// Sent on the wire instead of a positional table index, so a binding maps
+    /// to the same id across renders, restarts, and reconnects — the basis for
+    /// reusing DOM nodes (morphing) without misrouting events. `0` = unset
+    /// (handlers built without the macro); such handlers fall back to a
+    /// content hash at registration time.
+    pub handler_id: u32,
 }
 
 impl HandlerSpec {
@@ -605,6 +622,7 @@ impl HandlerSpec {
             param_bytes: None,
             changes,
             debounce_ms: 0,
+            handler_id: 0,
         }
     }
 
@@ -634,6 +652,7 @@ impl HandlerSpec {
             param_bytes: None,
             changes,
             debounce_ms: 0,
+            handler_id: 0,
         }
     }
 
@@ -646,6 +665,7 @@ impl HandlerSpec {
             param_bytes: None,
             changes: ChangeSet::all(),
             debounce_ms: 0,
+            handler_id: 0,
         }
     }
 
@@ -678,6 +698,17 @@ impl HandlerSpec {
         self
     }
 
+    /// Set the stable handler id (called by the `#[handler]` macro).
+    pub fn with_handler_id(mut self, id: u32) -> Self {
+        self.handler_id = id;
+        self
+    }
+
+    /// The stable handler id, or `0` if it was not assigned by the macro.
+    pub fn handler_id(&self) -> u32 {
+        self.handler_id
+    }
+
     /// Get the state type ID.
     pub fn state_type_id(&self) -> Option<TypeId> {
         self.state_type_id
@@ -687,6 +718,39 @@ impl HandlerSpec {
     pub fn remote_handler(&self) -> Option<&HandlerFn> {
         self.remote_handler.as_ref()
     }
+}
+
+/// Largest value the 3-byte wire varint can carry (see `protocol::varint`).
+///
+/// Handler ids travel as varints in bind/event frames, so they must fit this
+/// range — a wider value would be silently truncated on the wire and never
+/// resolve back to its map entry.
+pub const HANDLER_ID_MAX: u32 = 0x0040_0000 - 1; // 22-bit space, < VARINT_MAX
+
+/// Compute a stable handler id from a handler's module path and name.
+///
+/// FNV-1a (32-bit) over `"<module>::<name>"`, folded into the wire-varint range
+/// ([`HANDLER_ID_MAX`]). Deterministic across renders, process restarts, and
+/// reconnects, so a binding resolves to the same id over time. Used by the
+/// `#[handler]` macro via `module_path!()` + the fn name. Never returns `0`
+/// (which is reserved for "unset").
+#[must_use]
+pub fn stable_handler_id(module: &str, name: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mix = |h: &mut u32, b: u8| {
+        *h ^= u32::from(b);
+        *h = h.wrapping_mul(0x0100_0193);
+    };
+    for b in module.bytes() {
+        mix(&mut h, b);
+    }
+    mix(&mut h, b':');
+    mix(&mut h, b':');
+    for b in name.bytes() {
+        mix(&mut h, b);
+    }
+    let h = h & HANDLER_ID_MAX;
+    if h == 0 { 1 } else { h }
 }
 
 impl std::fmt::Debug for HandlerSpec {

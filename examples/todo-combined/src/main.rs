@@ -278,18 +278,12 @@ fn build_persisted_column() -> ElementBuilder {
 // Renderers
 // ============================================================================
 
-// NOTE: The framework does NOT properly support nested renderers during updates!
-// See docs/architecture-state.md for details.
-//
-// When a parent renderer re-renders, it clears its wrapper's children.
-// If the parent contains a nested renderer, that nested wrapper is destroyed.
-// The nested renderer's update then tries to find a non-existent element.
-//
-// WORKAROUND: Keep renderers flat (no nested renderers).
-// Split logic into separate renderers that are siblings, not nested.
+// NOTE: Nested renderers now have protocol-level support via the CREATE_SYNCED
+// opcode (see libs/rwire/tests/nested_renderer.rs). This example still keeps
+// renderers flat (siblings, not nested) for clarity and because it's the
+// simplest pattern — not because nesting is unsupported.
 
-// Memory todo - split into 3 renderers (items list, count, empty state)
-// These are SIBLINGS, not nested, to avoid the nested renderer bug.
+// Memory todo - split into 3 sibling renderers (items list, count, empty state).
 
 #[renderer]
 fn render_memory_items(_state: &MemoryTodoState) -> ElementBuilder {

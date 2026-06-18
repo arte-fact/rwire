@@ -16,6 +16,8 @@ use super::opcodes::{
     SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
+use crate::style_tokens::StyleKey;
+use std::collections::BTreeSet;
 
 /// Sentinel ref value for document.body in APPEND opcodes.
 pub const BODY_REF: u32 = 0xFFFF;
@@ -28,6 +30,9 @@ pub struct OpcodeBuffer {
     buf: BytesMut,
     next_ref: u32,
     next_symbol: u32,
+    /// Class-referenced style rules emitted into this buffer, for lazy CSS
+    /// delivery (`STYLE_DEF`). Composites are excluded (their CSS is static).
+    referenced_styles: BTreeSet<StyleKey>,
 }
 
 impl OpcodeBuffer {
@@ -36,7 +41,13 @@ impl OpcodeBuffer {
             buf: BytesMut::with_capacity(256),
             next_ref: 0,
             next_symbol: SYMBOL_SESSION_START as u32,
+            referenced_styles: BTreeSet::new(),
         }
+    }
+
+    /// The set of class-referenced style rules emitted so far (for `STYLE_DEF`).
+    pub fn referenced_styles(&self) -> &BTreeSet<StyleKey> {
+        &self.referenced_styles
     }
 
     /// Get the current ref count.
@@ -382,6 +393,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(STYLE_UTIL);
         write_varint(&mut self.buf, ref_idx);
         write_varint(&mut self.buf, util as u32);
+        self.referenced_styles.insert(StyleKey::Util(util));
         self
     }
 
@@ -410,6 +422,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(utils.len() as u8);
         for &util in utils {
             write_varint(&mut self.buf, util as u32);
+            self.referenced_styles.insert(StyleKey::Util(util));
         }
         self
     }
@@ -439,6 +452,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(st_tokens.len() as u8);
         for &token in st_tokens {
             write_varint(&mut self.buf, token as u32);
+            self.referenced_styles.insert(StyleKey::Pseudo(pc, token));
         }
         self
     }
@@ -458,6 +472,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(st_tokens.len() as u8);
         for &token in st_tokens {
             write_varint(&mut self.buf, token as u32);
+            self.referenced_styles.insert(StyleKey::Breakpoint(bp, token));
         }
         self
     }
@@ -538,6 +553,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(idx);
         write_varint(&mut self.buf, st as u32);
         self.buf.put_u8(if invert { 1 } else { 0 });
+        self.referenced_styles.insert(StyleKey::Util(st));
         self
     }
 
@@ -573,6 +589,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(idx);
         self.buf.put_u8(match_val);
         write_varint(&mut self.buf, st as u32);
+        self.referenced_styles.insert(StyleKey::Util(st));
         self
     }
 

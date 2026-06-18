@@ -1,7 +1,7 @@
 //! Tests for the element builder API.
 
 use rwire::builder::BuildContext;
-use rwire::{el, El, TokenInventory};
+use rwire::{el, El};
 
 #[test]
 fn test_el_builder_basic() {
@@ -281,41 +281,3 @@ fn test_integer_text_encoding() {
     );
 }
 
-#[test]
-fn test_token_inventory_merges_all_fields() {
-    use rwire::{At, Av, Ev};
-
-    static INV: TokenInventory = TokenInventory {
-        styles: &[0x01, 0x02],
-        pseudo_pairs: &[(1, 0x10)],
-        breakpoint_pairs: &[(2, 0x20)],
-        elements: &[El::Textarea as u8, El::Select as u8],
-        events: &[Ev::Input as u8, Ev::Change as u8],
-        attr_keys: &[At::Placeholder as u8, At::Disabled as u8, At::Role as u8],
-        attr_values: &[Av::Text as u8, Av::RoleDialog as u8],
-    };
-
-    let elem = el(El::Div).with_token_inventory(&INV);
-
-    let mut ctx = BuildContext::new();
-    let state: () = ();
-    ctx.collect_symbols(&elem, &state);
-
-    // Elements: Div (from el()) + Textarea + Select (from inventory)
-    assert!(ctx.used_elements().contains(&El::Div.as_u8()));
-    assert!(ctx.used_elements().contains(&El::Textarea.as_u8()), "El::Textarea missing from inventory merge");
-    assert!(ctx.used_elements().contains(&El::Select.as_u8()), "El::Select missing from inventory merge");
-
-    // Events from inventory
-    assert!(ctx.used_events().contains(&Ev::Input.as_u8()), "Ev::Input missing from inventory merge");
-    assert!(ctx.used_events().contains(&Ev::Change.as_u8()), "Ev::Change missing from inventory merge");
-
-    // Attr keys from inventory
-    assert!(ctx.used_attr_keys().contains(&At::Placeholder.as_u8()), "At::Placeholder missing");
-    assert!(ctx.used_attr_keys().contains(&At::Disabled.as_u8()), "At::Disabled missing");
-    assert!(ctx.used_attr_keys().contains(&At::Role.as_u8()), "At::Role missing");
-
-    // Attr values from inventory
-    assert!(ctx.used_attr_values().contains(&Av::Text.as_u8()), "Av::Text missing");
-    assert!(ctx.used_attr_values().contains(&Av::RoleDialog.as_u8()), "Av::RoleDialog missing");
-}

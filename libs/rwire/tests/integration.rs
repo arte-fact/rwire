@@ -121,9 +121,10 @@ async fn test_server_accepts_http() {
     server_task.cancel().await;
 }
 
-/// Test that capsule contains tree-shaken element types
+/// The small u8 element map is shipped whole (no element tree-shaking), so an
+/// element type reached only through a plain helper can never be missing.
 #[async_std::test]
-async fn test_capsule_tree_shaking() {
+async fn test_capsule_ships_all_elements() {
     let server_task = task::spawn(async {
         let _ = Server::bind("127.0.0.1:19002")
             .unwrap()
@@ -142,10 +143,11 @@ async fn test_capsule_tree_shaking() {
 
     let response_str = read_full_http_response(&mut stream).await;
 
-    // Simple component only uses div - should only have div in mappings
+    // `build_simple` only renders a div, yet the full map is shipped — button and
+    // span are present even though unused.
     assert!(response_str.contains("0:'div'"));
-    // Should NOT contain button since we don't use it
-    assert!(!response_str.contains("2:'button'"));
+    assert!(response_str.contains("2:'button'"), "full map must include button");
+    assert!(response_str.contains("1:'span'"), "full map must include span");
 
     drop(stream);
     server_task.cancel().await;

@@ -7,11 +7,10 @@
 //! - `#[renderer]` - transforms a render function into a synced element factory
 
 mod schema_gen;
-mod token_scanner;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, FnArg, ItemFn, ItemImpl, Type};
+use syn::{parse_macro_input, DeriveInput, FnArg, ItemFn, Type};
 
 /// Derive macro for the `ClientState` marker trait (deprecated).
 ///
@@ -84,6 +83,15 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         )
     };
 
+    // Shared state is keyed by its table name; default it to the struct name so
+    // `#[storage(shared)]` needs no explicit `table = "..."`.
+    let is_shared = storage_type.to_string().contains("Shared");
+    let table_name = if table_name.is_empty() && is_shared {
+        name.to_string()
+    } else {
+        table_name
+    };
+
     // Generate the State trait implementation
     let table_name_str = if table_name.is_empty() {
         quote!("")
@@ -135,6 +143,39 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    // Emit `FIELD_<NAME>: u8` field-index constants for named-field structs, so
+    // renderers/handlers can declare fine-grained dependencies/changes via
+    // `RendererDeps::from_fields` / `ChangeSet::from_fields`. Bit indices match
+    // the ChangeSet/RendererDeps u64 mask (effective for the first 64 fields).
+    let field_consts: Vec<proc_macro2::TokenStream> = match &input.data {
+        syn::Data::Struct(data) => data
+            .fields
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                f.ident.as_ref().map(|id| {
+                    let const_name = syn::Ident::new(
+                        &format!("FIELD_{}", id.to_string().to_uppercase()),
+                        id.span(),
+                    );
+                    let idx = i as u8;
+                    quote! { pub const #const_name: u8 = #idx; }
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    let field_consts_impl = if field_consts.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            impl #impl_generics #name #ty_generics #where_clause {
+                #(#field_consts)*
+            }
+        }
+    };
+
     let expanded = quote! {
         impl #impl_generics rwire::State for #name #ty_generics #where_clause {
             const STORAGE_TYPE: rwire::StorageType = #storage_type;
@@ -145,6 +186,8 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         #marker_trait_impl
 
         #schema_impl
+
+        #field_consts_impl
     };
 
     TokenStream::from(expanded)
@@ -163,6 +206,8 @@ fn parse_storage_attr(attr: &syn::Attribute) -> (proc_macro2::TokenStream, Strin
             storage_type = quote!(rwire::StorageType::Memory);
         } else if meta.path.is_ident("persisted") {
             storage_type = quote!(rwire::StorageType::Persisted);
+        } else if meta.path.is_ident("shared") {
+            storage_type = quote!(rwire::StorageType::Shared);
         } else if meta.path.is_ident("table") {
             let _: Token![=] = meta.input.parse()?;
             let lit: syn::LitStr = meta.input.parse()?;
@@ -258,9 +303,26 @@ pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
         None
     };
 
-    // Always re-render: every handler triggers all synced elements.
-    // This avoids fragile static analysis of field access patterns.
-    let changes_expr = quote! { rwire::ChangeSet::all() };
+    // Infer which state fields this handler touches so only renderers depending
+    // on those fields re-render. Over-approximates (any `param.field` access
+    // counts as changed) and falls back to `all()` if the state param is used
+    // opaquely — both keep it correct.
+    let changes_expr = {
+        let param_ident = match &param_pat {
+            syn::Pat::Ident(pi) => Some(pi.ident.clone()),
+            _ => None,
+        };
+        match param_ident
+            .as_ref()
+            .and_then(|p| infer_accessed_fields(block, p))
+        {
+            Some(fields) if !fields.is_empty() => {
+                let consts = field_index_consts(&state_type, &fields);
+                quote! { rwire::ChangeSet::from_fields(&[#(#consts),*]) }
+            }
+            _ => quote! { rwire::ChangeSet::all() },
+        }
+    };
 
     // Check if we have a 2-parameter handler with EventContext
     if has_context_param {
@@ -271,6 +333,7 @@ pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     const CHANGES: rwire::ChangeSet = #changes_expr;
                     fn #inner_name(#param_pat: &mut #state_type, #ctx_pat: &rwire::EventContext) #block
                     rwire::HandlerSpec::from_fn_with_context_and_changes::<#state_type>(#inner_name, CHANGES)
+                        .with_handler_id(rwire::stable_handler_id(module_path!(), stringify!(#fn_name)))
                 }
             };
             return TokenStream::from(expanded);
@@ -283,6 +346,7 @@ pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
             const CHANGES: rwire::ChangeSet = #changes_expr;
             fn #inner_name(#param_pat: &mut #state_type) #block
             rwire::HandlerSpec::from_fn_with_changes::<#state_type>(#inner_name, CHANGES)
+                .with_handler_id(rwire::stable_handler_id(module_path!(), stringify!(#fn_name)))
         }
     };
 
@@ -381,6 +445,75 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     ElementBuilder::synced_with_deps::<Counter>(__render_count_inner, DEPS)
 /// }
 /// ```
+/// Infer which fields of `param` are accessed as `param.field` in `block`.
+///
+/// Returns `None` if `param` is used in any way we cannot statically track
+/// (passed by value/ref to a function, method call on the whole state, captured
+/// in a closure, shadowed, …). Callers treat `None` as "depends on / changes
+/// everything", which is the conservative, always-correct fallback.
+fn infer_accessed_fields(block: &syn::Block, param: &syn::Ident) -> Option<Vec<syn::Ident>> {
+    use syn::visit::Visit;
+
+    struct Collector<'a> {
+        param: &'a syn::Ident,
+        fields: Vec<syn::Ident>,
+        opaque: bool,
+    }
+
+    impl<'ast> Visit<'ast> for Collector<'_> {
+        fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+            if let syn::Expr::Path(path) = &*node.base {
+                if path.path.is_ident(self.param) {
+                    if let syn::Member::Named(name) = &node.member {
+                        if !self.fields.iter().any(|f| f == name) {
+                            self.fields.push(name.clone());
+                        }
+                        // Do not descend into the base: that would visit the
+                        // `param` ident and flag it as an opaque use.
+                        return;
+                    }
+                }
+            }
+            syn::visit::visit_expr_field(self, node);
+        }
+
+        fn visit_ident(&mut self, id: &'ast syn::Ident) {
+            if id == self.param {
+                self.opaque = true;
+            }
+        }
+    }
+
+    let mut collector = Collector {
+        param,
+        fields: Vec::new(),
+        opaque: false,
+    };
+    collector.visit_block(block);
+    if collector.opaque {
+        None
+    } else {
+        Some(collector.fields)
+    }
+}
+
+/// Map field idents to `<StateType>::FIELD_<NAME>` const references.
+fn field_index_consts(
+    state_type: &syn::Type,
+    fields: &[syn::Ident],
+) -> Vec<proc_macro2::TokenStream> {
+    fields
+        .iter()
+        .map(|f| {
+            let const_name = syn::Ident::new(
+                &format!("FIELD_{}", f.to_string().to_uppercase()),
+                f.span(),
+            );
+            quote! { <#state_type>::#const_name }
+        })
+        .collect()
+}
+
 #[proc_macro_attribute]
 pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);
@@ -415,22 +548,29 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
         _ => unreachable!(),
     };
 
-    // Always re-render: no dependency tracking needed.
-    // Every handler triggers all synced elements to re-render.
-    let deps_expr = quote! { rwire::RendererDeps::always() };
-
-    // Scan function body for St::*, .hover(), .sm() etc. tokens
-    // to build a compile-time token inventory for tree-shaking.
-    let body_tokens: proc_macro2::TokenStream = block.stmts.iter().map(|s| quote! { #s }).collect();
-    let scan = token_scanner::scan_tokens(&body_tokens);
-    let inventory_expr = token_scanner::generate_inventory(&scan);
+    // Infer the state fields this renderer reads so it only re-renders when one
+    // of them changes. Falls back to `always()` if the state param is used in a
+    // way we can't track (over-approximation keeps it correct).
+    let param_ident = match &param_pat {
+        syn::Pat::Ident(pi) => Some(pi.ident.clone()),
+        _ => None,
+    };
+    let deps_expr = match param_ident
+        .as_ref()
+        .and_then(|p| infer_accessed_fields(block, p))
+    {
+        Some(fields) if !fields.is_empty() => {
+            let consts = field_index_consts(&state_type, &fields);
+            quote! { rwire::RendererDeps::from_fields(&[#(#consts),*]) }
+        }
+        _ => quote! { rwire::RendererDeps::always() },
+    };
 
     let expanded = quote! {
         #vis fn #fn_name() -> rwire::ElementBuilder {
             const DEPS: rwire::RendererDeps = #deps_expr;
-            const TOKENS: rwire::TokenInventory = #inventory_expr;
             fn #inner_name(#param_pat: &#state_type) #return_type #block
-            rwire::ElementBuilder::synced_with_tokens::<#state_type>(#inner_name, DEPS, &TOKENS)
+            rwire::ElementBuilder::synced_with_storage::<#state_type>(#inner_name, DEPS)
         }
     };
 
@@ -565,15 +705,12 @@ pub fn derive_selector(input: TokenStream) -> TokenStream {
 
 /// Attribute macro for component impl blocks.
 ///
-/// Scans all method bodies in the impl block for style tokens (`St::*`),
-/// pseudo-class methods (`.hover()`, `.focus()`, etc.), and breakpoint
-/// methods (`.sm()`, `.md()`, etc.). Generates a compile-time
-/// `TokenInventory` that captures all tokens across every code branch.
-///
-/// The `build()` method's return value is automatically wrapped with
-/// `.with_token_inventory()` to attach the inventory to the output
-/// `ElementBuilder`, enabling complete tree-shaking without relying
-/// on default-state rendering alone.
+/// Now a pass-through: it used to scan method bodies into a compile-time
+/// `TokenInventory` for tree-shaking, but the framework no longer tree-shakes
+/// element/event/attr maps (shipped whole) or CSS rules (delivered lazily over
+/// the wire). It is kept as a no-op so existing `#[component]` annotations keep
+/// working and as a hook for future component-level expansion. See
+/// `docs/tree-shaking-redesign.md`.
 ///
 /// # Example
 ///
@@ -582,61 +719,13 @@ pub fn derive_selector(input: TokenStream) -> TokenStream {
 ///
 /// #[component]
 /// impl Button {
-///     pub fn compute_tokens(&self) -> Vec<St> {
-///         match self.intent {
-///             ButtonIntent::Primary => vec![St::BgPrimary],
-///             ButtonIntent::Destructive => vec![St::BgDestructive],
-///         }
-///     }
-///
 ///     pub fn build(self) -> ElementBuilder {
-///         el(El::Button).st(self.compute_tokens())
-///             .hover([St::BgPrimaryHover])
-///         // ↑ All St tokens, .hover(), .sm() etc. are discovered at compile time
+///         el(El::Button).st([St::BgPrimary]).hover([St::BgPrimaryHover])
 ///     }
 /// }
 /// ```
 #[proc_macro_attribute]
 pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut input = parse_macro_input!(item as ItemImpl);
-
-    // Scan ALL method bodies in the impl block for tokens
-    let all_methods_tokens: proc_macro2::TokenStream = input
-        .items
-        .iter()
-        .filter_map(|item| {
-            if let syn::ImplItem::Fn(method) = item {
-                Some(quote! { #method })
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let scan = token_scanner::scan_tokens(&all_methods_tokens);
-    let inventory_expr = token_scanner::generate_inventory(&scan);
-
-    // Find build() method and wrap its return value
-    for item in &mut input.items {
-        if let syn::ImplItem::Fn(method) = item {
-            if method.sig.ident == "build" {
-                let original_block = &method.block;
-                method.block = syn::parse_quote! {{
-                    let __component_result: rwire::ElementBuilder = #original_block;
-                    __component_result.with_token_inventory(&Self::__COMPONENT_TOKENS)
-                }};
-                break;
-            }
-        }
-    }
-
-    // Add the const inventory to the impl block
-    let const_item: syn::ImplItem = syn::parse_quote! {
-        /// Compile-time token inventory for tree-shaking (generated by `#[component]`).
-        #[doc(hidden)]
-        pub const __COMPONENT_TOKENS: rwire::TokenInventory = #inventory_expr;
-    };
-    input.items.push(const_item);
-
-    TokenStream::from(quote! { #input })
+    // Pass the impl block through unchanged.
+    item
 }

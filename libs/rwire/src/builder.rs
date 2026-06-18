@@ -38,17 +38,67 @@
 //! }
 //! ```
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use std::any::{Any, TypeId};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::action::{Selector, Target};
 use crate::attr_tokens::{At, Av};
 use crate::item_ref::ItemRef;
+use crate::protocol::opcodes::STYLE_DEF;
+use crate::protocol::varint::write_varint;
 use crate::protocol::{El, Ev, OpcodeBuffer};
-use crate::state::{ChangeSet, HandlerFn, HandlerSpec, Renderer, RendererDeps};
+use crate::state::{ChangeSet, HandlerFn, HandlerSpec, Renderer, RendererDeps, State, StorageType};
+use crate::style_tokens::StyleKey;
+
+/// Encode a `STYLE_DEF` opcode block carrying complete CSS rule strings.
+///
+/// Format: `[STYLE_DEF, count_varint, (rule_len_varint, rule_utf8){count}]`.
+fn encode_style_def(rules: &[String]) -> BytesMut {
+    let mut buf = BytesMut::new();
+    buf.put_u8(STYLE_DEF);
+    write_varint(&mut buf, rules.len() as u32);
+    for rule in rules {
+        write_varint(&mut buf, rule.len() as u32);
+        buf.put_slice(rule.as_bytes());
+    }
+    buf
+}
+
+/// Build the `STYLE_DEF` prefix for class-referenced rules in `referenced` that
+/// this connection (`sent`) has not yet received, marking them sent.
+///
+/// Returns empty bytes when there is nothing new. Prepend the result to a batch's
+/// body so each rule lands before (or with) the node that uses it. Used for both
+/// the initial DOM and every incremental update — see
+/// `docs/tree-shaking-redesign.md` (Phase 2).
+pub fn style_def_prefix(referenced: &BTreeSet<StyleKey>, sent: &mut HashSet<StyleKey>) -> BytesMut {
+    let mut new_rules: Vec<String> = Vec::new();
+    for &key in referenced {
+        // `insert` returns true the first time this connection sees the key.
+        if sent.insert(key) {
+            if let Some(rule) = key.to_css_rule() {
+                new_rules.push(rule);
+            }
+        }
+    }
+    if new_rules.is_empty() {
+        return BytesMut::new();
+    }
+    encode_style_def(&new_rules)
+}
+
+/// Prepend a (possibly empty) `STYLE_DEF` prefix to a body buffer.
+fn prepend(prefix: BytesMut, body: Bytes) -> Bytes {
+    if prefix.is_empty() {
+        return body;
+    }
+    let mut out = prefix;
+    out.extend_from_slice(&body);
+    out.freeze()
+}
 
 /// A typed attribute: enum key + enum value, enum key + symbol value, or bool attr.
 #[derive(Clone, Debug)]
@@ -116,45 +166,6 @@ pub fn el(el_type: El) -> ElementBuilder {
     ElementBuilder::new(el_type)
 }
 
-/// Static token inventory extracted from a renderer's source code at compile time.
-///
-/// The `#[renderer]` proc macro scans the function body for `St::Variant`,
-/// `.hover([...])`, `.sm([...])` etc. and generates a const inventory of all
-/// tokens referenced across every branch. Tree-shaking uses this inventory
-/// instead of relying solely on default-state rendering.
-#[derive(Debug)]
-pub struct TokenInventory {
-    /// All `St` tokens referenced in the renderer body (as u16 codes).
-    pub styles: &'static [u16],
-    /// Pseudo-class pairs from `.hover()`, `.focus()`, `.active()` etc.
-    /// Each entry is `(Pc code, St code)`.
-    pub pseudo_pairs: &'static [(u8, u16)],
-    /// Breakpoint pairs from `.sm()`, `.md()`, `.lg()`, `.xl()`.
-    /// Each entry is `(Bp code, St code)`.
-    pub breakpoint_pairs: &'static [(u8, u16)],
-    /// All `El` tokens referenced (element types, as u8 codes).
-    pub elements: &'static [u8],
-    /// All `Ev` tokens referenced (event types, as u8 codes).
-    pub events: &'static [u8],
-    /// All `At` tokens referenced (attribute keys, as u8 codes).
-    pub attr_keys: &'static [u8],
-    /// All `Av` tokens referenced (attribute values, as u8 codes).
-    pub attr_values: &'static [u8],
-}
-
-impl TokenInventory {
-    /// Empty inventory (no tokens discovered).
-    pub const EMPTY: Self = Self {
-        styles: &[],
-        pseudo_pairs: &[],
-        breakpoint_pairs: &[],
-        elements: &[],
-        events: &[],
-        attr_keys: &[],
-        attr_values: &[],
-    };
-}
-
 /// Trait for type-erased synced renderers.
 ///
 /// This trait allows renderers to be stored and invoked without knowing
@@ -168,20 +179,27 @@ pub trait SyncedRenderer: Send + Sync {
     fn state_type_id(&self) -> TypeId;
     /// Create a default state instance for this renderer's state type.
     fn create_default_state(&self) -> Box<dyn Any + Send + Sync>;
+    /// Storage class of this renderer's state (default: memory).
+    fn storage_type(&self) -> StorageType {
+        StorageType::Memory
+    }
+    /// Cache-key base for shared/persisted state (default: none).
+    fn table_name(&self) -> Option<&'static str> {
+        None
+    }
     /// Get the dependency information for this renderer.
     fn deps(&self) -> RendererDeps;
-    /// Get the static token inventory extracted at compile time.
-    ///
-    /// Contains all `St`, pseudo, and breakpoint tokens referenced in the
-    /// renderer source code, across all branches.
-    fn token_inventory(&self) -> &'static TokenInventory;
 }
 
 /// Implementation of SyncedRenderer for a specific state type.
 struct SyncedRendererImpl<S: Default + Send + Sync + 'static> {
     render: Renderer<S>,
     deps: RendererDeps,
-    tokens: &'static TokenInventory,
+    /// Storage class of S, so the connection can resolve where its state lives
+    /// (per-connection vs shared/persisted cache) even with no handler present.
+    storage_type: StorageType,
+    /// Cache-key base for shared/persisted state (the State `TABLE_NAME`).
+    table_name: Option<&'static str>,
 }
 
 impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S> {
@@ -193,7 +211,8 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
         Box::new(SyncedRendererImpl {
             render: self.render,
             deps: self.deps,
-            tokens: self.tokens,
+            storage_type: self.storage_type,
+            table_name: self.table_name,
         })
     }
 
@@ -205,12 +224,16 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
         Box::new(S::default())
     }
 
-    fn deps(&self) -> RendererDeps {
-        self.deps
+    fn storage_type(&self) -> StorageType {
+        self.storage_type
     }
 
-    fn token_inventory(&self) -> &'static TokenInventory {
-        self.tokens
+    fn table_name(&self) -> Option<&'static str> {
+        self.table_name
+    }
+
+    fn deps(&self) -> RendererDeps {
+        self.deps
     }
 }
 
@@ -289,9 +312,6 @@ pub struct ElementBuilder {
     pseudo_groups: Vec<(u8, Vec<u16>)>,
     /// Responsive breakpoint groups: (Bp code, St tokens)
     breakpoint_groups: Vec<(u8, Vec<u16>)>,
-    /// Component-level token inventory for deep tree-shaking.
-    /// Set by `#[component]` macro on component impl blocks.
-    component_tokens: Option<&'static TokenInventory>,
     /// Target bindings: (TypeId, St code, invert, default)
     target_bindings: Vec<TargetBinding>,
     /// Target toggles: (Ev, TypeId)
@@ -322,7 +342,6 @@ impl ElementBuilder {
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
             breakpoint_groups: Vec::new(),
-            component_tokens: None,
             target_bindings: Vec::new(),
             target_toggles: Vec::new(),
             selector_bindings: Vec::new(),
@@ -332,36 +351,54 @@ impl ElementBuilder {
         }
     }
 
-    /// Create a synced element that will re-render when state changes.
+    /// Create a synced element that re-renders on any state change (legacy).
     ///
-    /// This is the legacy method that always re-renders on any state change.
-    /// Prefer using `synced_with_tokens` for proper tree-shaking support.
+    /// Prefer `synced_with_deps` for fine-grained re-render filtering.
     pub fn synced<S: Default + Send + Sync + 'static>(render: Renderer<S>) -> Self {
-        Self::synced_with_tokens::<S>(render, RendererDeps::always(), &TokenInventory::EMPTY)
+        Self::synced_with_deps::<S>(render, RendererDeps::always())
     }
 
-    /// Create a synced element with explicit dependency tracking (legacy).
+    /// Create a memory-state synced element with explicit dependency tracking.
     ///
-    /// Prefer `synced_with_tokens` which also provides a token inventory
-    /// for tree-shaking.
+    /// Used for framework internals (e.g. Theme) and types that impl only the
+    /// legacy `MemoryState` marker.
     pub fn synced_with_deps<S: Default + Send + Sync + 'static>(
         render: Renderer<S>,
         deps: RendererDeps,
     ) -> Self {
-        Self::synced_with_tokens::<S>(render, deps, &TokenInventory::EMPTY)
+        Self::synced_from(Box::new(SyncedRendererImpl {
+            render,
+            deps,
+            storage_type: StorageType::Memory,
+            table_name: None,
+        }))
     }
 
-    /// Create a synced element with dependency tracking and token inventory.
+    /// Create a synced element carrying its state's storage class.
     ///
-    /// This is the primary constructor called by the `#[renderer]` macro.
-    /// The token inventory contains all `St`, pseudo, and breakpoint tokens
-    /// found in the renderer's source code (across all branches), enabling
-    /// tree-shaking without relying on default-state rendering alone.
-    pub fn synced_with_tokens<S: Default + Send + Sync + 'static>(
+    /// This is what the `#[renderer]` macro emits. Reading `S::STORAGE_TYPE` and
+    /// `S::TABLE_NAME` lets the connection resolve where a renderer's state lives
+    /// (per-connection memory vs. shared/persisted cache) even when no handler
+    /// references that state.
+    pub fn synced_with_storage<S: State + Default>(
         render: Renderer<S>,
         deps: RendererDeps,
-        tokens: &'static TokenInventory,
     ) -> Self {
+        let table_name = if S::TABLE_NAME.is_empty() {
+            None
+        } else {
+            Some(S::TABLE_NAME)
+        };
+        Self::synced_from(Box::new(SyncedRendererImpl {
+            render,
+            deps,
+            storage_type: S::STORAGE_TYPE,
+            table_name,
+        }))
+    }
+
+    /// Wrap a boxed synced renderer in a placeholder element.
+    fn synced_from(synced: Box<dyn SyncedRenderer>) -> Self {
         Self {
             el_type: El::Div, // Placeholder, will be replaced by rendered content
             text: None,
@@ -370,12 +407,11 @@ impl ElementBuilder {
             typed_attrs: Vec::new(),
             events: Vec::new(),
             children: Vec::new(),
-            synced: Some(Box::new(SyncedRendererImpl { render, deps, tokens })),
+            synced: Some(synced),
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
             breakpoint_groups: Vec::new(),
-            component_tokens: None,
             target_bindings: Vec::new(),
             target_toggles: Vec::new(),
             selector_bindings: Vec::new(),
@@ -930,16 +966,6 @@ impl ElementBuilder {
         &self.events
     }
 
-    /// Attach a compile-time token inventory to this element.
-    ///
-    /// Called by the `#[component]` macro on `build()` return values.
-    /// Enables tree-shaking to discover all tokens across all branches
-    /// of a component (not just the default configuration).
-    pub fn with_token_inventory(mut self, inv: &'static TokenInventory) -> Self {
-        self.component_tokens = Some(inv);
-        self
-    }
-
     /// Get the style utility tokens.
     pub fn get_style_utils(&self) -> &[u16] {
         &self.style_utils
@@ -1033,8 +1059,8 @@ pub struct BuildContext {
     buf: OpcodeBuffer,
     symbols: Vec<String>,
     symbol_map: HashMap<String, u32>,
-    /// Remote handlers (Memory/Persisted state)
-    handlers: Vec<HandlerFn>,
+    /// Remote handlers keyed by stable handler id (see [`crate::stable_handler_id`]).
+    handlers: HashMap<u32, HandlerFn>,
     synced_elements: Vec<SyncedElement>,
     next_synced_id: u32,
     used_elements: HashSet<u8>,
@@ -1140,7 +1166,7 @@ impl BuildContext {
             buf: OpcodeBuffer::new(),
             symbols: Vec::new(),
             symbol_map: HashMap::new(),
-            handlers: Vec::new(),
+            handlers: HashMap::new(),
             synced_elements: Vec::new(),
             next_synced_id: 0,
             used_elements: HashSet::new(),
@@ -1186,7 +1212,7 @@ impl BuildContext {
     pub fn build_word_table(&mut self) {
         // Sort words by frequency (most common first)
         let mut word_freq: Vec<_> = self.word_counts.drain().collect();
-        word_freq.sort_by(|a, b| b.1.cmp(&a.1));
+        word_freq.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         // Only include words that appear more than once or are short common words
         // Limit to 255 words (u8 index)
@@ -1317,17 +1343,12 @@ impl BuildContext {
         }
     }
 
-    fn register_remote_handler(&mut self, handler: HandlerFn) -> u32 {
-        // Check if handler is already registered (by comparing fn_id)
-        let new_id = handler.fn_id();
-        for (i, h) in self.handlers.iter().enumerate() {
-            if h.fn_id() == new_id {
-                return i as u32;
-            }
-        }
-        let idx = self.handlers.len() as u32;
-        self.handlers.push(handler);
-        idx
+    /// Register a handler under its stable id (idempotent), returning the id
+    /// to emit in the bind opcode.
+    fn register_remote_handler(&mut self, spec: &HandlerSpec, handler: &HandlerFn) -> u32 {
+        let id = wire_handler_id(spec, handler);
+        self.handlers.entry(id).or_insert_with(|| handler.clone());
+        id
     }
 
     /// Collect all symbols from an element tree (first pass).
@@ -1340,8 +1361,6 @@ impl BuildContext {
         if let Some(renderer) = &el.synced {
             // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
-            // Collect compile-time token inventory (covers all branches)
-            self.collect_from_inventory(renderer.token_inventory());
             if let Some(rendered) = renderer.render_with_state(state) {
                 self.collect_symbols(&rendered, state);
             }
@@ -1401,10 +1420,6 @@ impl BuildContext {
                 }
             }
         }
-        // Merge component-level token inventory (from #[component] macro)
-        if let Some(inv) = el.component_tokens {
-            self.collect_from_inventory(inv);
-        }
         // Register target/selector types for tree-shaking
         self.register_client_actions(el);
         // Process synced children - just track the ID counter, no symbol interning needed
@@ -1431,8 +1446,6 @@ impl BuildContext {
         if let Some(renderer) = &el.synced {
             // Track the span wrapper element type (still used by CREATE_SYNCED)
             self.used_elements.insert(El::Span.as_u8());
-            // Collect compile-time token inventory (covers all branches)
-            self.collect_from_inventory(renderer.token_inventory());
             let synced_id = self.next_synced_id;
             self.next_synced_id += 1;
 
@@ -1500,10 +1513,6 @@ impl BuildContext {
                 }
             }
         }
-        // Merge component-level token inventory (from #[component] macro)
-        if let Some(inv) = el.component_tokens {
-            self.collect_from_inventory(inv);
-        }
         // Register target/selector types for tree-shaking
         self.register_client_actions(el);
         // Process children
@@ -1521,8 +1530,6 @@ impl BuildContext {
         // Handle synced elements (renderers) in router views
         if let Some(renderer) = &el.synced {
             self.used_elements.insert(El::Span.as_u8());
-            // Collect compile-time token inventory (covers all branches)
-            self.collect_from_inventory(renderer.token_inventory());
             // Also render with default state for runtime token discovery
             let default_state = renderer.create_default_state();
             if let Some(rendered) = renderer.render_with_state(default_state.as_ref()) {
@@ -1563,10 +1570,6 @@ impl BuildContext {
         }
         for (ev, _) in &el.events {
             self.used_events.insert(ev.as_u8());
-        }
-        // Merge component-level token inventory (from #[component] macro)
-        if let Some(inv) = el.component_tokens {
-            self.collect_from_inventory(inv);
         }
         // Register target/selector types for tree-shaking
         self.register_client_actions(el);
@@ -1796,7 +1799,7 @@ impl BuildContext {
             self.used_events.insert(ev.as_u8());
 
             if let Some(handler) = &handler_spec.remote_handler {
-                let handler_idx = self.register_remote_handler(handler.clone());
+                let handler_idx = self.register_remote_handler(handler_spec, handler);
 
                 if let Some(param_bytes) = &handler_spec.param_bytes {
                     self.buf
@@ -1957,7 +1960,7 @@ impl BuildContext {
             self.used_events.insert(ev.as_u8());
 
             if let Some(handler) = &handler_spec.remote_handler {
-                let handler_idx = self.register_remote_handler(handler.clone());
+                let handler_idx = self.register_remote_handler(handler_spec, handler);
 
                 if let Some(param_bytes) = &handler_spec.param_bytes {
                     self.buf
@@ -1996,43 +1999,30 @@ impl BuildContext {
         self.buf.finish()
     }
 
-    /// Get the registered remote handlers.
-    pub fn handlers(&self) -> &[HandlerFn] {
+    /// The class-referenced style rules emitted so far (for lazy CSS delivery).
+    pub fn referenced_styles(&self) -> &BTreeSet<StyleKey> {
+        self.buf.referenced_styles()
+    }
+
+    /// Finish building, prepending a `STYLE_DEF` block for any class-referenced
+    /// rules not yet sent to this connection (`sent`). Used for the initial DOM so
+    /// the styles it uses are delivered alongside it. See
+    /// `docs/tree-shaking-redesign.md` (Phase 2).
+    pub fn finish_with_style_defs(mut self, sent: &mut HashSet<StyleKey>) -> Bytes {
+        self.buf.end();
+        let prefix = style_def_prefix(self.buf.referenced_styles(), sent);
+        let body = self.buf.finish();
+        prepend(prefix, body)
+    }
+
+    /// Get the registered remote handlers, keyed by stable handler id.
+    pub fn handlers(&self) -> &HashMap<u32, HandlerFn> {
         &self.handlers
     }
 
     /// Take the synced elements.
     pub fn take_synced_elements(&mut self) -> Vec<SyncedElement> {
         std::mem::take(&mut self.synced_elements)
-    }
-
-    /// Merge a static token inventory into the used token sets.
-    ///
-    /// Called during tree-shaking to incorporate tokens discovered at compile
-    /// time by the `#[renderer]` proc macro. This covers all branches in the
-    /// renderer source code, not just what the default-state render produces.
-    fn collect_from_inventory(&mut self, inv: &TokenInventory) {
-        for &st in inv.styles {
-            self.used_style_utils.insert(st);
-        }
-        for &(pc, st) in inv.pseudo_pairs {
-            self.used_pseudo_pairs.insert((pc, st));
-        }
-        for &(bp, st) in inv.breakpoint_pairs {
-            self.used_breakpoint_pairs.insert((bp, st));
-        }
-        for &el in inv.elements {
-            self.used_elements.insert(el);
-        }
-        for &ev in inv.events {
-            self.used_events.insert(ev);
-        }
-        for &at in inv.attr_keys {
-            self.used_attr_keys.insert(at);
-        }
-        for &av in inv.attr_values {
-            self.used_attr_values.insert(av);
-        }
     }
 
     /// Get the set of used element type byte codes.
@@ -2205,9 +2195,12 @@ impl Default for BuildContext {
 pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + Sync)) -> Bytes {
     let mut states = HashMap::new();
     states.insert(state.type_id(), state);
-    let mut handlers = Vec::new();
+    let mut handlers = HashMap::new();
     build_synced_update_multi(synced, &states, &mut handlers, ChangeSet::all())
 }
+
+/// Type alias for the optional per-connection set of CSS rules already delivered.
+pub type SentCss<'a> = Option<&'a mut HashSet<StyleKey>>;
 
 /// Build an update for synced elements with multi-state support.
 ///
@@ -2229,10 +2222,10 @@ pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + S
 pub fn build_synced_update_multi(
     synced: &[SyncedElement],
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
-    handlers: &mut Vec<HandlerFn>,
+    handlers: &mut std::collections::HashMap<u32, HandlerFn>,
     changes: ChangeSet,
 ) -> Bytes {
-    build_synced_update_with_known_symbols(synced, states, handlers, changes, None, None, None)
+    build_synced_update_with_known_symbols(synced, states, handlers, changes, None, None, None, None)
 }
 
 /// Build an update for synced elements with incremental symbol support.
@@ -2252,14 +2245,16 @@ pub fn build_synced_update_multi(
 /// is skipped (no opcodes emitted). This avoids redundant DOM updates.
 ///
 /// This can reduce update message sizes by 50-90% for repeated updates.
+#[allow(clippy::too_many_arguments)]
 pub fn build_synced_update_with_known_symbols(
     synced: &[SyncedElement],
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
-    handlers: &mut Vec<HandlerFn>,
+    handlers: &mut std::collections::HashMap<u32, HandlerFn>,
     changes: ChangeSet,
     known_symbols: Option<&mut HashMap<String, u32>>,
     changed_state_type_id: Option<TypeId>,
     mut prev_hashes: Option<&mut HashMap<u32, u64>>,
+    sent_css: SentCss<'_>,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
@@ -2408,7 +2403,31 @@ pub fn build_synced_update_with_known_symbols(
     }
 
     buf.end();
-    buf.finish()
+
+    // Lazy CSS: prepend a STYLE_DEF block for any class-referenced rule this batch
+    // uses that this connection has not yet received.
+    let prefix = match sent_css {
+        Some(sent) => style_def_prefix(buf.referenced_styles(), sent),
+        None => BytesMut::new(),
+    };
+    let body = buf.finish();
+    prepend(prefix, body)
+}
+
+/// The stable wire id for a handler binding.
+///
+/// Prefers the macro-assigned [`HandlerSpec::handler_id`]; for handlers built
+/// without the macro (id `0`) it folds the runtime fn-pointer id to a non-zero
+/// `u32` (stable within a process run, which is sufficient — a reconnecting
+/// client re-renders and re-binds from scratch).
+fn wire_handler_id(spec: &HandlerSpec, handler: &HandlerFn) -> u32 {
+    let id = spec.handler_id();
+    if id != 0 {
+        return id;
+    }
+    let raw = handler.fn_id() as u64;
+    let folded = ((raw ^ (raw >> 32)) as u32) & crate::state::HANDLER_ID_MAX;
+    if folded == 0 { 1 } else { folded }
 }
 
 /// Emit an element and its children during a synced update.
@@ -2425,7 +2444,7 @@ fn emit_update_element(
     parent_ref: u32,
     buf: &mut OpcodeBuffer,
     symbol_map: &HashMap<String, u32>,
-    handlers: &mut Vec<HandlerFn>,
+    handlers: &mut std::collections::HashMap<u32, HandlerFn>,
     ids_by_type: &HashMap<TypeId, Vec<u32>>,
     next_idx_by_type: &mut HashMap<TypeId, usize>,
     rendered_ids: &mut HashSet<u32>,
@@ -2560,26 +2579,18 @@ fn emit_update_element(
     // If handler not found, register it as a new handler
     for (ev, spec) in &el.events {
         if let Some(handler) = &spec.remote_handler {
-            let handler_fn_id = handler.fn_id();
-            // Find matching handler by function pointer ID
-            let handler_idx = handlers
-                .iter()
-                .position(|h| h.fn_id() == handler_fn_id)
-                .unwrap_or_else(|| {
-                    // Handler not found - register it as new
-                    let idx = handlers.len();
-                    handlers.push(handler.clone());
-                    idx
-                });
+            // Register under the stable handler id (idempotent across renders).
+            let handler_id = wire_handler_id(spec, handler);
+            handlers.entry(handler_id).or_insert_with(|| handler.clone());
 
             // Use BIND_REMOTE_PARAM if we have param bytes,
             // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
             if let Some(param_bytes) = &spec.param_bytes {
-                buf.bind_remote_param(ref_idx, ev.as_u8(), handler_idx as u32, param_bytes);
+                buf.bind_remote_param(ref_idx, ev.as_u8(), handler_id, param_bytes);
             } else if spec.debounce_ms > 0 {
-                buf.bind_debounced(ref_idx, ev.as_u8(), handler_idx as u32, spec.debounce_ms);
+                buf.bind_debounced(ref_idx, ev.as_u8(), handler_id, spec.debounce_ms);
             } else {
-                buf.bind_remote(ref_idx, ev.as_u8(), handler_idx as u32);
+                buf.bind_remote(ref_idx, ev.as_u8(), handler_id);
             }
         }
     }

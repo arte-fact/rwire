@@ -9,33 +9,28 @@
 use std::collections::HashSet;
 
 use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
-use crate::protocol::El;
-use crate::style_tokens::St;
 use crate::theme::Theme;
 
-/// Generate a tree-shaken JS object literal from a mappings array.
+/// Generate a JS object literal `{code:'string', ...}` from a mappings array.
 ///
-/// Filters `mappings` to include only entries whose code is in `used`,
-/// then formats as `{code:'string', ...}` entries joined by commas.
-fn generate_js_map<T: std::fmt::Display + std::hash::Hash + Eq>(
-    mappings: &[(T, &str)],
-    used: &HashSet<T>,
-) -> String {
+/// Emits **every** entry. These maps cover the small `u8` token enums
+/// (elements, events, attribute keys/values, style props/values) whose total
+/// size is ~1-2 KB; shipping them whole removes the structural-failure risk of a
+/// token reached only through a plain helper function being absent from a
+/// tree-shaken map. CSS (the part that actually justifies tree-shaking) is
+/// handled separately. See `docs/tree-shaking-redesign.md`.
+fn generate_js_map<T: std::fmt::Display>(mappings: &[(T, &str)]) -> String {
     let entries: Vec<String> = mappings
         .iter()
-        .filter(|(code, _)| used.contains(code))
         .map(|(code, name)| format!("{}:'{}'", code, name))
         .collect();
     entries.join(",")
 }
 
-/// Generate a tree-shaken SVG element type set `{code:1, ...}`.
-///
-/// Only includes SVG element codes that are in `used_elements`.
-fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
+/// Generate the SVG element type set `{code:1, ...}` for every SVG element.
+fn generate_svg_set() -> String {
     let entries: Vec<String> = SVG_ELEMENT_CODES
         .iter()
-        .filter(|code| used_elements.contains(code))
         .map(|code| format!("{}:1", code))
         .collect();
     entries.join(",")
@@ -65,9 +60,9 @@ fn generate_svg_set(used_elements: &HashSet<u8>) -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,PD:0x89,BP:0x8A,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,PD:0x89,BP:0x8A,E:0xFF};
 const A={4:'id'};
-let s={},wt=[],w,sc=0,K={};
+let s={},wt=[],w,sc=0,K={},DS,pm=null;
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
 function wv(a,v){if(v<128)a.push(v);else if(v<16512){v-=128;a.push(128|(v>>8),v&255)}else{v-=16512;a.push(192|(v>>16),(v>>8)&255,v&255)}}
 function gp(e,el){
@@ -78,9 +73,38 @@ if(e.type==='click'){let tg=e.target.closest('[data-id]')||el,dt={};for(let k in
 return ''}
 function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0];wv(a,h);a.push(t,f&255,pb.length);let msg=new Uint8Array(a.length+pb.length);for(let j=0;j<a.length;j++)msg[j]=a[j];msg.set(pb,a.length);w.send(msg)}
 function sep(h,t,f,prm,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0x80];wv(a,h);a.push(t,f&255,prm.length);let msg=new Uint8Array(a.length+prm.length+1+pb.length);let j=0;for(let b of a)msg[j++]=b;msg.set(prm,j);j+=prm.length;msg[j++]=pb.length;msg.set(pb,j);w.send(msg)}
+function snd(fn,e,el){if(e.type==='input'){if(el.__t)clearTimeout(el.__t);el.__t=setTimeout(fn,250)}else fn()}
+// --- DOM morphing (node reuse on update) ---
+// me/mk reconcile a live subtree toward a freshly-built shadow subtree, reusing
+// nodes by id (and id-less nodes positionally) so focus/caret/scroll/uncontrolled
+// input state survive updates. A bound node is reused only when its binding key
+// (__hk) is unchanged — its existing listener stays valid via stable handler ids;
+// when the binding changed, the freshly-built node (with its new listener) is
+// swapped in instead, so listeners are never stale and never leak.
+function me(a,b){
+if(a.nodeType===3){if(a.nodeValue!==b.nodeValue)a.nodeValue=b.nodeValue;return}
+if(a.nodeType!==1)return;
+let ba=b.attributes;for(let k=0;k<ba.length;k++){let n=ba[k].name;if(a.getAttribute(n)!==ba[k].value)a.setAttribute(n,ba[k].value)}
+let aa=a.attributes;for(let k=aa.length-1;k>=0;k--){let n=aa[k].name;if(!b.hasAttribute(n))a.removeAttribute(n)}
+a.__hk=b.__hk;
+if(a.id&&a.id.indexOf('__synced_')===0)return; // nested region: its own update owns it
+mk(a,b)}
+function mk(a,b){
+let byId={};for(let c=a.firstChild;c;c=c.nextSibling)if(c.nodeType===1&&c.id)byId[c.id]=c;
+let cur=a.firstChild;
+for(let bc=b.firstChild;bc;){
+let nb=bc.nextSibling,m=null;
+if(bc.nodeType===1&&bc.id){if(byId[bc.id])m=byId[bc.id]}
+else if(cur&&!(cur.nodeType===1&&cur.id)&&cur.nodeType===bc.nodeType&&(cur.nodeType!==1||cur.tagName===bc.tagName))m=cur;
+if(m&&m.nodeType===1&&(m.tagName!==bc.tagName||(m.__hk||'')!==(bc.__hk||'')))m=null;
+if(m){if(m!==cur)a.insertBefore(m,cur);else cur=cur.nextSibling;me(m,bc)}
+else a.insertBefore(bc,cur);
+bc=nb}
+while(cur){let n=cur.nextSibling;a.removeChild(cur);cur=n}}
+function fm(){if(pm){mk(pm.live,pm.shadow);pm=null}}
 function x(d){
 let r=[],i=0,_oc=0;
-let ae=document.activeElement,ai=ae&&ae.id,ap=ae?ae.selectionStart:0;
+let ae=document.activeElement,ai=ae&&ae.id,ap=ae?ae.selectionStart:0,aq=ae?ae.selectionEnd:0,ax=ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'),av=ax?ae.value:null;
 try{
 while(i<d.length){
 let _p=i,o=d[i++];_oc++;
@@ -101,11 +125,11 @@ else if(o===O.AB){let[f,fl]=rv(d,i);i+=fl;let k=d[i++];r[f].setAttribute(AT[k]||
 else if(o===O.AK){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],[v,l]=rv(d,i);i+=l;r[f].setAttribute(AT[k]||'data',s[v]||'')}
 else if(o===O.D){let[f,fl]=rv(d,i);i+=fl;let[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
 else if(o===O.P){let[p,pl]=rv(d,i);i+=pl;let[c,cl]=rv(d,i);i+=cl;(p<0xFFFF?r[p]:document.body).appendChild(r[c])}
-else if(o===O.CC){let[f,fl]=rv(d,i);i+=fl;r[f].innerHTML=''}
+else if(o===O.CC){let[f,fl]=rv(d,i);i+=fl;fm();let lv=r[f];let sh=document.createElement(lv.tagName||'DIV');pm={live:lv,shadow:sh};r[f]=sh}
 else if(o===O.B){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;BL(f,t,h,r)}
-else if(o===O.R){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
-else if(o===O.DB){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let ms=(d[i++]<<8)|d[i++];let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
-else if(o===O.RP){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sep(h,t,f,prm,e,r[f])})}
+else if(o===O.R){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;r[f].__hk='r'+t+'_'+h;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>se(h,t,f,e,r[f]),e,r[f])})}
+else if(o===O.DB){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let ms=(d[i++]<<8)|d[i++];let tm;r[f].__hk='d'+t+'_'+h;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
+else if(o===O.RP){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].__hk='p'+t+'_'+h+'_'+prm.join(',');r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>sep(h,t,f,prm,e,r[f]),e,r[f])})}
 else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
 else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
@@ -114,6 +138,7 @@ else if(o===O.SU){let[f,fl]=rv(d,i);i+=fl;let[u,l]=rv(d,i);i+=l;r[f].classList.a
 else if(o===O.SP){let[f,fl]=rv(d,i);i+=fl;let p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
 else if(o===O.SM){let[f,fl]=rv(d,i);i+=fl;let n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}}
 else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++];while(c--){let[u,ul]=rv(d,i);i+=ul}K[id]='c'+id}}
+else if(o===O.SD){let[n,l]=rv(d,i);i+=l;if(!DS){DS=document.createElement('style');document.head.appendChild(DS)}while(n--){let[rl,ll]=rv(d,i);i+=ll;let rule=new TextDecoder().decode(d.slice(i,i+rl));i+=rl;try{DS.sheet.insertRule(rule,DS.sheet.cssRules.length)}catch(_e){DS.textContent+=rule}}}
 else if(o===O.SC){let[f,fl]=rv(d,i);i+=fl;let[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
 else if(o===O.PD){let[f,fl]=rv(d,i);i+=fl;let pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
 else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('b'+bp+'u'+u)}}
@@ -125,14 +150,14 @@ else if(o===O.BS){let[f,l]=rv(d,i);i+=l;let si=d[i++],mv=d[i++];let[st,sl]=rv(d,
 else if(o===O.SS2){let[f,l]=rv(d,i);i+=l;let t=d[i++],si=d[i++],sv=d[i++];if(typeof sl2!=='undefined'){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sl2[si]=sv;us2(si)})}}
 else if(o===O.TT){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);fl2[ti]=true;uf2(ti);tm=setTimeout(()=>{fl2[ti]=false;uf2(ti)},ms)})}}
 else if(o===O.AT2){let ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){setTimeout(()=>{fl2[ti]=!fl2[ti];uf2(ti)},ms)}}
-else if(o===O.E){if(ai){let ne=document.getElementById(ai);if(ne&&ne!==document.activeElement){ne.focus();try{ne.setSelectionRange(ap,ap)}catch(_){}}}return}
+else if(o===O.E){fm();if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
 function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
 if('scrollRestoration' in history)history.scrollRestoration='manual';
 let rc=0,rn=false;
 function connect(){
-w=new WebSocket('ws://'+location.host);
+w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
 w.binaryType='arraybuffer';
 w.onopen=()=>{
 if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
@@ -161,17 +186,17 @@ function us2(i){let v=sl2[i];for(let b of sb2[i]||[]){if(v===b.v)b.e.classList.a
 
 /// Bind handler (sends to server via WebSocket).
 /// Also includes a stub xi() since the main runtime references it.
-const BIND_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();se(h,t,f,e,r[f])})}
+const BIND_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>se(h,t,f,e,r[f]),e,r[f])})}
 function xi(d,i){return i}"#;
 
-/// Generate a minimal capsule HTML with only the used element and event types.
-pub fn generate_capsule(
-    used_elements: &HashSet<u8>,
-    used_events: &HashSet<u8>,
-) -> String {
-    let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
-    let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
-    let svg_js = generate_svg_set(used_elements);
+/// Generate a minimal (unstyled) capsule HTML with the full element/event maps.
+///
+/// The `_used_*` params are retained for API stability; the small u8 enum maps
+/// are shipped whole (see `generate_js_map`), so they are ignored.
+pub fn generate_capsule(_used_elements: &HashSet<u8>, _used_events: &HashSet<u8>) -> String {
+    let elements_js = generate_js_map(ELEMENT_MAPPINGS);
+    let events_js = generate_js_map(EVENT_MAPPINGS);
+    let svg_js = generate_svg_set();
 
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
@@ -322,28 +347,10 @@ impl FontFace {
 pub struct CapsuleConfig {
     /// Theme configuration for CSS variables
     pub theme: Theme,
-    /// Used style utility tokens (for tree-shaking)
-    pub(crate) used_style_utils: HashSet<u16>,
-    /// Used style property codes (for tree-shaking)
-    pub(crate) used_style_props: HashSet<u8>,
-    /// Used style value codes (for tree-shaking)
-    pub(crate) used_style_values: HashSet<u8>,
-    /// Used pseudo-class (Pc, St) pairs (for tree-shaking)
-    pub(crate) used_pseudo_pairs: HashSet<(u8, u16)>,
-    /// Used breakpoint (Bp, St) pairs (for tree-shaking)
-    pub(crate) used_breakpoint_pairs: HashSet<(u8, u16)>,
-    /// Used attribute key codes (for tree-shaking)
-    pub(crate) used_attr_keys: HashSet<u8>,
-    /// Used attribute value codes (for tree-shaking)
-    pub(crate) used_attr_values: HashSet<u8>,
     /// Whether any client actions (targets/selectors) are used
     pub(crate) has_client_actions: bool,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
     pub(crate) composite_css: String,
-    /// Extra element types to include in the capsule beyond what tree-shaking discovers.
-    pub(crate) extra_elements: HashSet<u8>,
-    /// Extra style utility tokens to include beyond what tree-shaking discovers.
-    pub(crate) extra_style_utils: HashSet<u16>,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
 }
@@ -376,80 +383,11 @@ impl CapsuleConfig {
         self
     }
 
-    /// Set all used style utility tokens (from build context).
-    pub(crate) fn with_style_utils(mut self, utils: &HashSet<u16>) -> Self {
-        self.used_style_utils = utils.clone();
-        self
-    }
-
-    /// Set all used style property codes (from build context).
-    pub(crate) fn with_style_props(mut self, props: &HashSet<u8>) -> Self {
-        self.used_style_props = props.clone();
-        self
-    }
-
-    /// Set all used style value codes (from build context).
-    pub(crate) fn with_style_values(mut self, values: &HashSet<u8>) -> Self {
-        self.used_style_values = values.clone();
-        self
-    }
-
-    /// Set all used pseudo-class (Pc, St) pairs (from build context).
-    pub(crate) fn with_pseudo_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
-        self.used_pseudo_pairs = pairs.clone();
-        self
-    }
-
-    /// Set all used breakpoint (Bp, St) pairs (from build context).
-    pub(crate) fn with_breakpoint_pairs(mut self, pairs: &HashSet<(u8, u16)>) -> Self {
-        self.used_breakpoint_pairs = pairs.clone();
-        self
-    }
-
-    /// Set all used attribute key codes (from build context).
-    pub(crate) fn with_attr_keys(mut self, keys: &HashSet<u8>) -> Self {
-        self.used_attr_keys = keys.clone();
-        self
-    }
-
-    /// Set all used attribute value codes (from build context).
-    pub(crate) fn with_attr_values(mut self, values: &HashSet<u8>) -> Self {
-        self.used_attr_values = values.clone();
-        self
-    }
-
     /// Set pre-generated composite CSS from style grouping analysis.
     pub(crate) fn with_composite_css(mut self, css: String) -> Self {
         self.composite_css = css;
         self
     }
-
-    /// Declare extra element types that should be included in the capsule
-    /// beyond what tree-shaking discovers from the initial render.
-    ///
-    /// Use this when your app creates element types dynamically (e.g.,
-    /// markdown rendering uses `<table>`, `<pre>`, `<code>` etc. that
-    /// aren't present on the initial page).
-    pub fn extra_elements(mut self, elements: &[El]) -> Self {
-        for el in elements {
-            self.extra_elements.insert(el.as_u8());
-        }
-        self
-    }
-
-    /// Declare extra style utility tokens that should be included in the capsule
-    /// beyond what tree-shaking discovers from the initial render.
-    ///
-    /// Use this when your app uses St tokens in conditional code paths
-    /// (e.g., active sidebar links, markdown styling) that aren't exercised
-    /// during the initial render.
-    pub fn extra_styles(mut self, styles: &[St]) -> Self {
-        for st in styles {
-            self.extra_style_utils.insert(st.as_u16());
-        }
-        self
-    }
-
 
     /// Register a font face for the capsule.
     ///
@@ -467,124 +405,47 @@ impl CapsuleConfig {
         self.fonts.push(face);
         self
     }
-
-    /// Check if any style tokens are used.
-    pub fn has_style_tokens(&self) -> bool {
-        !self.used_style_utils.is_empty()
-            || !self.used_style_props.is_empty()
-    }
-}
-
-/// Extract all CSS variable references from a CSS string.
-///
-/// Scans for `var(--..)` patterns and returns a set of variable names.
-/// Tracks all custom property references (short-name primitives, color vars, etc.)
-/// but excludes semantic vars (lowercase `--a` through `--z`, uppercase `--A`-`--L`,
-/// `--n1`-`--n12`) since those are always emitted by the theme system.
-fn extract_used_variables(css: &str) -> HashSet<String> {
-    let mut vars = HashSet::new();
-
-    for (idx, _) in css.match_indices("var(") {
-        let rest = &css[idx + 4..]; // Skip "var("
-
-        if let Some(end) = rest.find([',', ')']) {
-            let var_name = rest[..end].trim();
-
-            // Track short-name primitives and color vars:
-            // S=spacing, R=radius, T=text, W=weight, X=leading, Z=shadow
-            // N=neutral, U=blue, O=red, P=green, M=amber, Y=special
-            // Q=component hooks
-            if var_name.starts_with("--") && var_name.len() >= 4 {
-                let suffix = &var_name[2..];
-                let first = suffix.as_bytes()[0];
-                if matches!(first, b'S' | b'R' | b'T' | b'W' | b'X' | b'Z'
-                    | b'N' | b'U' | b'O' | b'P' | b'M' | b'Y' | b'Q') {
-                    vars.insert(var_name.to_string());
-                }
-            }
-        }
-    }
-
-    vars
 }
 
 /// Generate complete CSS for the capsule with resolved theme.
 ///
+/// This is the **static** CSS embedded in the capsule `<style>` tag: the parts
+/// that must exist before any class is applied. Class-referenced utility, pseudo
+/// and breakpoint rules (`.u`/`.h`/`.b`) are NOT here — they are delivered lazily
+/// over the wire via `STYLE_DEF` the first time a connection uses them. See
+/// `docs/tree-shaking-redesign.md` (Phase 2).
+///
 /// Includes:
 /// - Base reset CSS
-/// - Non-color primitive CSS (spacing, radius, typography, shadows)
-/// - Resolved semantic CSS (light + dark, with direct oklch values)
-/// - Color primitive CSS (tree-shaken: only palette colors referenced by St tokens)
-/// - Theme style preset overrides
-/// - Component CSS (tree-shaken utility, pseudo, breakpoint classes)
+/// - All non-color + color CSS variables (shipped whole, since lazy rules
+///   reference them and the set is small and bounded)
+/// - Theme `:root` semantic vars
+/// - Keyframes referenced by animation utilities
+/// - Composite classes (`.c{id}`), whose id set is fixed by startup analysis
 pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
-    use crate::style_tokens::{generate_utility_css, generate_pseudo_css, generate_breakpoint_css};
+    use crate::style_tokens::PSEUDO_GLOBAL_CSS;
     use crate::theme::{generate_base_css, generate_theme_css};
-    use crate::tokens::css::{generate_primitive_css_filtered, generate_color_css_filtered};
+    use crate::tokens::css::{generate_color_css_all, generate_noncolor_primitive_css};
 
     let mut css = String::with_capacity(8192);
 
-    // 1. Generate utility + pseudo + breakpoint token CSS (class-based, tree-shaken)
-    let mut all_utils = config.used_style_utils.clone();
-    all_utils.extend(&config.extra_style_utils);
-    let utility_token_css = generate_utility_css(&all_utils);
-    let pseudo_token_css = generate_pseudo_css(&config.used_pseudo_pairs);
-    let breakpoint_token_css = generate_breakpoint_css(&config.used_breakpoint_pairs);
+    // 1. Base reset (must come first).
+    css.push_str(generate_base_css());
 
-    // 2. Extract var(--...) references from token CSS rules.
-    //    Short-name vars: S=spacing, R=radius, T=text, W=weight, X=leading, Z=shadow
-    //    Color vars: N=neutral, U=blue, O=red, P=green, M=amber, Y=special
-    //    Component hooks: Q=hooks
-    let base_css = generate_base_css();
-    let mut used_vars = extract_used_variables(base_css);
-    used_vars.extend(extract_used_variables(&utility_token_css));
-    used_vars.extend(extract_used_variables(&pseudo_token_css));
-    used_vars.extend(extract_used_variables(&breakpoint_token_css));
-    // Scan composite CSS for var() references (Concern 3: composite vars)
-    used_vars.extend(extract_used_variables(&config.composite_css));
+    // 2. All CSS variables (no tree-shaking): lazy rules arrive after load and
+    //    reference these, so every var must already be defined. The full set is
+    //    small and bounded (spacing/radius/type/shadow scales + ~62 colors).
+    css.push_str(&generate_noncolor_primitive_css());
+    css.push_str(&generate_color_css_all());
 
-    // 3. Base reset (must come first)
-    css.push_str(base_css);
-
-    // 4. Non-color primitives (tree-shaken: S, R, T, W, X, Z prefixes)
-    let primitive_vars: HashSet<String> = used_vars
-        .iter()
-        .filter(|v| {
-            v.len() >= 4 && matches!(v.as_bytes()[2], b'S' | b'R' | b'T' | b'W' | b'X' | b'Z')
-        })
-        .cloned()
-        .collect();
-    if !primitive_vars.is_empty() {
-        css.push_str(&generate_primitive_css_filtered(&primitive_vars));
-    }
-
-    // 5. Color primitives (tree-shaken: N, U, O, P, M, Y prefixes)
-    let color_vars: HashSet<String> = used_vars
-        .iter()
-        .filter(|v| {
-            v.len() >= 4 && matches!(v.as_bytes()[2], b'N' | b'U' | b'O' | b'P' | b'M' | b'Y')
-        })
-        .cloned()
-        .collect();
-    if !color_vars.is_empty() {
-        css.push_str(&generate_color_css_filtered(&color_vars));
-    }
-
-    // 6. Theme CSS — single :root{...} block with mode-aware colors, style preset Q-vars,
-    //    and radius overrides. Replaces the old dual light/dark blocks + [data-style] +
-    //    [data-palette] + [data-radius] selectors.
+    // 3. Theme :root semantic vars (mode-aware colors, style preset Q-vars, radius).
     css.push_str(&generate_theme_css(&config.theme));
 
-    // 7. Utility token CSS classes (.u{code}{declaration})
-    css.push_str(&utility_token_css);
+    // 4. Keyframes referenced by animation utilities — global, so always shipped.
+    css.push_str(PSEUDO_GLOBAL_CSS);
 
-    // 8. Pseudo-class token CSS rules (.h{pc}u{st}:hover{...}, etc.)
-    css.push_str(&pseudo_token_css);
-
-    // 8b. Breakpoint token CSS rules (@media(min-width:...){.b{bp}u{st}{...}})
-    css.push_str(&breakpoint_token_css);
-
-    // 9. Composite style CSS classes (.c{id}{declarations})
+    // 5. Composite classes (.c{id}). The emittable id set is fixed by the startup
+    //    pattern analysis, so these never have the lazy/plain-helper gap.
     if !config.composite_css.is_empty() {
         css.push_str(&config.composite_css);
     }
@@ -626,26 +487,27 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
 /// This ensures styles are available immediately when the page loads,
 /// without waiting for the WebSocket connection.
 pub fn generate_styled_capsule(
-    used_elements: &HashSet<u8>,
-    used_events: &HashSet<u8>,
+    _used_elements: &HashSet<u8>,
+    _used_events: &HashSet<u8>,
     config: &CapsuleConfig,
     css: &str,
 ) -> String {
     use crate::attr_tokens::{AT_MAPPINGS, AV_MAPPINGS};
     use crate::style_tokens::{PROP_MAPPINGS, VALUE_MAPPINGS};
 
-    let elements_js = generate_js_map(ELEMENT_MAPPINGS, used_elements);
-    let events_js = generate_js_map(EVENT_MAPPINGS, used_events);
-    let svg_js = generate_svg_set(used_elements);
+    // Small u8 token enums are shipped whole (not tree-shaken) — see generate_js_map.
+    let elements_js = generate_js_map(ELEMENT_MAPPINGS);
+    let events_js = generate_js_map(EVENT_MAPPINGS);
+    let svg_js = generate_svg_set();
 
-    // Generate style token lookup tables (tree-shaken)
-    // Note: U (utility) map removed - utilities now use CSS classes generated server-side
-    let props_js = generate_js_map(PROP_MAPPINGS, &config.used_style_props);
-    let values_js = generate_js_map(VALUE_MAPPINGS, &config.used_style_values);
+    // Style token lookup tables for inline STYLE_PROP (property/value name maps).
+    // Note: U (utility) map removed - utilities now use CSS classes generated server-side.
+    let props_js = generate_js_map(PROP_MAPPINGS);
+    let values_js = generate_js_map(VALUE_MAPPINGS);
 
-    // Generate attribute lookup tables (tree-shaken)
-    let attr_keys_js = generate_js_map(AT_MAPPINGS, &config.used_attr_keys);
-    let attr_values_js = generate_js_map(AV_MAPPINGS, &config.used_attr_values);
+    // Attribute lookup tables.
+    let attr_keys_js = generate_js_map(AT_MAPPINGS);
+    let attr_values_js = generate_js_map(AV_MAPPINGS);
 
     // Include client actions JS (targets & selectors) when used
     let client_actions_js = if config.has_client_actions {
@@ -700,21 +562,14 @@ mod tests {
 
     #[test]
     fn test_css_variables_resolved() {
-        // Verify the resolved theme pipeline: semantic vars use short names
-        // with direct oklch values, and primitives are tree-shaken.
+        // Verify the resolved theme pipeline: semantic vars use short names with
+        // direct oklch values, and all primitive vars are shipped (lazy CSS needs
+        // every var present up-front).
 
-        let mut used_utils = HashSet::new();
-        used_utils.insert(0xC0); // BgApp -> var(--a)
-        used_utils.insert(0x8B); // RoundedLg -> var(--R3)
-        used_utils.insert(0xD1); // BorderSubtle -> var(--g)
-        used_utils.insert(0x53); // PMd -> var(--S4)
-        used_utils.insert(0xE9); // ShadowSm -> var(--Z1)
-
-        let config = CapsuleConfig::new()
-            .with_style_utils(&used_utils);
+        let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
 
-        // Non-color primitives (tree-shaken: only used ones)
+        // Non-color primitives are all shipped now.
         assert!(css.contains("--S4:"), "Missing --S4 (space-4)");
         assert!(css.contains("--R3:"), "Missing --R3 (radius-lg)");
         assert!(css.contains("--X3:"), "Missing --X3 (leading-normal, from base CSS)");
@@ -767,11 +622,7 @@ mod tests {
         let mut events = HashSet::new();
         events.insert(1); // click
 
-        let mut used_utils = HashSet::new();
-        used_utils.insert(0xC0); // BgApp -> var(--a)
-
-        let config = CapsuleConfig::new()
-            .with_style_utils(&used_utils);
+        let config = CapsuleConfig::new();
 
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&elements, &events, &config, &css);
@@ -802,24 +653,21 @@ mod tests {
     }
 
     #[test]
-    fn test_minimal_element_map() {
-        let mut used = HashSet::new();
-        used.insert(0); // div
-        used.insert(2); // button
-
-        let map = generate_js_map(ELEMENT_MAPPINGS, &used);
+    fn test_element_map_ships_all() {
+        // The element map is now shipped whole (no tree-shaking) so a token
+        // reached only through a plain helper can never be missing.
+        let map = generate_js_map(ELEMENT_MAPPINGS);
         assert!(map.contains("0:'div'"));
         assert!(map.contains("2:'button'"));
-        assert!(!map.contains("span"));
+        assert!(map.contains("1:'span'"), "full map must include span");
     }
 
     #[test]
-    fn test_minimal_event_map() {
-        let mut used = HashSet::new();
-        used.insert(1); // click
-
-        let map = generate_js_map(EVENT_MAPPINGS, &used);
-        assert_eq!(map, "1:'click'");
+    fn test_event_map_ships_all() {
+        let map = generate_js_map(EVENT_MAPPINGS);
+        assert!(map.contains("1:'click'"));
+        // More than one event is present now that the map is full.
+        assert!(map.contains("7:'input'"));
     }
 
     #[test]
@@ -831,8 +679,10 @@ mod tests {
         events.insert(1); // click
 
         let capsule = generate_capsule(&elements, &events);
-        assert!(capsule.contains("const E={0:'div'}"));
-        assert!(capsule.contains("const V={1:'click'}"));
+        // Maps are shipped whole now, so they contain every entry (not just div/click).
+        assert!(capsule.contains("0:'div'"));
+        assert!(capsule.contains("1:'span'"));
+        assert!(capsule.contains("1:'click'"));
         assert!(capsule.contains("<!DOCTYPE html>"));
         assert!(!capsule.contains("let ls={},lh={}"));
     }
@@ -870,20 +720,16 @@ mod tests {
     }
 
     #[test]
-    fn test_composite_css_appended_after_utility_css() {
-        let mut used_utils = HashSet::new();
-        used_utils.insert(0x02); // DisplayFlex
-
+    fn test_utility_css_is_lazy_not_static() {
+        // Utility rules are delivered lazily over the wire (STYLE_DEF), so they
+        // must NOT appear in the static capsule CSS. Composites stay static.
         let config = CapsuleConfig::new()
-            .with_style_utils(&used_utils)
             .with_composite_css(".c256{display:flex;gap:1rem}".to_string());
 
         let css = generate_capsule_css(&config);
 
-        // Utility CSS for .u2 should come before composite CSS .c256
-        let utility_pos = css.find(".u2{").expect("utility CSS .u2 not found");
-        let composite_pos = css.find(".c256{").expect("composite CSS .c256 not found");
-        assert!(utility_pos < composite_pos, "Composite CSS should come after utility CSS");
+        assert!(!css.contains(".u2{"), "utility rule must be lazy, not in static CSS");
+        assert!(css.contains(".c256{"), "composite CSS should be static");
     }
 
     #[test]

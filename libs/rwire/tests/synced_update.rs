@@ -18,7 +18,7 @@ fn test_handler(_state: &mut TestState) {}
 fn test_build_synced_update_multi_with_empty_synced() {
     let synced: Vec<SyncedElement> = vec![];
     let states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     let update = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
 
@@ -30,7 +30,7 @@ fn test_build_synced_update_multi_with_empty_synced() {
 fn test_build_synced_update_multi_with_empty_handlers() {
     // This tests the edge case where synced elements exist but no handlers
     let mut ctx = BuildContext::new();
-    let state = TestState::default();
+    let state = TestState;
 
     // Build a simple element tree
     let el = el(El::Div).text("test");
@@ -50,7 +50,7 @@ fn test_handler_deduplication_by_fn_id() {
     assert_eq!(h1.fn_id(), h2.fn_id());
 
     // Register both handlers - the lookup should deduplicate
-    let handlers = vec![h1.clone()];
+    let handlers = [h1.clone()];
 
     // When looking up, should find the existing one
     let fn_id = h2.fn_id();
@@ -89,7 +89,7 @@ fn test_build_context_tracks_elements() {
 #[test]
 fn test_build_context_tracks_events() {
     let mut ctx = BuildContext::new();
-    let state = TestState::default();
+    let state = TestState;
 
     let handler_spec = rwire::state::HandlerSpec::memory(test_handler);
 
@@ -105,7 +105,7 @@ fn test_build_context_tracks_events() {
 #[test]
 fn test_emit_update_element_creates_valid_opcodes() {
     let mut ctx = BuildContext::new();
-    let state = TestState::default();
+    let state = TestState;
 
     // Simple element with text and class
     let el = el(El::Div).class("container").text("content");

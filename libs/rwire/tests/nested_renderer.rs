@@ -152,7 +152,7 @@ fn test_nested_renderer_update_creates_wrappers() {
     ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     // This should produce update bytes
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
@@ -219,7 +219,7 @@ fn test_nested_update_preserves_structure() {
     assert_eq!(synced.len(), 2, "Should have 2 synced elements");
 
     // Now simulate an update
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
 
     let bytes = update_bytes.as_ref();
@@ -261,7 +261,7 @@ fn test_nested_update_emits_wrapper_ids() {
     ctx.emit_multi(&el);
 
     let synced = ctx.take_synced_elements();
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
     let bytes = update_bytes.as_ref();
@@ -273,7 +273,7 @@ fn test_nested_update_emits_wrapper_ids() {
     // Note: The update may or may not start with SYMBOLS depending on whether
     // non-synced-ID symbols are present. Check for symbol table OR GET_SYNCED.
     let starts_with_symbols = bytes[0] == SYMBOLS;
-    let has_get_synced = bytes.iter().any(|&b| b == GET_SYNCED);
+    let has_get_synced = bytes.contains(&GET_SYNCED);
     assert!(
         starts_with_symbols || has_get_synced,
         "Should have SYMBOLS or GET_SYNCED"
@@ -357,7 +357,7 @@ fn test_deeply_nested_synced_elements() {
     assert_eq!(ids, vec![0, 1, 2], "IDs should be 0, 1, 2");
 
     // Now test update
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
     let update_bytes = build_synced_update_multi(&synced, &states, &mut handlers, ChangeSet::all());
     let bytes = update_bytes.as_ref();
 

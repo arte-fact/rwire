@@ -10,7 +10,7 @@ use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Ev, Server, State};
 use rwire_components::*;
-use rwire_markdown::{markdown_element_types, parse_markdown, DocPage, DocSite, SearchResult, TableOfContents};
+use rwire_markdown::{parse_markdown, DocPage, DocSite, SearchResult, TableOfContents};
 use rwire_themes::{palettes, styles};
 
 // ============================================================================
@@ -117,9 +117,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_search_results(&DocSite::load(docs_dir()), "example")
         });
 
+    // Element maps are shipped whole now, so markdown's table/pre/code elements
+    // no longer need declaring — see docs/tree-shaking-redesign.md.
     let capsule_config = CapsuleConfig::new()
-        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]))
-        .extra_elements(&markdown_element_types());
+        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind(&config.bind_addr)?
         .root(root)

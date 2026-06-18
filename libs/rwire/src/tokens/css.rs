@@ -5,7 +5,6 @@
 //! `<style>` block.
 
 use super::primitives::{color, font_size, font_weight, line_height, radius, shadow, space};
-use std::collections::HashSet;
 
 /// Single source of truth for all non-color primitive CSS variables.
 ///
@@ -119,87 +118,37 @@ pub fn generate_noncolor_primitive_css() -> String {
     css
 }
 
-/// Generate CSS custom properties for only the non-color primitives that are actually used.
+
+/// Generate CSS custom properties for **all** color tokens (no tree-shaking).
 ///
-/// Takes a set of variable names (with `--` prefix) and only generates CSS
-/// for those variables. This tree-shakes spacing, radius, typography, and shadow
-/// tokens so small apps don't pay for unused vars.
-pub(crate) fn generate_primitive_css_filtered(used_vars: &HashSet<String>) -> String {
-    if used_vars.is_empty() {
-        return String::new();
-    }
+/// With lazy CSS delivery, utility rules arrive over the wire after page load and
+/// reference color vars like `var(--P4)`. Those vars must already exist in the
+/// static capsule, so we ship the full color set (it is small and bounded — a few
+/// dozen scale entries). See `docs/tree-shaking-redesign.md` (Phase 2).
+pub(crate) fn generate_color_css_all() -> String {
+    let mut css = String::with_capacity(2048);
+    css.push_str(":root{\n");
 
-    let mut css = String::with_capacity(512);
-
-    for &(name, value) in NONCOLOR_PRIMITIVES {
-        let var_name = format!("--{}", name);
-        if used_vars.contains(&var_name) {
-            write_var(&mut css, name, value);
-        }
-    }
-
-    if css.is_empty() {
-        return String::new();
-    }
-
-    let mut result = String::with_capacity(css.len() + 10);
-    result.push_str(":root{\n");
-    result.push_str(&css);
-    result.push_str("}\n");
-    result
-}
-
-/// Generate CSS custom properties for only the color tokens that are actually used.
-///
-/// Takes a set of variable names (with `--` prefix) and only generates CSS
-/// for those variables. This is used to tree-shake color primitives that are
-/// directly referenced by St tokens (e.g., `--P4` for green-4, `--O9` for red-9).
-///
-/// Short names: N=neutral, U=blue, O=red, P=green, M=amber, Y=special (Yw/Yb).
-pub(crate) fn generate_color_css_filtered(used_vars: &HashSet<String>) -> String {
-    if used_vars.is_empty() {
-        return String::new();
-    }
-
-    let mut css = String::with_capacity(512);
-
-    let write_if_used = |css: &mut String, name: &str, value: &str| {
-        let var_name = format!("--{}", name);
-        if used_vars.contains(&var_name) {
-            write_var(css, name, value);
-        }
-    };
-
-    // Color scales (short prefix + 1-based index)
     for (i, c) in NEUTRAL_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("N{}", i + 1), c);
+        write_var(&mut css, &format!("N{}", i + 1), c);
     }
     for (i, c) in BLUE_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("U{}", i + 1), c);
+        write_var(&mut css, &format!("U{}", i + 1), c);
     }
     for (i, c) in RED_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("O{}", i + 1), c);
+        write_var(&mut css, &format!("O{}", i + 1), c);
     }
     for (i, c) in GREEN_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("P{}", i + 1), c);
+        write_var(&mut css, &format!("P{}", i + 1), c);
     }
     for (i, c) in AMBER_SCALE.iter().enumerate() {
-        write_if_used(&mut css, &format!("M{}", i + 1), c);
+        write_var(&mut css, &format!("M{}", i + 1), c);
     }
+    write_var(&mut css, "Yw", color::WHITE);
+    write_var(&mut css, "Yb", color::BLACK);
 
-    // Special colors
-    write_if_used(&mut css, "Yw", color::WHITE);
-    write_if_used(&mut css, "Yb", color::BLACK);
-
-    if css.is_empty() {
-        return String::new();
-    }
-
-    let mut result = String::with_capacity(css.len() + 10);
-    result.push_str(":root{\n");
-    result.push_str(&css);
-    result.push_str("}\n");
-    result
+    css.push_str("}\n");
+    css
 }
 
 /// Minify CSS by removing unnecessary whitespace.
@@ -287,28 +236,15 @@ mod tests {
     }
 
     #[test]
-    fn test_color_css_filtered() {
-        let mut used = HashSet::new();
-        used.insert("--P4".to_string());
-        used.insert("--O9".to_string());
-
-        let css = generate_color_css_filtered(&used);
-
-        // Should contain only the requested colors (short names)
+    fn test_color_css_all_ships_every_scale() {
+        // Lazy CSS ships the full color set so later-delivered rules always
+        // resolve their var() references.
+        let css = generate_color_css_all();
         assert!(css.contains("--P4:"));
         assert!(css.contains("--O9:"));
-        // Should NOT contain others
-        assert!(!css.contains("--U1:"));
-        assert!(!css.contains("--N1:"));
-    }
-
-    #[test]
-    fn test_color_css_filtered_empty() {
-        let used = HashSet::new();
-        let css = generate_color_css_filtered(&used);
-
-        // Should return empty string when no colors are used
-        assert_eq!(css, "");
+        assert!(css.contains("--U1:"));
+        assert!(css.contains("--N1:"));
+        assert!(css.contains("--Yw:"));
     }
 
     #[test]

@@ -78,7 +78,7 @@ pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 // Builder API exports
-pub use builder::{el, ElementBuilder, TokenInventory};
+pub use builder::{el, ElementBuilder};
 
 // Item reference exports
 pub use item_ref::{ItemRef, IterWithRef};
@@ -86,7 +86,7 @@ pub use item_ref::{ItemRef, IterWithRef};
 // State exports
 pub use state::{
     ChangeSet, EventContext, EventPayload, HandlerFn, HandlerSpec, MemoryState, PersistedState,
-    RendererDeps, State, StorageType,
+    RendererDeps, State, StorageType, stable_handler_id,
 };
 
 // Protocol exports
@@ -126,7 +126,7 @@ pub use style::{ScopedClass, Style};
 pub use attr_tokens::{At, Av};
 
 // Style token exports (binary-encoded styles)
-pub use style_tokens::{Bp, Pc, St, StyleProp, StyleValue};
+pub use style_tokens::{Bp, Pc, St, StyleKey, StyleProp, StyleValue};
 
 // Token exports
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};

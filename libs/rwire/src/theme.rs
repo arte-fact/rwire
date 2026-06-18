@@ -238,6 +238,20 @@ impl State for Theme {
 }
 
 impl Theme {
+    // Field-index constants for fine-grained reactivity, matching the
+    // `#[derive(State)]` convention (positional index, uppercased field name).
+    // Required because Theme's `State` impl is hand-written, not derived.
+    /// Field index of `mode`.
+    pub const FIELD_MODE: u8 = 0;
+    /// Field index of `radius`.
+    pub const FIELD_RADIUS: u8 = 1;
+    /// Field index of `style`.
+    pub const FIELD_STYLE: u8 = 2;
+    /// Field index of `palette`.
+    pub const FIELD_PALETTE: u8 = 3;
+}
+
+impl Theme {
     /// Create a new theme with default settings (light mode, Soft style).
     pub fn new() -> Self {
         Self::default()

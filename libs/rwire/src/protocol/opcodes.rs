@@ -154,6 +154,13 @@ pub const STYLE_COMPOSITE: u8 = 0x85;
 /// Each entry: [id_varint, util_count, util1, util2, ...]
 pub const COMPOSITE_TABLE: u8 = 0x86;
 
+/// Define CSS rules lazily (one batch). Format: [STYLE_DEF, count_varint,
+/// (rule_len_varint, rule_utf8){count}]. Each rule is a complete CSS rule
+/// including selector, e.g. `.u192{background:var(--a)}`. The client appends
+/// each to a dedicated stylesheet. Sent the first time a connection references a
+/// utility/pseudo/breakpoint class — see docs/tree-shaking-redesign.md (Phase 2).
+pub const STYLE_DEF: u8 = 0x87;
+
 /// Apply composable pseudo-class styles.
 /// Format: [STYLE_PSEUDO, ref, pc_code, count, st1_varint, st2_varint, ...]
 /// pc_code is the Pc selector (u8), st tokens are varint-encoded St codes.

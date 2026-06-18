@@ -10,7 +10,7 @@ use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, At, El, ElementBuilder, Ev, Server, State};
 use rwire_components::catalog::{self, Category, ComponentEntry};
 use rwire_components::*;
-use rwire_markdown::{markdown_element_types, Markdown};
+use rwire_markdown::Markdown;
 use rwire_themes::{palettes, styles};
 
 // ============================================================================
@@ -108,9 +108,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_component_page(slug)
         });
 
+    // Element maps are shipped whole now — markdown elements need no declaring.
     let capsule_config = CapsuleConfig::new()
-        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]))
-        .extra_elements(&markdown_element_types());
+        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind(&config.bind_addr)?
         .root(root)

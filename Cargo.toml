@@ -13,5 +13,6 @@ members = [
     "examples/todolist",
     "examples/todo-combined",
     "examples/fine-grained",
+    "examples/nested",
 ]
 resolver = "2"

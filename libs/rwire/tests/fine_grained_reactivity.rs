@@ -10,7 +10,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 use rwire::builder::{
-    build_synced_update_multi, ElementBuilder, SyncedElement, SyncedRenderer, TokenInventory,
+    build_synced_update_multi, ElementBuilder, SyncedElement, SyncedRenderer,
 };
 use rwire::protocol::opcodes::GET_SYNCED;
 use rwire::state::{ChangeSet, RendererDeps};
@@ -248,10 +248,6 @@ impl SyncedRenderer for TestRenderer {
     fn deps(&self) -> RendererDeps {
         self.deps
     }
-
-    fn token_inventory(&self) -> &'static TokenInventory {
-        &TokenInventory::EMPTY
-    }
 }
 
 #[test]
@@ -267,7 +263,7 @@ fn test_build_synced_update_filters_by_changeset() {
         make_synced_element_with_deps(2, RendererDeps::from_fields(&[MultiFieldState::FIELD_C])),
     ];
 
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     // Only field_a changed
     let changes = ChangeSet::from_fields(&[MultiFieldState::FIELD_A]);
@@ -300,7 +296,7 @@ fn test_build_synced_update_all_changes() {
         make_synced_element_with_deps(1, RendererDeps::from_fields(&[MultiFieldState::FIELD_B])),
     ];
 
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     // All fields changed
     let changes = ChangeSet::all();
@@ -329,7 +325,7 @@ fn test_build_synced_update_no_changes() {
         RendererDeps::from_fields(&[MultiFieldState::FIELD_A]),
     )];
 
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     // No changes
     let changes = ChangeSet::new();
@@ -350,7 +346,7 @@ fn test_build_synced_update_always_deps() {
         make_synced_element_with_deps(1, RendererDeps::always()), // Always update
     ];
 
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     // Only field_b changed (element 0 doesn't depend on it)
     let changes = ChangeSet::from_fields(&[MultiFieldState::FIELD_B]);
@@ -385,7 +381,7 @@ fn test_build_synced_update_multiple_fields_overlap() {
         make_synced_element_with_deps(1, RendererDeps::from_fields(&[MultiFieldState::FIELD_C])),
     ];
 
-    let mut handlers: Vec<HandlerFn> = vec![];
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
 
     // Only field_a changed
     let changes = ChangeSet::from_fields(&[MultiFieldState::FIELD_A]);
