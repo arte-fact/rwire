@@ -514,9 +514,25 @@ impl ElementBuilder {
         self
     }
 
-    /// Set inline style on this element.
-    pub fn style(self, style: crate::style::Style) -> Self {
-        self.attr("style", &style.to_css())
+    /// Set inline style on this element, merging with any existing inline style.
+    ///
+    /// A second `.style(...)` augments the first rather than replacing it, so a
+    /// selection ring layered onto a card that already set `flex`/`background`
+    /// keeps both (later declarations win per CSS property).
+    pub fn style(mut self, style: crate::style::Style) -> Self {
+        let css = style.to_css();
+        if css.is_empty() {
+            return self;
+        }
+        if let Some((_, existing)) = self.attrs.iter_mut().find(|(k, _)| k == "style") {
+            if !existing.is_empty() && !existing.trim_end().ends_with(';') {
+                existing.push(';');
+            }
+            existing.push_str(&css);
+            self
+        } else {
+            self.attr("style", &css)
+        }
     }
 
     /// Apply a binary-encoded style utility token.
