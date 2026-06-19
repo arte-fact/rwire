@@ -2166,7 +2166,7 @@ pub fn build_synced_update_multi(
     changes: ChangeSet,
 ) -> Bytes {
     build_synced_update_with_known_symbols(
-        synced, states, handlers, changes, None, None, None, None, None,
+        synced, states, handlers, changes, None, None, None, None, None, 0,
     )
 }
 
@@ -2198,6 +2198,7 @@ pub fn build_synced_update_with_known_symbols(
     mut prev_hashes: Option<&mut HashMap<u32, u64>>,
     sent_css: SentCss<'_>,
     discovered_out: Option<&mut Vec<SyncedElement>>,
+    synced_id_floor: u32,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
@@ -2223,7 +2224,11 @@ pub fn build_synced_update_with_known_symbols(
     // This avoids the double-render problem where non-deterministic values
     // (like generate_element_id()) produce different outputs between symbol
     // collection and emission passes.
-    let mut synced_counter: u32 = 0;
+    //
+    // The counter starts at `synced_id_floor` so newly-introduced regions get ids
+    // above any the client may still hold from a just-removed region (a router view
+    // swap) — reusing an id would make the client morph preserve the stale span.
+    let mut synced_counter: u32 = synced_id_floor;
     let mut has_updates = false;
     let mut rendered_cache: HashMap<u32, ElementBuilder> = HashMap::new();
 
@@ -2304,20 +2309,13 @@ pub fn build_synced_update_with_known_symbols(
     // CREATE_SYNCED placeholder (so the morph preserves the live span) while the
     // nested region's own entry here emits its standalone GET_SYNCED + rebuild.
 
-    // Build a map of state_type_id -> list of synced element IDs (in order)
-    let mut ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
-    for se in synced {
-        ids_by_type.entry(se.state_type_id).or_default().push(se.id);
-    }
-
-    let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
-
     let mut emit_synced_counter: u32 = synced
         .iter()
         .map(|se| se.id)
         .max()
         .map(|m| m + 1)
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(synced_id_floor);
 
     // Nested regions encountered while re-rendering each region this pass, tagged with
     // their owning parent — the caller reconciles registrations from this.
@@ -2327,8 +2325,18 @@ pub fn build_synced_update_with_known_symbols(
         // Use the cached render result (rendered exactly once above; taking the
         // entry guarantees each region is emitted at most once).
         if let Some(rendered) = rendered_cache.remove(&se.id) {
-            let idx = next_idx_by_type.entry(se.state_type_id).or_insert(0);
-            *idx += 1;
+            // Match nested regions only against THIS region's own children, so they
+            // reuse their previous ids — while a sibling region's same-typed regions
+            // (e.g. after a router view swap) are treated as new rather than hijacking
+            // another region's live spans.
+            let mut ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
+            for child in synced.iter().filter(|s| s.parent == Some(se.id)) {
+                ids_by_type
+                    .entry(child.state_type_id)
+                    .or_default()
+                    .push(child.id);
+            }
+            let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
 
             let wrapper_ref = buf.get_synced(se.id);
             buf.clear_children(wrapper_ref);
@@ -2453,16 +2461,20 @@ fn emit_update_element(
             // client short-circuit, leaving stale / append-only content.
         } else if let Some(state) = states.get(&state_type_id) {
             // A genuinely new nested region: no standalone update covers it, so
-            // build its content inline.
+            // build its content inline. It has no prior children, so its own nested
+            // regions match against an empty scope (all fresh) rather than the
+            // enclosing region's children.
             if let Some(rendered) = renderer.render_with_state(*state) {
+                let child_ids: HashMap<TypeId, Vec<u32>> = HashMap::new();
+                let mut child_next_idx: HashMap<TypeId, usize> = HashMap::new();
                 emit_update_element(
                     &rendered,
                     wrapper_ref,
                     buf,
                     symbol_map,
                     handlers,
-                    ids_by_type,
-                    next_idx_by_type,
+                    &child_ids,
+                    &mut child_next_idx,
                     synced_counter,
                     states,
                     Some(synced_id),

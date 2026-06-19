@@ -347,6 +347,7 @@ fn test_update_collects_discovered_nested_regions_with_parent() {
         None,
         None,
         Some(&mut discovered),
+        0,
     );
 
     let child = discovered

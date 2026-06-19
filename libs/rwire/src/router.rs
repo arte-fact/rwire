@@ -322,6 +322,15 @@ impl Link {
             .attr("data-route", "")
             .append([content])
     }
+
+    /// A bare client-routed `<a>` (no text/content) for callers that style it and
+    /// append their own children — e.g. a nav row with an accent bar + label.
+    pub fn route(href: &str) -> ElementBuilder {
+        use crate::builder::el;
+        use crate::protocol::El;
+
+        el(El::A).attr("href", href).attr("data-route", "")
+    }
 }
 
 // ============================================================================
