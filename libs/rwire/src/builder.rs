@@ -578,15 +578,37 @@ impl ElementBuilder {
         }
     }
 
+    /// Collect every utility/pseudo/breakpoint `StyleKey` this tree references, so a
+    /// static page can emit their CSS rules up front (the live capsule delivers them
+    /// lazily over the wire instead). Recurses into children.
+    pub fn collect_style_keys(&self, keys: &mut BTreeSet<StyleKey>) {
+        for &code in &self.style_utils {
+            keys.insert(StyleKey::Util(code));
+        }
+        for (pc, codes) in &self.pseudo_groups {
+            for &st in codes {
+                keys.insert(StyleKey::Pseudo(*pc, st));
+            }
+        }
+        for (bp, codes) in &self.breakpoint_groups {
+            for &st in codes {
+                keys.insert(StyleKey::Breakpoint(*bp, st));
+            }
+        }
+        for child in &self.children {
+            child.collect_style_keys(keys);
+        }
+    }
+
     /// Serialize this element tree to a self-contained HTML string, for pages
     /// rendered *before* the WebSocket capsule exists (e.g. the auth login).
     ///
     /// Structure, text, attributes, and inline styles (`.style(..)` -> the `style`
     /// attribute) are emitted directly. `.st(..)` utility tokens become `u<code>`
-    /// classes (and pseudo/breakpoint variants) whose CSS the surrounding page must
-    /// supply — they reference theme variables that aren't present pre-capsule.
-    /// Event handlers, synced renderers, and client-action bindings are runtime-only
-    /// and omitted.
+    /// classes (and pseudo/breakpoint variants); pair this with
+    /// `capsule_gen::render_static_page`, which inlines the matching CSS so the
+    /// tokens resolve. Event handlers, synced renderers, and client-action bindings
+    /// are runtime-only and omitted.
     pub fn to_static_html(&self) -> String {
         let mut out = String::new();
         self.write_static_html(&mut out);

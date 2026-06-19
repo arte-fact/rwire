@@ -144,7 +144,9 @@ pub use theme::{
 pub use icons::{icon, icon_sized, icon_with_class, Icon};
 
 // Capsule styling exports
-pub use capsule_gen::{generate_capsule_css, generate_styled_capsule, CapsuleConfig};
+pub use capsule_gen::{
+    generate_capsule_css, generate_styled_capsule, render_static_page, CapsuleConfig,
+};
 
 // Metrics exports
 pub use metrics::{Counter, Gauge, Histogram, Metrics};

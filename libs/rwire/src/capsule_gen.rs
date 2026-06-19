@@ -471,6 +471,37 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
     css
 }
 
+/// Render a self-contained HTML page for a tree built with the `el()` builder, for
+/// content shown *before* the WebSocket capsule exists (e.g. an auth login).
+///
+/// Unlike the live capsule — which embeds only base/composite CSS and delivers
+/// utility rules lazily over the wire — this inlines everything the page needs:
+/// the capsule's static CSS (reset, variables, theme `:root`, composite classes)
+/// plus the utility/pseudo/breakpoint rules for exactly the tokens `body` uses. So
+/// `.st(..)`, `.hover`/`.focus`, and theme colors all resolve with no runtime and
+/// no hand-written CSS.
+pub fn render_static_page(
+    config: &CapsuleConfig,
+    title: &str,
+    body: &crate::builder::ElementBuilder,
+) -> String {
+    let mut css = generate_capsule_css(config);
+    let mut keys = std::collections::BTreeSet::new();
+    body.collect_style_keys(&mut keys);
+    for key in keys {
+        if let Some(rule) = key.to_css_rule() {
+            css.push_str(&rule);
+        }
+    }
+    let title = title.replace('&', "&amp;").replace('<', "&lt;");
+    let body_html = body.to_static_html();
+    format!(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title>\
+<style>{css}</style></head><body>{body_html}</body></html>"
+    )
+}
+
 /// Generate a capsule with styling support.
 ///
 /// This is the recommended way to generate capsules for styled applications.

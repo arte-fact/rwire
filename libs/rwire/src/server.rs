@@ -1073,6 +1073,20 @@ fn extract_cookie_from_request(request: &str) -> Option<String> {
     None
 }
 
+/// Build the capsule config used to render the static login page: the app theme
+/// (for `:root` vars) plus the composite classes, so the login uses the design
+/// system. Cheap enough to build per login-page render (a rare request).
+fn login_capsule_config(
+    initial_theme: &Option<Arc<crate::theme::Theme>>,
+    composite_table: &crate::style_groups::CompositeTable,
+) -> CapsuleConfig {
+    let mut config = CapsuleConfig::new();
+    if let Some(theme) = initial_theme {
+        config = config.theme((**theme).clone());
+    }
+    config.with_composite_css(composite_table.generate_css())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_client<F>(
     mut stream: TcpStream,
@@ -1119,7 +1133,8 @@ async fn handle_client<F>(
                 let _ = capsule::serve_redirect(stream, "/", Some(&cookie)).await;
             } else {
                 println!("[{peer_addr}] login failed");
-                let _ = capsule::serve_login(stream, true, gate.brand.as_deref()).await;
+                let config = login_capsule_config(&initial_theme, &composite_table);
+                let _ = capsule::serve_login(stream, true, gate.brand.as_deref(), &config).await;
             }
             return;
         }
@@ -1140,7 +1155,8 @@ async fn handle_client<F>(
             } else {
                 let mut buf = vec![0u8; n];
                 let _ = stream.read_exact(&mut buf).await;
-                let _ = capsule::serve_login(stream, false, gate.brand.as_deref()).await;
+                let config = login_capsule_config(&initial_theme, &composite_table);
+                let _ = capsule::serve_login(stream, false, gate.brand.as_deref(), &config).await;
             }
             return;
         }
