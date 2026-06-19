@@ -441,7 +441,7 @@ impl ElementBuilder {
     }
 
     /// Wrap a boxed synced renderer in a placeholder element.
-    fn synced_from(synced: Box<dyn SyncedRenderer>) -> Self {
+    pub(crate) fn synced_from(synced: Box<dyn SyncedRenderer>) -> Self {
         Self {
             el_type: El::Div, // Placeholder, will be replaced by rendered content
             text: None,

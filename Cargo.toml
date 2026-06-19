@@ -14,5 +14,6 @@ members = [
     "examples/todo-combined",
     "examples/fine-grained",
     "examples/nested",
+    "examples/router",
 ]
 resolver = "2"

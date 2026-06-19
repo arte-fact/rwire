@@ -324,6 +324,107 @@ impl Link {
     }
 }
 
+// ============================================================================
+// Outlet: render-the-matched-view-on-route (the actual router runtime)
+// ============================================================================
+
+use std::any::{Any, TypeId};
+use std::sync::OnceLock;
+
+use crate::builder::SyncedRenderer;
+use crate::state::{RendererDeps, State, StorageType};
+
+/// The configured router, shared with each connection's outlet. Set in `run()` when
+/// `Server::routes` is used.
+static ROUTER: OnceLock<Arc<Router>> = OnceLock::new();
+
+/// Install the app's router (called by the server). Idempotent.
+pub(crate) fn install_router(router: Arc<Router>) {
+    let _ = ROUTER.set(router);
+}
+
+pub(crate) fn installed_router() -> Option<&'static Arc<Router>> {
+    ROUTER.get()
+}
+
+/// Built-in per-connection state holding the current URL path. The framework updates
+/// it on every route event (`Link` click, back/forward, deep-link/reload); the
+/// [`outlet`] re-renders the matched view from it. App renderers can read it to
+/// highlight active navigation or pull `:params`.
+#[derive(Clone, Debug)]
+pub struct CurrentRoute {
+    path: String,
+}
+
+impl Default for CurrentRoute {
+    fn default() -> Self {
+        Self {
+            path: "/".to_owned(),
+        }
+    }
+}
+
+impl State for CurrentRoute {
+    const STORAGE_TYPE: StorageType = StorageType::Memory;
+}
+
+impl CurrentRoute {
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub(crate) fn set_path(&mut self, path: impl Into<String>) {
+        self.path = path.into();
+    }
+
+    /// A named route parameter for the current path, matched against the registered
+    /// routes (e.g. `param("id")` on `/chat/42` with a `/chat/:id` page → `"42"`).
+    #[must_use]
+    pub fn param(&self, name: &str) -> Option<String> {
+        installed_router()?
+            .match_path(&self.path)
+            .and_then(|(_, params)| params.get(name).map(str::to_owned))
+    }
+}
+
+/// A custom synced renderer over [`CurrentRoute`] that renders the matched route view.
+struct OutletRenderer;
+
+impl SyncedRenderer for OutletRenderer {
+    fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
+        let route = state.downcast_ref::<CurrentRoute>()?;
+        let view = match installed_router() {
+            Some(router) => router.build_for_path(&route.path),
+            None => crate::builder::el(crate::protocol::El::Div),
+        };
+        Some(view)
+    }
+
+    fn clone_box(&self) -> Box<dyn SyncedRenderer> {
+        Box::new(OutletRenderer)
+    }
+
+    fn state_type_id(&self) -> TypeId {
+        TypeId::of::<CurrentRoute>()
+    }
+
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        Box::new(CurrentRoute::default())
+    }
+
+    fn deps(&self) -> RendererDeps {
+        RendererDeps::always()
+    }
+}
+
+/// Place where the matched route view renders. Put one in your shell (next to the
+/// persistent layout); the framework swaps the view here on every navigation.
+#[must_use]
+pub fn outlet() -> ElementBuilder {
+    ElementBuilder::synced_from(Box::new(OutletRenderer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -754,6 +754,12 @@ where
             .shared
             .unwrap_or_else(|| SharedServerState::new(self.persist_interval));
 
+        // Install the app's router (if any) so each connection's `outlet()` renders the
+        // matched view, and the startup analysis below tree-shakes the "/" view.
+        if let Some(router) = self.router {
+            crate::router::install_router(std::sync::Arc::new(router));
+        }
+
         // Pre-analyze the root element to determine used types for tree shaking
         let root_element = (self.root)();
         let mut ctx = BuildContext::new();
@@ -1403,6 +1409,15 @@ where
             .insert(TypeId::of::<Theme>(), Box::new(theme.as_ref().clone()));
     }
 
+    // Seed the built-in CurrentRoute so the outlet renders the initial path ("/");
+    // the client's on-connect R<path> corrects it for deep-links.
+    if crate::router::installed_router().is_some() {
+        conn_state.states.insert(
+            TypeId::of::<crate::router::CurrentRoute>(),
+            Box::new(crate::router::CurrentRoute::default()),
+        );
+    }
+
     // Restore cached session state if available, otherwise initialize fresh
     if let Some(cached) = shared.restore_session(conn_state.session_id.as_str()) {
         println!("[{}] Restored cached session state", peer_addr);
@@ -1763,6 +1778,41 @@ where
             },
             Ok(Message::Text(text)) => {
                 if let Some(path) = text.strip_prefix('R') {
+                    // Built-in router: update CurrentRoute so the outlet re-renders the
+                    // matched view (the view's own renderers update via Phase B).
+                    if crate::router::installed_router().is_some() {
+                        let route_tid = TypeId::of::<crate::router::CurrentRoute>();
+                        conn_state.states.entry(route_tid).or_insert_with(|| {
+                            Box::new(crate::router::CurrentRoute::default())
+                        });
+                        if let Some(state) = conn_state.get_state_mut(route_tid) {
+                            if let Some(route) =
+                                state.downcast_mut::<crate::router::CurrentRoute>()
+                            {
+                                route.set_path(path);
+                            }
+                        }
+                        let update = {
+                            let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
+                                .states
+                                .iter()
+                                .map(|(k, v)| (*k, v.as_ref()))
+                                .collect();
+                            build_synced_update_with_known_symbols(
+                                &conn_state.synced_elements,
+                                &states_map,
+                                &mut conn_state.handlers,
+                                ChangeSet::all(),
+                                Some(&mut conn_state.sent_symbols),
+                                Some(route_tid),
+                                Some(&mut conn_state.synced_hashes),
+                                Some(&mut conn_state.sent_css),
+                            )
+                        };
+                        if !update.is_empty() {
+                            write.send(Message::Binary(update.to_vec())).await?;
+                        }
+                    }
                     if let Some(ref handler) = route_handler {
                         println!("[{}] Route: {}", peer_addr, path);
 
