@@ -13,6 +13,7 @@ use async_std::net::TcpStream;
 use std::time::Duration;
 
 use crate::session::{SessionId, COOKIE_MAX_AGE_SECS};
+use crate::{At, Av, El, ElementBuilder, Style, el};
 
 /// Serve a pre-generated capsule HTML over the TCP stream.
 ///
@@ -104,53 +105,102 @@ pub async fn serve_redirect(
     Ok(())
 }
 
-/// Standalone dark-themed login page (self-contained; no capsule runtime/CSS).
+/// Standalone dark-themed login page. The body is built with the `el()` builder
+/// and serialized via `ElementBuilder::to_static_html` (no capsule runtime); the
+/// styling lives in a self-contained `<style>` block, since pseudo-states
+/// (`:focus`, `:hover`) can't be inline and theme variables don't exist pre-capsule.
 fn login_html(error: bool, brand: Option<&str>) -> String {
-    let err = if error {
-        "<p class=\"err\">Incorrect username or password.</p>"
-    } else {
-        ""
-    };
     let title = brand.unwrap_or("Sign in");
-    let glyph = if brand.is_some() {
-        "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#88c0d0\" \
-stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"flex:0 0 auto\">\
-<path d=\"M4 17l6-5-6-5M12 19h8\"/></svg>"
-    } else {
-        ""
-    };
-    // Self-contained (no capsule runtime/CSS): flat, hairline, mono, Nord — the
-    // terminal look. Inputs/buttons take an accent border on focus/hover.
+    let body = login_form(error, brand).to_static_html();
     format!(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title>\
-<style>*{{box-sizing:border-box}}\
-body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
-background:#2e3440;color:#d8dee9;\
-font-family:'Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85rem}}\
-form{{background:#2e3440;border:1px solid #434c5e;border-radius:3px;padding:1.25rem;\
-width:min(22rem,90vw);display:flex;flex-direction:column;gap:.7rem}}\
-.brand{{display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem}}\
-.brand b{{color:#eceff4;font-size:1.05rem}}\
-.field{{display:flex;flex-direction:column;gap:.25rem}}\
-label{{font-size:.7rem;color:#81a1c1;text-transform:uppercase;letter-spacing:.05em}}\
-input{{width:100%;padding:.5rem .6rem;border:1px solid #434c5e;border-radius:3px;\
-background:#3b4252;color:#eceff4;font:inherit;outline:none}}\
-input::placeholder{{color:#4c566a}}\
-input:focus{{border-color:#88c0d0}}\
-button{{margin-top:.25rem;padding:.55rem;border:1px solid #434c5e;border-radius:3px;\
-background:#3b4252;color:#d8dee9;font:inherit;cursor:pointer}}\
-button:hover{{border-color:#88c0d0;color:#eceff4}}\
-.err{{color:#bf616a;font-size:.8rem;margin:0}}</style></head>\
-<body><form method=\"POST\" action=\"/login\">\
-<div class=\"brand\">{glyph}<b>{title}</b></div>{err}\
-<div class=\"field\"><label>Username</label>\
-<input name=\"username\" autofocus autocomplete=\"username\"></div>\
-<div class=\"field\"><label>Password</label>\
-<input name=\"password\" type=\"password\" autocomplete=\"current-password\"></div>\
-<button type=\"submit\">Sign in</button></form></body></html>"
+<style>{LOGIN_CSS}</style></head><body>{body}</body></html>"
     )
 }
+
+/// The login form tree: brand row, optional error, username/password fields, submit.
+fn login_form(error: bool, brand: Option<&str>) -> ElementBuilder {
+    let title = brand.unwrap_or("Sign in");
+
+    let mut brand_row = el(El::Div).class("brand");
+    if brand.is_some() {
+        brand_row = brand_row.append([login_glyph()]);
+    }
+    brand_row = brand_row.append([el(El::Strong).text(title)]);
+
+    let mut children: Vec<ElementBuilder> = vec![brand_row];
+    if error {
+        children.push(
+            el(El::P)
+                .class("err")
+                .text("Incorrect username or password."),
+        );
+    }
+    children.push(login_field(
+        "Username",
+        el(El::Input)
+            .attr("name", "username")
+            .attr("autofocus", "")
+            .attr("autocomplete", "username"),
+    ));
+    children.push(login_field(
+        "Password",
+        el(El::Input)
+            .attr("name", "password")
+            .at(At::Type, Av::Password)
+            .attr("autocomplete", "current-password"),
+    ));
+    children.push(el(El::Button).at(At::Type, Av::Submit).text("Sign in"));
+
+    el(El::Form)
+        .attr("method", "POST")
+        .attr("action", "/login")
+        .append(children)
+}
+
+fn login_field(label: &str, input: ElementBuilder) -> ElementBuilder {
+    el(El::Div)
+        .class("field")
+        .append([el(El::Label).text(label), input])
+}
+
+/// The terminal-prompt brand glyph (matches the in-app wordmark icon).
+fn login_glyph() -> ElementBuilder {
+    el(El::Svg)
+        .attr("width", "18")
+        .attr("height", "18")
+        .attr("viewBox", "0 0 24 24")
+        .attr("fill", "none")
+        .attr("stroke", "#88c0d0")
+        .attr("stroke-width", "2")
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round")
+        .style(Style::new().set("flex", "0 0 auto"))
+        .append([el(El::Path).attr("d", "M4 17l6-5-6-5M12 19h8")])
+}
+
+/// Flat, hairline, mono, Nord — the terminal look. Inputs/buttons take an accent
+/// border on focus/hover. Pseudo-states and the base layout can't be inline, so
+/// they live here rather than on the builder tree.
+const LOGIN_CSS: &str = "*{box-sizing:border-box}\
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
+background:#2e3440;color:#d8dee9;\
+font-family:'Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85rem}\
+form{background:#2e3440;border:1px solid #434c5e;border-radius:3px;padding:1.25rem;\
+width:min(22rem,90vw);display:flex;flex-direction:column;gap:.7rem}\
+.brand{display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem}\
+.brand strong{color:#eceff4;font-size:1.05rem}\
+.field{display:flex;flex-direction:column;gap:.25rem}\
+label{font-size:.7rem;color:#81a1c1;text-transform:uppercase;letter-spacing:.05em}\
+input{width:100%;padding:.5rem .6rem;border:1px solid #434c5e;border-radius:3px;\
+background:#3b4252;color:#eceff4;font:inherit;outline:none}\
+input::placeholder{color:#4c566a}\
+input:focus{border-color:#88c0d0}\
+button{margin-top:.25rem;padding:.55rem;border:1px solid #434c5e;border-radius:3px;\
+background:#3b4252;color:#d8dee9;font:inherit;cursor:pointer}\
+button:hover{border-color:#88c0d0;color:#eceff4}\
+.err{color:#bf616a;font-size:.8rem;margin:0}";
 
 /// Check if the HTTP request is a WebSocket upgrade request.
 pub fn is_websocket_upgrade(headers: &str) -> bool {

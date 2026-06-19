@@ -67,6 +67,49 @@ fn encode_style_def(rules: &[String]) -> BytesMut {
     buf
 }
 
+/// HTML void elements: emitted with no closing tag and no children.
+fn is_void_element(tag: &str) -> bool {
+    matches!(
+        tag,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+fn push_attr_escaped(out: &mut String, value: &str) {
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+}
+
+fn push_text_escaped(out: &mut String, value: &str) {
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+}
+
 /// Build the `STYLE_DEF` prefix for class-referenced rules in `referenced` that
 /// this connection (`sent`) has not yet received, marking them sent.
 ///
@@ -533,6 +576,98 @@ impl ElementBuilder {
         } else {
             self.attr("style", &css)
         }
+    }
+
+    /// Serialize this element tree to a self-contained HTML string, for pages
+    /// rendered *before* the WebSocket capsule exists (e.g. the auth login).
+    ///
+    /// Structure, text, attributes, and inline styles (`.style(..)` -> the `style`
+    /// attribute) are emitted directly. `.st(..)` utility tokens become `u<code>`
+    /// classes (and pseudo/breakpoint variants) whose CSS the surrounding page must
+    /// supply — they reference theme variables that aren't present pre-capsule.
+    /// Event handlers, synced renderers, and client-action bindings are runtime-only
+    /// and omitted.
+    pub fn to_static_html(&self) -> String {
+        let mut out = String::new();
+        self.write_static_html(&mut out);
+        out
+    }
+
+    fn write_static_html(&self, out: &mut String) {
+        let tag = self.el_type.name();
+        out.push('<');
+        out.push_str(tag);
+
+        let mut classes: Vec<String> = Vec::new();
+        if let Some(c) = &self.class {
+            if !c.is_empty() {
+                classes.push(c.clone());
+            }
+        }
+        for u in &self.style_utils {
+            classes.push(format!("u{u}"));
+        }
+        for (pc, codes) in &self.pseudo_groups {
+            for u in codes {
+                classes.push(format!("h{pc}u{u}"));
+            }
+        }
+        for (bp, codes) in &self.breakpoint_groups {
+            for u in codes {
+                classes.push(format!("b{bp}u{u}"));
+            }
+        }
+        if !classes.is_empty() {
+            out.push_str(" class=\"");
+            push_attr_escaped(out, &classes.join(" "));
+            out.push('"');
+        }
+
+        for (key, value) in &self.attrs {
+            out.push(' ');
+            out.push_str(key);
+            out.push_str("=\"");
+            push_attr_escaped(out, value);
+            out.push('"');
+        }
+        for ta in &self.typed_attrs {
+            match ta {
+                TypedAttr::Enum(at, av) => {
+                    out.push(' ');
+                    out.push_str(at.name());
+                    out.push_str("=\"");
+                    push_attr_escaped(out, av.value());
+                    out.push('"');
+                }
+                TypedAttr::KeySym(at, value) => {
+                    out.push(' ');
+                    out.push_str(at.name());
+                    out.push_str("=\"");
+                    push_attr_escaped(out, value);
+                    out.push('"');
+                }
+                TypedAttr::Bool(at) => {
+                    out.push(' ');
+                    out.push_str(at.name());
+                }
+            }
+        }
+        out.push('>');
+
+        if is_void_element(tag) {
+            return;
+        }
+
+        if let Some(text) = &self.text {
+            push_text_escaped(out, text);
+        }
+        for child in &self.children {
+            child.write_static_html(out);
+        }
+
+        out.push_str("</");
+        out.push_str(tag);
+        out.push('>');
     }
 
     /// Apply a binary-encoded style utility token.
