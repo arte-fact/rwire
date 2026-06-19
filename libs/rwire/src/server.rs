@@ -1156,7 +1156,10 @@ async fn handle_client<F>(
 
         if !gate.has_session(&peek_str) {
             if is_ws {
-                println!("[{peer_addr}] WebSocket rejected (no session)");
+                // Expected and benign: a still-open tab from a previous run (tokens are
+                // in-memory and reset on restart, or expired) auto-reconnects its socket.
+                // The client probes and reloads to the login form on repeated rejects,
+                // so this isn't logged to avoid noise.
                 let _ = capsule::serve_unauthorized(stream).await;
             } else {
                 let mut buf = vec![0u8; n];

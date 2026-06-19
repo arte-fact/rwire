@@ -154,17 +154,17 @@ else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_o
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
 function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
 if('scrollRestoration' in history)history.scrollRestoration='manual';
-let rc=0,rn=false;
+let rc=0,rn=false,op=false;
 function connect(){
 w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
 w.binaryType='arraybuffer';
 w.onopen=()=>{
 if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
-rn=false;rc=0;
+rn=false;rc=0;op=true;
 if(location.pathname!=='/')w.send('R'+location.pathname);
 if(location.hash)sh(location.hash)};
 w.onmessage=e=>x(new Uint8Array(e.data));
-w.onclose=()=>{rn=true;setTimeout(connect,Math.min(1000*Math.pow(2,rc++),30000))};
+w.onclose=()=>{rn=true;if(op&&rc>=2)fetch(location.pathname,{cache:'no-store'}).then(()=>location.reload()).catch(()=>{});setTimeout(connect,Math.min(1000*Math.pow(2,rc++),30000))};
 w.onerror=()=>{}}
 connect();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&w.readyState>1){rc=0;connect()}});
