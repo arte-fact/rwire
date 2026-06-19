@@ -57,7 +57,7 @@ fn generate_svg_set() -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,PD:0x89,BP:0x8A,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,PD:0x89,BP:0x8A,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={},DS,pm=null;
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
@@ -130,6 +130,8 @@ else if(o===O.RP){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;l
 else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
 else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
 else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
+else if(o===O.RUI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.pushState(null,'',u)}
+else if(o===O.RRI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.replaceState(null,'',u)}
 else if(o===O.SS){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
 else if(o===O.SU){let[f,fl]=rv(d,i);i+=fl;let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
 else if(o===O.SP){let[f,fl]=rv(d,i);i+=fl;let p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}

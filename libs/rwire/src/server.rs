@@ -1725,6 +1725,20 @@ where
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;
                         }
+
+                        // A handler may have requested a client navigation (e.g. it
+                        // created a resource and wants the URL to reflect it). Flush
+                        // it after the DOM update so the page is already in the new
+                        // state when the URL changes.
+                        if let Some(nav) = ctx.take_navigation() {
+                            let mut buf = crate::protocol::OpcodeBuffer::new();
+                            if nav.replace {
+                                buf.route_replace_inline(&nav.url);
+                            } else {
+                                buf.route_push_inline(&nav.url);
+                            }
+                            write.send(Message::Binary(buf.finish().to_vec())).await?;
+                        }
                     } else {
                         eprintln!(
                             "[{}] No handler registered for index {}",

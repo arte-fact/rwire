@@ -21,6 +21,7 @@
 //! ```
 
 use std::any::{Any, TypeId};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -252,6 +253,15 @@ pub struct EventContext {
     parsed: OnceLock<EventPayload>,
     /// Handler parameter bytes (for ItemRef-based handlers)
     param_bytes: Vec<u8>,
+    /// A client navigation the handler requested via `navigate`/`replace_route`,
+    /// flushed to this connection after the handler's synced update.
+    navigation: Cell<Option<Navigation>>,
+}
+
+/// A server-initiated client navigation requested from a handler.
+pub(crate) struct Navigation {
+    pub url: String,
+    pub replace: bool,
 }
 
 impl EventContext {
@@ -261,6 +271,7 @@ impl EventContext {
             raw,
             parsed: OnceLock::new(),
             param_bytes: Vec::new(),
+            navigation: Cell::new(None),
         }
     }
 
@@ -270,6 +281,7 @@ impl EventContext {
             raw,
             parsed: OnceLock::new(),
             param_bytes,
+            navigation: Cell::new(None),
         }
     }
 
@@ -279,7 +291,31 @@ impl EventContext {
             raw: Vec::new(),
             parsed: OnceLock::new(),
             param_bytes: Vec::new(),
+            navigation: Cell::new(None),
         }
+    }
+
+    /// Request a client navigation: push `url` onto history (back returns here).
+    /// Use this when a handler creates or selects a resource whose URL is only
+    /// known server-side — the URL updates after the handler's DOM update lands.
+    pub fn navigate(&self, url: impl Into<String>) {
+        self.navigation.set(Some(Navigation {
+            url: url.into(),
+            replace: false,
+        }));
+    }
+
+    /// Request a client navigation that replaces the current history entry.
+    pub fn replace_route(&self, url: impl Into<String>) {
+        self.navigation.set(Some(Navigation {
+            url: url.into(),
+            replace: true,
+        }));
+    }
+
+    /// Take the navigation the handler requested, if any (server-internal).
+    pub(crate) fn take_navigation(&self) -> Option<Navigation> {
+        self.navigation.take()
     }
 
     /// Create an EventContext with a text payload (e.g., a route path).

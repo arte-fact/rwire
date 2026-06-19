@@ -126,6 +126,14 @@ pub const ROUTE_PUSH: u8 = 0x70;
 /// Replace current URL in history. Format: [ROUTE_REPLACE, url_symbol]
 pub const ROUTE_REPLACE: u8 = 0x71;
 
+/// Push a new URL to history, URL carried inline (no symbol table). For
+/// server-initiated navigation where the URL is computed at request time (e.g. a
+/// freshly created resource). Format: [ROUTE_PUSH_INLINE, varint len, utf8 bytes]
+pub const ROUTE_PUSH_INLINE: u8 = 0x72;
+
+/// Replace the current URL, carried inline. Format: [ROUTE_REPLACE_INLINE, varint len, utf8 bytes]
+pub const ROUTE_REPLACE_INLINE: u8 = 0x73;
+
 // ============================================================================
 // Styling Operations
 // ============================================================================

@@ -10,7 +10,8 @@ use super::opcodes::{
     BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    ROUTE_PUSH, ROUTE_REPLACE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM,
+    ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL,
+    SET_ATTR_ENUM, SET_ATTR_KEY_SYM,
     SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
     STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
     SYMBOL_SESSION_START, WORD_TABLE,
@@ -372,6 +373,22 @@ impl OpcodeBuffer {
         self
     }
 
+    /// Push a new URL to history, carrying the URL inline (no symbol table).
+    pub fn route_push_inline(&mut self, url: &str) -> &mut Self {
+        self.buf.put_u8(ROUTE_PUSH_INLINE);
+        write_varint(&mut self.buf, url.len() as u32);
+        self.buf.put_slice(url.as_bytes());
+        self
+    }
+
+    /// Replace the current URL, carrying the URL inline (no symbol table).
+    pub fn route_replace_inline(&mut self, url: &str) -> &mut Self {
+        self.buf.put_u8(ROUTE_REPLACE_INLINE);
+        write_varint(&mut self.buf, url.len() as u32);
+        self.buf.put_slice(url.as_bytes());
+        self
+    }
+
     // ========================================================================
     // Styling Operations
     // ========================================================================
@@ -681,6 +698,23 @@ mod tests {
         assert_eq!(bytes[0], INIT_TARGET);
         assert_eq!(bytes[1], 0); // target_idx
         assert_eq!(bytes[2], 1); // default = true
+    }
+
+    #[test]
+    fn route_push_inline_carries_the_url_in_place() {
+        let mut buf = OpcodeBuffer::new();
+        buf.route_push_inline("/chat/abc");
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], ROUTE_PUSH_INLINE);
+        assert_eq!(bytes[1], "/chat/abc".len() as u8); // varint length (short)
+        assert_eq!(&bytes[2..], b"/chat/abc");
+    }
+
+    #[test]
+    fn route_replace_inline_uses_its_opcode() {
+        let mut buf = OpcodeBuffer::new();
+        buf.route_replace_inline("/x");
+        assert_eq!(buf.as_slice()[0], ROUTE_REPLACE_INLINE);
     }
 
     #[test]
