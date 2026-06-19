@@ -65,8 +65,13 @@ pub async fn serve_unauthorized(mut stream: TcpStream) -> std::io::Result<()> {
 }
 
 /// Serve the login page (`200`), showing an error banner when `error` is set.
-pub async fn serve_login(mut stream: TcpStream, error: bool) -> std::io::Result<()> {
-    let html = login_html(error);
+/// `brand`, when set, is shown (with a glyph) as the form heading.
+pub async fn serve_login(
+    mut stream: TcpStream,
+    error: bool,
+    brand: Option<&str>,
+) -> std::io::Result<()> {
+    let html = login_html(error, brand);
     let resp = format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: text/html; charset=utf-8\r\n\
@@ -100,28 +105,50 @@ pub async fn serve_redirect(
 }
 
 /// Standalone dark-themed login page (self-contained; no capsule runtime/CSS).
-fn login_html(error: bool) -> String {
+fn login_html(error: bool, brand: Option<&str>) -> String {
     let err = if error {
-        "<p style=\"color:#bf616a;margin:0 0 1rem\">Incorrect username or password.</p>"
+        "<p class=\"err\">Incorrect username or password.</p>"
     } else {
         ""
     };
+    let title = brand.unwrap_or("Sign in");
+    let glyph = if brand.is_some() {
+        "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#88c0d0\" \
+stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"flex:0 0 auto\">\
+<path d=\"M4 17l6-5-6-5M12 19h8\"/></svg>"
+    } else {
+        ""
+    };
+    // Self-contained (no capsule runtime/CSS): flat, hairline, mono, Nord — the
+    // terminal look. Inputs/buttons take an accent border on focus/hover.
     format!(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">\
-<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Sign in</title></head>\
-<body style=\"margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
-background:#2e3440;color:#eceff4;font-family:system-ui,sans-serif\">\
-<form method=\"POST\" action=\"/login\" style=\"background:#3b4252;padding:2rem;border-radius:12px;\
-width:min(20rem,90vw);box-shadow:0 10px 40px rgba(0,0,0,.4)\">\
-<h1 style=\"margin:0 0 1.25rem;font-size:1.25rem\">Node Monitor</h1>{err}\
-<label style=\"display:block;font-size:.8rem;margin:0 0 .25rem;color:#d8dee9\">Username</label>\
-<input name=\"username\" autofocus autocomplete=\"username\" style=\"width:100%;box-sizing:border-box;\
-padding:.55rem;margin:0 0 .9rem;border:1px solid #4c566a;border-radius:6px;background:#2e3440;color:#eceff4\">\
-<label style=\"display:block;font-size:.8rem;margin:0 0 .25rem;color:#d8dee9\">Password</label>\
-<input name=\"password\" type=\"password\" autocomplete=\"current-password\" style=\"width:100%;box-sizing:border-box;\
-padding:.55rem;margin:0 0 1.25rem;border:1px solid #4c566a;border-radius:6px;background:#2e3440;color:#eceff4\">\
-<button type=\"submit\" style=\"width:100%;padding:.6rem;border:0;border-radius:6px;background:#5e81ac;\
-color:#fff;font-size:.95rem;cursor:pointer\">Sign in</button></form></body></html>"
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title>\
+<style>*{{box-sizing:border-box}}\
+body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;\
+background:#2e3440;color:#d8dee9;\
+font-family:'Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85rem}}\
+form{{background:#2e3440;border:1px solid #434c5e;border-radius:3px;padding:1.25rem;\
+width:min(22rem,90vw);display:flex;flex-direction:column;gap:.7rem}}\
+.brand{{display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem}}\
+.brand b{{color:#eceff4;font-size:1.05rem}}\
+.field{{display:flex;flex-direction:column;gap:.25rem}}\
+label{{font-size:.7rem;color:#81a1c1;text-transform:uppercase;letter-spacing:.05em}}\
+input{{width:100%;padding:.5rem .6rem;border:1px solid #434c5e;border-radius:3px;\
+background:#3b4252;color:#eceff4;font:inherit;outline:none}}\
+input::placeholder{{color:#4c566a}}\
+input:focus{{border-color:#88c0d0}}\
+button{{margin-top:.25rem;padding:.55rem;border:1px solid #434c5e;border-radius:3px;\
+background:#3b4252;color:#d8dee9;font:inherit;cursor:pointer}}\
+button:hover{{border-color:#88c0d0;color:#eceff4}}\
+.err{{color:#bf616a;font-size:.8rem;margin:0}}</style></head>\
+<body><form method=\"POST\" action=\"/login\">\
+<div class=\"brand\">{glyph}<b>{title}</b></div>{err}\
+<div class=\"field\"><label>Username</label>\
+<input name=\"username\" autofocus autocomplete=\"username\"></div>\
+<div class=\"field\"><label>Password</label>\
+<input name=\"password\" type=\"password\" autocomplete=\"current-password\"></div>\
+<button type=\"submit\">Sign in</button></form></body></html>"
     )
 }
 

@@ -647,6 +647,15 @@ where
         self
     }
 
+    /// Brand/title shown on the login form (with a glyph). Call after [`auth`];
+    /// no-op if auth isn't enabled.
+    pub fn auth_brand(mut self, brand: impl Into<String>) -> Self {
+        if let Some(gate) = self.auth.as_mut() {
+            gate.brand = Some(brand.into());
+        }
+        self
+    }
+
     pub fn with_shared_state(mut self, shared: Arc<SharedServerState>) -> Self {
         self.shared = Some(shared);
         self
@@ -906,6 +915,8 @@ const AUTH_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub(crate) struct AuthGate {
     user: String,
     password: String,
+    /// Optional brand/title shown on the login form.
+    brand: Option<String>,
     tokens: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
@@ -914,6 +925,7 @@ impl AuthGate {
         Self {
             user,
             password,
+            brand: None,
             tokens: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -1107,7 +1119,7 @@ async fn handle_client<F>(
                 let _ = capsule::serve_redirect(stream, "/", Some(&cookie)).await;
             } else {
                 println!("[{peer_addr}] login failed");
-                let _ = capsule::serve_login(stream, true).await;
+                let _ = capsule::serve_login(stream, true, gate.brand.as_deref()).await;
             }
             return;
         }
@@ -1128,7 +1140,7 @@ async fn handle_client<F>(
             } else {
                 let mut buf = vec![0u8; n];
                 let _ = stream.read_exact(&mut buf).await;
-                let _ = capsule::serve_login(stream, false).await;
+                let _ = capsule::serve_login(stream, false, gate.brand.as_deref()).await;
             }
             return;
         }
