@@ -314,6 +314,52 @@ fn test_nested_update_emits_wrapper_ids() {
     println!("  - Total bytes: {}", bytes.len());
 }
 
+/// A re-render reports the nested regions it produced, tagged with their parent —
+/// the hook the router uses to register a swapped-in view's renderers and prune the
+/// previous view's. Here the parent (id 0) re-render must surface the nested child
+/// (id 1) as a discovered region whose parent is 0.
+#[test]
+fn test_update_collects_discovered_nested_regions_with_parent() {
+    use rwire::builder::{build_synced_update_with_known_symbols, SyncedElement};
+
+    let mut ctx = BuildContext::new();
+    let state = ParentState { count: 7 };
+    let boxed: Box<dyn std::any::Any + Send + Sync> = Box::new(state);
+    let state_ref: &(dyn std::any::Any + Send + Sync) = boxed.as_ref();
+    let mut states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<ParentState>(), state_ref);
+
+    let el = make_parent_renderer_with_nested();
+    ctx.collect_symbols_multi(&el, &states);
+    ctx.emit_multi(&el);
+    let synced = ctx.take_synced_elements();
+    assert_eq!(synced.len(), 2, "parent + nested child");
+
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
+    let mut discovered: Vec<SyncedElement> = Vec::new();
+    let _ = build_synced_update_with_known_symbols(
+        &synced,
+        &states,
+        &mut handlers,
+        ChangeSet::all(),
+        None,
+        None,
+        None,
+        None,
+        Some(&mut discovered),
+    );
+
+    let child = discovered
+        .iter()
+        .find(|r| r.id == 1)
+        .expect("the nested child (id 1) should be discovered during the parent's re-render");
+    assert_eq!(
+        child.parent(),
+        Some(0),
+        "the discovered child's parent should be the parent region (id 0)"
+    );
+}
+
 /// Test deeply nested synced elements (3 levels).
 #[test]
 fn test_deeply_nested_synced_elements() {

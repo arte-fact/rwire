@@ -13,7 +13,8 @@ use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::theme::Theme;
 use rwire::{
-    el, outlet, renderer, theme, CurrentRoute, El, ElementBuilder, Link, Router, Server, St,
+    el, handler, outlet, renderer, theme, CurrentRoute, El, ElementBuilder, Link, Router, Server,
+    St, State,
 };
 use rwire_components::Text;
 use rwire_themes::palettes;
@@ -31,6 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Router::new()
                 .page("/", |_| home())
                 .page("/about", |_| about())
+                .page("/counter", |_| counter_view())
                 .page("/item/:id", |params| item(params.get("id").unwrap_or("?"))),
         )
         .capsule_config(CapsuleConfig::new())
@@ -70,8 +72,38 @@ fn nav(route: &CurrentRoute) -> ElementBuilder {
     el(El::Div).st([St::DisplayFlex, St::GapMd]).append([
         link("/", "Home"),
         link("/about", "About"),
+        link("/counter", "Counter"),
         link("/item/42", "Item 42"),
     ])
+}
+
+/// A STATEFUL routed view: its own `#[renderer]` + state + handler. After navigating
+/// here, the count must update on click — and still work after navigating away and
+/// back. That requires the framework to register the view's renderer (increment B).
+#[derive(State, Default)]
+#[storage(memory)]
+struct Counter {
+    n: i32,
+}
+
+fn counter_view() -> ElementBuilder {
+    el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapSm])
+        .append([
+            Text::heading1("Counter".to_owned()).build(),
+            count_display(),
+            rwire_components::Button::primary("+").on_click(bump()),
+        ])
+}
+
+#[renderer]
+fn count_display(state: &Counter) -> ElementBuilder {
+    Text::body(format!("count: {}", state.n)).build()
+}
+
+#[handler]
+fn bump(state: &mut Counter) {
+    state.n += 1;
 }
 
 fn page(title: &str, body: &str) -> ElementBuilder {

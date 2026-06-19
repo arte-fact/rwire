@@ -1593,6 +1593,7 @@ where
                             Some(state_type_id),
                             Some(&mut conn_state.synced_hashes),
                             Some(&mut conn_state.sent_css),
+                            None,
                         )
                     };
 
@@ -1733,6 +1734,7 @@ where
                                 Some(state_type_id),
                                 Some(&mut conn_state.synced_hashes),
                                 Some(&mut conn_state.sent_css),
+                                None,
                             )
                             // cache_guard dropped here at end of block
                         };
@@ -1779,19 +1781,63 @@ where
             Ok(Message::Text(text)) => {
                 if let Some(path) = text.strip_prefix('R') {
                     // Built-in router: update CurrentRoute so the outlet re-renders the
-                    // matched view (the view's own renderers update via Phase B).
-                    if crate::router::installed_router().is_some() {
+                    // matched view, then reconcile the view's renderer registrations so
+                    // its stateful regions stay live (and the prior view's are pruned).
+                    if let Some(router) = crate::router::installed_router() {
                         let route_tid = TypeId::of::<crate::router::CurrentRoute>();
-                        conn_state.states.entry(route_tid).or_insert_with(|| {
-                            Box::new(crate::router::CurrentRoute::default())
-                        });
-                        if let Some(state) = conn_state.get_state_mut(route_tid) {
-                            if let Some(route) =
-                                state.downcast_mut::<crate::router::CurrentRoute>()
-                            {
-                                route.set_path(path);
-                            }
+                        conn_state
+                            .states
+                            .entry(route_tid)
+                            .or_insert_with(|| Box::new(crate::router::CurrentRoute::default()));
+                        if let Some(route) = conn_state
+                            .get_state_mut(route_tid)
+                            .and_then(|s| s.downcast_mut::<crate::router::CurrentRoute>())
+                        {
+                            route.set_path(path);
                         }
+
+                        // Initialize any state the matched view's renderers read, so the
+                        // outlet can render them inline. `or_insert` preserves state from a
+                        // prior visit (e.g. a counter keeps its value across navigations).
+                        let view = router.build_for_path(path);
+                        for r in crate::builder::extract_renderers(&view) {
+                            conn_state
+                                .states
+                                .entry(r.state_type_id())
+                                .or_insert_with(|| r.create_default_state());
+                        }
+
+                        // Prune the previous view's regions (every synced region descended
+                        // from a CurrentRoute region) so the new view's regions render fresh
+                        // rather than matching stale ids.
+                        let route_regions: std::collections::HashSet<u32> = conn_state
+                            .synced_elements
+                            .iter()
+                            .filter(|se| se.state_type_id == route_tid)
+                            .map(|se| se.id)
+                            .collect();
+                        let mut stale = std::collections::HashSet::new();
+                        let mut frontier: Vec<u32> = route_regions.iter().copied().collect();
+                        while !frontier.is_empty() {
+                            let next: Vec<u32> = conn_state
+                                .synced_elements
+                                .iter()
+                                .filter(|se| {
+                                    se.parent.is_some_and(|p| frontier.contains(&p))
+                                        && !stale.contains(&se.id)
+                                })
+                                .map(|se| se.id)
+                                .collect();
+                            for id in &next {
+                                stale.insert(*id);
+                            }
+                            frontier = next;
+                        }
+                        conn_state
+                            .synced_elements
+                            .retain(|se| !stale.contains(&se.id));
+
+                        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
                         let update = {
                             let states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
                                 .states
@@ -1807,8 +1853,31 @@ where
                                 Some(route_tid),
                                 Some(&mut conn_state.synced_hashes),
                                 Some(&mut conn_state.sent_css),
+                                Some(&mut discovered),
                             )
                         };
+
+                        // Register the new view's regions so subsequent state changes
+                        // re-render them, and subscribe any shared/persisted state they read.
+                        for region in discovered {
+                            if !conn_state
+                                .synced_elements
+                                .iter()
+                                .any(|se| se.id == region.id)
+                            {
+                                conn_state.synced_elements.push(region);
+                            }
+                        }
+                        for (_, key) in shared_persisted_keys(
+                            &conn_state.handlers,
+                            &conn_state.synced_elements,
+                            &conn_state.session_id,
+                        ) {
+                            if conn_state.subscribed_keys.insert(key.clone()) {
+                                shared.subscribe(conn_state.connection_id, &key);
+                            }
+                        }
+
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;
                         }
@@ -1843,6 +1912,7 @@ where
                                 Some(state_type_id),
                                 Some(&mut conn_state.synced_hashes),
                                 Some(&mut conn_state.sent_css),
+                                None,
                             )
                         };
 

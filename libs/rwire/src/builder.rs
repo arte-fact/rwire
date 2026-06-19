@@ -1236,6 +1236,10 @@ pub struct BuildContext {
     handlers: HashMap<u32, HandlerFn>,
     synced_elements: Vec<SyncedElement>,
     next_synced_id: u32,
+    /// The synced region currently being emitted into, so nested regions record their
+    /// owning parent (used to prune a swapped-out view's regions). Saved/restored
+    /// around each synced region's content emission.
+    current_synced_parent: Option<u32>,
     /// Word frequency counts (built during collect_symbols)
     word_counts: HashMap<String, usize>,
     /// Word table: word -> index (built after collect_symbols, before emit)
@@ -1275,6 +1279,9 @@ pub struct SyncedElement {
     pub(crate) state_type_id: TypeId,
     /// Dependency information for fine-grained updates.
     pub deps: RendererDeps,
+    /// The enclosing synced region's id, or `None` for a top-level region. Lets a
+    /// region's whole subtree be pruned when its parent swaps it out (router outlet).
+    pub(crate) parent: Option<u32>,
 }
 
 impl Clone for SyncedElement {
@@ -1284,6 +1291,7 @@ impl Clone for SyncedElement {
             renderer: self.renderer.clone_box(),
             state_type_id: self.state_type_id,
             deps: self.deps,
+            parent: self.parent,
         }
     }
 }
@@ -1303,12 +1311,18 @@ impl SyncedElement {
             renderer,
             state_type_id,
             deps,
+            parent: None,
         }
     }
 
     /// Get the TypeId of the state type this element renders from.
     pub fn state_type_id(&self) -> TypeId {
         self.state_type_id
+    }
+
+    /// The enclosing synced region's id, or `None` for a top-level region.
+    pub fn parent(&self) -> Option<u32> {
+        self.parent
     }
 
     /// Create a default state instance for this element's state type.
@@ -1326,6 +1340,7 @@ impl BuildContext {
             handlers: HashMap::new(),
             synced_elements: Vec::new(),
             next_synced_id: 0,
+            current_synced_parent: None,
             word_counts: HashMap::new(),
             word_indices: HashMap::new(),
             words: Vec::new(),
@@ -1699,14 +1714,19 @@ impl BuildContext {
                 state_type_id: renderer.state_type_id(),
                 renderer: renderer.clone_box(),
                 deps: renderer.deps(),
+                parent: self.current_synced_parent,
             });
 
             if let Some(rendered) = renderer.render_with_state(state) {
                 // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
                 let ref_idx = self.buf.create_synced(synced_id);
 
-                // Emit the rendered content as a child
+                // Emit the rendered content as a child, tagging nested regions with this
+                // region as their parent.
+                let saved_parent = self.current_synced_parent;
+                self.current_synced_parent = Some(synced_id);
                 self.emit_element(&rendered, Some(ref_idx), state);
+                self.current_synced_parent = saved_parent;
 
                 // Append wrapper to parent
                 if let Some(parent) = parent_ref {
@@ -1839,12 +1859,16 @@ impl BuildContext {
                 state_type_id: renderer.state_type_id(),
                 renderer: renderer.clone_box(),
                 deps: renderer.deps(),
+                parent: self.current_synced_parent,
             });
 
             // Use cached render from collect_symbols_multi (single-render path)
             if let Some(rendered) = self.synced_render_cache.remove(&synced_id) {
                 let ref_idx = self.buf.create_synced(synced_id);
+                let saved_parent = self.current_synced_parent;
+                self.current_synced_parent = Some(synced_id);
                 self.emit_element_multi(&rendered, Some(ref_idx));
+                self.current_synced_parent = saved_parent;
 
                 if let Some(parent) = parent_ref {
                     self.buf.append(parent, ref_idx);
@@ -2141,7 +2165,9 @@ pub fn build_synced_update_multi(
     handlers: &mut std::collections::HashMap<u32, HandlerFn>,
     changes: ChangeSet,
 ) -> Bytes {
-    build_synced_update_with_known_symbols(synced, states, handlers, changes, None, None, None, None)
+    build_synced_update_with_known_symbols(
+        synced, states, handlers, changes, None, None, None, None, None,
+    )
 }
 
 /// Build an update for synced elements with incremental symbol support.
@@ -2171,6 +2197,7 @@ pub fn build_synced_update_with_known_symbols(
     changed_state_type_id: Option<TypeId>,
     mut prev_hashes: Option<&mut HashMap<u32, u64>>,
     sent_css: SentCss<'_>,
+    discovered_out: Option<&mut Vec<SyncedElement>>,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
@@ -2292,6 +2319,10 @@ pub fn build_synced_update_with_known_symbols(
         .map(|m| m + 1)
         .unwrap_or(0);
 
+    // Nested regions encountered while re-rendering each region this pass, tagged with
+    // their owning parent — the caller reconciles registrations from this.
+    let mut discovered: Vec<SyncedElement> = Vec::new();
+
     for se in synced {
         // Use the cached render result (rendered exactly once above; taking the
         // entry guarantees each region is emitted at most once).
@@ -2312,8 +2343,14 @@ pub fn build_synced_update_with_known_symbols(
                 &mut next_idx_by_type,
                 &mut emit_synced_counter,
                 states,
+                Some(se.id),
+                &mut discovered,
             );
         }
+    }
+
+    if let Some(out) = discovered_out {
+        *out = discovered;
     }
 
     buf.end();
@@ -2364,6 +2401,8 @@ fn emit_update_element(
     next_idx_by_type: &mut HashMap<TypeId, usize>,
     synced_counter: &mut u32,
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+    enclosing_synced: Option<u32>,
+    discovered: &mut Vec<SyncedElement>,
 ) -> u32 {
     // Handle nested synced elements
     if let Some(renderer) = &el.synced {
@@ -2389,6 +2428,16 @@ fn emit_update_element(
             *synced_counter += 1;
             (id, false)
         };
+
+        // Record every nested region encountered (existing or new) with its owning
+        // parent, so the caller can reconcile a swapped view's registrations.
+        discovered.push(SyncedElement {
+            id: synced_id,
+            state_type_id,
+            renderer: renderer.clone_box(),
+            deps: renderer.deps(),
+            parent: enclosing_synced,
+        });
 
         let wrapper_ref = buf.create_synced(synced_id);
 
@@ -2416,6 +2465,8 @@ fn emit_update_element(
                     next_idx_by_type,
                     synced_counter,
                     states,
+                    Some(synced_id),
+                    discovered,
                 );
             }
         }
@@ -2511,7 +2562,8 @@ fn emit_update_element(
         }
     }
 
-    // Recursively emit children
+    // Recursively emit children (same enclosing region — regular elements are not a
+    // synced boundary).
     for child in &el.children {
         emit_update_element(
             child,
@@ -2523,6 +2575,8 @@ fn emit_update_element(
             next_idx_by_type,
             synced_counter,
             states,
+            enclosing_synced,
+            discovered,
         );
     }
 
