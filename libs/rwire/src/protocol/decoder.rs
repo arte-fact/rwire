@@ -24,10 +24,11 @@ pub struct ClientEvent {
 impl ClientEvent {
     /// Decode a client event from binary data.
     ///
-    /// Format:
-    /// - [flags, handler_varint, event_type, target_ref, payload_len, ...payload]
+    /// Format (`payload_len` is a varint, so payloads may exceed 255 bytes; `param_len`
+    /// is a single byte, as handler params are capped at 255):
+    /// - [flags, handler_varint, event_type, target_ref, payload_len_varint, ...payload]
     /// - With params (flags & 0x80):
-    ///   [flags, handler_varint, event_type, target_ref, param_len, ...params, payload_len, ...payload]
+    ///   [flags, handler_varint, event_type, target_ref, param_len, ...params, payload_len_varint, ...payload]
     pub fn decode(data: &[u8]) -> Result<Self, DecodeError> {
         if data.len() < 4 {
             return Err(DecodeError::TooShort);
@@ -63,8 +64,10 @@ impl ClientEvent {
             let param_bytes = data[pos..pos + param_len].to_vec();
             pos += param_len;
 
-            let payload_len = data[pos] as usize;
-            pos += 1;
+            let (payload_len, len_bytes) =
+                read_varint(&data[pos..]).ok_or(DecodeError::PayloadTruncated)?;
+            let payload_len = payload_len as usize;
+            pos += len_bytes;
 
             if payload_len > MAX_PAYLOAD_SIZE {
                 return Err(DecodeError::PayloadTooLarge);
@@ -88,8 +91,10 @@ impl ClientEvent {
             if data.len() < pos + 1 {
                 return Err(DecodeError::PayloadTruncated);
             }
-            let payload_len = data[pos] as usize;
-            pos += 1;
+            let (payload_len, len_bytes) =
+                read_varint(&data[pos..]).ok_or(DecodeError::PayloadTruncated)?;
+            let payload_len = payload_len as usize;
+            pos += len_bytes;
 
             if payload_len > MAX_PAYLOAD_SIZE {
                 return Err(DecodeError::PayloadTooLarge);
@@ -137,3 +142,51 @@ impl std::fmt::Display for DecodeError {
 }
 
 impl std::error::Error for DecodeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::write_varint;
+
+    fn varint(value: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        write_varint(&mut out, value);
+        out
+    }
+
+    #[test]
+    fn decodes_payload_longer_than_255_bytes() {
+        // Regression: the payload length is a varint, so a form field over 255 bytes
+        // (e.g. a long chat message) round-trips fully. A single-byte length wrapped
+        // (430 -> 174), truncating the JSON so the field parse failed and the send was
+        // silently dropped — the composer appeared to do nothing.
+        let payload = vec![b'x'; 430];
+        let mut data = vec![0u8]; // flags: no params
+        data.extend(varint(0)); // handler idx
+        data.push(7); // event_type
+        data.push(0); // target_ref
+        data.extend(varint(payload.len() as u32));
+        data.extend_from_slice(&payload);
+
+        let ev = ClientEvent::decode(&data).expect("decodes");
+        assert_eq!(ev.payload, payload);
+    }
+
+    #[test]
+    fn decodes_short_payload_unchanged() {
+        // A <=127-byte payload encodes its length in one varint byte, identical to the
+        // old single-byte format — so existing short events are unaffected.
+        let payload = b"hello".to_vec();
+        let mut data = vec![0u8];
+        data.extend(varint(3)); // handler idx
+        data.push(7);
+        data.push(0);
+        data.extend(varint(payload.len() as u32));
+        data.extend_from_slice(&payload);
+
+        let ev = ClientEvent::decode(&data).expect("decodes");
+        assert_eq!(ev.handler_idx, 3);
+        assert_eq!(ev.event_type, 7);
+        assert_eq!(ev.payload, payload);
+    }
+}

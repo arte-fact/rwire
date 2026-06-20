@@ -11,7 +11,7 @@
 use rwire::ElementBuilder;
 use std::borrow::Cow;
 
-use crate::parser::parse_markdown;
+use crate::parser::parse_markdown_with;
 use crate::prose::ProseSize;
 
 /// A simple component for embedding markdown content.
@@ -43,11 +43,11 @@ impl Markdown {
         self
     }
 
-    /// Build the markdown into an ElementBuilder tree.
+    /// Build the markdown into an ElementBuilder tree, honouring the configured prose
+    /// `size` (default `Base`) and `full_width`.
     pub fn build(self) -> ElementBuilder {
-        let _ = self.size;
-        let _ = self.full_width;
-        parse_markdown(&self.content).content
+        let size = self.size.unwrap_or(ProseSize::Base);
+        parse_markdown_with(&self.content, size, self.full_width).content
     }
 }
 

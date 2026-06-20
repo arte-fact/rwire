@@ -9,6 +9,8 @@ use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+use crate::prose::ProseSize;
+
 /// Result of parsing markdown.
 pub struct ParseResult {
     /// The rendered ElementBuilder tree (wrapped in Prose container).
@@ -28,16 +30,24 @@ pub struct TocEntry {
     pub anchor: String,
 }
 
-/// Parse markdown into an ElementBuilder tree.
+/// Parse markdown into an ElementBuilder tree, wrapped in a default prose container
+/// (`Base` size, max-width constrained). See [`parse_markdown_with`] to control those.
 ///
 /// Returns the content wrapped in a Prose container and extracted headings.
 pub fn parse_markdown(markdown: &str) -> ParseResult {
+    parse_markdown_with(markdown, ProseSize::Base, false)
+}
+
+/// Parse markdown, controlling the prose wrapper's text `size` and whether it spans the
+/// `full_width` (dropping the reading-width cap). [`Markdown`](crate::Markdown) routes its
+/// `.size()` / `.full_width()` here.
+pub fn parse_markdown_with(markdown: &str, size: ProseSize, full_width: bool) -> ParseResult {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS;
 
     let parser = Parser::new_ext(markdown, options);
-    let mut builder = MarkdownBuilder::new();
+    let mut builder = MarkdownBuilder::new(size, full_width);
 
     for event in parser {
         builder.process_event(event);
@@ -64,10 +74,14 @@ struct MarkdownBuilder {
     text_buf: String,
     /// Whether we're inside a <thead>.
     in_thead: bool,
+    /// Prose text size for the wrapper.
+    size: ProseSize,
+    /// Whether the prose wrapper spans full width (no reading-width cap).
+    full_width: bool,
 }
 
 impl MarkdownBuilder {
-    fn new() -> Self {
+    fn new(size: ProseSize, full_width: bool) -> Self {
         Self {
             stack: Vec::new(),
             children: Vec::new(),
@@ -77,6 +91,8 @@ impl MarkdownBuilder {
             in_code_block: false,
             text_buf: String::new(),
             in_thead: false,
+            size,
+            full_width,
         }
     }
 
@@ -310,14 +326,8 @@ impl MarkdownBuilder {
     }
 
     fn finish(self) -> ParseResult {
-        // Wrap in prose container
-        let mut prose = el(El::Div).st([
-            St::LeadingRelaxedProse,
-            St::TextDefault,
-            St::SpaceYMd,
-            St::TextBase,
-            St::MaxWProse,
-        ]);
+        // Wrap in the prose container, honouring the requested size + reading-width cap.
+        let mut prose = el(El::Div).st(prose_tokens(self.size, self.full_width));
 
         for child in self.children {
             prose = prose.append([child]);
@@ -328,6 +338,28 @@ impl MarkdownBuilder {
             headings: self.headings,
         }
     }
+}
+
+/// Style tokens for the prose wrapper. `BreakWords` (overflow-wrap) lets long unbroken
+/// tokens — URLs, inline code — break instead of forcing horizontal overflow on a narrow
+/// viewport (code blocks opt back into `white-space: pre` with their own scroll). The
+/// size token and the `MaxWProse` reading-width cap follow the requested options.
+fn prose_tokens(size: ProseSize, full_width: bool) -> Vec<St> {
+    let mut tokens = vec![
+        St::LeadingRelaxedProse,
+        St::TextDefault,
+        St::SpaceYMd,
+        St::BreakWords,
+        match size {
+            ProseSize::Sm => St::TextSm,
+            ProseSize::Base => St::TextBase,
+            ProseSize::Lg => St::TextLg,
+        },
+    ];
+    if !full_width {
+        tokens.push(St::MaxWProse);
+    }
+    tokens
 }
 
 /// Convert heading text to a URL-safe slug.
@@ -362,6 +394,22 @@ mod tests {
         assert_eq!(slugify("Hello World"), "hello-world");
         assert_eq!(slugify("Getting Started!"), "getting-started");
         assert_eq!(slugify("API Reference (v2)"), "api-reference-v2");
+    }
+
+    #[test]
+    fn prose_size_selects_the_matching_text_token() {
+        // Regression: `Markdown::build()` used to ignore `.size()`, hardcoding `TextBase`.
+        assert!(prose_tokens(ProseSize::Sm, false).contains(&St::TextSm));
+        assert!(prose_tokens(ProseSize::Lg, false).contains(&St::TextLg));
+        let base = prose_tokens(ProseSize::Base, false);
+        assert!(base.contains(&St::TextBase));
+        assert!(!base.contains(&St::TextSm) && !base.contains(&St::TextLg));
+    }
+
+    #[test]
+    fn full_width_drops_the_reading_width_cap() {
+        assert!(prose_tokens(ProseSize::Base, false).contains(&St::MaxWProse));
+        assert!(!prose_tokens(ProseSize::Base, true).contains(&St::MaxWProse));
     }
 
     #[test]

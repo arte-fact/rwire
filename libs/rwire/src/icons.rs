@@ -42,6 +42,8 @@ pub enum Icon {
     Minus,
     Edit,
     Trash,
+    Archive,
+    ArchiveRestore,
     Copy,
     Download,
     Upload,
@@ -69,6 +71,7 @@ pub enum Icon {
     User,
     Home,
     External,
+    LogOut,
     Calendar,
     Clock,
 
@@ -90,6 +93,12 @@ pub enum Icon {
     Cpu,
     Palette,
     Leaf,
+
+    // Content & comms
+    MessageSquare,
+    Activity,
+    FileText,
+    Folder,
 }
 
 impl Icon {
@@ -115,7 +124,9 @@ impl Icon {
             Icon::Minus => "M5 12h14",
             Icon::Edit => "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z",
             Icon::Trash => "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6",
-            Icon::Copy => "M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2zM16 18v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2",
+            Icon::Archive => "M1 3h22v5H1z M21 8v13H3V8 M10 12h4",
+            Icon::ArchiveRestore => "M2 3h20v5H2z M4 8v11a2 2 0 0 0 2 2h2 M20 8v11a2 2 0 0 1-2 2h-2 M9 15l3-3 3 3 M12 12v9",
+            Icon::Copy =>"M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2zM16 18v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2",
             Icon::Download => "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
             Icon::Upload => "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
             Icon::Search => "M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z",
@@ -142,7 +153,8 @@ impl Icon {
             Icon::User => "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
             Icon::Home => "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M9 22V12h6v10",
             Icon::External => "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
-            Icon::Calendar => "M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM21 20H3V10h18v10zM3 8V6h18v2H3z",
+            Icon::LogOut => "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9",
+            Icon::Calendar =>"M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM21 20H3V10h18v10zM3 8V6h18v2H3z",
             Icon::Clock => "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 6v6l4 2",
 
             // Brand (fill-based)
@@ -163,6 +175,12 @@ impl Icon {
             Icon::Cpu => "M18 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM9 9h6v6H9V9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3",
             Icon::Palette => "M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2zM6.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM9.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM14.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM17.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z",
             Icon::Leaf => "M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75",
+
+            // Content & comms
+            Icon::MessageSquare => "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+            Icon::Activity => "M22 12h-4l-3 9L9 3l-3 9H2",
+            Icon::FileText => "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8",
+            Icon::Folder => "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
         }
     }
 
@@ -296,16 +314,18 @@ mod tests {
             Icon::ArrowLeft, Icon::ArrowRight, Icon::ArrowUp, Icon::ArrowDown,
             Icon::Menu, Icon::Close,
             Icon::Check, Icon::Plus, Icon::Minus, Icon::Edit, Icon::Trash,
+            Icon::Archive, Icon::ArchiveRestore,
             Icon::Copy, Icon::Download, Icon::Upload, Icon::Search, Icon::Filter,
             Icon::Info, Icon::Warning, Icon::Error, Icon::Success,
             Icon::AlertCircle, Icon::CheckCircle,
             Icon::Sun, Icon::Moon,
             Icon::Play, Icon::Pause,
-            Icon::Settings, Icon::User, Icon::Home, Icon::External,
+            Icon::Settings, Icon::User, Icon::Home, Icon::External, Icon::LogOut,
             Icon::Calendar, Icon::Clock,
             Icon::GitHub, Icon::Discord, Icon::Twitter,
             Icon::Crate, Icon::Terminal, Icon::Clipboard, Icon::ClipboardCheck,
             Icon::Zap, Icon::Feather, Icon::Shield, Icon::Cpu, Icon::Palette, Icon::Leaf,
+            Icon::MessageSquare, Icon::Activity, Icon::FileText, Icon::Folder,
         ];
 
         for icon in &icons {

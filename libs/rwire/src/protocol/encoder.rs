@@ -101,8 +101,14 @@ impl OpcodeBuffer {
     }
 
     /// Add a word to the word table.
+    ///
+    /// The byte length is varint-encoded to match the client decoder (`rv`), which
+    /// reads it as a varint. A plain `u8` would desync the whole stream for any word
+    /// of 128–255 bytes (the high bit makes the decoder read a multi-byte varint) —
+    /// e.g. a long unbroken URL token. Words ≤127 bytes encode identically, so this is
+    /// wire-compatible with existing clients.
     pub fn add_word(&mut self, word: &str) -> &mut Self {
-        self.buf.put_u8(word.len() as u8);
+        write_varint(&mut self.buf, word.len() as u32);
         self.buf.put_slice(word.as_bytes());
         self
     }
@@ -715,6 +721,25 @@ mod tests {
         let mut buf = OpcodeBuffer::new();
         buf.route_replace_inline("/x");
         assert_eq!(buf.as_slice()[0], ROUTE_REPLACE_INLINE);
+    }
+
+    #[test]
+    fn add_word_varint_encodes_lengths_at_and_over_128_bytes() {
+        // Regression: a word of 128-255 bytes (e.g. a long unbroken URL token) must
+        // encode its length as a varint to match the client decoder, which reads it
+        // with `rv`. A plain `u8` length sets the high bit, so the decoder mis-reads it
+        // as a multi-byte varint and desyncs the entire DOM stream — the whole page
+        // renders blank. Words <=127 bytes are unaffected (varint == u8 there).
+        let long = "x".repeat(200);
+        let mut buf = OpcodeBuffer::new();
+        buf.begin_word_table(1).add_word(&long);
+        let bytes = buf.as_slice();
+        assert_eq!(bytes[0], WORD_TABLE);
+        assert_eq!(bytes[1], 1, "word count");
+        let (len, consumed) = crate::protocol::read_varint(&bytes[2..]).unwrap();
+        assert_eq!(len, 200, "length decodes as a varint, not a wrapped u8");
+        assert_eq!(consumed, 2, "200 takes two varint bytes");
+        assert_eq!(&bytes[2 + consumed..], long.as_bytes());
     }
 
     #[test]

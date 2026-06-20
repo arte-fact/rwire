@@ -25,7 +25,7 @@ mod toc;
 
 pub use frontmatter::Frontmatter;
 pub use markdown::Markdown;
-pub use parser::{parse_markdown, ParseResult, TocEntry};
+pub use parser::{parse_markdown, parse_markdown_with, ParseResult, TocEntry};
 pub use prose::{Prose, ProseSize};
 pub use search::{SearchIndex, SearchResult};
 pub use sidebar::{DocsSidebar, SidebarSection};
