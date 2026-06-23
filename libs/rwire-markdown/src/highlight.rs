@@ -47,6 +47,8 @@ impl LangSpec {
             "json" => Some(JSON),
             "bash" | "sh" | "shell" | "zsh" => Some(BASH),
             "sql" => Some(SQL),
+            "toml" => Some(TOML),
+            "yaml" | "yml" => Some(YAML),
             _ => None,
         }
     }
@@ -149,6 +151,22 @@ const SQL: LangSpec = LangSpec {
     block_comment: Some(("/*", "*/")),
     string_delims: &['\''],
     case_insensitive: true,
+};
+
+const TOML: LangSpec = LangSpec {
+    keywords: &["true", "false"],
+    line_comment: Some("#"),
+    block_comment: None,
+    string_delims: &['"', '\''],
+    case_insensitive: false,
+};
+
+const YAML: LangSpec = LangSpec {
+    keywords: &["true", "false", "null", "yes", "no", "on", "off"],
+    line_comment: Some("#"),
+    block_comment: None,
+    string_delims: &['"', '\''],
+    case_insensitive: false,
 };
 
 fn lex(code: &str, spec: &LangSpec) -> Vec<Token> {
@@ -363,5 +381,16 @@ mod tests {
     fn unicode_is_preserved() {
         // Multi-byte chars in strings/identifiers must not corrupt the round-trip.
         assert_roundtrip(r#"let s = "héllo→ω";"#, "rust");
+    }
+
+    #[test]
+    fn toml_and_yaml_basics() {
+        let toml = assert_roundtrip("# cfg\nname = \"claw\"\nport = 8080\nlive = true", "toml");
+        assert!(kinds(&toml, TokenKind::Comment).contains(&"# cfg"));
+        assert!(kinds(&toml, TokenKind::Str).contains(&"\"claw\""));
+        assert!(kinds(&toml, TokenKind::Number).contains(&"8080"));
+        assert!(kinds(&toml, TokenKind::Keyword).contains(&"true"));
+        let yaml = assert_roundtrip("# y\nname: claw\nenabled: false", "yml");
+        assert!(kinds(&yaml, TokenKind::Keyword).contains(&"false"));
     }
 }

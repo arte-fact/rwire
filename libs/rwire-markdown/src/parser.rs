@@ -257,54 +257,8 @@ impl MarkdownBuilder {
                 self.in_code_block = false;
                 let code_content = std::mem::take(&mut self.text_buf);
                 let lang = self.code_lang.take();
-
-                let base = el(El::Code).st([
-                    St::FontMono,
-                    St::TextSm,
-                    St::WhitespacePre,
-                    St::DisplayBlock,
-                    St::LeadingRelaxed,
-                ]);
-                // Syntax-highlight a recognised language into coloured spans; otherwise flat text.
-                let code_el = match lang
-                    .as_deref()
-                    .and_then(|l| crate::highlight::highlight(&code_content, l))
-                {
-                    Some(tokens) => {
-                        base.append(tokens.iter().map(highlight_span).collect::<Vec<_>>())
-                    }
-                    None => base.text(&code_content),
-                };
-
-                let mut pre = el(El::Pre).st([
-                    St::BgCode,
-                    St::RoundedLg,
-                    St::OverflowXAuto,
-                    St::PMd,
-                    St::BorderSubtle,
-                    St::MyMd,
-                ]);
-
-                if let Some(lang) = lang {
-                    let label = el(El::Span)
-                        .st([
-                            St::TextXs,
-                            St::TextMuted,
-                            St::DisplayBlock,
-                            St::MbSm,
-                            St::TextUppercase,
-                            St::TrackingWider,
-                            St::FontMedium,
-                        ])
-                        .text(&lang);
-                    let wrapper = el(El::Div)
-                        .st([St::PositionRelative])
-                        .append([label, pre.append([code_el])]);
-                    self.push_to_parent(wrapper);
-                } else {
-                    pre = pre.append([code_el]);
-                    self.push_to_parent(pre);
-                }
+                // The shared renderer also serves standalone code files — one code path.
+                self.push_to_parent(crate::code::highlight_code(&code_content, lang.as_deref()));
             }
             TagEnd::Heading(_) => {
                 if let Some((level, text)) = self.heading_text.take() {
@@ -408,20 +362,6 @@ fn prose_tokens(size: ProseSize, full_width: bool) -> Vec<St> {
 }
 
 /// Convert heading text to a URL-safe slug.
-/// Render one highlighted token as a coloured `<span>`. Keyword→accent, string→success (green),
-/// number→warning (amber), comment→muted; plain text inherits the code block's colour.
-fn highlight_span(token: &crate::highlight::Token) -> ElementBuilder {
-    use crate::highlight::TokenKind;
-    let span = el(El::Span).text(&token.text);
-    match token.kind {
-        TokenKind::Keyword => span.st([St::TextAccent]),
-        TokenKind::Str => span.st([St::TextSuccess]),
-        TokenKind::Number => span.st([St::TextWarning]),
-        TokenKind::Comment => span.st([St::TextMuted]),
-        TokenKind::Plain => span,
-    }
-}
-
 fn slugify(text: &str) -> String {
     text.to_lowercase()
         .chars()
@@ -513,23 +453,5 @@ mod tests {
         assert!(fallback.headings.is_empty());
         let unknown_lang = parse_markdown("```brainfuck\n+[->+]\n```");
         assert!(unknown_lang.headings.is_empty());
-    }
-
-    #[test]
-    fn highlight_span_maps_each_kind_to_a_span() {
-        // Every token kind produces a span (smoke test for the render mapping).
-        for kind in [
-            crate::highlight::TokenKind::Keyword,
-            crate::highlight::TokenKind::Str,
-            crate::highlight::TokenKind::Number,
-            crate::highlight::TokenKind::Comment,
-            crate::highlight::TokenKind::Plain,
-        ] {
-            let token = crate::highlight::Token {
-                kind,
-                text: "x".to_string(),
-            };
-            let _ = highlight_span(&token); // must not panic
-        }
     }
 }
