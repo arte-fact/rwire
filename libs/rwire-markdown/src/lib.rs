@@ -15,6 +15,7 @@
 //! ```
 
 mod frontmatter;
+mod highlight;
 mod markdown;
 mod parser;
 mod prose;

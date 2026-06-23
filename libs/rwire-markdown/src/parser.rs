@@ -4,10 +4,10 @@
 //! the pulldown-cmark parser. Produces styled elements using the
 //! Code, Blockquote, and Prose components.
 
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use rwire::attr_tokens::At;
 use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder};
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use crate::prose::ProseSize;
 
@@ -42,9 +42,8 @@ pub fn parse_markdown(markdown: &str) -> ParseResult {
 /// `full_width` (dropping the reading-width cap). [`Markdown`](crate::Markdown) routes its
 /// `.size()` / `.full_width()` here.
 pub fn parse_markdown_with(markdown: &str, size: ProseSize, full_width: bool) -> ParseResult {
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS;
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
 
     let parser = Parser::new_ext(markdown, options);
     let mut builder = MarkdownBuilder::new(size, full_width);
@@ -113,7 +112,14 @@ impl MarkdownBuilder {
             Event::Code(code) => {
                 // Inline code
                 let code_el = el(El::Code)
-                    .st([St::FontMono, St::BgCode, St::TextSm, St::RoundedSm, St::PxXs, St::PyXs])
+                    .st([
+                        St::FontMono,
+                        St::BgCode,
+                        St::TextSm,
+                        St::RoundedSm,
+                        St::PxXs,
+                        St::PyXs,
+                    ])
                     .text(&code);
                 self.push_child(code_el);
             }
@@ -153,16 +159,23 @@ impl MarkdownBuilder {
                 self.stack.push(el(el_type).st(tokens));
             }
             Tag::BlockQuote(_) => {
-                self.stack.push(
-                    el(El::Blockquote)
-                        .st([St::BorderL3Accent, St::PlLg, St::Italic, St::TextMuted, St::MyMd]),
-                );
+                self.stack.push(el(El::Blockquote).st([
+                    St::BorderL3Accent,
+                    St::PlLg,
+                    St::Italic,
+                    St::TextMuted,
+                    St::MyMd,
+                ]));
             }
             Tag::CodeBlock(kind) => {
                 let lang = match kind {
                     pulldown_cmark::CodeBlockKind::Fenced(lang) => {
                         let l = lang.to_string();
-                        if l.is_empty() { None } else { Some(l) }
+                        if l.is_empty() {
+                            None
+                        } else {
+                            Some(l)
+                        }
                     }
                     _ => None,
                 };
@@ -171,14 +184,12 @@ impl MarkdownBuilder {
                 self.text_buf.clear();
             }
             Tag::List(Some(_)) => {
-                self.stack.push(
-                    el(El::Ol).st([St::ListDecimal, St::PlLg, St::MyMd]),
-                );
+                self.stack
+                    .push(el(El::Ol).st([St::ListDecimal, St::PlLg, St::MyMd]));
             }
             Tag::List(None) => {
-                self.stack.push(
-                    el(El::Ul).st([St::ListDisc, St::PlLg, St::MyMd]),
-                );
+                self.stack
+                    .push(el(El::Ul).st([St::ListDisc, St::PlLg, St::MyMd]));
             }
             Tag::Item => {
                 self.stack.push(el(El::Li).st([St::MySm]));
@@ -199,7 +210,9 @@ impl MarkdownBuilder {
                         .at_str(At::Href, &dest_url),
                 );
             }
-            Tag::Image { dest_url, title, .. } => {
+            Tag::Image {
+                dest_url, title, ..
+            } => {
                 let mut img = el(El::Img)
                     .st([St::MaxWFull, St::HAuto, St::RoundedMd, St::MyMd])
                     .at_str(At::Src, &dest_url);
@@ -210,11 +223,10 @@ impl MarkdownBuilder {
             }
             Tag::Table(_) => {
                 // Wrapper div allows horizontal scroll on narrow viewports
-                self.stack.push(el(El::Div).st([St::OverflowXAuto, St::MyMd]));
-                self.stack.push(
-                    el(El::Table)
-                        .st([St::WFull, St::BorderSubtle, St::TextSm]),
-                );
+                self.stack
+                    .push(el(El::Div).st([St::OverflowXAuto, St::MyMd]));
+                self.stack
+                    .push(el(El::Table).st([St::WFull, St::BorderSubtle, St::TextSm]));
             }
             Tag::TableHead => {
                 self.in_thead = true;
@@ -225,7 +237,12 @@ impl MarkdownBuilder {
             }
             Tag::TableCell => {
                 if self.in_thead {
-                    self.stack.push(el(El::Th).st([St::PMd, St::TextLeft, St::FontSemibold, St::BgSubtle]));
+                    self.stack.push(el(El::Th).st([
+                        St::PMd,
+                        St::TextLeft,
+                        St::FontSemibold,
+                        St::BgSubtle,
+                    ]));
                 } else {
                     self.stack.push(el(El::Td).st([St::PMd]));
                 }
@@ -241,16 +258,44 @@ impl MarkdownBuilder {
                 let code_content = std::mem::take(&mut self.text_buf);
                 let lang = self.code_lang.take();
 
-                let code_el = el(El::Code)
-                    .st([St::FontMono, St::TextSm, St::WhitespacePre, St::DisplayBlock, St::LeadingRelaxed])
-                    .text(&code_content);
+                let base = el(El::Code).st([
+                    St::FontMono,
+                    St::TextSm,
+                    St::WhitespacePre,
+                    St::DisplayBlock,
+                    St::LeadingRelaxed,
+                ]);
+                // Syntax-highlight a recognised language into coloured spans; otherwise flat text.
+                let code_el = match lang
+                    .as_deref()
+                    .and_then(|l| crate::highlight::highlight(&code_content, l))
+                {
+                    Some(tokens) => {
+                        base.append(tokens.iter().map(highlight_span).collect::<Vec<_>>())
+                    }
+                    None => base.text(&code_content),
+                };
 
-                let mut pre = el(El::Pre)
-                    .st([St::BgCode, St::RoundedLg, St::OverflowXAuto, St::PMd, St::BorderSubtle, St::MyMd]);
+                let mut pre = el(El::Pre).st([
+                    St::BgCode,
+                    St::RoundedLg,
+                    St::OverflowXAuto,
+                    St::PMd,
+                    St::BorderSubtle,
+                    St::MyMd,
+                ]);
 
                 if let Some(lang) = lang {
                     let label = el(El::Span)
-                        .st([St::TextXs, St::TextMuted, St::DisplayBlock, St::MbSm, St::TextUppercase, St::TrackingWider, St::FontMedium])
+                        .st([
+                            St::TextXs,
+                            St::TextMuted,
+                            St::DisplayBlock,
+                            St::MbSm,
+                            St::TextUppercase,
+                            St::TrackingWider,
+                            St::FontMedium,
+                        ])
                         .text(&lang);
                     let wrapper = el(El::Div)
                         .st([St::PositionRelative])
@@ -363,6 +408,20 @@ fn prose_tokens(size: ProseSize, full_width: bool) -> Vec<St> {
 }
 
 /// Convert heading text to a URL-safe slug.
+/// Render one highlighted token as a coloured `<span>`. Keyword→accent, string→success (green),
+/// number→warning (amber), comment→muted; plain text inherits the code block's colour.
+fn highlight_span(token: &crate::highlight::Token) -> ElementBuilder {
+    use crate::highlight::TokenKind;
+    let span = el(El::Span).text(&token.text);
+    match token.kind {
+        TokenKind::Keyword => span.st([St::TextAccent]),
+        TokenKind::Str => span.st([St::TextSuccess]),
+        TokenKind::Number => span.st([St::TextWarning]),
+        TokenKind::Comment => span.st([St::TextMuted]),
+        TokenKind::Plain => span,
+    }
+}
+
 fn slugify(text: &str) -> String {
     text.to_lowercase()
         .chars()
@@ -442,5 +501,35 @@ mod tests {
     fn test_heading_level_conversion() {
         assert_eq!(heading_level_to_u8(HeadingLevel::H1), 1);
         assert_eq!(heading_level_to_u8(HeadingLevel::H6), 6);
+    }
+
+    #[test]
+    fn fenced_code_blocks_render_for_known_and_unknown_languages() {
+        // The highlighted path (known language → coloured spans) and the fallback path
+        // (unknown/blank language → flat text) must both build without panicking.
+        let highlighted = parse_markdown("```rust\nfn main() { let x = 1; }\n```");
+        assert!(highlighted.headings.is_empty());
+        let fallback = parse_markdown("```\nplain text\n```");
+        assert!(fallback.headings.is_empty());
+        let unknown_lang = parse_markdown("```brainfuck\n+[->+]\n```");
+        assert!(unknown_lang.headings.is_empty());
+    }
+
+    #[test]
+    fn highlight_span_maps_each_kind_to_a_span() {
+        // Every token kind produces a span (smoke test for the render mapping).
+        for kind in [
+            crate::highlight::TokenKind::Keyword,
+            crate::highlight::TokenKind::Str,
+            crate::highlight::TokenKind::Number,
+            crate::highlight::TokenKind::Comment,
+            crate::highlight::TokenKind::Plain,
+        ] {
+            let token = crate::highlight::Token {
+                kind,
+                text: "x".to_string(),
+            };
+            let _ = highlight_span(&token); // must not panic
+        }
     }
 }
