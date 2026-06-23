@@ -169,6 +169,7 @@ w.onerror=()=>{}}
 connect();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&w.readyState>1){rc=0;connect()}});
 document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.target.matches&&e.target.matches('[data-enter-submit]')){e.preventDefault();let f=e.target.closest('form');if(f)f.requestSubmit()}});
 window.addEventListener('popstate',()=>{w.send('R'+location.pathname);if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
 
 /// Client actions JS (~250 bytes): targets (bool toggle) and selectors (exclusive enum).
