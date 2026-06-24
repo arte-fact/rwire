@@ -7,7 +7,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use rwire::builder::{style_def_prefix, BuildContext};
-use rwire::{El, St, StyleKey, el};
+use rwire::{el, El, St, StyleKey};
 
 #[test]
 fn style_key_renders_each_kind() {
@@ -38,7 +38,10 @@ fn style_def_prefix_delivers_once_per_connection() {
 
     // Same rules again on the same connection → nothing re-sent.
     let second = style_def_prefix(&referenced, &mut sent);
-    assert!(second.is_empty(), "already-sent rules must not be re-delivered");
+    assert!(
+        second.is_empty(),
+        "already-sent rules must not be re-delivered"
+    );
 
     // A fresh connection (fresh `sent`) re-receives everything — this is how a
     // hard refresh recovers: a new WebSocket connection starts with an empty set.

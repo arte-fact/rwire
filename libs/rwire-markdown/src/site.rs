@@ -99,8 +99,7 @@ impl DocSite {
                             let description = fm.as_ref().and_then(|f| f.description.clone());
                             let order = fm.as_ref().and_then(|f| f.order).unwrap_or(100);
 
-                            let page_path =
-                                format!("/docs/{}/{}", section_name, slug);
+                            let page_path = format!("/docs/{}/{}", section_name, slug);
 
                             section_map
                                 .entry(section_name.clone())

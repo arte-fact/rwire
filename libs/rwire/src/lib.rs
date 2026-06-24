@@ -85,8 +85,8 @@ pub use item_ref::{ItemRef, IterWithRef};
 
 // State exports
 pub use state::{
-    ChangeSet, EventContext, EventPayload, HandlerFn, HandlerSpec, MemoryState, PersistedState,
-    RendererDeps, State, StorageType, stable_handler_id,
+    stable_handler_id, ChangeSet, EventContext, EventPayload, HandlerFn, HandlerSpec, MemoryState,
+    PersistedState, RendererDeps, State, StorageType,
 };
 
 // Protocol exports
@@ -117,7 +117,7 @@ pub use health::{HealthResponse, HealthStatus, ReadyResponse};
 pub use form::{Field, FieldType, Form, ValidationRule};
 
 // Router exports
-pub use router::{CurrentRoute, Link, RouteParams, RoutePattern, Router, outlet};
+pub use router::{outlet, CurrentRoute, Link, RouteParams, RoutePattern, Router};
 
 // Style exports
 pub use style::{ScopedClass, Style};
@@ -129,15 +129,14 @@ pub use attr_tokens::{At, Av};
 pub use style_tokens::{Bp, Pc, St, StyleKey, StyleProp, StyleValue};
 
 // Token exports
+pub use tokens::css::minify_css;
 pub use tokens::{color, font_size, font_weight, line_height, radius, shadow, space, transition};
 pub use tokens::{ColorPalette, ColorScale};
-pub use tokens::css::minify_css;
 
 // Theme exports
 pub use theme::{
-    css_var, generate_base_css, generate_theme_css,
-    IntoStyle, IntoPalette, RadiusScale, ResolvedPalette,
-    Theme, ThemeMode, ThemeProvider, ThemeStyle,
+    css_var, generate_base_css, generate_theme_css, IntoPalette, IntoStyle, RadiusScale,
+    ResolvedPalette, Theme, ThemeMode, ThemeProvider, ThemeStyle,
 };
 
 // Icon exports

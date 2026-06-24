@@ -84,7 +84,14 @@ impl ColorScale {
     fn from_oklch_seed(seed_l: f32, seed_c: f32, hue: f32) -> Self {
         // Lightness ramp: backgrounds light → dark text
         let lightness = [
-            0.985, 0.965, 0.93, 0.88, 0.82, 0.76, 0.68, 0.60,
+            0.985,
+            0.965,
+            0.93,
+            0.88,
+            0.82,
+            0.76,
+            0.68,
+            0.60,
             seed_l,
             (seed_l - 0.05).max(0.1),
             (seed_l - 0.10).max(0.1),
@@ -92,8 +99,7 @@ impl ColorScale {
         ];
         // Chroma ramp: very subtle → peak at 9-10 → moderate for text
         let chroma_ratios = [
-            0.06, 0.11, 0.22, 0.39, 0.56, 0.67, 0.78, 0.89,
-            1.0, 1.06, 0.89, 0.67,
+            0.06, 0.11, 0.22, 0.39, 0.56, 0.67, 0.78, 0.89, 1.0, 1.06, 0.89, 0.67,
         ];
         let mut steps = [(0.0f32, 0.0f32, 0.0f32); 12];
         for i in 0..12 {
@@ -151,29 +157,74 @@ impl Default for ColorPalette {
     fn default() -> Self {
         Self {
             neutral: ColorScale::new([
-                color::NEUTRAL_1, color::NEUTRAL_2, color::NEUTRAL_3, color::NEUTRAL_4,
-                color::NEUTRAL_5, color::NEUTRAL_6, color::NEUTRAL_7, color::NEUTRAL_8,
-                color::NEUTRAL_9, color::NEUTRAL_10, color::NEUTRAL_11, color::NEUTRAL_12,
+                color::NEUTRAL_1,
+                color::NEUTRAL_2,
+                color::NEUTRAL_3,
+                color::NEUTRAL_4,
+                color::NEUTRAL_5,
+                color::NEUTRAL_6,
+                color::NEUTRAL_7,
+                color::NEUTRAL_8,
+                color::NEUTRAL_9,
+                color::NEUTRAL_10,
+                color::NEUTRAL_11,
+                color::NEUTRAL_12,
             ]),
             accent: ColorScale::new([
-                color::BLUE_1, color::BLUE_2, color::BLUE_3, color::BLUE_4,
-                color::BLUE_5, color::BLUE_6, color::BLUE_7, color::BLUE_8,
-                color::BLUE_9, color::BLUE_10, color::BLUE_11, color::BLUE_12,
+                color::BLUE_1,
+                color::BLUE_2,
+                color::BLUE_3,
+                color::BLUE_4,
+                color::BLUE_5,
+                color::BLUE_6,
+                color::BLUE_7,
+                color::BLUE_8,
+                color::BLUE_9,
+                color::BLUE_10,
+                color::BLUE_11,
+                color::BLUE_12,
             ]),
             red: ColorScale::new([
-                color::RED_1, color::RED_2, color::RED_3, color::RED_4,
-                color::RED_5, color::RED_6, color::RED_7, color::RED_8,
-                color::RED_9, color::RED_10, color::RED_11, color::RED_12,
+                color::RED_1,
+                color::RED_2,
+                color::RED_3,
+                color::RED_4,
+                color::RED_5,
+                color::RED_6,
+                color::RED_7,
+                color::RED_8,
+                color::RED_9,
+                color::RED_10,
+                color::RED_11,
+                color::RED_12,
             ]),
             green: ColorScale::new([
-                color::GREEN_1, color::GREEN_2, color::GREEN_3, color::GREEN_4,
-                color::GREEN_5, color::GREEN_6, color::GREEN_7, color::GREEN_8,
-                color::GREEN_9, color::GREEN_10, color::GREEN_11, color::GREEN_12,
+                color::GREEN_1,
+                color::GREEN_2,
+                color::GREEN_3,
+                color::GREEN_4,
+                color::GREEN_5,
+                color::GREEN_6,
+                color::GREEN_7,
+                color::GREEN_8,
+                color::GREEN_9,
+                color::GREEN_10,
+                color::GREEN_11,
+                color::GREEN_12,
             ]),
             amber: ColorScale::new([
-                color::AMBER_1, color::AMBER_2, color::AMBER_3, color::AMBER_4,
-                color::AMBER_5, color::AMBER_6, color::AMBER_7, color::AMBER_8,
-                color::AMBER_9, color::AMBER_10, color::AMBER_11, color::AMBER_12,
+                color::AMBER_1,
+                color::AMBER_2,
+                color::AMBER_3,
+                color::AMBER_4,
+                color::AMBER_5,
+                color::AMBER_6,
+                color::AMBER_7,
+                color::AMBER_8,
+                color::AMBER_9,
+                color::AMBER_10,
+                color::AMBER_11,
+                color::AMBER_12,
             ]),
         }
     }
@@ -267,7 +318,11 @@ fn srgb_to_oklch(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     // sRGB gamma decode → linear sRGB
     let lin = |v: u8| -> f32 {
         let f = v as f32 / 255.0;
-        if f <= 0.04045 { f / 12.92 } else { ((f + 0.055) / 1.055).powf(2.4) }
+        if f <= 0.04045 {
+            f / 12.92
+        } else {
+            ((f + 0.055) / 1.055).powf(2.4)
+        }
     };
     let lr = lin(r);
     let lg = lin(g);
@@ -313,8 +368,8 @@ mod tests {
     #[test]
     fn test_color_scale_from_hex() {
         let scale = ColorScale::from_hex([
-            "#000", "#111", "#222", "#333", "#444", "#555",
-            "#666", "#777", "#888", "#999", "#AAA", "#BBB",
+            "#000", "#111", "#222", "#333", "#444", "#555", "#666", "#777", "#888", "#999", "#AAA",
+            "#BBB",
         ]);
         assert_eq!(scale.step(0), "#000");
         assert_eq!(scale.step(11), "#BBB");
@@ -323,9 +378,18 @@ mod tests {
     #[test]
     fn test_color_scale_from_oklch() {
         let scale = ColorScale::from_oklch([
-            (0.98, 0.0, 0.0), (0.90, 0.0, 0.0), (0.80, 0.0, 0.0), (0.70, 0.0, 0.0),
-            (0.60, 0.0, 0.0), (0.50, 0.0, 0.0), (0.40, 0.0, 0.0), (0.30, 0.0, 0.0),
-            (0.25, 0.0, 0.0), (0.20, 0.0, 0.0), (0.15, 0.0, 0.0), (0.10, 0.0, 0.0),
+            (0.98, 0.0, 0.0),
+            (0.90, 0.0, 0.0),
+            (0.80, 0.0, 0.0),
+            (0.70, 0.0, 0.0),
+            (0.60, 0.0, 0.0),
+            (0.50, 0.0, 0.0),
+            (0.40, 0.0, 0.0),
+            (0.30, 0.0, 0.0),
+            (0.25, 0.0, 0.0),
+            (0.20, 0.0, 0.0),
+            (0.15, 0.0, 0.0),
+            (0.10, 0.0, 0.0),
         ]);
         assert!(scale.step(0).starts_with("oklch("));
     }
@@ -340,12 +404,11 @@ mod tests {
     #[test]
     fn test_palette_builder() {
         let custom_neutral = ColorScale::from_hex([
-            "#FFF", "#EEE", "#DDD", "#CCC", "#BBB", "#AAA",
-            "#999", "#888", "#777", "#666", "#555", "#444",
+            "#FFF", "#EEE", "#DDD", "#CCC", "#BBB", "#AAA", "#999", "#888", "#777", "#666", "#555",
+            "#444",
         ]);
 
-        let palette = ColorPalette::default()
-            .with_neutral(custom_neutral);
+        let palette = ColorPalette::default().with_neutral(custom_neutral);
 
         assert_eq!(palette.neutral.step(0), "#FFF");
         // Others unchanged
@@ -368,13 +431,21 @@ mod tests {
         let (l, c, h) = parse_to_oklch("#5E81AC");
         assert!(l > 0.4 && l < 0.7, "Nord blue L out of range: {}", l);
         assert!(c > 0.01, "Nord blue should have some chroma: {}", c);
-        assert!(h > 200.0 && h < 300.0, "Nord blue hue should be blue-ish: {}", h);
+        assert!(
+            h > 200.0 && h < 300.0,
+            "Nord blue hue should be blue-ish: {}",
+            h
+        );
     }
 
     #[test]
     fn test_parse_to_oklch_short_hex() {
         let (l, _, _) = parse_to_oklch("#FFF");
-        assert!((l - 1.0).abs() < 0.01, "White #FFF L should be ~1.0, got {}", l);
+        assert!(
+            (l - 1.0).abs() < 0.01,
+            "White #FFF L should be ~1.0, got {}",
+            l
+        );
     }
 
     #[test]
@@ -390,8 +461,12 @@ mod tests {
         let scale = ColorScale::from_color("#5E81AC");
         // All 12 steps should be oklch
         for i in 0..12 {
-            assert!(scale.step(i).starts_with("oklch("),
-                "Step {} should be oklch: {}", i, scale.step(i));
+            assert!(
+                scale.step(i).starts_with("oklch("),
+                "Step {} should be oklch: {}",
+                i,
+                scale.step(i)
+            );
         }
         // Lightness should decrease from step 1 to step 12
         let step1 = scale.step(0);
@@ -403,8 +478,11 @@ mod tests {
     fn test_from_color_oklch() {
         let scale = ColorScale::from_color("oklch(0.55 0.18 250)");
         for i in 0..12 {
-            assert!(scale.step(i).starts_with("oklch("),
-                "Step {} should be oklch", i);
+            assert!(
+                scale.step(i).starts_with("oklch("),
+                "Step {} should be oklch",
+                i
+            );
         }
     }
 }

@@ -37,8 +37,7 @@ impl ClientEvent {
         let flags = data[0];
         let has_params = (flags & 0x80) != 0;
 
-        let (handler_idx, handler_len) = read_varint(&data[1..])
-            .ok_or(DecodeError::TooShort)?;
+        let (handler_idx, handler_len) = read_varint(&data[1..]).ok_or(DecodeError::TooShort)?;
 
         let mut pos = 1 + handler_len;
         if data.len() < pos + 2 {

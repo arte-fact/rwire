@@ -64,33 +64,78 @@ pub(crate) const NONCOLOR_PRIMITIVES: &[(&str, &str)] = &[
 
 // Color scale arrays for iteration
 const NEUTRAL_SCALE: [&str; 12] = [
-    color::NEUTRAL_1,  color::NEUTRAL_2,  color::NEUTRAL_3,  color::NEUTRAL_4,
-    color::NEUTRAL_5,  color::NEUTRAL_6,  color::NEUTRAL_7,  color::NEUTRAL_8,
-    color::NEUTRAL_9,  color::NEUTRAL_10, color::NEUTRAL_11, color::NEUTRAL_12,
+    color::NEUTRAL_1,
+    color::NEUTRAL_2,
+    color::NEUTRAL_3,
+    color::NEUTRAL_4,
+    color::NEUTRAL_5,
+    color::NEUTRAL_6,
+    color::NEUTRAL_7,
+    color::NEUTRAL_8,
+    color::NEUTRAL_9,
+    color::NEUTRAL_10,
+    color::NEUTRAL_11,
+    color::NEUTRAL_12,
 ];
 
 const BLUE_SCALE: [&str; 12] = [
-    color::BLUE_1,  color::BLUE_2,  color::BLUE_3,  color::BLUE_4,
-    color::BLUE_5,  color::BLUE_6,  color::BLUE_7,  color::BLUE_8,
-    color::BLUE_9,  color::BLUE_10, color::BLUE_11, color::BLUE_12,
+    color::BLUE_1,
+    color::BLUE_2,
+    color::BLUE_3,
+    color::BLUE_4,
+    color::BLUE_5,
+    color::BLUE_6,
+    color::BLUE_7,
+    color::BLUE_8,
+    color::BLUE_9,
+    color::BLUE_10,
+    color::BLUE_11,
+    color::BLUE_12,
 ];
 
 const RED_SCALE: [&str; 12] = [
-    color::RED_1,  color::RED_2,  color::RED_3,  color::RED_4,
-    color::RED_5,  color::RED_6,  color::RED_7,  color::RED_8,
-    color::RED_9,  color::RED_10, color::RED_11, color::RED_12,
+    color::RED_1,
+    color::RED_2,
+    color::RED_3,
+    color::RED_4,
+    color::RED_5,
+    color::RED_6,
+    color::RED_7,
+    color::RED_8,
+    color::RED_9,
+    color::RED_10,
+    color::RED_11,
+    color::RED_12,
 ];
 
 const GREEN_SCALE: [&str; 12] = [
-    color::GREEN_1,  color::GREEN_2,  color::GREEN_3,  color::GREEN_4,
-    color::GREEN_5,  color::GREEN_6,  color::GREEN_7,  color::GREEN_8,
-    color::GREEN_9,  color::GREEN_10, color::GREEN_11, color::GREEN_12,
+    color::GREEN_1,
+    color::GREEN_2,
+    color::GREEN_3,
+    color::GREEN_4,
+    color::GREEN_5,
+    color::GREEN_6,
+    color::GREEN_7,
+    color::GREEN_8,
+    color::GREEN_9,
+    color::GREEN_10,
+    color::GREEN_11,
+    color::GREEN_12,
 ];
 
 const AMBER_SCALE: [&str; 12] = [
-    color::AMBER_1,  color::AMBER_2,  color::AMBER_3,  color::AMBER_4,
-    color::AMBER_5,  color::AMBER_6,  color::AMBER_7,  color::AMBER_8,
-    color::AMBER_9,  color::AMBER_10, color::AMBER_11, color::AMBER_12,
+    color::AMBER_1,
+    color::AMBER_2,
+    color::AMBER_3,
+    color::AMBER_4,
+    color::AMBER_5,
+    color::AMBER_6,
+    color::AMBER_7,
+    color::AMBER_8,
+    color::AMBER_9,
+    color::AMBER_10,
+    color::AMBER_11,
+    color::AMBER_12,
 ];
 
 /// Write a single CSS variable.
@@ -117,7 +162,6 @@ pub fn generate_noncolor_primitive_css() -> String {
     css.push_str("}\n");
     css
 }
-
 
 /// Generate CSS custom properties for **all** color tokens (no tree-shaking).
 ///
@@ -277,19 +321,10 @@ mod tests {
         let vars: Vec<&str> = css
             .lines()
             .filter(|line| line.starts_with("--"))
-            .map(|line| {
-                line.trim()
-                    .split(':')
-                    .next()
-                    .unwrap_or("")
-            })
+            .map(|line| line.trim().split(':').next().unwrap_or(""))
             .collect();
 
         let unique: std::collections::HashSet<_> = vars.iter().collect();
-        assert_eq!(
-            vars.len(),
-            unique.len(),
-            "Duplicate CSS variables detected"
-        );
+        assert_eq!(vars.len(), unique.len(), "Duplicate CSS variables detected");
     }
 }

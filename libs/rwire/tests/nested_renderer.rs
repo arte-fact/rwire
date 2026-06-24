@@ -227,14 +227,20 @@ fn test_nested_update_preserves_structure() {
 
     // Parent (id=0) gets GET_SYNCED for its own standalone update.
     let has_synced_0 = has_get_synced_for_id(bytes, 0);
-    assert!(has_synced_0, "Update should have GET_SYNCED for parent (id 0)");
+    assert!(
+        has_synced_0,
+        "Update should have GET_SYNCED for parent (id 0)"
+    );
 
     // The nested child (id=1) ALSO gets its own GET_SYNCED standalone update, so its
     // children reconcile (including removals) via its own CLEAR_CHILDREN+rebuild. The
     // parent additionally emits a CREATE_SYNCED placeholder the client morph uses to
     // preserve the live nested span.
     let has_synced_1 = has_get_synced_for_id(bytes, 1);
-    assert!(has_synced_1, "Nested child should get its own GET_SYNCED standalone update");
+    assert!(
+        has_synced_1,
+        "Nested child should get its own GET_SYNCED standalone update"
+    );
 
     let has_create_synced_1 = has_create_synced_for_id(bytes, 1);
     assert!(

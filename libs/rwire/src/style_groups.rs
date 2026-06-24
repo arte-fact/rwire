@@ -183,8 +183,8 @@ impl Composite {
     /// Calculate bytes saved by using this composite vs atomic emission.
     pub fn bytes_saved(&self) -> isize {
         let atomic_total = self.pattern.atomic_cost() * self.frequency;
-        let composite_total = self.pattern.definition_cost()
-            + self.pattern.composite_cost() * self.frequency;
+        let composite_total =
+            self.pattern.definition_cost() + self.pattern.composite_cost() * self.frequency;
         atomic_total as isize - composite_total as isize
     }
 }
@@ -570,7 +570,10 @@ mod tests {
 
         // Should have exactly one composite (the frequent pattern)
         assert_eq!(table.composites().len(), 1);
-        assert_eq!(table.composites()[0].pattern.utils(), &[0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(
+            table.composites()[0].pattern.utils(),
+            &[0x01, 0x02, 0x03, 0x04]
+        );
         assert_eq!(table.composites()[0].frequency, 5);
     }
 
@@ -713,7 +716,8 @@ mod tests {
         println!("Component library analysis:");
         println!("  Original: {} bytes", analysis.original_bytes);
         println!("  Optimized: {} bytes", analysis.optimized_bytes);
-        println!("  Savings: {} bytes ({:.1}%)",
+        println!(
+            "  Savings: {} bytes ({:.1}%)",
             analysis.estimated_savings,
             analysis.compression_ratio() * 100.0
         );
@@ -741,7 +745,11 @@ mod tests {
 
         // The flex+col+gap pattern appears 3 times
         let pattern = StylePattern::new([0x02, 0x11, 0x2B]); // flex, col, gap-md
-        let count = collector.exact_patterns().get(&pattern).copied().unwrap_or(0);
+        let count = collector
+            .exact_patterns()
+            .get(&pattern)
+            .copied()
+            .unwrap_or(0);
         assert_eq!(count, 3, "Expected flex+col+gap pattern to appear 3 times");
 
         // Analyze patterns
@@ -776,7 +784,10 @@ mod tests {
 
         // Composite table should be populated
         let table = ctx.composite_table();
-        assert!(!table.is_empty(), "Composite table should not be empty after analysis");
+        assert!(
+            !table.is_empty(),
+            "Composite table should not be empty after analysis"
+        );
 
         // The 4-util pattern used 3 times should have a composite
         let flex_col_gap_p = [
@@ -794,7 +805,7 @@ mod tests {
     #[test]
     fn test_build_context_emits_composite_opcode() {
         use crate::builder::{el, BuildContext};
-        use crate::protocol::{El, opcodes};
+        use crate::protocol::{opcodes, El};
         use crate::style_tokens::St;
 
         // Build tree with repeated style patterns
@@ -826,7 +837,10 @@ mod tests {
         // Should NOT contain STYLE_MULTI for the composited pattern
         // (individual STYLE_MULTI opcodes would be replaced by STYLE_COMPOSITE)
         let multi_count = bytes.iter().filter(|&&b| b == opcodes::STYLE_MULTI).count();
-        let composite_count = bytes.iter().filter(|&&b| b == opcodes::STYLE_COMPOSITE).count();
+        let composite_count = bytes
+            .iter()
+            .filter(|&&b| b == opcodes::STYLE_COMPOSITE)
+            .count();
         assert!(
             composite_count >= 3,
             "Expected at least 3 STYLE_COMPOSITE opcodes, got {}",
@@ -858,15 +872,27 @@ mod tests {
         }
 
         let table = CompositeTable::from_collector(&collector);
-        assert!(!table.is_empty(), "Should create composite for 5-use pattern");
+        assert!(
+            !table.is_empty(),
+            "Should create composite for 5-use pattern"
+        );
 
         let css = table.generate_css();
         assert!(!css.is_empty(), "Composite CSS should not be empty");
 
         // CSS should contain .c{id} class with declarations
-        assert!(css.contains(".c256{"), "CSS should start with .c256 (COMPOSITE_ID_START)");
-        assert!(css.contains("display:flex"), "CSS should contain display:flex");
-        assert!(css.contains("align-items:center"), "CSS should contain align-items:center");
+        assert!(
+            css.contains(".c256{"),
+            "CSS should start with .c256 (COMPOSITE_ID_START)"
+        );
+        assert!(
+            css.contains("display:flex"),
+            "CSS should contain display:flex"
+        );
+        assert!(
+            css.contains("align-items:center"),
+            "CSS should contain align-items:center"
+        );
     }
 
     #[test]
@@ -897,10 +923,16 @@ mod tests {
     #[test]
     fn test_composites_reduce_wire_bytes() {
         use crate::builder::{el, BuildContext};
-        use crate::protocol::{El, opcodes};
+        use crate::protocol::{opcodes, El};
         use crate::style_tokens::St;
 
-        let pattern = [St::DisplayFlex, St::FlexCol, St::GapMd, St::PMd, St::BgSubtle];
+        let pattern = [
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapMd,
+            St::PMd,
+            St::BgSubtle,
+        ];
 
         // Build tree WITHOUT composites (measure baseline)
         let root_no_composite = el(El::Div).append([

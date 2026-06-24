@@ -2,7 +2,7 @@
 //! self-contained HTML string for pre-capsule pages (e.g. the auth login).
 
 use rwire::style::Style;
-use rwire::{At, Av, El, St, el};
+use rwire::{el, At, Av, El, St};
 
 #[test]
 fn serializes_tag_text_and_children() {
@@ -37,10 +37,7 @@ fn inline_style_passes_through_as_attribute() {
     let html = el(El::Div)
         .style(Style::new().display("none"))
         .to_static_html();
-    assert!(
-        html.starts_with("<div style=\"display:none"),
-        "got: {html}"
-    );
+    assert!(html.starts_with("<div style=\"display:none"), "got: {html}");
 }
 
 #[test]
@@ -84,7 +81,10 @@ fn render_static_page_inlines_theme_and_utility_css() {
     let html = rwire::render_static_page(&rwire::CapsuleConfig::new(), "claw", &tree);
     assert!(html.starts_with("<!DOCTYPE html>"));
     assert!(html.contains("<title>claw</title>"));
-    assert!(html.contains(":root{"), "theme :root vars should be inlined");
+    assert!(
+        html.contains(":root{"),
+        "theme :root vars should be inlined"
+    );
     assert!(
         html.contains(&format!(".u{code}{{")),
         "utility rule for the used token should be inlined"

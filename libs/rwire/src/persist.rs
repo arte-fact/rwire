@@ -90,7 +90,8 @@ impl PersistRegistry {
 
     /// Register a persistable type.
     pub fn register(&mut self, persistable: PersistableType) {
-        self.by_type_id.insert(persistable.type_id, persistable.clone());
+        self.by_type_id
+            .insert(persistable.type_id, persistable.clone());
         self.by_table.insert(persistable.table_name, persistable);
     }
 
@@ -155,7 +156,10 @@ impl SqliteStore {
     /// Ensure all schemas exist in the database.
     pub fn ensure_schema(&self) -> Result<(), PersistError> {
         let conn = self.conn.lock().map_err(|_| PersistError::LockPoisoned)?;
-        let registry = self.registry.lock().map_err(|_| PersistError::LockPoisoned)?;
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| PersistError::LockPoisoned)?;
 
         for persistable in registry.all() {
             for sql in persistable.schema {
@@ -171,7 +175,10 @@ impl SqliteStore {
     /// Returns a HashMap of cache key -> state.
     pub fn hydrate_all(&self) -> Result<HashMap<String, Box<dyn Any + Send + Sync>>, PersistError> {
         let conn = self.conn.lock().map_err(|_| PersistError::LockPoisoned)?;
-        let registry = self.registry.lock().map_err(|_| PersistError::LockPoisoned)?;
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| PersistError::LockPoisoned)?;
         let mut cache = HashMap::new();
 
         for persistable in registry.all() {
@@ -206,7 +213,10 @@ impl SqliteStore {
     /// Save a single state to the database.
     pub fn save(&self, key: &str, state: &dyn Any) -> Result<(), PersistError> {
         let conn = self.conn.lock().map_err(|_| PersistError::LockPoisoned)?;
-        let registry = self.registry.lock().map_err(|_| PersistError::LockPoisoned)?;
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| PersistError::LockPoisoned)?;
 
         // Parse key format: "table:session_id"
         let parts: Vec<&str> = key.splitn(2, ':').collect();
@@ -286,9 +296,7 @@ mod tests {
 
         let persistable = PersistableType {
             table_name: "users",
-            schema: &[
-                "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL)"
-            ],
+            schema: &["CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL)"],
             type_id: TypeId::of::<String>(),
             key_field: "id",
             load_fn: |_, _| Ok(None),
@@ -369,17 +377,27 @@ mod tests {
         // Insert some data directly
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO counters (id, value) VALUES ('a', 42)", []).unwrap();
-            conn.execute("INSERT INTO counters (id, value) VALUES ('b', 100)", []).unwrap();
+            conn.execute("INSERT INTO counters (id, value) VALUES ('a', 42)", [])
+                .unwrap();
+            conn.execute("INSERT INTO counters (id, value) VALUES ('b', 100)", [])
+                .unwrap();
         }
 
         let cache = store.hydrate_all().unwrap();
         assert_eq!(cache.len(), 2);
 
-        let value_a = cache.get("counters:a").unwrap().downcast_ref::<i32>().unwrap();
+        let value_a = cache
+            .get("counters:a")
+            .unwrap()
+            .downcast_ref::<i32>()
+            .unwrap();
         assert_eq!(*value_a, 42);
 
-        let value_b = cache.get("counters:b").unwrap().downcast_ref::<i32>().unwrap();
+        let value_b = cache
+            .get("counters:b")
+            .unwrap()
+            .downcast_ref::<i32>()
+            .unwrap();
         assert_eq!(*value_b, 100);
     }
 
@@ -423,7 +441,9 @@ mod tests {
         // Verify it was saved
         let conn = store.conn.lock().unwrap();
         let value: i32 = conn
-            .query_row("SELECT value FROM counters WHERE id = 'test'", [], |row| row.get(0))
+            .query_row("SELECT value FROM counters WHERE id = 'test'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(value, 99);
     }

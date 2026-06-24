@@ -12,9 +12,9 @@ use async_std::io::WriteExt;
 use async_std::net::TcpStream;
 use std::time::Duration;
 
-use crate::capsule_gen::{CapsuleConfig, render_static_page};
+use crate::capsule_gen::{render_static_page, CapsuleConfig};
 use crate::session::{SessionId, COOKIE_MAX_AGE_SECS};
-use crate::{At, Av, El, ElementBuilder, St, Style, el};
+use crate::{el, At, Av, El, ElementBuilder, St, Style};
 
 /// Serve a pre-generated capsule HTML over the TCP stream.
 ///
@@ -135,11 +135,9 @@ fn login_card(error: bool, brand: Option<&str>) -> ElementBuilder {
     if brand.is_some() {
         brand_row = brand_row.append([login_glyph()]);
     }
-    brand_row = brand_row.append([
-        el(El::Strong)
-            .st([St::TextHigh, St::TextLg, St::FontSemibold])
-            .text(title),
-    ]);
+    brand_row = brand_row.append([el(El::Strong)
+        .st([St::TextHigh, St::TextLg, St::FontSemibold])
+        .text(title)]);
 
     let mut children: Vec<ElementBuilder> = vec![brand_row];
     if error {

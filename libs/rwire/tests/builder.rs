@@ -189,7 +189,6 @@ fn test_complex_tree() {
 
 #[test]
 fn test_text_encoding_analysis() {
-
     // Build a tree with repeated words
     let page = el(El::Div).append([
         el(El::Span).text("Hello world"),
@@ -206,7 +205,10 @@ fn test_text_encoding_analysis() {
 
     // Check word table was built with repeated words
     let word_table = ctx.word_table();
-    assert!(!word_table.is_empty(), "Word table should have common words");
+    assert!(
+        !word_table.is_empty(),
+        "Word table should have common words"
+    );
     // "Hello" and "world" each appear 2 times, so they should be in the table
     assert!(
         word_table.contains(&"Hello".to_string()),
@@ -255,4 +257,3 @@ fn test_integer_text_encoding() {
         enc_zero
     );
 }
-

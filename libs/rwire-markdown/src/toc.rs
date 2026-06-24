@@ -71,7 +71,13 @@ impl TableOfContents {
 
     /// Compute style tokens for the TOC container.
     pub fn compute_tokens() -> Vec<St> {
-        vec![St::DisplayFlex, St::FlexCol, St::TextSm, St::PositionSticky, St::Top0]
+        vec![
+            St::DisplayFlex,
+            St::FlexCol,
+            St::TextSm,
+            St::PositionSticky,
+            St::Top0,
+        ]
     }
 
     /// Compute style tokens for a TOC link.

@@ -254,7 +254,11 @@ enum FontSource {
     /// Google Fonts CDN import.
     Google { weights: Vec<u16> },
     /// Self-hosted font file.
-    Custom { url: String, format: String, weight: u16 },
+    Custom {
+        url: String,
+        format: String,
+        weight: u16,
+    },
 }
 
 impl FontFace {
@@ -264,7 +268,9 @@ impl FontFace {
     pub fn google(family: &str, weights: &[u16]) -> Self {
         Self {
             family: family.to_string(),
-            source: FontSource::Google { weights: weights.to_vec() },
+            source: FontSource::Google {
+                weights: weights.to_vec(),
+            },
             display: FontDisplay::Swap,
         }
     }
@@ -284,7 +290,12 @@ impl FontFace {
 
     /// Set the font source URL and format (for self-hosted fonts).
     pub fn src(mut self, url: &str, format: &str) -> Self {
-        if let FontSource::Custom { url: ref mut u, format: ref mut f, .. } = self.source {
+        if let FontSource::Custom {
+            url: ref mut u,
+            format: ref mut f,
+            ..
+        } = self.source
+        {
             *u = url.to_string();
             *f = format.to_string();
         }
@@ -293,7 +304,10 @@ impl FontFace {
 
     /// Set the font weight (for self-hosted fonts).
     pub fn weight(mut self, weight: u16) -> Self {
-        if let FontSource::Custom { weight: ref mut w, .. } = self.source {
+        if let FontSource::Custom {
+            weight: ref mut w, ..
+        } = self.source
+        {
             *w = weight;
         }
         self
@@ -331,7 +345,11 @@ impl FontFace {
                     encoded_family, wght, display
                 )
             }
-            FontSource::Custom { url, format, weight } => {
+            FontSource::Custom {
+                url,
+                format,
+                weight,
+            } => {
                 format!(
                     "@font-face{{font-family:'{}';src:url('{}') format('{}');font-weight:{};font-display:{}}}\n",
                     self.family, url, format, weight, display
@@ -598,18 +616,26 @@ mod tests {
         // Non-color primitives are all shipped now.
         assert!(css.contains("--S4:"), "Missing --S4 (space-4)");
         assert!(css.contains("--R3:"), "Missing --R3 (radius-lg)");
-        assert!(css.contains("--X3:"), "Missing --X3 (leading-normal, from base CSS)");
+        assert!(
+            css.contains("--X3:"),
+            "Missing --X3 (leading-normal, from base CSS)"
+        );
         assert!(css.contains("--Z1:"), "Missing --Z1 (shadow-sm)");
 
         // Resolved semantic tokens use short names with direct oklch values
-        assert!(css.contains("--a:oklch("), "Semantic --a should have resolved oklch value");
-        assert!(css.contains("--k:oklch("), "Semantic --k should have resolved oklch value");
+        assert!(
+            css.contains("--a:oklch("),
+            "Semantic --a should have resolved oklch value"
+        );
+        assert!(
+            css.contains("--k:oklch("),
+            "Semantic --k should have resolved oklch value"
+        );
     }
 
     #[test]
     fn test_styled_capsule_structure() {
-        let config = CapsuleConfig::new()
-            .theme(Theme::dark().accent("#00FF00"));
+        let config = CapsuleConfig::new().theme(Theme::dark().accent("#00FF00"));
 
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
@@ -622,8 +648,14 @@ mod tests {
         assert!(capsule.contains("box-sizing"));
 
         // No data-theme/data-style/data-palette attributes (theme-as-state handles CSS vars)
-        assert!(!capsule.contains("data-theme"), "data-theme should not be emitted");
-        assert!(!capsule.contains("data-accent"), "data-accent should not be emitted");
+        assert!(
+            !capsule.contains("data-theme"),
+            "data-theme should not be emitted"
+        );
+        assert!(
+            !capsule.contains("data-accent"),
+            "data-accent should not be emitted"
+        );
 
         // Should have div#rw for app root
         assert!(capsule.contains("<div id=\"rw\""));
@@ -655,7 +687,10 @@ mod tests {
         let capsule = generate_styled_capsule(&config, &css);
 
         // Capsule includes CSS in <style> tag - should be reasonable size
-        println!("Styled capsule size: {} bytes (CSS embedded)", capsule.len());
+        println!(
+            "Styled capsule size: {} bytes (CSS embedded)",
+            capsule.len()
+        );
     }
 
     #[test]
@@ -703,27 +738,37 @@ mod tests {
 
     #[test]
     fn test_composite_css_included_in_capsule() {
-        let config = CapsuleConfig::new()
-            .with_composite_css(".c256{display:flex;flex-direction:column;gap:var(--S4)}".to_string());
+        let config = CapsuleConfig::new().with_composite_css(
+            ".c256{display:flex;flex-direction:column;gap:var(--S4)}".to_string(),
+        );
 
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
 
         // Composite CSS should be embedded in the <style> tag
-        assert!(css.contains(".c256{"), "Composite CSS missing from generated CSS");
-        assert!(capsule.contains(".c256{"), "Composite CSS missing from capsule HTML");
+        assert!(
+            css.contains(".c256{"),
+            "Composite CSS missing from generated CSS"
+        );
+        assert!(
+            capsule.contains(".c256{"),
+            "Composite CSS missing from capsule HTML"
+        );
     }
 
     #[test]
     fn test_utility_css_is_lazy_not_static() {
         // Utility rules are delivered lazily over the wire (STYLE_DEF), so they
         // must NOT appear in the static capsule CSS. Composites stay static.
-        let config = CapsuleConfig::new()
-            .with_composite_css(".c256{display:flex;gap:1rem}".to_string());
+        let config =
+            CapsuleConfig::new().with_composite_css(".c256{display:flex;gap:1rem}".to_string());
 
         let css = generate_capsule_css(&config);
 
-        assert!(!css.contains(".u2{"), "utility rule must be lazy, not in static CSS");
+        assert!(
+            !css.contains(".u2{"),
+            "utility rule must be lazy, not in static CSS"
+        );
         assert!(css.contains(".c256{"), "composite CSS should be static");
     }
 
@@ -734,13 +779,15 @@ mod tests {
 
         let css = generate_capsule_css(&config);
         // Should not contain any composite class patterns
-        assert!(!css.contains(".c256"), "Empty composite CSS should not produce .c256");
+        assert!(
+            !css.contains(".c256"),
+            "Empty composite CSS should not produce .c256"
+        );
     }
 
     #[test]
     fn test_capsule_css_uses_theme_css() {
-        let config = CapsuleConfig::new()
-            .theme(Theme::dark().accent("#5E81AC"));
+        let config = CapsuleConfig::new().theme(Theme::dark().accent("#5E81AC"));
         let css = generate_capsule_css(&config);
 
         // Should contain a single :root{} block with resolved theme CSS
@@ -748,17 +795,25 @@ mod tests {
         assert!(css.contains("--a:"), "Missing --a (bg-app)");
         assert!(css.contains("--k:"), "Missing --k (text-default)");
         // Should NOT contain old dual-mode or data-attribute selectors
-        assert!(!css.contains("[data-theme"), "Should not contain data-theme selectors");
-        assert!(!css.contains("[data-style"), "Should not contain data-style selectors");
-        assert!(!css.contains("[data-palette"), "Should not contain data-palette selectors");
+        assert!(
+            !css.contains("[data-theme"),
+            "Should not contain data-theme selectors"
+        );
+        assert!(
+            !css.contains("[data-style"),
+            "Should not contain data-style selectors"
+        );
+        assert!(
+            !css.contains("[data-palette"),
+            "Should not contain data-palette selectors"
+        );
     }
 
     #[test]
     fn test_composite_css_vars_scanned() {
         // Composite CSS references var(--S6) which is not used by any utility token.
         // After the fix, generate_capsule_css should include --S6 in the :root block.
-        let config = CapsuleConfig::new()
-            .with_composite_css(".c1{gap:var(--S6)}".to_string());
+        let config = CapsuleConfig::new().with_composite_css(".c1{gap:var(--S6)}".to_string());
         let css = generate_capsule_css(&config);
 
         assert!(
@@ -769,27 +824,40 @@ mod tests {
 
     #[test]
     fn test_client_actions_js_included_when_enabled() {
-        let config = CapsuleConfig::new()
-            .has_client_actions(true);
+        let config = CapsuleConfig::new().has_client_actions(true);
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
 
         // Client actions JS should be included
-        assert!(capsule.contains("fl2"), "Client actions JS vars should be present");
-        assert!(capsule.contains("uf2"), "Target update function should be present");
-        assert!(capsule.contains("us2"), "Selector update function should be present");
+        assert!(
+            capsule.contains("fl2"),
+            "Client actions JS vars should be present"
+        );
+        assert!(
+            capsule.contains("uf2"),
+            "Target update function should be present"
+        );
+        assert!(
+            capsule.contains("us2"),
+            "Selector update function should be present"
+        );
     }
 
     #[test]
     fn test_client_actions_js_excluded_when_disabled() {
-        let config = CapsuleConfig::new()
-            .has_client_actions(false);
+        let config = CapsuleConfig::new().has_client_actions(false);
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
 
         // Client actions update functions should NOT be included
-        assert!(!capsule.contains("function uf2"), "Target update function should not be present when disabled");
-        assert!(!capsule.contains("function us2"), "Selector update function should not be present when disabled");
+        assert!(
+            !capsule.contains("function uf2"),
+            "Target update function should not be present when disabled"
+        );
+        assert!(
+            !capsule.contains("function us2"),
+            "Selector update function should not be present when disabled"
+        );
     }
 
     #[test]
@@ -799,12 +867,30 @@ mod tests {
         let capsule = generate_styled_capsule(&config, &css);
 
         // Opcode constants should always be in the runtime
-        assert!(capsule.contains("IT:0x47"), "INIT_TARGET opcode should be in O object");
-        assert!(capsule.contains("BT:0x48"), "BIND_TARGET opcode should be in O object");
-        assert!(capsule.contains("TG:0x49"), "BIND_TOGGLE opcode should be in O object");
-        assert!(capsule.contains("IS:0x4A"), "INIT_SELECTOR opcode should be in O object");
-        assert!(capsule.contains("BS:0x4B"), "BIND_SELECTOR opcode should be in O object");
-        assert!(capsule.contains("SS2:0x4C"), "BIND_SELECT opcode should be in O object");
+        assert!(
+            capsule.contains("IT:0x47"),
+            "INIT_TARGET opcode should be in O object"
+        );
+        assert!(
+            capsule.contains("BT:0x48"),
+            "BIND_TARGET opcode should be in O object"
+        );
+        assert!(
+            capsule.contains("TG:0x49"),
+            "BIND_TOGGLE opcode should be in O object"
+        );
+        assert!(
+            capsule.contains("IS:0x4A"),
+            "INIT_SELECTOR opcode should be in O object"
+        );
+        assert!(
+            capsule.contains("BS:0x4B"),
+            "BIND_SELECTOR opcode should be in O object"
+        );
+        assert!(
+            capsule.contains("SS2:0x4C"),
+            "BIND_SELECT opcode should be in O object"
+        );
     }
 
     #[test]
@@ -813,7 +899,10 @@ mod tests {
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
 
-        assert!(capsule.contains("TT:0x4D"), "BIND_TIMED_TOGGLE opcode should be in O object");
+        assert!(
+            capsule.contains("TT:0x4D"),
+            "BIND_TIMED_TOGGLE opcode should be in O object"
+        );
     }
 
     #[test]
@@ -822,6 +911,9 @@ mod tests {
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
 
-        assert!(capsule.contains("AT2:0x4E"), "AUTO_TOGGLE opcode should be in O object");
+        assert!(
+            capsule.contains("AT2:0x4E"),
+            "AUTO_TOGGLE opcode should be in O object"
+        );
     }
 }

@@ -656,6 +656,21 @@ where
         self
     }
 
+    /// Set a stable **development** session token. When set, login issues this token as the
+    /// session cookie and the gate accepts it without consulting the in-memory token map — so it
+    /// stays valid across server restarts. A rebuild (e.g. `cargo watch`) then keeps an open tab
+    /// logged in (and on its current route, since the client reloads in place) instead of bouncing
+    /// it to the login form.
+    ///
+    /// Intended for local development only — drive it from an env var and leave it unset in
+    /// production, where sessions should stay ephemeral. Call after [`auth`]; no-op without it.
+    pub fn dev_session(mut self, token: impl Into<String>) -> Self {
+        if let Some(gate) = self.auth.as_mut() {
+            gate.dev_token = Some(token.into());
+        }
+        self
+    }
+
     pub fn with_shared_state(mut self, shared: Arc<SharedServerState>) -> Self {
         self.shared = Some(shared);
         self
@@ -923,6 +938,10 @@ pub(crate) struct AuthGate {
     password: String,
     /// Optional brand/title shown on the login form.
     brand: Option<String>,
+    /// A stable development session token. When set, it's accepted regardless of the in-memory
+    /// token map (which resets on restart), so a rebuild doesn't log an open tab out. See
+    /// [`ServerWithRoot::dev_session`].
+    dev_token: Option<String>,
     tokens: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
@@ -932,6 +951,7 @@ impl AuthGate {
             user,
             password,
             brand: None,
+            dev_token: None,
             tokens: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -941,6 +961,11 @@ impl AuthGate {
         let Some(token) = cookie_value(request, AUTH_COOKIE) else {
             return false;
         };
+        // A configured dev session token is always valid: it isn't kept in the in-memory map, so
+        // it survives a server restart and an open tab stays logged in across a rebuild.
+        if self.dev_token.as_deref() == Some(token.as_str()) {
+            return true;
+        }
         let mut tokens = self
             .tokens
             .lock()
@@ -966,7 +991,9 @@ impl AuthGate {
         let user_ok = ct_eq(user?.as_bytes(), self.user.as_bytes());
         let pass_ok = ct_eq(password?.as_bytes(), self.password.as_bytes());
         if user_ok & pass_ok {
-            let token = generate_token();
+            // In dev-session mode, issue the stable token so the cookie keeps working across
+            // restarts; otherwise a fresh random token tracked in memory.
+            let token = self.dev_token.clone().unwrap_or_else(generate_token);
             self.tokens
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)

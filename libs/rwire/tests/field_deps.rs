@@ -4,7 +4,7 @@
 
 use rwire::builder::extract_renderers;
 use rwire::state::ChangeSet;
-use rwire::{El, ElementBuilder, State, el, renderer};
+use rwire::{el, renderer, El, ElementBuilder, State};
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -44,7 +44,10 @@ fn renderer_depends_only_on_fields_it_reads() {
     let changed_b = ChangeSet::from_fields(&[Two::FIELD_B]);
 
     let a = deps_of(&reads_a());
-    assert!(a.needs_update(changed_a), "reads_a must update when a changes");
+    assert!(
+        a.needs_update(changed_a),
+        "reads_a must update when a changes"
+    );
     assert!(
         !a.needs_update(changed_b),
         "reads_a must NOT update when only b changes"

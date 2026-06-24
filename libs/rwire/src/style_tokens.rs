@@ -1167,7 +1167,13 @@ pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
         if used.contains(&code) {
             use std::fmt::Write;
             let _ = write!(css, ".u{}{{{}}}", code, declaration);
-            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") || declaration.contains("rw-ping") || declaration.contains("rw-pulse") || declaration.contains("rw-bounce") {
+            if declaration.contains("rw-spin")
+                || declaration.contains("rw-shimmer")
+                || declaration.contains("rw-slide-in")
+                || declaration.contains("rw-ping")
+                || declaration.contains("rw-pulse")
+                || declaration.contains("rw-bounce")
+            {
                 needs_global_keyframes = true;
             }
         }
@@ -1209,7 +1215,13 @@ pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> Strin
                 ".h{}u{}{}{{{}}}",
                 pc_code, st_code, selector, declaration
             );
-            if declaration.contains("rw-spin") || declaration.contains("rw-shimmer") || declaration.contains("rw-slide-in") || declaration.contains("rw-ping") || declaration.contains("rw-pulse") || declaration.contains("rw-bounce") {
+            if declaration.contains("rw-spin")
+                || declaration.contains("rw-shimmer")
+                || declaration.contains("rw-slide-in")
+                || declaration.contains("rw-ping")
+                || declaration.contains("rw-pulse")
+                || declaration.contains("rw-bounce")
+            {
                 needs_spin_keyframes = true;
             }
         }
@@ -1466,7 +1478,11 @@ mod tests {
     fn test_no_duplicate_bp_codes() {
         let mut seen: HashSet<u8> = HashSet::new();
         for (code, _) in BP_MAPPINGS {
-            assert!(seen.insert(*code), "Duplicate breakpoint code: 0x{:02X}", code);
+            assert!(
+                seen.insert(*code),
+                "Duplicate breakpoint code: 0x{:02X}",
+                code
+            );
         }
     }
 
@@ -1489,9 +1505,18 @@ mod tests {
         used.insert((Bp::Lg.as_u8(), St::GridCols3.as_u16()));
 
         let css = generate_breakpoint_css(&used);
-        assert!(css.contains("@media(min-width:768px)"), "Missing md breakpoint: {css}");
-        assert!(css.contains("@media(min-width:1024px)"), "Missing lg breakpoint: {css}");
-        assert!(css.contains(".b1u2{display:flex}"), "Missing md flex rule: {css}");
+        assert!(
+            css.contains("@media(min-width:768px)"),
+            "Missing md breakpoint: {css}"
+        );
+        assert!(
+            css.contains("@media(min-width:1024px)"),
+            "Missing lg breakpoint: {css}"
+        );
+        assert!(
+            css.contains(".b1u2{display:flex}"),
+            "Missing md flex rule: {css}"
+        );
         assert!(css.contains(".b2u331{"), "Missing lg grid rule: {css}");
     }
 
@@ -1508,7 +1533,10 @@ mod tests {
         used.insert(St::AnimatePing.as_u16());
         let css = generate_utility_css(&used);
         assert!(css.contains("rw-ping"), "Missing rw-ping animation: {css}");
-        assert!(css.contains("@keyframes rw-ping"), "Missing rw-ping keyframes: {css}");
+        assert!(
+            css.contains("@keyframes rw-ping"),
+            "Missing rw-ping keyframes: {css}"
+        );
     }
 
     #[test]
@@ -1516,8 +1544,14 @@ mod tests {
         let mut used = HashSet::new();
         used.insert(St::AnimatePulse.as_u16());
         let css = generate_utility_css(&used);
-        assert!(css.contains("rw-pulse"), "Missing rw-pulse animation: {css}");
-        assert!(css.contains("@keyframes rw-pulse"), "Missing rw-pulse keyframes: {css}");
+        assert!(
+            css.contains("rw-pulse"),
+            "Missing rw-pulse animation: {css}"
+        );
+        assert!(
+            css.contains("@keyframes rw-pulse"),
+            "Missing rw-pulse keyframes: {css}"
+        );
     }
 
     #[test]
@@ -1525,7 +1559,13 @@ mod tests {
         let mut used = HashSet::new();
         used.insert(St::AnimateBounce.as_u16());
         let css = generate_utility_css(&used);
-        assert!(css.contains("rw-bounce"), "Missing rw-bounce animation: {css}");
-        assert!(css.contains("@keyframes rw-bounce"), "Missing rw-bounce keyframes: {css}");
+        assert!(
+            css.contains("rw-bounce"),
+            "Missing rw-bounce animation: {css}"
+        );
+        assert!(
+            css.contains("@keyframes rw-bounce"),
+            "Missing rw-bounce keyframes: {css}"
+        );
     }
 }

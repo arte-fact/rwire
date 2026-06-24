@@ -75,7 +75,9 @@ mod tests {
     }
 
     impl Selector for TestSelector {
-        fn default_value() -> u8 { 1 }
+        fn default_value() -> u8 {
+            1
+        }
         fn variant_value(&self) -> u8 {
             match self {
                 TestSelector::A => 0,

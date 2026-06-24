@@ -24,7 +24,9 @@ async fn read_full_http_response(stream: &mut TcpStream) -> String {
         let response_str = String::from_utf8_lossy(&buffer);
         if let Some(header_end) = response_str.find("\r\n\r\n") {
             // Parse Content-Length
-            if let Some(cl_line) = response_str.lines().find(|l| l.starts_with("Content-Length:"))
+            if let Some(cl_line) = response_str
+                .lines()
+                .find(|l| l.starts_with("Content-Length:"))
             {
                 if let Ok(content_length) = cl_line
                     .split(':')
@@ -146,8 +148,14 @@ async fn test_capsule_ships_all_elements() {
     // `build_simple` only renders a div, yet the full map is shipped — button and
     // span are present even though unused.
     assert!(response_str.contains("0:'div'"));
-    assert!(response_str.contains("2:'button'"), "full map must include button");
-    assert!(response_str.contains("1:'span'"), "full map must include span");
+    assert!(
+        response_str.contains("2:'button'"),
+        "full map must include button"
+    );
+    assert!(
+        response_str.contains("1:'span'"),
+        "full map must include span"
+    );
 
     drop(stream);
     server_task.cancel().await;
@@ -296,7 +304,9 @@ async fn test_content_length() {
     let mut buf = [0u8; 8192];
     loop {
         let n = stream.read(&mut buf).await.unwrap();
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         response.extend_from_slice(&buf[..n]);
         // Check if we've received the full response (headers + body)
         if let Some(header_end) = response.windows(4).position(|w| w == b"\r\n\r\n") {

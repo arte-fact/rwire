@@ -102,7 +102,13 @@ impl DocsSidebar {
 
     /// Compute style tokens for the sidebar container.
     pub fn compute_tokens() -> Vec<St> {
-        vec![St::DisplayFlex, St::FlexCol, St::GapMd, St::PxSm, St::TextSm]
+        vec![
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapMd,
+            St::PxSm,
+            St::TextSm,
+        ]
     }
 
     /// Compute style tokens for a section title.
@@ -185,9 +191,7 @@ impl DocsSidebar {
                 })
                 .collect();
 
-            let link_list = el(El::Div)
-                .st([St::DisplayFlex, St::FlexCol])
-                .append(links);
+            let link_list = el(El::Div).st([St::DisplayFlex, St::FlexCol]).append(links);
 
             let section_el = if section.open {
                 el(El::Div).append([title, link_list])
@@ -266,9 +270,11 @@ mod tests {
     #[test]
     fn test_docs_sidebar_with_active_path() {
         let sidebar = DocsSidebar::new()
-            .section(SidebarSection::new("Docs")
-                .link("/install", "Installation")
-                .link("/quickstart", "Quick Start"))
+            .section(
+                SidebarSection::new("Docs")
+                    .link("/install", "Installation")
+                    .link("/quickstart", "Quick Start"),
+            )
             .active_path("/quickstart");
         assert_eq!(sidebar.active_path.as_deref(), Some("/quickstart"));
     }

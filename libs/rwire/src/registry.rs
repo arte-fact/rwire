@@ -54,7 +54,8 @@ impl ConnectionRegistry {
         self.total.fetch_add(1, Ordering::Relaxed);
 
         // Increment per-IP count
-        *self.per_ip
+        *self
+            .per_ip
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .entry(ip)

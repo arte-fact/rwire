@@ -91,7 +91,12 @@ impl ThemeStyle {
         color_css: fn(&mut String, &ResolvedPalette, bool),
         q_css: fn(&mut String, bool),
     ) -> Self {
-        Self { id, label, color_css, q_css }
+        Self {
+            id,
+            label,
+            color_css,
+            q_css,
+        }
     }
 
     /// Built-in Soft style (the framework default).
@@ -521,80 +526,80 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         // Dark mode: invert scales
         css_var(&mut css, "a", &rp.neutral[11]); // bg-app
         css_var(&mut css, "b", &rp.neutral[10]); // bg-subtle
-        css_var(&mut css, "c", &rp.neutral[9]);  // bg-muted
-        css_var(&mut css, "d", &rp.neutral[8]);  // bg-emphasis
-        css_var(&mut css, "e", &rp.neutral[7]);  // bg-hover
-        css_var(&mut css, "f", &rp.neutral[6]);  // bg-active
-        css_var(&mut css, "g", &rp.neutral[6]);  // border-subtle
-        css_var(&mut css, "h", &rp.neutral[5]);  // border-default
-        css_var(&mut css, "i", &rp.neutral[4]);  // border-emphasis
-        css_var(&mut css, "j", &rp.neutral[4]);  // text-muted
-        css_var(&mut css, "k", &rp.neutral[1]);  // text-default
-        css_var(&mut css, "l", &rp.neutral[0]);  // text-high
-        css_var(&mut css, "m", &rp.white);       // text-on-accent
+        css_var(&mut css, "c", &rp.neutral[9]); // bg-muted
+        css_var(&mut css, "d", &rp.neutral[8]); // bg-emphasis
+        css_var(&mut css, "e", &rp.neutral[7]); // bg-hover
+        css_var(&mut css, "f", &rp.neutral[6]); // bg-active
+        css_var(&mut css, "g", &rp.neutral[6]); // border-subtle
+        css_var(&mut css, "h", &rp.neutral[5]); // border-default
+        css_var(&mut css, "i", &rp.neutral[4]); // border-emphasis
+        css_var(&mut css, "j", &rp.neutral[4]); // text-muted
+        css_var(&mut css, "k", &rp.neutral[1]); // text-default
+        css_var(&mut css, "l", &rp.neutral[0]); // text-high
+        css_var(&mut css, "m", &rp.white); // text-on-accent
         css_var(&mut css, "r", &rp.neutral[11]); // surface
-        css_var(&mut css, "s", &rp.neutral[0]);  // on-surface
+        css_var(&mut css, "s", &rp.neutral[0]); // on-surface
         css_var(&mut css, "t", &rp.neutral[10]); // surface-raised
-        css_var(&mut css, "u", &rp.neutral[0]);  // on-surface-raised
-        css_var(&mut css, "A", &rp.neutral[8]);  // secondary
-        css_var(&mut css, "B", &rp.neutral[0]);  // on-secondary
-        css_var(&mut css, "C", &rp.neutral[7]);  // secondary-hover
-        css_var(&mut css, "D", &rp.neutral[9]);  // muted
-        css_var(&mut css, "E", &rp.neutral[3]);  // on-muted
-        css_var(&mut css, "I", &rp.red[9]);      // destructive-subtle
-        css_var(&mut css, "J", &rp.red[2]);      // on-destructive-subtle
-        css_var(&mut css, "y", &rp.accent[9]);   // primary-subtle
-        css_var(&mut css, "z", &rp.accent[2]);   // on-primary-subtle
+        css_var(&mut css, "u", &rp.neutral[0]); // on-surface-raised
+        css_var(&mut css, "A", &rp.neutral[8]); // secondary
+        css_var(&mut css, "B", &rp.neutral[0]); // on-secondary
+        css_var(&mut css, "C", &rp.neutral[7]); // secondary-hover
+        css_var(&mut css, "D", &rp.neutral[9]); // muted
+        css_var(&mut css, "E", &rp.neutral[3]); // on-muted
+        css_var(&mut css, "I", &rp.red[9]); // destructive-subtle
+        css_var(&mut css, "J", &rp.red[2]); // on-destructive-subtle
+        css_var(&mut css, "y", &rp.accent[9]); // primary-subtle
+        css_var(&mut css, "z", &rp.accent[2]); // on-primary-subtle
     } else {
         // Light mode
-        css_var(&mut css, "a", &rp.neutral[0]);  // bg-app
-        css_var(&mut css, "b", &rp.neutral[1]);  // bg-subtle
-        css_var(&mut css, "c", &rp.neutral[2]);  // bg-muted
-        css_var(&mut css, "d", &rp.neutral[3]);  // bg-emphasis
-        css_var(&mut css, "e", &rp.neutral[4]);  // bg-hover
-        css_var(&mut css, "f", &rp.neutral[5]);  // bg-active
-        css_var(&mut css, "g", &rp.neutral[5]);  // border-subtle
-        css_var(&mut css, "h", &rp.neutral[6]);  // border-default
-        css_var(&mut css, "i", &rp.neutral[7]);  // border-emphasis
-        css_var(&mut css, "j", &rp.neutral[8]);  // text-muted
+        css_var(&mut css, "a", &rp.neutral[0]); // bg-app
+        css_var(&mut css, "b", &rp.neutral[1]); // bg-subtle
+        css_var(&mut css, "c", &rp.neutral[2]); // bg-muted
+        css_var(&mut css, "d", &rp.neutral[3]); // bg-emphasis
+        css_var(&mut css, "e", &rp.neutral[4]); // bg-hover
+        css_var(&mut css, "f", &rp.neutral[5]); // bg-active
+        css_var(&mut css, "g", &rp.neutral[5]); // border-subtle
+        css_var(&mut css, "h", &rp.neutral[6]); // border-default
+        css_var(&mut css, "i", &rp.neutral[7]); // border-emphasis
+        css_var(&mut css, "j", &rp.neutral[8]); // text-muted
         css_var(&mut css, "k", &rp.neutral[10]); // text-default
         css_var(&mut css, "l", &rp.neutral[11]); // text-high
-        css_var(&mut css, "m", &rp.white);       // text-on-accent
-        css_var(&mut css, "r", &rp.neutral[0]);  // surface
+        css_var(&mut css, "m", &rp.white); // text-on-accent
+        css_var(&mut css, "r", &rp.neutral[0]); // surface
         css_var(&mut css, "s", &rp.neutral[11]); // on-surface
-        css_var(&mut css, "t", &rp.neutral[1]);  // surface-raised
+        css_var(&mut css, "t", &rp.neutral[1]); // surface-raised
         css_var(&mut css, "u", &rp.neutral[11]); // on-surface-raised
-        css_var(&mut css, "A", &rp.neutral[3]);  // secondary
+        css_var(&mut css, "A", &rp.neutral[3]); // secondary
         css_var(&mut css, "B", &rp.neutral[11]); // on-secondary
-        css_var(&mut css, "C", &rp.neutral[4]);  // secondary-hover
-        css_var(&mut css, "D", &rp.neutral[2]);  // muted
+        css_var(&mut css, "C", &rp.neutral[4]); // secondary-hover
+        css_var(&mut css, "D", &rp.neutral[2]); // muted
         css_var(&mut css, "E", &rp.neutral[10]); // on-muted
-        css_var(&mut css, "I", &rp.red[2]);      // destructive-subtle
-        css_var(&mut css, "J", &rp.red[10]);     // on-destructive-subtle
-        css_var(&mut css, "y", &rp.accent[2]);   // primary-subtle
-        css_var(&mut css, "z", &rp.accent[10]);  // on-primary-subtle
+        css_var(&mut css, "I", &rp.red[2]); // destructive-subtle
+        css_var(&mut css, "J", &rp.red[10]); // on-destructive-subtle
+        css_var(&mut css, "y", &rp.accent[2]); // primary-subtle
+        css_var(&mut css, "z", &rp.accent[10]); // on-primary-subtle
     }
 
     // Mode-independent vars
     for i in 0..12 {
         vn(&mut css, "n", i + 1, &rp.accent[i]);
     }
-    css_var(&mut css, "o", &rp.green[8]);    // success
-    css_var(&mut css, "p", &rp.amber[8]);    // warning
-    css_var(&mut css, "q", &rp.red[8]);      // error
-    css_var(&mut css, "F", &rp.red[8]);      // destructive
-    css_var(&mut css, "G", &rp.white);       // on-destructive
-    css_var(&mut css, "H", &rp.red[9]);      // destructive-hover
-    // Semantic subtle pairs for status colors (mode-aware)
+    css_var(&mut css, "o", &rp.green[8]); // success
+    css_var(&mut css, "p", &rp.amber[8]); // warning
+    css_var(&mut css, "q", &rp.red[8]); // error
+    css_var(&mut css, "F", &rp.red[8]); // destructive
+    css_var(&mut css, "G", &rp.white); // on-destructive
+    css_var(&mut css, "H", &rp.red[9]); // destructive-hover
+                                        // Semantic subtle pairs for status colors (mode-aware)
     if is_dark {
-        css_var(&mut css, "M", &rp.green[9]);  // success-subtle bg
+        css_var(&mut css, "M", &rp.green[9]); // success-subtle bg
         css_var(&mut css, "M1", &rp.green[2]); // on-success-subtle text
-        css_var(&mut css, "N", &rp.amber[9]);  // warning-subtle bg
+        css_var(&mut css, "N", &rp.amber[9]); // warning-subtle bg
         css_var(&mut css, "N1", &rp.amber[2]); // on-warning-subtle text
         css_var(&mut css, "O", &rp.accent[9]); // info-subtle bg
-        css_var(&mut css, "O1", &rp.accent[2]);// on-info-subtle text
-        css_var(&mut css, "P", &rp.red[9]);    // error-subtle bg (alias for --I)
-        css_var(&mut css, "P1", &rp.red[2]);   // on-error-subtle text
+        css_var(&mut css, "O1", &rp.accent[2]); // on-info-subtle text
+        css_var(&mut css, "P", &rp.red[9]); // error-subtle bg (alias for --I)
+        css_var(&mut css, "P1", &rp.red[2]); // on-error-subtle text
     } else {
         css_var(&mut css, "M", &rp.green[1]);
         css_var(&mut css, "M1", &rp.green[10]);
@@ -606,11 +611,11 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         css_var(&mut css, "P1", &rp.red[10]);
     }
     if is_dark {
-        css_var(&mut css, "K", &rp.accent[5]);   // focus-ring (brighter in dark)
-        css_var(&mut css, "L", &rp.accent[4]);   // border-primary (brighter in dark)
+        css_var(&mut css, "K", &rp.accent[5]); // focus-ring (brighter in dark)
+        css_var(&mut css, "L", &rp.accent[4]); // border-primary (brighter in dark)
     } else {
-        css_var(&mut css, "K", &rp.accent[7]);   // focus-ring
-        css_var(&mut css, "L", &rp.accent[6]);   // border-primary
+        css_var(&mut css, "K", &rp.accent[7]); // focus-ring
+        css_var(&mut css, "L", &rp.accent[6]); // border-primary
     }
 
     // --- Style preset: resolve primary/surface/border overrides inline ---
@@ -657,12 +662,12 @@ fn vn(css: &mut String, prefix: &str, num: usize, value: &str) {
 
 fn soft_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
     if is_dark {
-        css_var(css, "v", &rp.accent[7]);  // primary — brighter for dark bg
-        css_var(css, "w", &rp.accent[0]);  // on-primary
-        css_var(css, "x", &rp.accent[6]);  // primary-hover
-        css_var(css, "F", &rp.red[7]);     // destructive
-        css_var(css, "G", &rp.red[0]);     // on-destructive
-        css_var(css, "H", &rp.red[6]);     // destructive-hover
+        css_var(css, "v", &rp.accent[7]); // primary — brighter for dark bg
+        css_var(css, "w", &rp.accent[0]); // on-primary
+        css_var(css, "x", &rp.accent[6]); // primary-hover
+        css_var(css, "F", &rp.red[7]); // destructive
+        css_var(css, "G", &rp.red[0]); // on-destructive
+        css_var(css, "H", &rp.red[6]); // destructive-hover
         css_var(css, "h", &rp.neutral[8]); // border-default
         css.push_str("--g:transparent;");
         css_var(css, "t", &rp.neutral[9]); // surface-raised
@@ -739,14 +744,23 @@ mod tests {
 
         // Single :root block, no data-theme selectors
         assert!(css.starts_with(":root{"), "Should start with :root{{");
-        assert!(!css.contains("[data-theme"), "Should not contain data-theme selectors");
-        assert!(!css.contains("[data-style"), "Should not contain data-style selectors");
+        assert!(
+            !css.contains("[data-theme"),
+            "Should not contain data-theme selectors"
+        );
+        assert!(
+            !css.contains("[data-style"),
+            "Should not contain data-style selectors"
+        );
 
         // Should have resolved values
         assert!(css.contains("--a:"), "Missing --a (bg-app)");
         assert!(css.contains("--k:"), "Missing --k (text-default)");
         assert!(css.contains("--v:"), "Missing --v (primary)");
-        assert!(css.contains("oklch("), "Should contain resolved oklch values");
+        assert!(
+            css.contains("oklch("),
+            "Should contain resolved oklch values"
+        );
 
         // Should include Q-vars
         assert!(css.contains("--Qd:"), "Missing Q-var --Qd");
@@ -778,13 +792,18 @@ mod tests {
         let theme = Theme::light().radius(RadiusScale::Full);
         let css = generate_theme_css(&theme);
 
-        assert!(css.contains("--R2:9999px"), "Full radius should override --R2");
+        assert!(
+            css.contains("--R2:9999px"),
+            "Full radius should override --R2"
+        );
         assert!(!css.contains("[data-radius"), "No data-radius selectors");
     }
 
     #[test]
     fn test_generate_theme_css_size() {
-        let theme = Theme::dark().style(ThemeStyle::soft()).radius(RadiusScale::Large);
+        let theme = Theme::dark()
+            .style(ThemeStyle::soft())
+            .radius(RadiusScale::Large);
         let css = generate_theme_css(&theme);
         // Single block should be compact
         assert!(css.len() < 2048, "Theme CSS too large: {} bytes", css.len());

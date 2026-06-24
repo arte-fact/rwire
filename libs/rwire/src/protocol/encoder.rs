@@ -11,10 +11,9 @@ use super::opcodes::{
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
     ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL,
-    SET_ATTR_ENUM, SET_ATTR_KEY_SYM,
-    SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
-    STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
-    SYMBOL_SESSION_START, WORD_TABLE,
+    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
+    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
+    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 use crate::style_tokens::StyleKey;
@@ -495,7 +494,8 @@ impl OpcodeBuffer {
         self.buf.put_u8(st_tokens.len() as u8);
         for &token in st_tokens {
             write_varint(&mut self.buf, token as u32);
-            self.referenced_styles.insert(StyleKey::Breakpoint(bp, token));
+            self.referenced_styles
+                .insert(StyleKey::Breakpoint(bp, token));
         }
         self
     }
@@ -750,14 +750,14 @@ mod tests {
         assert_eq!(bytes[0], BIND_TARGET);
         assert_eq!(bytes[1], 5); // ref (varint, single byte)
         assert_eq!(bytes[2], 0); // target_idx
-        // St code 0xC0 as varint: 0x80 | ((0xC0-0x80)>>8) = 0x80, then low byte
-        // Actually 0xC0 = 192. 192 >= 128 so varint is 2 bytes: 0x80 + ((192-128)>>8)=0x80, (192-128)&255=64
-        // Wait: varint encoding: if v < 128 -> 1 byte. v=192 >= 128.
-        // v-128 = 64. 0x80 | (64>>8) = 0x80. Second byte: 64&255 = 64.
-        // So varint(192) = [0x80, 64]
+                                 // St code 0xC0 as varint: 0x80 | ((0xC0-0x80)>>8) = 0x80, then low byte
+                                 // Actually 0xC0 = 192. 192 >= 128 so varint is 2 bytes: 0x80 + ((192-128)>>8)=0x80, (192-128)&255=64
+                                 // Wait: varint encoding: if v < 128 -> 1 byte. v=192 >= 128.
+                                 // v-128 = 64. 0x80 | (64>>8) = 0x80. Second byte: 64&255 = 64.
+                                 // So varint(192) = [0x80, 64]
         assert_eq!(bytes[3], 0x80); // st varint high byte
-        assert_eq!(bytes[4], 64);  // st varint low byte
-        assert_eq!(bytes[5], 0);   // invert = false
+        assert_eq!(bytes[4], 64); // st varint low byte
+        assert_eq!(bytes[5], 0); // invert = false
     }
 
     #[test]

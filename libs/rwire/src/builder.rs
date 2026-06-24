@@ -553,7 +553,8 @@ impl ElementBuilder {
     /// el(El::Path).at_str(At::D, "M6 9l6 6 6-6")
     /// ```
     pub fn at_str(mut self, key: At, value: &str) -> Self {
-        self.typed_attrs.push(TypedAttr::KeySym(key, value.to_string()));
+        self.typed_attrs
+            .push(TypedAttr::KeySym(key, value.to_string()));
         self
     }
 
@@ -758,10 +759,10 @@ impl ElementBuilder {
     where
         I: IntoIterator<Item = crate::style_tokens::St>,
     {
-        self.style_utils.extend(utils.into_iter().map(|u| u.as_u16()));
+        self.style_utils
+            .extend(utils.into_iter().map(|u| u.as_u16()));
         self
     }
-
 
     /// Apply pseudo-class style tokens (hover, focus, disabled, etc.)
     ///
@@ -809,7 +810,10 @@ impl ElementBuilder {
     }
 
     /// Apply disabled styles.
-    pub fn disabled_style<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+    pub fn disabled_style<I: IntoIterator<Item = crate::style_tokens::St>>(
+        self,
+        tokens: I,
+    ) -> Self {
         self.pseudo(crate::style_tokens::Pc::Disabled, tokens)
     }
 
@@ -819,7 +823,10 @@ impl ElementBuilder {
     }
 
     /// Apply placeholder styles.
-    pub fn placeholder_style<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+    pub fn placeholder_style<I: IntoIterator<Item = crate::style_tokens::St>>(
+        self,
+        tokens: I,
+    ) -> Self {
         self.pseudo(crate::style_tokens::Pc::Placeholder, tokens)
     }
 
@@ -844,7 +851,10 @@ impl ElementBuilder {
     }
 
     /// Apply :not(:last-child) styles.
-    pub fn not_last_child<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
+    pub fn not_last_child<I: IntoIterator<Item = crate::style_tokens::St>>(
+        self,
+        tokens: I,
+    ) -> Self {
         self.pseudo(crate::style_tokens::Pc::NotLastChild, tokens)
     }
 
@@ -1169,9 +1179,20 @@ impl ElementBuilder {
         // Hash typed attrs
         for ta in &self.typed_attrs {
             match ta {
-                TypedAttr::Enum(k, v) => { 0u8.hash(hasher); k.as_u8().hash(hasher); v.as_u8().hash(hasher); }
-                TypedAttr::Bool(k) => { 1u8.hash(hasher); k.as_u8().hash(hasher); }
-                TypedAttr::KeySym(k, v) => { 2u8.hash(hasher); k.as_u8().hash(hasher); v.hash(hasher); }
+                TypedAttr::Enum(k, v) => {
+                    0u8.hash(hasher);
+                    k.as_u8().hash(hasher);
+                    v.as_u8().hash(hasher);
+                }
+                TypedAttr::Bool(k) => {
+                    1u8.hash(hasher);
+                    k.as_u8().hash(hasher);
+                }
+                TypedAttr::KeySym(k, v) => {
+                    2u8.hash(hasher);
+                    k.as_u8().hash(hasher);
+                    v.hash(hasher);
+                }
             }
         }
         self.style_utils.hash(hasher);
@@ -1646,10 +1667,7 @@ impl BuildContext {
     }
 
     /// Emit opcodes for an element tree with multi-state support.
-    pub fn emit_multi(
-        &mut self,
-        el: &ElementBuilder,
-    ) -> u32 {
+    pub fn emit_multi(&mut self, el: &ElementBuilder) -> u32 {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
 
@@ -1702,7 +1720,12 @@ impl BuildContext {
         }
     }
 
-    fn emit_element(&mut self, el: &ElementBuilder, parent_ref: Option<u32>, state: &dyn Any) -> u32 {
+    fn emit_element(
+        &mut self,
+        el: &ElementBuilder,
+        parent_ref: Option<u32>,
+        state: &dyn Any,
+    ) -> u32 {
         // If this is a synced element, render it and wrap with an ID
         if let Some(renderer) = &el.synced {
             let synced_id = self.next_synced_id;
@@ -1803,7 +1826,6 @@ impl BuildContext {
             self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
 
-
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
         // Bind events
@@ -1843,11 +1865,7 @@ impl BuildContext {
     }
 
     /// Emit an element with multi-state support.
-    fn emit_element_multi(
-        &mut self,
-        el: &ElementBuilder,
-        parent_ref: Option<u32>,
-    ) -> u32 {
+    fn emit_element_multi(&mut self, el: &ElementBuilder, parent_ref: Option<u32>) -> u32 {
         // If this is a synced element, use the cached render from collect_symbols_multi
         if let Some(renderer) = &el.synced {
             let synced_id = self.next_synced_id;
@@ -1944,7 +1962,6 @@ impl BuildContext {
         for (bp_code, st_codes) in &el.breakpoint_groups {
             self.buf.style_breakpoint(ref_idx, *bp_code, st_codes);
         }
-
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
@@ -2386,7 +2403,11 @@ fn wire_handler_id(spec: &HandlerSpec, handler: &HandlerFn) -> u32 {
     }
     let raw = handler.fn_id() as u64;
     let folded = ((raw ^ (raw >> 32)) as u32) & crate::state::HANDLER_ID_MAX;
-    if folded == 0 { 1 } else { folded }
+    if folded == 0 {
+        1
+    } else {
+        folded
+    }
 }
 
 /// Emit an element and its children during a synced update.
@@ -2560,7 +2581,9 @@ fn emit_update_element(
         if let Some(handler) = &spec.remote_handler {
             // Register under the stable handler id (idempotent across renders).
             let handler_id = wire_handler_id(spec, handler);
-            handlers.entry(handler_id).or_insert_with(|| handler.clone());
+            handlers
+                .entry(handler_id)
+                .or_insert_with(|| handler.clone());
 
             // Use BIND_REMOTE_PARAM if we have param bytes,
             // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE

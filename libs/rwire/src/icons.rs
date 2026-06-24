@@ -207,7 +207,11 @@ impl Icon {
 /// ```
 pub fn icon(i: Icon) -> ElementBuilder {
     let mut svg = el(El::Svg)
-        .st([St::DisplayInlineBlock, St::VerticalAlignMiddle, St::FlexShrink0])
+        .st([
+            St::DisplayInlineBlock,
+            St::VerticalAlignMiddle,
+            St::FlexShrink0,
+        ])
         .at(At::Xmlns, Av::SvgNs)
         .at(At::Width, Av::V24)
         .at(At::Height, Av::V24)
@@ -282,7 +286,11 @@ pub fn icon_with_class(i: Icon, class: &str) -> ElementBuilder {
 pub fn icon_sized(i: Icon, size: u32) -> ElementBuilder {
     let size_str = size.to_string();
     let mut svg = el(El::Svg)
-        .st([St::DisplayInlineBlock, St::VerticalAlignMiddle, St::FlexShrink0])
+        .st([
+            St::DisplayInlineBlock,
+            St::VerticalAlignMiddle,
+            St::FlexShrink0,
+        ])
         .at(At::Xmlns, Av::SvgNs)
         .attr("width", &size_str)
         .attr("height", &size_str)
@@ -310,22 +318,62 @@ mod tests {
     fn test_all_icons_have_paths() {
         // Ensure all icon variants return non-empty paths
         let icons = [
-            Icon::ChevronDown, Icon::ChevronUp, Icon::ChevronLeft, Icon::ChevronRight,
-            Icon::ArrowLeft, Icon::ArrowRight, Icon::ArrowUp, Icon::ArrowDown,
-            Icon::Menu, Icon::Close,
-            Icon::Check, Icon::Plus, Icon::Minus, Icon::Edit, Icon::Trash,
-            Icon::Archive, Icon::ArchiveRestore,
-            Icon::Copy, Icon::Download, Icon::Upload, Icon::Search, Icon::Filter,
-            Icon::Info, Icon::Warning, Icon::Error, Icon::Success,
-            Icon::AlertCircle, Icon::CheckCircle,
-            Icon::Sun, Icon::Moon,
-            Icon::Play, Icon::Pause,
-            Icon::Settings, Icon::User, Icon::Home, Icon::External, Icon::LogOut,
-            Icon::Calendar, Icon::Clock,
-            Icon::GitHub, Icon::Discord, Icon::Twitter,
-            Icon::Crate, Icon::Terminal, Icon::Clipboard, Icon::ClipboardCheck,
-            Icon::Zap, Icon::Feather, Icon::Shield, Icon::Cpu, Icon::Palette, Icon::Leaf,
-            Icon::MessageSquare, Icon::Activity, Icon::FileText, Icon::Folder,
+            Icon::ChevronDown,
+            Icon::ChevronUp,
+            Icon::ChevronLeft,
+            Icon::ChevronRight,
+            Icon::ArrowLeft,
+            Icon::ArrowRight,
+            Icon::ArrowUp,
+            Icon::ArrowDown,
+            Icon::Menu,
+            Icon::Close,
+            Icon::Check,
+            Icon::Plus,
+            Icon::Minus,
+            Icon::Edit,
+            Icon::Trash,
+            Icon::Archive,
+            Icon::ArchiveRestore,
+            Icon::Copy,
+            Icon::Download,
+            Icon::Upload,
+            Icon::Search,
+            Icon::Filter,
+            Icon::Info,
+            Icon::Warning,
+            Icon::Error,
+            Icon::Success,
+            Icon::AlertCircle,
+            Icon::CheckCircle,
+            Icon::Sun,
+            Icon::Moon,
+            Icon::Play,
+            Icon::Pause,
+            Icon::Settings,
+            Icon::User,
+            Icon::Home,
+            Icon::External,
+            Icon::LogOut,
+            Icon::Calendar,
+            Icon::Clock,
+            Icon::GitHub,
+            Icon::Discord,
+            Icon::Twitter,
+            Icon::Crate,
+            Icon::Terminal,
+            Icon::Clipboard,
+            Icon::ClipboardCheck,
+            Icon::Zap,
+            Icon::Feather,
+            Icon::Shield,
+            Icon::Cpu,
+            Icon::Palette,
+            Icon::Leaf,
+            Icon::MessageSquare,
+            Icon::Activity,
+            Icon::FileText,
+            Icon::Folder,
         ];
 
         for icon in &icons {

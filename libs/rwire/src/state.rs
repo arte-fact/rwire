@@ -786,7 +786,11 @@ pub fn stable_handler_id(module: &str, name: &str) -> u32 {
         mix(&mut h, b);
     }
     let h = h & HANDLER_ID_MAX;
-    if h == 0 { 1 } else { h }
+    if h == 0 {
+        1
+    } else {
+        h
+    }
 }
 
 impl std::fmt::Debug for HandlerSpec {

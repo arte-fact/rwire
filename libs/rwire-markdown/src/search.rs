@@ -143,7 +143,9 @@ mod tests {
 
     #[test]
     fn test_search_empty_query() {
-        let index = SearchIndex { entries: Vec::new() };
+        let index = SearchIndex {
+            entries: Vec::new(),
+        };
         let results = index.search("", 10);
         assert!(results.is_empty());
     }

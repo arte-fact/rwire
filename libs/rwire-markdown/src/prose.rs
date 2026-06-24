@@ -80,11 +80,7 @@ impl Prose {
 
     /// Compute style tokens for the prose container.
     pub fn compute_tokens(&self) -> Vec<St> {
-        let mut tokens = vec![
-            St::LeadingRelaxedProse,
-            St::TextDefault,
-            St::SpaceYMd,
-        ];
+        let mut tokens = vec![St::LeadingRelaxedProse, St::TextDefault, St::SpaceYMd];
 
         match self.size {
             ProseSize::Sm => tokens.push(St::TextSm),
