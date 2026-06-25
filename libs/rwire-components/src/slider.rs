@@ -90,29 +90,28 @@ impl Slider {
 
     /// Build the slider into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        let mut container = el(El::Div).st(Self::compute_tokens());
-
-        // Visual track with fill
+        // Visual track with fill, vertically centered in a fixed-height control box.
         let range = self.max - self.min;
         let fill_pct = if range > 0 {
-            ((self.value - self.min) as f64 / range as f64 * 100.0) as u32
+            (((self.value - self.min).max(0) as f64 / range as f64) * 100.0).clamp(0.0, 100.0)
         } else {
-            0
+            0.0
         };
 
         let track = el(El::Div)
-            .st([St::SliderTrack, St::PositionRelative, St::RoundedSm])
+            .st([St::SliderTrack, St::PositionAbsolute, St::RoundedSm])
+            .attr("style", "top:50%;left:0;right:0;transform:translateY(-50%)")
             .append([
                 el(El::Div)
                     .st([St::SliderFill])
-                    .attr("style", &format!("width:{}%", fill_pct)),
+                    .attr("style", &format!("width:{fill_pct:.1}%")),
             ]);
 
-        container = container.append([track]);
-
-        // Range input (overlaid for accessibility)
+        // Native range input overlaid on top of the track so the thumb sits ON the bar.
+        // Transparent track (the visual track shows through); only the thumb is painted.
         let mut input = el(El::Input)
-            .st([St::SliderInput, St::SliderThumb])
+            .st([St::SliderInput, St::SliderThumb, St::PositionAbsolute])
+            .attr("style", "top:0;left:0;width:100%;height:100%")
             .attr("type", "range")
             .attr("min", &self.min.to_string())
             .attr("max", &self.max.to_string())
@@ -130,13 +129,16 @@ impl Slider {
             input = input.at_str(At::AriaLabel, label);
         }
 
+        // Bind the `change` event (fires on release), not `input` — a server round-trip on
+        // every drag tick would re-render and interrupt the native drag.
         if let Some(handler) = self.on_change {
-            input = input.on(Ev::Input, handler);
+            input = input.on(Ev::Change, handler);
         }
 
-        container = container.append([input]);
-
-        container
+        el(El::Div)
+            .st([St::PositionRelative, St::WFull])
+            .attr("style", "height:20px")
+            .append([track, input])
     }
 }
 

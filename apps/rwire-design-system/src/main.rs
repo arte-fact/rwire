@@ -69,6 +69,8 @@ struct DesignSystemState {
     // Playground state (reset on component navigation)
     variant_selections: Vec<usize>,
     bool_states: Vec<bool>,
+    num_states: Vec<i32>,
+    text_states: Vec<String>,
 }
 
 // ============================================================================
@@ -590,6 +592,98 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
         );
     }
 
+    // Number params -> sliders (easy to drag), with the live value shown alongside.
+    let num_specs = catalog::num_props(entry.slug);
+    let nums: Vec<i32> = num_specs
+        .iter()
+        .enumerate()
+        .map(|(i, np)| state.num_states.get(i).copied().unwrap_or(np.default))
+        .collect();
+    for (i, np) in num_specs.iter().enumerate() {
+        let cur = nums[i];
+        let h = match i {
+            0 => set_num_0(),
+            1 => set_num_1(),
+            2 => set_num_2(),
+            _ => set_num_3(),
+        };
+        let mut row_children: Vec<ElementBuilder> = vec![el(El::Span)
+            .st([St::TextXs, St::TextMuted, St::FontMedium])
+            .attr("style", "min-width:88px")
+            .text(np.name)];
+        if np.slider {
+            // Range slider (best for visual magnitudes) + live value.
+            row_children.push(el(El::Div).st([St::Flex1]).append([Slider::new()
+                .min(np.min)
+                .max(np.max)
+                .value(cur)
+                .step(np.step)
+                .on_change(h)
+                .build()]));
+            row_children.push(
+                el(El::Span)
+                    .st([St::TextXs, St::FontMono, St::TextDefault])
+                    .attr("style", "min-width:36px;text-align:right")
+                    .text(&cur.to_string()),
+            );
+        } else {
+            // Number input (best for discrete counts) — native steppers, min/max clamp.
+            row_children.push(el(El::Div).attr("style", "width:96px").append([Input::number()
+                .value(cur.to_string())
+                .size(InputSize::Sm)
+                .on_input_debounced(h, 400)
+                .attr("min", &np.min.to_string())
+                .attr("max", &np.max.to_string())
+                .attr("step", &np.step.to_string())]));
+        }
+        controls.push(
+            Stack::row()
+                .gap(Gap::Sm)
+                .align(StackAlign::Center)
+                .children(row_children)
+                .build(),
+        );
+    }
+
+    // Text params -> text inputs.
+    let text_specs = catalog::text_props(entry.slug);
+    let texts: Vec<String> = text_specs
+        .iter()
+        .enumerate()
+        .map(|(i, tp)| {
+            state
+                .text_states
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| tp.default.to_string())
+        })
+        .collect();
+    for (i, tp) in text_specs.iter().enumerate() {
+        let h = match i {
+            0 => set_text_0(),
+            1 => set_text_1(),
+            2 => set_text_2(),
+            _ => set_text_3(),
+        };
+        let input = Input::text()
+            .value(texts[i].clone())
+            .size(InputSize::Sm)
+            .on_input_debounced(h, 300);
+        controls.push(
+            Stack::row()
+                .gap(Gap::Sm)
+                .align(StackAlign::Center)
+                .children([
+                    el(El::Span)
+                        .st([St::TextXs, St::TextMuted, St::FontMedium])
+                        .attr("style", "min-width:64px")
+                        .text(tp.name),
+                    el(El::Div).st([St::Flex1]).append([input]),
+                ])
+                .build(),
+        );
+    }
+
     // Build the live demo
     let variants: Vec<usize> = entry
         .variants
@@ -607,16 +701,20 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
         .bool_props
         .iter()
         .enumerate()
-        .map(|(i, prop)| {
-            state
-                .bool_states
-                .get(i)
-                .copied()
-                .unwrap_or(prop.default)
-        })
+        .map(|(i, prop)| state.bool_states.get(i).copied().unwrap_or(prop.default))
         .collect();
 
-    let demo = (entry.build_demo)(&variants, &bools);
+    let demo = if let Some(rich) = catalog::rich_demo(entry.slug) {
+        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        rich(&catalog::DemoParams {
+            variants: &variants,
+            bools: &bools,
+            nums: &nums,
+            texts: &text_refs,
+        })
+    } else {
+        (entry.build_demo)(&variants, &bools)
+    };
 
     // Assemble playground card
     let mut playground_children = Vec::new();
@@ -641,6 +739,31 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
             .append([demo]),
     );
 
+    // Overlay components (modal/drawer/dropdown) render a fixed, full-screen overlay when their
+    // `open` bool is set, covering the playground controls. Without an escape hatch the user is
+    // trapped (the component's own backdrop/close needs an `on_close` handler the cross-crate demo
+    // can't supply). Render a floating dismiss button — above the overlay's z-index — that flips
+    // the `open` bool back off.
+    if let Some(open_idx) = entry
+        .bool_props
+        .iter()
+        .position(|p| p.name.eq_ignore_ascii_case("open"))
+    {
+        if bools.get(open_idx).copied().unwrap_or(false) {
+            playground_children.push(
+                el(El::Button)
+                    .text("\u{2715} Close demo")
+                    .st([
+                        St::BgPrimary, St::TextOnPrimary, St::PxMd, St::PySm, St::RoundedMd,
+                        St::BorderNone, St::CursorPointer, St::FontMedium, St::ShadowLg,
+                    ])
+                    .attr("style", "position:fixed;top:1rem;right:1rem;z-index:9999")
+                    .data("idx", &open_idx.to_string())
+                    .on(Ev::Click, toggle_bool_prop()),
+            );
+        }
+    }
+
     Card::new()
         .children(playground_children)
         .build()
@@ -651,39 +774,51 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
 // ============================================================================
 
 fn build_code_example(entry: &ComponentEntry, state: &DesignSystemState) -> ElementBuilder {
-    let parts = [format!("{}::new()", entry.name)];
-    let mut chain = Vec::new();
+    let variants: Vec<usize> = entry
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(i, axis)| {
+            state
+                .variant_selections
+                .get(i)
+                .copied()
+                .unwrap_or(axis.default_index)
+        })
+        .collect();
+    let nums: Vec<i32> = catalog::num_props(entry.slug)
+        .iter()
+        .enumerate()
+        .map(|(i, np)| state.num_states.get(i).copied().unwrap_or(np.default))
+        .collect();
+    let texts_owned: Vec<String> = catalog::text_props(entry.slug)
+        .iter()
+        .enumerate()
+        .map(|(i, tp)| {
+            state
+                .text_states
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| tp.default.to_string())
+        })
+        .collect();
+    let texts: Vec<&str> = texts_owned.iter().map(|s| s.as_str()).collect();
+    let bools: Vec<bool> = entry
+        .bool_props
+        .iter()
+        .enumerate()
+        .map(|(i, prop)| state.bool_states.get(i).copied().unwrap_or(prop.default))
+        .collect();
 
-    for (i, axis) in entry.variants.iter().enumerate() {
-        let selected = state
-            .variant_selections
-            .get(i)
-            .copied()
-            .unwrap_or(axis.default_index);
-        if selected != axis.default_index {
-            if let Some(val) = axis.values.get(selected) {
-                chain.push(format!("    .{}({})", axis.name, val.rust_expr));
-            }
-        }
-    }
-
-    for (i, prop) in entry.bool_props.iter().enumerate() {
-        let checked = state
-            .bool_states
-            .get(i)
-            .copied()
-            .unwrap_or(prop.default);
-        if checked != prop.default {
-            chain.push(format!("    .{}({})", prop.name, checked));
-        }
-    }
-
-    let code = if chain.is_empty() {
-        format!("{}\n    .build()", parts[0])
-    } else {
-        format!("{}\n{}\n    .build()", parts[0], chain.join("\n"))
-    };
-
+    let code = catalog::generate_code(
+        entry,
+        &catalog::CodeCtx {
+            variants: &variants,
+            nums: &nums,
+            texts: &texts,
+            bools: &bools,
+        },
+    );
     Code::block(code).language("rust").build()
 }
 
@@ -692,7 +827,13 @@ fn build_code_example(entry: &ComponentEntry, state: &DesignSystemState) -> Elem
 // ============================================================================
 
 fn build_props_table(entry: &ComponentEntry) -> ElementBuilder {
-    if entry.variants.is_empty() && entry.bool_props.is_empty() {
+    let nums = catalog::num_props(entry.slug);
+    let texts = catalog::text_props(entry.slug);
+    if entry.variants.is_empty()
+        && entry.bool_props.is_empty()
+        && nums.is_empty()
+        && texts.is_empty()
+    {
         return el(El::Div);
     }
 
@@ -718,6 +859,24 @@ fn build_props_table(entry: &ComponentEntry) -> ElementBuilder {
                 .cell(prop.name)
                 .cell("bool")
                 .cell(if prop.default { "true" } else { "false" }),
+        );
+    }
+
+    for np in nums {
+        table = table.row(
+            TableRow::new()
+                .cell(np.name)
+                .cell("number")
+                .cell(np.default.to_string()),
+        );
+    }
+
+    for tp in texts {
+        table = table.row(
+            TableRow::new()
+                .cell(tp.name)
+                .cell("&str")
+                .cell(if tp.default.is_empty() { "—" } else { tp.default }),
         );
     }
 
@@ -803,6 +962,11 @@ fn on_route_change(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
                     .map(|axis| axis.default_index)
                     .collect();
                 state.bool_states = entry.bool_props.iter().map(|p| p.default).collect();
+                state.num_states = catalog::num_props(slug).iter().map(|p| p.default).collect();
+                state.text_states = catalog::text_props(slug)
+                    .iter()
+                    .map(|p| p.default.to_string())
+                    .collect();
             }
         }
         state.sidebar_open = false;
@@ -838,6 +1002,44 @@ fn toggle_bool_prop(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
         }
     }
 }
+
+// Numeric (slider) + text param setters. Slider/text inputs send only their value via
+// `ctx.text()` (no data-* on input/change events), so each control index needs its own handler.
+fn set_num_at(state: &mut DesignSystemState, ctx: &rwire::EventContext, i: usize) {
+    if let Some(t) = ctx.text() {
+        if let Ok(v) = t.trim().parse::<i32>() {
+            while state.num_states.len() <= i {
+                state.num_states.push(0);
+            }
+            state.num_states[i] = v;
+        }
+    }
+}
+fn set_text_at(state: &mut DesignSystemState, ctx: &rwire::EventContext, i: usize) {
+    if let Some(t) = ctx.text() {
+        while state.text_states.len() <= i {
+            state.text_states.push(String::new());
+        }
+        state.text_states[i] = t.to_string();
+    }
+}
+
+#[handler]
+fn set_num_0(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 0); }
+#[handler]
+fn set_num_1(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 1); }
+#[handler]
+fn set_num_2(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 2); }
+#[handler]
+fn set_num_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 3); }
+#[handler]
+fn set_text_0(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 0); }
+#[handler]
+fn set_text_1(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 1); }
+#[handler]
+fn set_text_2(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 2); }
+#[handler]
+fn set_text_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 3); }
 
 #[handler]
 fn toggle_theme(theme: &mut Theme) {
