@@ -738,12 +738,14 @@ where
         self
     }
 
-    /// Register a router for view tree-shaking.
+    /// Register a router that drives the [`outlet`](crate::router::outlet) runtime.
     ///
-    /// At startup, all registered view functions are called with default params
-    /// to discover element types, style tokens, events, and attributes. This
-    /// eliminates the need for `extra_elements` / `extra_styles` in the capsule
-    /// config.
+    /// On every navigation, the framework updates the built-in `CurrentRoute` state and the
+    /// `outlet()` in your shell renders the matched view. Place an `outlet()` in the tree passed
+    /// to [`root`](Self::root) — installing a router without one leaves navigation with nothing
+    /// to re-render. This is an alternative to the `on_route` + root-rerender model; use one or
+    /// the other, not both. (Capsule contents are not affected: names and CSS stream lazily over
+    /// the wire regardless of routes.)
     pub fn routes(mut self, router: crate::router::Router) -> Self {
         self.router = Some(router);
         self
@@ -1284,6 +1286,9 @@ struct ConnectionState {
     /// Class-referenced CSS rules already delivered to this client (lazy CSS).
     /// Each rule is sent once via `STYLE_DEF` the first time it is referenced.
     sent_css: HashSet<crate::style_tokens::StyleKey>,
+    /// `(category, code)` name-map entries already delivered to this client (lazy names).
+    /// Each is sent once via `MAP_DEF` the first time its code is referenced.
+    sent_maps: HashSet<(u8, u8)>,
 }
 
 impl ConnectionState {
@@ -1298,6 +1303,7 @@ impl ConnectionState {
             subscribed_keys: HashSet::new(),
             synced_hashes: HashMap::new(),
             sent_css: HashSet::new(),
+            sent_maps: HashSet::new(),
         }
     }
 
@@ -1545,7 +1551,7 @@ where
 
         // Prepend STYLE_DEF for the styles this initial render uses (lazy CSS):
         // the capsule ships only global CSS; class rules arrive over the wire.
-        ctx.finish_with_style_defs(&mut conn_state.sent_css)
+        ctx.finish_with_style_defs(&mut conn_state.sent_css, &mut conn_state.sent_maps)
     };
 
     // Send initial DOM message (global CSS is in the capsule; class rules are
@@ -1623,6 +1629,7 @@ where
                             Some(state_type_id),
                             Some(&mut conn_state.synced_hashes),
                             Some(&mut conn_state.sent_css),
+                            Some(&mut conn_state.sent_maps),
                             None,
                             0,
                         )
@@ -1765,6 +1772,7 @@ where
                                 Some(state_type_id),
                                 Some(&mut conn_state.synced_hashes),
                                 Some(&mut conn_state.sent_css),
+                                Some(&mut conn_state.sent_maps),
                                 None,
                                 0,
                             )
@@ -1914,6 +1922,7 @@ where
                                 Some(route_tid),
                                 Some(&mut conn_state.synced_hashes),
                                 Some(&mut conn_state.sent_css),
+                                Some(&mut conn_state.sent_maps),
                                 Some(&mut discovered),
                                 synced_id_floor,
                             )
@@ -2034,6 +2043,7 @@ where
                                     Some(state_type_id),
                                     Some(&mut conn_state.synced_hashes),
                                     Some(&mut conn_state.sent_css),
+                                    Some(&mut conn_state.sent_maps),
                                     None,
                                     0,
                                 )

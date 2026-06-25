@@ -47,7 +47,12 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use crate::action::{Selector, Target};
 use crate::attr_tokens::{At, Av};
 use crate::item_ref::ItemRef;
-use crate::protocol::opcodes::STYLE_DEF;
+use crate::protocol::encoder::{
+    NAME_ATTR_KEY, NAME_ATTR_VALUE, NAME_ELEMENT, NAME_EVENT, NAME_STYLE_PROP, NAME_STYLE_VALUE,
+};
+use crate::protocol::opcodes::{
+    ELEMENT_MAPPINGS, EVENT_MAPPINGS, MAP_DEF, STYLE_DEF, SVG_ELEMENT_CODES,
+};
 use crate::protocol::varint::write_varint;
 use crate::protocol::{El, Ev, OpcodeBuffer};
 use crate::state::{ChangeSet, HandlerFn, HandlerSpec, Renderer, RendererDeps, State, StorageType};
@@ -133,7 +138,7 @@ pub fn style_def_prefix(referenced: &BTreeSet<StyleKey>, sent: &mut HashSet<Styl
     encode_style_def(&new_rules)
 }
 
-/// Prepend a (possibly empty) `STYLE_DEF` prefix to a body buffer.
+/// Prepend a (possibly empty) lazy-delivery prefix to a body buffer.
 fn prepend(prefix: BytesMut, body: Bytes) -> Bytes {
     if prefix.is_empty() {
         return body;
@@ -142,6 +147,69 @@ fn prepend(prefix: BytesMut, body: Bytes) -> Bytes {
     out.extend_from_slice(&body);
     out.freeze()
 }
+
+/// Encode a `MAP_DEF` opcode block carrying `(kind, code, name)` entries.
+///
+/// Format: `[MAP_DEF, count_varint, (kind_u8, code_u8, name_len_varint, name_utf8){count}]`.
+fn encode_map_def(entries: &[(u8, u8, &'static str)]) -> BytesMut {
+    let mut buf = BytesMut::new();
+    buf.put_u8(MAP_DEF);
+    write_varint(&mut buf, entries.len() as u32);
+    for &(kind, code, name) in entries {
+        buf.put_u8(kind);
+        buf.put_u8(code);
+        write_varint(&mut buf, name.len() as u32);
+        buf.put_slice(name.as_bytes());
+    }
+    buf
+}
+
+/// Look up the wire name for a `(category, code)` name-map reference.
+fn name_for(category: u8, code: u8) -> Option<&'static str> {
+    use crate::attr_tokens::{AT_MAPPINGS, AV_MAPPINGS};
+    use crate::style_tokens::{PROP_MAPPINGS, VALUE_MAPPINGS};
+    let table: &[(u8, &str)] = match category {
+        NAME_ELEMENT => ELEMENT_MAPPINGS,
+        NAME_EVENT => EVENT_MAPPINGS,
+        NAME_ATTR_KEY => AT_MAPPINGS,
+        NAME_ATTR_VALUE => AV_MAPPINGS,
+        NAME_STYLE_PROP => PROP_MAPPINGS,
+        NAME_STYLE_VALUE => VALUE_MAPPINGS,
+        _ => return None,
+    };
+    table.iter().find(|(c, _)| *c == code).map(|(_, n)| *n)
+}
+
+/// Build the `MAP_DEF` prefix for `(category, code)` name references in `referenced`
+/// that this connection (`sent`) has not yet received, marking them sent.
+///
+/// Mirrors [`style_def_prefix`] for the lazy delivery of element/event/attribute/
+/// style-token names: the capsule ships empty maps and each name arrives the first time
+/// its code is referenced. SVG element codes are emitted with wire `kind` 6, so the client
+/// sets both `E[code]` and `SE[code]=1`. Returns empty bytes when there is nothing new.
+pub fn map_def_prefix(referenced: &BTreeSet<(u8, u8)>, sent: &mut HashSet<(u8, u8)>) -> BytesMut {
+    let mut new_entries: Vec<(u8, u8, &'static str)> = Vec::new();
+    for &(category, code) in referenced {
+        // `insert` returns true the first time this connection sees the (category, code).
+        if sent.insert((category, code)) {
+            if let Some(name) = name_for(category, code) {
+                let kind = if category == NAME_ELEMENT && SVG_ELEMENT_CODES.contains(&code) {
+                    6
+                } else {
+                    category
+                };
+                new_entries.push((kind, code, name));
+            }
+        }
+    }
+    if new_entries.is_empty() {
+        return BytesMut::new();
+    }
+    encode_map_def(&new_entries)
+}
+
+/// A per-connection set of already-delivered `(category, code)` name entries (`MAP_DEF`).
+pub type SentMaps<'a> = Option<&'a mut HashSet<(u8, u8)>>;
 
 /// A typed attribute: enum key + enum value, enum key + symbol value, or bool attr.
 #[derive(Clone, Debug)]
@@ -2016,9 +2084,15 @@ impl BuildContext {
     /// rules not yet sent to this connection (`sent`). Used for the initial DOM so
     /// the styles it uses are delivered alongside it. See
     /// `docs/tree-shaking-redesign.md` (Phase 2).
-    pub fn finish_with_style_defs(mut self, sent: &mut HashSet<StyleKey>) -> Bytes {
+    pub fn finish_with_style_defs(
+        mut self,
+        sent: &mut HashSet<StyleKey>,
+        sent_maps: &mut HashSet<(u8, u8)>,
+    ) -> Bytes {
         self.buf.end();
-        let prefix = style_def_prefix(self.buf.referenced_styles(), sent);
+        // Names (MAP_DEF) before CSS (STYLE_DEF); both land before the body that uses them.
+        let mut prefix = map_def_prefix(self.buf.referenced_names(), sent_maps);
+        prefix.extend_from_slice(&style_def_prefix(self.buf.referenced_styles(), sent));
         let body = self.buf.finish();
         prepend(prefix, body)
     }
@@ -2183,7 +2257,7 @@ pub fn build_synced_update_multi(
     changes: ChangeSet,
 ) -> Bytes {
     build_synced_update_with_known_symbols(
-        synced, states, handlers, changes, None, None, None, None, None, 0,
+        synced, states, handlers, changes, None, None, None, None, None, None, 0,
     )
 }
 
@@ -2214,6 +2288,7 @@ pub fn build_synced_update_with_known_symbols(
     changed_state_type_id: Option<TypeId>,
     mut prev_hashes: Option<&mut HashMap<u32, u64>>,
     sent_css: SentCss<'_>,
+    sent_maps: SentMaps<'_>,
     discovered_out: Option<&mut Vec<SyncedElement>>,
     synced_id_floor: u32,
 ) -> Bytes {
@@ -2380,12 +2455,18 @@ pub fn build_synced_update_with_known_symbols(
 
     buf.end();
 
-    // Lazy CSS: prepend a STYLE_DEF block for any class-referenced rule this batch
-    // uses that this connection has not yet received.
-    let prefix = match sent_css {
+    // Lazy delivery: prepend MAP_DEF (element/event/attr/style-token names) then STYLE_DEF
+    // (CSS rules) for anything this batch references that the connection hasn't received yet.
+    // Both land before the body opcodes that use them.
+    let mut prefix = match sent_maps {
+        Some(sent) => map_def_prefix(buf.referenced_names(), sent),
+        None => BytesMut::new(),
+    };
+    let style_prefix = match sent_css {
         Some(sent) => style_def_prefix(buf.referenced_styles(), sent),
         None => BytesMut::new(),
     };
+    prefix.extend_from_slice(&style_prefix);
     let body = buf.finish();
     prepend(prefix, body)
 }
@@ -2694,5 +2775,43 @@ fn collect_symbols_recursive_with_known(
             synced_counter,
             states,
         );
+    }
+}
+
+#[cfg(test)]
+mod map_def_tests {
+    use super::*;
+    use std::collections::{BTreeSet, HashSet};
+
+    #[test]
+    fn map_def_prefix_encodes_names_and_dedups_per_connection() {
+        // Element code 0x00 = "div", wire kind 0.
+        let mut referenced = BTreeSet::new();
+        referenced.insert((NAME_ELEMENT, 0u8));
+        let mut sent: HashSet<(u8, u8)> = HashSet::new();
+
+        let bytes = map_def_prefix(&referenced, &mut sent);
+        assert_eq!(bytes[0], MAP_DEF);
+        assert_eq!(bytes[1], 1, "count = 1 entry (varint)");
+        assert_eq!(bytes[2], 0, "kind = element");
+        assert_eq!(bytes[3], 0, "code = 0 (div)");
+        assert_eq!(bytes[4], 3, "name length (varint)");
+        assert_eq!(&bytes[5..8], b"div");
+
+        // Same connection + same code → already delivered → nothing re-sent.
+        assert!(map_def_prefix(&referenced, &mut sent).is_empty());
+    }
+
+    #[test]
+    fn map_def_prefix_tags_svg_elements_with_kind_6() {
+        // 0x18 is an SVG element code, so it is emitted with wire kind 6 — the client
+        // sets both E[code] and SE[code]=1.
+        let mut referenced = BTreeSet::new();
+        referenced.insert((NAME_ELEMENT, 0x18u8));
+        let mut sent: HashSet<(u8, u8)> = HashSet::new();
+        let bytes = map_def_prefix(&referenced, &mut sent);
+        assert_eq!(bytes[0], MAP_DEF);
+        assert_eq!(bytes[2], 6, "svg element uses kind 6");
+        assert_eq!(bytes[3], 0x18);
     }
 }

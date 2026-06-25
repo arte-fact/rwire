@@ -22,6 +22,16 @@ use std::collections::BTreeSet;
 /// Sentinel ref value for document.body in APPEND opcodes.
 pub const BODY_REF: u32 = 0xFFFF;
 
+// Logical categories for lazily-delivered name maps (`MAP_DEF`). These index the
+// referenced-name set; `map_def_prefix` resolves each (category, code) to its name
+// string and wire `kind` (elements split into 0/6 for plain vs SVG at that point).
+pub(crate) const NAME_ELEMENT: u8 = 0;
+pub(crate) const NAME_EVENT: u8 = 1;
+pub(crate) const NAME_ATTR_KEY: u8 = 2;
+pub(crate) const NAME_ATTR_VALUE: u8 = 3;
+pub(crate) const NAME_STYLE_PROP: u8 = 4;
+pub(crate) const NAME_STYLE_VALUE: u8 = 5;
+
 /// Buffer for building opcode sequences.
 ///
 /// Element refs, symbol indices, and handler indices all use varint encoding,
@@ -33,6 +43,9 @@ pub struct OpcodeBuffer {
     /// Class-referenced style rules emitted into this buffer, for lazy CSS
     /// delivery (`STYLE_DEF`). Composites are excluded (their CSS is static).
     referenced_styles: BTreeSet<StyleKey>,
+    /// `(category, code)` name-map entries referenced by this buffer, for lazy
+    /// name delivery (`MAP_DEF`) — the element/event/attr/style-token names.
+    referenced_names: BTreeSet<(u8, u8)>,
 }
 
 impl OpcodeBuffer {
@@ -42,12 +55,18 @@ impl OpcodeBuffer {
             next_ref: 0,
             next_symbol: SYMBOL_SESSION_START as u32,
             referenced_styles: BTreeSet::new(),
+            referenced_names: BTreeSet::new(),
         }
     }
 
     /// The set of class-referenced style rules emitted so far (for `STYLE_DEF`).
     pub fn referenced_styles(&self) -> &BTreeSet<StyleKey> {
         &self.referenced_styles
+    }
+
+    /// The set of `(category, code)` name-map entries referenced so far (for `MAP_DEF`).
+    pub fn referenced_names(&self) -> &BTreeSet<(u8, u8)> {
+        &self.referenced_names
     }
 
     /// Get the current ref count.
@@ -117,6 +136,7 @@ impl OpcodeBuffer {
         let ref_idx = self.next_ref;
         self.buf.put_u8(CREATE);
         self.buf.put_u8(element_type);
+        self.referenced_names.insert((NAME_ELEMENT, element_type));
         self.next_ref += 1;
         ref_idx
     }
@@ -248,6 +268,7 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(event_type);
         write_varint(&mut self.buf, handler_idx);
+        self.referenced_names.insert((NAME_EVENT, event_type));
         self
     }
 
@@ -257,6 +278,7 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(event_type);
         write_varint(&mut self.buf, handler_idx);
+        self.referenced_names.insert((NAME_EVENT, event_type));
         self
     }
 
@@ -276,6 +298,7 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, handler_idx);
         self.buf.put_u8((delay_ms >> 8) as u8);
         self.buf.put_u8((delay_ms & 0xFF) as u8);
+        self.referenced_names.insert((NAME_EVENT, event_type));
         self
     }
 
@@ -303,6 +326,7 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, handler_idx);
         self.buf.put_u8(param_bytes.len() as u8);
         self.buf.put_slice(param_bytes);
+        self.referenced_names.insert((NAME_EVENT, event_type));
         self
     }
 
@@ -427,6 +451,8 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(prop);
         self.buf.put_u8(value);
+        self.referenced_names.insert((NAME_STYLE_PROP, prop));
+        self.referenced_names.insert((NAME_STYLE_VALUE, value));
         self
     }
 
@@ -527,6 +553,8 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(at);
         self.buf.put_u8(av);
+        self.referenced_names.insert((NAME_ATTR_KEY, at));
+        self.referenced_names.insert((NAME_ATTR_VALUE, av));
         self
     }
 
@@ -537,6 +565,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(SET_ATTR_BOOL);
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(at);
+        self.referenced_names.insert((NAME_ATTR_KEY, at));
         self
     }
 
@@ -548,6 +577,7 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(at);
         write_varint(&mut self.buf, value_symbol);
+        self.referenced_names.insert((NAME_ATTR_KEY, at));
         self
     }
 
@@ -588,6 +618,7 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, ref_idx);
         self.buf.put_u8(ev_type);
         self.buf.put_u8(idx);
+        self.referenced_names.insert((NAME_EVENT, ev_type));
         self
     }
 
@@ -625,6 +656,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(ev_type);
         self.buf.put_u8(idx);
         self.buf.put_u8(val);
+        self.referenced_names.insert((NAME_EVENT, ev_type));
         self
     }
 
@@ -645,6 +677,7 @@ impl OpcodeBuffer {
         self.buf.put_u8(idx);
         self.buf.put_u8((delay_ms >> 8) as u8);
         self.buf.put_u8((delay_ms & 0xFF) as u8);
+        self.referenced_names.insert((NAME_EVENT, ev_type));
         self
     }
 

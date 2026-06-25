@@ -169,6 +169,14 @@ pub const COMPOSITE_TABLE: u8 = 0x86;
 /// utility/pseudo/breakpoint class — see docs/tree-shaking-redesign.md (Phase 2).
 pub const STYLE_DEF: u8 = 0x87;
 
+/// Define element/event/attribute/style name-map entries lazily (one batch).
+/// Format: `[MAP_DEF, count_varint, (kind_u8, code_u8, name_len_varint, name_utf8){count}]`.
+/// `kind`: 0=element (`E[code]=name`), 1=event (`V`), 2=attr-key (`AT`), 3=attr-value (`AV`),
+/// 4=style-prop (`P`), 5=style-value (`Y`), 6=svg-element (sets both `E[code]=name` and
+/// `SE[code]=1`). The capsule ships empty maps; the server sends each `(kind, code)→name` the
+/// first time a connection references it — the lazy-delivery analogue of `STYLE_DEF` for CSS.
+pub const MAP_DEF: u8 = 0x88;
+
 /// Apply composable pseudo-class styles.
 /// Format: [STYLE_PSEUDO, ref, pc_code, count, st1_varint, st2_varint, ...]
 /// pc_code is the Pc selector (u8), st tokens are varint-encoded St codes.

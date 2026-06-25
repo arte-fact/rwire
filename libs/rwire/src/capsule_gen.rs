@@ -1,37 +1,12 @@
-//! Generate capsule HTML with the element and event mappings.
+//! Generate capsule HTML for the rwire runtime.
 //!
-//! The small u8 token enum maps (elements, events, attribute keys/values, style
-//! props/values) are shipped whole. For styled capsules, composite and global
-//! CSS is embedded in a `<style>` tag within `<head>`; utility/pseudo/breakpoint
-//! rules are delivered lazily over the WebSocket (STYLE_DEF).
+//! The capsule ships only the runtime logic and global/composite CSS (embedded in a
+//! `<style>` tag within `<head>`). The element/event/attribute/style-token **name maps**
+//! ship empty: each `(kind, code)→name` entry is delivered lazily over the WebSocket via
+//! `MAP_DEF` the first time a connection references the code — the name-map analogue of
+//! the lazy CSS delivery (`STYLE_DEF`) used for utility/pseudo/breakpoint rules.
 
-use crate::protocol::opcodes::{ELEMENT_MAPPINGS, EVENT_MAPPINGS, SVG_ELEMENT_CODES};
 use crate::theme::Theme;
-
-/// Generate a JS object literal `{code:'string', ...}` from a mappings array.
-///
-/// Emits **every** entry. These maps cover the small `u8` token enums
-/// (elements, events, attribute keys/values, style props/values) whose total
-/// size is ~1-2 KB; shipping them whole removes the structural-failure risk of a
-/// token reached only through a plain helper function being absent from a
-/// tree-shaken map. CSS (the part that actually justifies tree-shaking) is
-/// handled separately. See `docs/tree-shaking-redesign.md`.
-fn generate_js_map<T: std::fmt::Display>(mappings: &[(T, &str)]) -> String {
-    let entries: Vec<String> = mappings
-        .iter()
-        .map(|(code, name)| format!("{}:'{}'", code, name))
-        .collect();
-    entries.join(",")
-}
-
-/// Generate the SVG element type set `{code:1, ...}` for every SVG element.
-fn generate_svg_set() -> String {
-    let entries: Vec<String> = SVG_ELEMENT_CODES
-        .iter()
-        .map(|code| format!("{}:1", code))
-        .collect();
-    entries.join(",")
-}
 
 /// The runtime JavaScript code (constant part, not affected by tree shaking).
 ///
@@ -57,7 +32,7 @@ fn generate_svg_set() -> String {
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,PD:0x89,BP:0x8A,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,MD:0x88,PD:0x89,BP:0x8A,E:0xFF};
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={},DS,pm=null;
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
@@ -138,6 +113,7 @@ else if(o===O.SP){let[f,fl]=rv(d,i);i+=fl;let p=d[i++],v=d[i++];r[f].style[P[p]]
 else if(o===O.SM){let[f,fl]=rv(d,i);i+=fl;let n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}}
 else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++];while(c--){let[u,ul]=rv(d,i);i+=ul}K[id]='c'+id}}
 else if(o===O.SD){let[n,l]=rv(d,i);i+=l;if(!DS){DS=document.createElement('style');document.head.appendChild(DS)}while(n--){let[rl,ll]=rv(d,i);i+=ll;let rule=new TextDecoder().decode(d.slice(i,i+rl));i+=rl;try{DS.sheet.insertRule(rule,DS.sheet.cssRules.length)}catch(_e){DS.textContent+=rule}}}
+else if(o===O.MD){let[n,nl]=rv(d,i);i+=nl;while(n--){let k=d[i++],c=d[i++],[l,ll]=rv(d,i);i+=ll;let nm=new TextDecoder().decode(d.slice(i,i+l));i+=l;if(k===6){E[c]=nm;SE[c]=1}else(k===0?E:k===1?V:k===2?AT:k===3?AV:k===4?P:Y)[c]=nm}}
 else if(o===O.SC){let[f,fl]=rv(d,i);i+=fl;let[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
 else if(o===O.PD){let[f,fl]=rv(d,i);i+=fl;let pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
 else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('b'+bp+'u'+u)}}
@@ -189,24 +165,15 @@ function us2(i){let v=sl2[i];for(let b of sb2[i]||[]){if(v===b.v)b.e.classList.a
 const BIND_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>se(h,t,f,e,r[f]),e,r[f])})}
 function xi(d,i){return i}"#;
 
-/// Generate a minimal (unstyled) capsule HTML with the full element/event maps.
+/// Generate a minimal (unstyled) capsule HTML.
 ///
-/// The small u8 enum maps are shipped whole (see `generate_js_map`).
+/// Name maps ship empty; entries arrive lazily via `MAP_DEF` (see `generate_styled_capsule`).
 pub fn generate_capsule() -> String {
-    let elements_js = generate_js_map(ELEMENT_MAPPINGS);
-    let events_js = generate_js_map(EVENT_MAPPINGS);
-    let svg_js = generate_svg_set();
-
+    // Name maps ship empty; entries arrive lazily via `MAP_DEF` (see `generate_styled_capsule`).
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
 <script>
-const E={{{elements_js}}};
-const V={{{events_js}}};
-const P={{}};
-const Y={{}};
-const AT={{}};
-const AV={{}};
-const SE={{{svg_js}}};
+const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
 {BIND_JS}
 {RUNTIME_JS}
 </script>
@@ -527,8 +494,8 @@ pub fn render_static_page(
 ///
 /// This is the recommended way to generate capsules for styled applications.
 /// Includes:
-/// - Full element/event mappings (small u8 enum maps shipped whole)
-/// - Theme data attributes on root element
+/// - Empty element/event/attribute/style-token name maps (entries delivered lazily
+///   over the wire via `MAP_DEF`, like utility CSS via `STYLE_DEF`)
 /// - CSS embedded in `<style>` tag (composite + global CSS; utility/pseudo/
 ///   breakpoint rules are delivered lazily over the wire)
 ///
@@ -536,22 +503,10 @@ pub fn render_static_page(
 /// This ensures styles are available immediately when the page loads,
 /// without waiting for the WebSocket connection.
 pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
-    use crate::attr_tokens::{AT_MAPPINGS, AV_MAPPINGS};
-    use crate::style_tokens::{PROP_MAPPINGS, VALUE_MAPPINGS};
-
-    // Small u8 token enums are shipped whole (not tree-shaken) — see generate_js_map.
-    let elements_js = generate_js_map(ELEMENT_MAPPINGS);
-    let events_js = generate_js_map(EVENT_MAPPINGS);
-    let svg_js = generate_svg_set();
-
-    // Style token lookup tables for inline STYLE_PROP (property/value name maps).
-    // Note: U (utility) map removed - utilities now use CSS classes generated server-side.
-    let props_js = generate_js_map(PROP_MAPPINGS);
-    let values_js = generate_js_map(VALUE_MAPPINGS);
-
-    // Attribute lookup tables.
-    let attr_keys_js = generate_js_map(AT_MAPPINGS);
-    let attr_values_js = generate_js_map(AV_MAPPINGS);
+    // The element/event/attribute/style-token name maps ship empty: each
+    // `(kind, code)→name` entry is delivered lazily over the wire via `MAP_DEF` the first
+    // time a connection references the code (the name-map analogue of lazy CSS / `STYLE_DEF`).
+    // `A={4:'id'}` (the one universal attribute) is seeded in `RUNTIME_JS`.
 
     // Include client actions JS (targets & selectors) when used
     let client_actions_js = if config.has_client_actions {
@@ -565,13 +520,7 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
 <style>{css}</style></head><body>
 <div id="rw"></div>
 <script>
-const E={{{elements_js}}};
-const V={{{events_js}}};
-const P={{{props_js}}};
-const Y={{{values_js}}};
-const AT={{{attr_keys_js}}};
-const AV={{{attr_values_js}}};
-const SE={{{svg_js}}};
+const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
 {client_actions_js}
 {BIND_JS}
 {RUNTIME_JS}
@@ -660,9 +609,9 @@ mod tests {
         // Should have div#rw for app root
         assert!(capsule.contains("<div id=\"rw\""));
 
-        // Should have element/event mappings
-        assert!(capsule.contains("const E="));
-        assert!(capsule.contains("const V="));
+        // Name maps ship empty (entries delivered lazily via MAP_DEF).
+        assert!(capsule.contains("const E={},V={}"));
+        assert!(capsule.contains("O.MD"), "MAP_DEF handler must be present");
     }
 
     #[test]
@@ -694,30 +643,22 @@ mod tests {
     }
 
     #[test]
-    fn test_element_map_ships_all() {
-        // The element map is now shipped whole (no tree-shaking) so a token
-        // reached only through a plain helper can never be missing.
-        let map = generate_js_map(ELEMENT_MAPPINGS);
-        assert!(map.contains("0:'div'"));
-        assert!(map.contains("2:'button'"));
-        assert!(map.contains("1:'span'"), "full map must include span");
-    }
-
-    #[test]
-    fn test_event_map_ships_all() {
-        let map = generate_js_map(EVENT_MAPPINGS);
-        assert!(map.contains("1:'click'"));
-        // More than one event is present now that the map is full.
-        assert!(map.contains("7:'input'"));
+    fn test_capsule_ships_empty_name_maps() {
+        // Name maps are delivered lazily over the wire (MAP_DEF), so the capsule ships them
+        // empty rather than inlining every entry. A token reached only through a plain helper
+        // can never be missing: its name arrives the first time its code is referenced.
+        let capsule = generate_capsule();
+        assert!(capsule.contains("const E={},V={}"), "maps ship empty");
+        assert!(!capsule.contains("0:'div'"), "names must not be inlined");
+        assert!(capsule.contains("O.MD"), "MAP_DEF handler must be present");
     }
 
     #[test]
     fn test_generate_capsule() {
         let capsule = generate_capsule();
-        // Maps are shipped whole now, so they contain every entry (not just div/click).
-        assert!(capsule.contains("0:'div'"));
-        assert!(capsule.contains("1:'span'"));
-        assert!(capsule.contains("1:'click'"));
+        // Maps ship empty; element/event names arrive lazily via MAP_DEF.
+        assert!(capsule.contains("const E={},V={}"));
+        assert!(!capsule.contains("0:'div'"));
         assert!(capsule.contains("<!DOCTYPE html>"));
         assert!(!capsule.contains("let ls={},lh={}"));
     }

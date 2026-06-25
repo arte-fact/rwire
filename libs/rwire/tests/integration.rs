@@ -115,18 +115,20 @@ async fn test_server_accepts_http() {
     assert!(response_str.contains("text/html"));
     assert!(response_str.contains("<!DOCTYPE html>"));
 
-    // Verify capsule contains our element/event mappings
-    assert!(response_str.contains("const E="));
-    assert!(response_str.contains("const V="));
+    // Name maps ship empty; entries are delivered lazily over the wire via MAP_DEF.
+    assert!(response_str.contains("const E={},V={}"));
 
     drop(stream);
     server_task.cancel().await;
 }
 
-/// The small u8 element map is shipped whole (no element tree-shaking), so an
-/// element type reached only through a plain helper can never be missing.
+/// The element/event/attribute/style-token name maps ship empty: each entry is
+/// delivered lazily over the wire via `MAP_DEF` the first time a code is referenced
+/// (the name-map analogue of lazy CSS). So the served capsule inlines no names — and a
+/// token reached only through a plain helper can never be missing, since its name is
+/// sent exactly when its opcode is.
 #[async_std::test]
-async fn test_capsule_ships_all_elements() {
+async fn test_capsule_ships_empty_name_maps() {
     let server_task = task::spawn(async {
         let _ = Server::bind("127.0.0.1:19002")
             .unwrap()
@@ -145,16 +147,15 @@ async fn test_capsule_ships_all_elements() {
 
     let response_str = read_full_http_response(&mut stream).await;
 
-    // `build_simple` only renders a div, yet the full map is shipped — button and
-    // span are present even though unused.
-    assert!(response_str.contains("0:'div'"));
+    // Maps ship empty; no element names are inlined into the capsule.
+    assert!(response_str.contains("const E={},V={}"));
     assert!(
-        response_str.contains("2:'button'"),
-        "full map must include button"
+        !response_str.contains("0:'div'"),
+        "names must not be inlined into the capsule"
     );
     assert!(
-        response_str.contains("1:'span'"),
-        "full map must include span"
+        response_str.contains("O.MD"),
+        "runtime must understand the MAP_DEF opcode"
     );
 
     drop(stream);
@@ -182,13 +183,10 @@ async fn test_counter_capsule() {
 
     let response_str = read_full_http_response(&mut stream).await;
 
-    // Counter uses div, span, button
-    assert!(response_str.contains("0:'div'"));
-    assert!(response_str.contains("1:'span'"));
-    assert!(response_str.contains("2:'button'"));
-
-    // Counter uses click event
-    assert!(response_str.contains("1:'click'"));
+    // Element/event names are delivered lazily over the wire (MAP_DEF), not inlined.
+    assert!(response_str.contains("const E={},V={}"));
+    assert!(!response_str.contains("0:'div'"));
+    assert!(!response_str.contains("1:'click'"));
 
     drop(stream);
     server_task.cancel().await;
