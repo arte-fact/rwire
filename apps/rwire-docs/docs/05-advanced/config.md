@@ -63,7 +63,7 @@ fn handle_route(state: &mut AppState, ctx: &EventContext) {
 
 ### .routes(router)
 
-Registers a `Router` for URL pattern matching and automatic tree shaking. See the [Router](/docs/advanced/router) page for details.
+Registers a `Router` that drives the `outlet()` runtime for URL pattern matching. See the [Router](/docs/05-advanced/router) page for the two navigation models.
 
 ## Capsule Configuration
 

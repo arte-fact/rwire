@@ -1,6 +1,6 @@
 # rwire
 
-A WebSocket-based UI framework where the server owns all state and renders DOM via a compact binary protocol. The browser runs a minimal ~1.5KB JavaScript runtime that executes DOM opcodes and sends events back to the server.
+A WebSocket-based UI framework where the server owns all state and renders DOM via a compact binary protocol. The browser runs a small (~13KB) JavaScript runtime that executes DOM opcodes and sends events back to the server.
 
 ## Concept
 
@@ -13,14 +13,14 @@ Traditional web frameworks ship large JavaScript bundles to the browser. rwire i
 │  ┌───────────┐  │   Binary Opcodes   │  ┌───────────┐  │
 │  │   State   │  │ =================> │  │  Minimal  │  │
 │  │  + Logic  │  │                    │  │  Runtime  │  │
-│  └───────────┘  │                    │  │  (~1.5KB) │  │
+│  └───────────┘  │                    │  │  (~13KB)  │  │
 │                 │   Event Messages   │  └───────────┘  │
 │                 │ <================= │                 │
 └─────────────────┘                    └─────────────────┘
 ```
 
 **Benefits:**
-- **Tiny client footprint**: ~1.5KB JavaScript runtime (tree-shaken per app)
+- **Tiny client footprint**: a ~13KB runtime; element/event names and CSS stream lazily over the wire
 - **No client-side state management**: All state lives on the server
 - **Rust everywhere**: Write UI logic in Rust with full type safety
 - **Binary protocol**: Compact opcodes minimize bandwidth
@@ -96,21 +96,19 @@ DOM operations are encoded as single-byte opcodes followed by arguments:
 
 Strings are interned into a per-message symbol table, referenced by index. This keeps repeated strings (class names, text) compact.
 
-### Tree Shaking
+### Capsule Size
 
-The JavaScript capsule is generated at startup with only the element types and events your app actually uses:
+The capsule ships only the runtime. The element/event/attribute **name maps** start empty, and the utility **CSS** is not embedded — both are delivered lazily over the WebSocket the first time a connection references them, deduped per connection:
 
 ```javascript
-// Full mappings (unused code)
-const E={0:'div',1:'span',2:'button',3:'input',4:'p',5:'h1',6:'h2',7:'a',16:'form'};
-const V={1:'click',2:'dblclick',3:'mousedown',4:'mouseup',5:'mousemove',...};
+// Capsule ships empty maps
+const E={},V={},P={},Y={},AT={},AV={},SE={};
 
-// Tree-shaken for counter app
-const E={0:'div',1:'span',2:'button'};
-const V={1:'click'};
+// The server streams names on first use (MAP_DEF), e.g. for a counter:
+//   E[0]="div", E[1]="span", E[2]="button"; V[1]="click"
 ```
 
-The server analyzes your root component at startup and generates a minimal capsule containing only what's needed.
+So a minimal app's capsule is ~17KB (~13KB runtime + ~4KB global CSS), and it stays small as the app grows — a connection only ever receives the names and CSS its pages actually render. See `apps/rwire-docs/docs/05-advanced/tree-shaking.md`.
 
 ### Reactive State
 
@@ -172,7 +170,7 @@ fn toggle_item(state: &mut TodoState, ctx: &EventContext) {
 
 ### Style Tokens
 
-Styles are applied with the `St` token enum (720+ utility tokens) rather than CSS files. Tokens compile to compact CSS classes and are tree-shaken per app:
+Styles are applied with the `St` token enum (700+ utility tokens) rather than CSS files. Tokens compile to compact CSS classes whose rules are delivered lazily over the wire on first use:
 
 ```rust
 el(El::Div)
@@ -212,7 +210,7 @@ rwire/
 │   ├── rwire/               # Core framework: builder, protocol, state, router,
 │   │                        #   store, theme, style_tokens, attr_tokens, tokens/
 │   ├── rwire-macros/        # Proc macros: #[handler], #[renderer], #[derive(State)], #[theme]
-│   ├── rwire-components/    # UI component library (52 components)
+│   ├── rwire-components/    # UI component library (51 components)
 │   ├── rwire-themes/        # Predefined palettes + style presets
 │   └── rwire-markdown/      # Markdown rendering for docs
 ├── apps/
@@ -223,7 +221,7 @@ rwire/
 └── examples/
     ├── counter/             # Simple counter
     ├── todolist/            # Todo list with filtering
-    ├── todo-combined/       # Todo list with ItemRef + SQLite persistence
+    ├── todo-combined/       # Todo list with ItemRef + JSON file persistence
     └── fine-grained/        # Fine-grained reactivity demo
 ```
 
@@ -274,7 +272,7 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Multi-state support (memory, persisted)
 - [x] ItemRef for dynamic list binding
 - [x] Style token system + reactive theming (palettes, dark/light, style presets)
-- [x] Component library (52 components)
+- [x] Component library (51 components)
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics

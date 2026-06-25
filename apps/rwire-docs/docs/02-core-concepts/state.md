@@ -40,7 +40,7 @@ struct UserData { name: String }
 | `memory` | Server RAM | Per connection | Session data, counters, form input |
 | `persisted` | Server disk (JSON) | Across restarts | User profiles, saved documents |
 
-For purely visual state (menu toggles, tab switching), use [Client Actions](/docs/advanced/client-actions) instead of state -- they run entirely in the browser with zero server round-trips.
+For purely visual state (menu toggles, tab switching), use [Client Actions](/docs/05-advanced/client-actions) instead of state -- they run entirely in the browser with zero server round-trips.
 
 ## Accessing State
 

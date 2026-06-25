@@ -19,8 +19,9 @@ copy with the current codebase.
 The docs were written in the project's first two weeks. The framework overhaul of
 2026-06-16..24 (plus earlier token/theme refactors) invalidated many assumptions:
 
-- Capsule strategy inverted: element/event maps **ship whole**; CSS is delivered **lazily
-  over the WebSocket** (`STYLE_DEF 0x87`). No per-token tree-shaking into the capsule.
+- Capsule strategy: the capsule is just the runtime. Element/event/attribute **name maps**
+  (`MAP_DEF 0x88`) and utility **CSS** (`STYLE_DEF 0x87`) both stream lazily over the WebSocket
+  (the name-map half landed in Phase Pre). No per-token tree-shaking into the capsule.
 - `ThemeStyle` became a **struct** (was an enum); `AccentColor` / `ThemeColors` /
   `CapsuleConfig::accent|palette|colors` deleted; palettes moved to the `rwire-themes` crate.
 - Theming no longer uses `data-theme` / `data-style` attributes — it's a server round-trip
@@ -38,7 +39,8 @@ The docs were written in the project's first two weeks. The framework overhaul o
 | P0 | Compile-breaking & false headline numbers | 9 | ✅ 9 / 9 |
 | P1 | Architecture rewrites | 7 | ✅ 7 / 7 |
 | P2 | Inventory & stale numbers | 7 | ✅ 7 / 7 |
-| — | **Total** | **25** | **✅ 25 / 25** |
+| P3 | Verification & coverage gaps (links, README) | 2 | ✅ 2 / 2 |
+| — | **Total** | **27** | **✅ 27 / 27** |
 
 > **Phase Pre gates the size numbers.** Several doc/copy claims are about runtime/capsule
 > size (P0-2, P2-7). We do not want to document the *current* number and then immediately change
@@ -285,6 +287,28 @@ These need a rewrite of the explanation, not a token swap.
   - **Note:** the ~30 B figure is for the component counter (re-renders a styled `Text::heading1`
     + interns the new number string); a bare text patch is ~6 B. Competitor KB figures (LiveView
     30KB, Blazor 200KB, htmx 14KB) remain external/approximate — not independently benchmarked.
+
+---
+
+## Phase 3 — Verification & coverage gaps (beyond the original 25-item audit)
+
+The original audit was claim-by-claim within the docs/app copy. This phase covers cross-cutting
+and out-of-scope content the audit didn't reach.
+
+- [x] **P3-1 · Fix broken internal doc cross-links** ✅ done
+  Four links pointed at non-existent pages:
+  - `state.md`, `project-structure.md`: `/docs/advanced/client-actions` → `/docs/05-advanced/client-actions`
+  - `config.md`: `/docs/advanced/router` → `/docs/05-advanced/router` (+ dropped the stale "automatic
+    tree shaking" wording)
+  - `quick-start.md`: `/docs/02-core-concepts/concepts` (no such page) → `/docs/02-core-concepts/state`
+  Re-scanned: every `/docs/…` link now resolves to a real page.
+
+- [x] **P3-2 · Reconcile `README.md`** ✅ done (was not in the original audit)
+  - "~1.5KB runtime" (×3: intro, ASCII diagram, benefits) → "~13KB runtime; names + CSS stream lazily"
+  - "Tree Shaking" section → "Capsule Size" (empty maps + lazy `MAP_DEF`/`STYLE_DEF`, ~17KB capsule)
+  - "tree-shaken per app" / "720+ tokens" → lazy-over-wire / "700+ tokens"
+  - "52 components" (×2) → 51; todo-combined "SQLite persistence" → "JSON file persistence"
+  - Quick-start snippet already used `#[async_std::main]` + `.run().await` (no change needed)
 
 ---
 

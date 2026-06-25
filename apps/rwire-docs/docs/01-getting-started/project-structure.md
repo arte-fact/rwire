@@ -86,7 +86,7 @@ struct UserData {
 
 **Persisted** state adds durability. State is still read from memory for instant access, but a background task periodically flushes dirty entries to SQLite.
 
-For purely visual state like menu toggles or tab switching, use [Client Actions](/docs/advanced/client-actions) instead of state -- they run entirely in the browser with zero latency.
+For purely visual state like menu toggles or tab switching, use [Client Actions](/docs/05-advanced/client-actions) instead of state -- they run entirely in the browser with zero latency.
 
 ## Handlers vs Renderers
 

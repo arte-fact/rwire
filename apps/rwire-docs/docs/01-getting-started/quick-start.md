@@ -180,4 +180,4 @@ The entire interaction -- click to screen update -- is a single WebSocket round-
 
 ## Next Steps
 
-Read the [Project Structure](./project-structure) guide to understand how rwire applications are organized, or jump to the [Core Concepts](/docs/02-core-concepts/concepts) section for a deeper look at state, handlers, and renderers.
+Read the [Project Structure](./project-structure) guide to understand how rwire applications are organized, or jump to the [Core Concepts](/docs/02-core-concepts/state) section for a deeper look at state, handlers, and renderers.
