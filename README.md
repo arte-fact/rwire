@@ -210,7 +210,7 @@ rwire/
 │   ├── rwire/               # Core framework: builder, protocol, state, router,
 │   │                        #   store, theme, style_tokens, attr_tokens, tokens/
 │   ├── rwire-macros/        # Proc macros: #[handler], #[renderer], #[derive(State)], #[theme]
-│   ├── rwire-components/    # UI component library (51 components)
+│   ├── rwire-components/    # UI component library (50 components)
 │   ├── rwire-themes/        # Predefined palettes + style presets
 │   └── rwire-markdown/      # Markdown rendering for docs
 ├── apps/
@@ -272,7 +272,7 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Multi-state support (memory, persisted)
 - [x] ItemRef for dynamic list binding
 - [x] Style token system + reactive theming (palettes, dark/light, style presets)
-- [x] Component library (51 components)
+- [x] Component library (50 components)
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics

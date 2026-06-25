@@ -107,7 +107,7 @@ Stack::column()
 
 ## Full Component List
 
-rwire ships 50+ components organized into categories:
+rwire ships 50 components organized into categories:
 
 - **Layout**: Stack, Grid, Container, AppShell, Spacer, Divider, Footer
 - **Navigation**: Link, NavMenu, Breadcrumb, Tabs, Pagination, DropdownMenu

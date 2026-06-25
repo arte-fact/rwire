@@ -281,7 +281,7 @@ fn section_stats() -> ElementBuilder {
     let stats = [
         ("~17KB", "Client payload (minimal app)"),
         ("~30 bytes", "Per UI update"),
-        ("51", "Production-ready components"),
+        ("50", "Production-ready components"),
         ("200K+", "Connections per GB RAM"),
     ];
 

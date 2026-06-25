@@ -136,7 +136,7 @@ fn examples() -> Vec<Example> {
         },
         Example {
             title: "Design System",
-            description: "Interactive showcase of 50+ rwire components across forms, data display, and navigation categories.",
+            description: "Interactive showcase of 50 rwire components across forms, data display, and navigation categories.",
             complexity: Complexity::Intermediate,
             tags: &["Components", "Interactive", "Showcase"],
             run_command: "cargo run -p rwire-design-system",

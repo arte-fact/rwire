@@ -39,8 +39,8 @@ The docs were written in the project's first two weeks. The framework overhaul o
 | P0 | Compile-breaking & false headline numbers | 9 | ✅ 9 / 9 |
 | P1 | Architecture rewrites | 7 | ✅ 7 / 7 |
 | P2 | Inventory & stale numbers | 7 | ✅ 7 / 7 |
-| P3 | Verification & coverage gaps (links, README, CLAUDE.md) | 3 | ✅ 3 / 3 |
-| — | **Total** | **28** | **✅ 28 / 28** |
+| P3 | Verification & coverage gaps (links, README, CLAUDE.md, visual QA) | 4 | ✅ 4 / 4 |
+| — | **Total** | **29** | **✅ 29 / 29** |
 
 > **Phase Pre gates the size numbers.** Several doc/copy claims are about runtime/capsule
 > size (P0-2, P2-7). We do not want to document the *current* number and then immediately change
@@ -243,13 +243,11 @@ These need a rewrite of the explanation, not a token swap.
 
 ## Phase 2 — Inventory & stale numbers
 
-- [x] **P2-1 · Unify the component count (inconsistent across 4 places)**
-  Real: **50 modules / 51 catalog entries**. Today: website "51", design-system hero hardcodes
-  "50", examples "25+", `03-components/overview.md` "50+".
-  **Fix:** pick the catalog count (**51**) everywhere; prefer deriving it dynamically
-  (`catalog::catalog().len()`) where rendered.
-  Files: `apps/rwire-website/src/main.rs` (~285), `apps/rwire-design-system/src/main.rs` (~401),
-  `apps/rwire-examples/src/main.rs` (~139), `03-components/overview.md` (~110).
+- [x] **P2-1 · Unify the component count** — corrected to **50** (see P3-4)
+  Real count is **50** (`catalog::catalog().len()` = 50; my first-pass `grep -c "ComponentEntry {"`
+  miscounted as 51 because it also matched the `struct ComponentEntry {` definition). design-system
+  hero derives it dynamically (`catalog().len()` → 50); website/examples/overview/README/CLAUDE.md
+  now all say **50**. The "51" was caught and fixed during the P3-4 visual QA.
 
 - [x] **P2-2 · Remove fabricated `Prose` section**
   `03-components/data-display.md` (~144-165), `03-components/overview.md` (Data Display list)
@@ -307,14 +305,25 @@ and out-of-scope content the audit didn't reach.
   - "~1.5KB runtime" (×3: intro, ASCII diagram, benefits) → "~13KB runtime; names + CSS stream lazily"
   - "Tree Shaking" section → "Capsule Size" (empty maps + lazy `MAP_DEF`/`STYLE_DEF`, ~17KB capsule)
   - "tree-shaken per app" / "720+ tokens" → lazy-over-wire / "700+ tokens"
-  - "52 components" (×2) → 51; todo-combined "SQLite persistence" → "JSON file persistence"
+  - "52 components" (×2) → 50; todo-combined "SQLite persistence" → "JSON file persistence"
   - Quick-start snippet already used `#[async_std::main]` + `.run().await` (no change needed)
 
 - [x] **P3-3 · Reconcile `CLAUDE.md`** ✅ done (internal AI-instructions file)
-  - "~1.5KB runtime" (×2) → "~13KB"; "52 components" → 51; `ThemeStyle::Soft` → `ThemeStyle::soft()`
+  - "~1.5KB runtime" (×2) → "~13KB"; "52 components" → 50; `ThemeStyle::Soft` → `ThemeStyle::soft()`
   - "Tree Shaking" section + design-decision #3 → lazy `MAP_DEF`/`STYLE_DEF` delivery (no static pass)
   - crate-structure comments (builder.rs / capsule_gen.rs) → lazy CSS/name-map prefixes
   - protocol opcode table → added `STYLE_DEF` (0x87) + `MAP_DEF` (0x88), noted varint encoding
+
+- [x] **P3-4 · Visual QA of the design-system component system** ✅ done
+  Ran the design-system app and drove it with a headless browser (Playwright):
+  - Landing page (category grid), Button page (playground), Modal page (overlay) all render correctly
+  - Interactive playground works: intent/size selectors + bool-prop checkboxes re-render the live
+    preview **and** the live code snippet (`Button::new().intent(...).size(...).build()`)
+  - Dark-mode toggle works and component state persists through it; session state persists across
+    navigation; Modal opens with a backdrop overlay
+  - **Zero console errors** throughout
+  - **Caught a real bug:** the component count is **50**, not 51 (the design-system hero showed the
+    correct dynamic count). Fixed the hardcoded "51" in website/README/CLAUDE.md (→ P2-1 note).
 
 ---
 
