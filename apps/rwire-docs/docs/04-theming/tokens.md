@@ -126,4 +126,4 @@ Four breakpoints are available: `.sm()` (640px), `.md()` (768px), `.lg()` (1024p
 
 The `St` enum uses `#[repr(u16)]` internally. On the wire, tokens are varint-encoded: values under 128 take 1 byte, larger values take 2 bytes. A typical styled element sends 5-10 tokens at 1-2 bytes each, far smaller than equivalent CSS class strings.
 
-The framework currently defines 590+ tokens covering CSS3 layout, spacing, typography, color, border, shadow, and animation properties.
+The framework currently defines 700+ tokens covering CSS3 layout, spacing, typography, color, border, shadow, and animation properties.

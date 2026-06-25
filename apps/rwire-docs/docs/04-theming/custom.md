@@ -16,7 +16,7 @@ let config = CapsuleConfig::new()
         Theme::dark()
             .accent("#5E81AC")
             .radius(RadiusScale::Large)
-            .style(ThemeStyle::Soft)
+            .style(ThemeStyle::soft())
     )
     .font(FontFace::google("Inter", &[400, 600]));
 ```

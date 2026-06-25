@@ -5,92 +5,87 @@ order: 3
 ---
 # Dark Mode
 
-rwire ships both light and dark CSS in every capsule. Switching themes is a matter of changing the `data-theme` attribute on the root element -- no page reload, no server round-trip.
+`Theme` is a framework-provided state type. The capsule ships one `:root{}` block of CSS
+variables for the *current* mode; switching modes is a handler that mutates `&mut Theme`, and a
+built-in renderer re-emits the `:root{}` block, which the synced `<style>` element patches over
+the wire. It's a server round-trip, but a tiny one — only the variable block changes, and every
+component re-colors automatically because they reference the semantic variables.
 
 ```rust
 use rwire::theme::{Theme, ThemeMode};
 
-// Start with dark mode
+// Start in dark mode
 let theme = Theme::dark();
 
-// Start with light mode (the default)
+// Start in light mode (the default)
 let theme = Theme::light();
 ```
 
+Pass the theme to the server with `.theme(...)` (typically from a `#[theme]` function).
+
 ## How It Works
 
-The capsule CSS includes two blocks of semantic variables with resolved color values:
+The capsule's `<style>` contains a single `:root{}` block with the resolved color values for the
+current mode:
 
 ```css
-:root,[data-theme="light"]{
+:root{
   --a:oklch(0.985 0 0);   /* bg-app */
   --k:oklch(0.25 0 0);    /* text-default */
-  --j:oklch(0.55 0 0);    /* text-muted */
-  /* ...light mappings */
-}
-
-[data-theme="dark"]{
-  --a:oklch(0.15 0 0);    /* bg-app (inverted) */
-  --k:oklch(0.97 0 0);    /* text-default (inverted) */
-  --j:oklch(0.55 0 0);    /* text-muted (inverted) */
-  /* ...dark mappings */
+  --l:oklch(0.55 0 0);    /* text-muted */
+  /* ...the rest of the semantic variables */
 }
 ```
 
-When `data-theme` changes, all semantic tokens (`BgApp`, `TextDefault`, `TextMuted`, etc.) automatically resolve to the correct value. Components never need conditional color logic.
+There are **no** `[data-theme]` selectors. When a handler flips `theme.mode`, the framework
+re-renders this block with the dark values and patches the `<style>` element via the synced
+element system. All semantic tokens (`BgApp`, `TextDefault`, `TextMuted`, …) then resolve to the
+new values automatically — components never need conditional color logic.
 
 ## ThemeToggle Component
 
-The built-in `ThemeToggle` component renders a button that switches between light and dark modes:
+The built-in `ThemeToggle` renders a button that switches between light and dark modes:
 
 ```rust
 use rwire_components::{ThemeToggle, ThemeToggleMode};
 
-// In your header or navigation
 ThemeToggle::new()
-    .mode(ThemeToggleMode::Light)  // current mode (controls icon)
+    .mode(ThemeToggleMode::Light)  // current mode (controls the icon)
     .on_toggle(toggle_theme())
     .build()
 ```
 
 The toggle shows a moon icon in light mode and a sun icon in dark mode.
 
-## Managing Theme State
+## Wiring It Up
 
-Connect the toggle to your application state:
+Because `Theme` is itself a state type, the handler takes `&mut Theme` and the renderer reads
+`&Theme` directly — you do **not** track a `dark_mode` flag in your own app state:
 
 ```rust
-use rwire::{State, handler, renderer};
-use rwire::theme::ThemeMode;
+use rwire::{handler, renderer, ElementBuilder};
+use rwire::theme::{Theme, ThemeMode};
 use rwire_components::{ThemeToggle, ThemeToggleMode};
 
-#[derive(State, Default)]
-#[storage(memory)]
-struct AppState {
-    dark_mode: bool,
-}
-
 #[handler]
-fn toggle_theme(state: &mut AppState) {
-    state.dark_mode = !state.dark_mode;
+fn toggle_theme(theme: &mut Theme) {
+    theme.mode = theme.mode.toggle();
 }
 
 #[renderer]
-fn render_toggle(state: &AppState) -> ElementBuilder {
-    let mode = if state.dark_mode {
-        ThemeToggleMode::Dark
-    } else {
-        ThemeToggleMode::Light
-    };
-
+fn render_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(mode)
+        .mode(match theme.mode {
+            ThemeMode::Light => ThemeToggleMode::Light,
+            ThemeMode::Dark => ThemeToggleMode::Dark,
+        })
         .on_toggle(toggle_theme())
         .build()
 }
 ```
 
-The server updates the `data-theme` attribute on the root element when the handler fires, and CSS variables do the rest.
+When the handler fires, the built-in theme renderer re-emits the `:root{}` variables and the
+client patches them — no `data-theme` attribute, no page reload.
 
 ## No Conditional Code
 
@@ -108,4 +103,5 @@ el(El::Div).st([
 ])
 ```
 
-There is no `if dark_mode { ... }` anywhere. The semantic layer handles the mapping, and the palette step inversion ensures consistent contrast ratios across both themes.
+There is no `if dark_mode { ... }` anywhere. The semantic layer handles the mapping, and the
+palette step inversion keeps contrast ratios consistent across both modes.

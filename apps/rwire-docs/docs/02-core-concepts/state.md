@@ -29,7 +29,7 @@ The `#[storage(...)]` attribute controls where state lives:
 #[storage(memory)]
 struct AppState { count: i32 }
 
-// Persisted -- survives server restarts via SQLite
+// Persisted -- survives server restarts (JSON files on disk)
 #[derive(State, Default)]
 #[storage(persisted)]
 struct UserData { name: String }
@@ -38,7 +38,7 @@ struct UserData { name: String }
 | Storage | Location | Lifetime | Use case |
 |---------|----------|----------|----------|
 | `memory` | Server RAM | Per connection | Session data, counters, form input |
-| `persisted` | Server disk | Across restarts | User profiles, saved documents |
+| `persisted` | Server disk (JSON) | Across restarts | User profiles, saved documents |
 
 For purely visual state (menu toggles, tab switching), use [Client Actions](/docs/advanced/client-actions) instead of state -- they run entirely in the browser with zero server round-trips.
 

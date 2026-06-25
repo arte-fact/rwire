@@ -279,8 +279,8 @@ fn section_hero() -> ElementBuilder {
 
 fn section_stats() -> ElementBuilder {
     let stats = [
-        ("~1.5KB", "JS runtime (tree-shaken)"),
-        ("4 bytes", "Per text update"),
+        ("~17KB", "Client payload (minimal app)"),
+        ("~30 bytes", "Per UI update"),
         ("51", "Production-ready components"),
         ("200K+", "Connections per GB RAM"),
     ];
@@ -338,10 +338,12 @@ fn render_count(state: &Counter) -> ElementBuilder {
     Text::heading1(state.count.to_string()).build()
 }
 
-fn main() {
-    Server::bind("0.0.0.0:9000").unwrap()
+#[async_std::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Server::bind("0.0.0.0:9000")?
         .root(root)
-        .run_blocking();
+        .run()
+        .await
 }"#;
 
     let annotations = [
@@ -408,12 +410,12 @@ fn section_features() -> ElementBuilder {
         (
             Icon::Zap,
             "Binary Protocol",
-            "DOM updates in 4 bytes. Not JSON, not HTML fragments \u{2014} binary opcodes parsed in microseconds.",
+            "A UI update is tens of bytes of binary opcodes \u{2014} not JSON, not HTML fragments \u{2014} parsed in microseconds.",
         ),
         (
             Icon::Feather,
-            "1.5KB Runtime",
-            "Tree-shaken JS runtime. 20x smaller than LiveView, 200x smaller than Vaadin.",
+            "~17KB Client",
+            "The whole client \u{2014} runtime plus styles \u{2014} in one small document. Element/event maps and CSS stream lazily over the wire, so you only receive what your app uses.",
         ),
         (
             Icon::Shield,
@@ -422,18 +424,18 @@ fn section_features() -> ElementBuilder {
         ),
         (
             Icon::Cpu,
-            "200K Connections/GB",
-            "Rust async tasks use ~2\u{2013}5KB per connection. No GC pauses, no JVM warmup.",
+            "Tiny Connections",
+            "Sub-KB per connection: a minimal server held 5,000 live WebSocket connections in under 4 MB of RAM. No GC pauses, no JVM warmup.",
         ),
         (
             Icon::Palette,
-            "580+ Style Tokens",
+            "700+ Style Tokens",
             "CSS encoded as 1\u{2013}2 byte varint codes. Semantic theming with light/dark mode.",
         ),
         (
             Icon::Leaf,
             "Low Carbon",
-            "60x less bandwidth than a React SPA. Fewer bytes = less energy across the stack.",
+            "Tiny binary diffs instead of re-rendered HTML or JSON. Fewer bytes = less energy across the stack.",
         ),
     ];
 
@@ -485,12 +487,12 @@ fn section_comparison() -> ElementBuilder {
                 .text("How rwire compares"),
             el(El::P)
                 .st([St::TextMuted, St::TextCenter, St::MbLg])
-                .text("Real numbers, not marketing claims."),
+                .text("Architecture and ballpark sizes; competitor figures are approximate."),
             el(El::Div).st([St::OverflowXAuto]).append([Table::new()
                 .headers(["", "rwire", "LiveView", "Blazor", "htmx"])
                 .row(
                     TableRow::new()
-                        .cells(["Client runtime", "1.5KB", "30KB", "200KB", "14KB"]),
+                        .cells(["Client runtime", "~17KB", "30KB", "200KB", "14KB"]),
                 )
                 .row(
                     TableRow::new()
@@ -499,7 +501,7 @@ fn section_comparison() -> ElementBuilder {
                 .row(
                     TableRow::new().cells([
                         "Update cost",
-                        "4 bytes",
+                        "~30 bytes",
                         "25 bytes",
                         "100+ bytes",
                         "100+ bytes",
@@ -612,8 +614,7 @@ fn build_footer() -> ElementBuilder {
         )
         .column(
             FooterColumn::new("Community")
-                .external_link("GitHub", "https://github.com")
-                .external_link("Discord", "https://discord.gg"),
+                .external_link("GitHub", "https://github.com/arte-fact/rwire"),
         )
         .copyright("\u{00a9} 2026 rwire contributors. MIT License.")
         .build()

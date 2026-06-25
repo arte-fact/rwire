@@ -12,6 +12,7 @@ rwire uses a 12-step color scale system inspired by Radix Colors. Each scale map
 ```rust
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::theme::Theme;
+use rwire_themes::palettes;
 
 // Default Oklch palette
 let config = CapsuleConfig::new();
@@ -20,8 +21,9 @@ let config = CapsuleConfig::new();
 let config = CapsuleConfig::new()
     .theme(Theme::dark().accent("#5E81AC"));
 
-// Nord preset
-let config = CapsuleConfig::dark_nord();
+// Nord palette
+let config = CapsuleConfig::new()
+    .theme(Theme::dark().palette(palettes::nord()));
 ```
 
 ## The 12-Step Scale
@@ -78,11 +80,11 @@ Supported formats: `#RRGGBB`, `#RGB`, and `oklch(L C H)`.
 
 ## Nord Palette
 
-The built-in Nord preset maps arctic-inspired colors to the 12-step scale:
+The Nord palette (from the `rwire-themes` crate) maps arctic-inspired colors to the 12-step scale:
 
 ```rust
-use rwire::tokens::ColorPalette;
-let palette = ColorPalette::nord();
+use rwire_themes::palettes;
+let palette = palettes::nord();
 ```
 
 - **Neutral**: Snow Storm (light) to Polar Night (dark)

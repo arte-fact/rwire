@@ -54,15 +54,15 @@ Instead of writing CSS class strings, use the `St` enum for type-safe styling:
 
 ```rust
 el(El::Div).st([
-    St::Flex,
+    St::DisplayFlex,
     St::ItemsCenter,
-    St::Gap4,
+    St::GapMd,
     St::BgSurface,
-    St::Rounded,
+    St::RoundedMd,
 ])
 ```
 
-Style tokens compile to single-class CSS rules. The server encodes them as varint numbers (1-2 bytes each), and the browser maps them to generated CSS classes. Only tokens your app uses are included in the stylesheet.
+Style tokens compile to single-class CSS rules. The server encodes them as varint numbers (1-2 bytes each), and the browser maps them to generated CSS classes. The CSS rule for each token is delivered lazily over the WebSocket the first time it's used, so the client only receives the styles your app actually renders.
 
 ## Pseudo-Class Styles
 
@@ -70,13 +70,12 @@ Add hover, focus, and active styles with dedicated methods:
 
 ```rust
 el(El::Button)
-    .st([St::BgPrimary, St::TextOnPrimary, St::Px4, St::Py2])
+    .st([St::BgPrimary, St::TextOnPrimary, St::PxMd, St::PySm])
     .hover([St::BgPrimaryHover])
-    .focus([St::RingPrimary, St::Outline0])
-    .active([St::BgPrimaryActive])
+    .focus([St::RingFocus, St::OutlineNone])
 ```
 
-Each pseudo-class group generates a CSS rule like `.h1u200:hover { ... }` and is tree-shaken based on actual usage.
+Each pseudo-class group generates a CSS rule (e.g. `.h1u772:hover { ... }`), delivered lazily over the wire the first time it's used.
 
 ## Appending Children
 

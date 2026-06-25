@@ -127,7 +127,7 @@ fn examples() -> Vec<Example> {
         },
         Example {
             title: "Multi-State TodoMVC",
-            description: "A full TodoMVC implementation using local, memory, and persisted storage types with ItemRef for type-safe dynamic content.",
+            description: "A full TodoMVC implementation using memory and persisted storage types with ItemRef for type-safe dynamic content.",
             complexity: Complexity::Advanced,
             tags: &["Local Storage", "Persistence", "ItemRef"],
             run_command: "cargo run -p todo-combined",
@@ -136,7 +136,7 @@ fn examples() -> Vec<Example> {
         },
         Example {
             title: "Design System",
-            description: "Interactive showcase of 25+ rwire components across forms, data display, and navigation categories.",
+            description: "Interactive showcase of 50+ rwire components across forms, data display, and navigation categories.",
             complexity: Complexity::Intermediate,
             tags: &["Components", "Interactive", "Showcase"],
             run_command: "cargo run -p rwire-design-system",
@@ -479,8 +479,7 @@ fn build_footer() -> ElementBuilder {
         )
         .column(
             FooterColumn::new("Community")
-                .external_link("GitHub", "https://github.com")
-                .external_link("Discord", "https://discord.gg"),
+                .external_link("GitHub", "https://github.com/arte-fact/rwire"),
         )
         .copyright("\u{00a9} 2026 rwire contributors. MIT License.")
         .build()

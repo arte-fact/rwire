@@ -54,7 +54,7 @@ Button::destructive("Delete")
 
 ## Style Tokens
 
-Components use `St` tokens (a `#[repr(u16)]` enum) for all styling. Tokens map to atomic CSS classes that are tree-shaken at startup -- only the tokens your app actually uses ship to the browser.
+Components use `St` tokens (a `#[repr(u16)]` enum) for all styling. Tokens map to atomic CSS classes whose rules are delivered lazily over the WebSocket the first time they're used -- only the tokens your app actually renders reach the browser.
 
 ```rust
 // Components compute their own tokens internally:
@@ -109,9 +109,9 @@ Stack::column()
 
 rwire ships 50+ components organized into categories:
 
-- **Layout**: Stack, Grid, Container, AppShell, Spacer, Divider
-- **Navigation**: Link, NavMenu, Breadcrumb, Tabs, Pagination
-- **Data Display**: Card, Badge, Table, Code, Stat, Timeline, Prose, Tag, Avatar, Image, Kbd
-- **Forms**: Button, Input, Textarea, Select, Checkbox, Radio, Switch, FormField, Slider
+- **Layout**: Stack, Grid, Container, AppShell, Spacer, Divider, Footer
+- **Navigation**: Link, NavMenu, Breadcrumb, Tabs, Pagination, DropdownMenu
+- **Data Display**: Card, Badge, Table, Code, Stat, Timeline, Tag, Avatar, AvatarGroup, Image, Kbd
+- **Forms**: Button, Input, Label, Textarea, Select, Checkbox, Radio, Switch, FormField, Slider
 - **Feedback**: Alert, Toast, Spinner, Progress, Skeleton, Modal, Drawer, EmptyState, Tooltip
-- **Utilities**: CopyButton, ThemeToggle, Accordion, Blockquote, Text, List, Stepper, TableOfContents
+- **Utilities**: CopyButton, ThemeToggle, Accordion, Blockquote, Text, List, Stepper

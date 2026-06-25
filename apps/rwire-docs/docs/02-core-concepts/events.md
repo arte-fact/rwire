@@ -81,16 +81,16 @@ The `ItemRef` is encoded as a varint (1-3 bytes) and sent back with the event. I
 Different event types carry different payloads automatically:
 
 - **Input/Change** on text fields: the current `.value` string
-- **Submit** on forms: a map of all field name-value pairs
-- **Click** with `data-*` attributes: a map of data attributes
+- **Submit** on forms: each field is accessible by name
+- **Click** with `data-*` attributes: read individual keys with `ctx.data("key")`
 
 Access these through `EventContext` in the handler:
 
 ```rust
 #[handler]
 fn on_submit(state: &mut AppState, ctx: &EventContext) {
-    if let Some(form) = ctx.form() {
-        state.name = form.get("name").cloned().unwrap_or_default();
+    if let Some(name) = ctx.field("name") {
+        state.name = name.to_string();
     }
 }
 ```

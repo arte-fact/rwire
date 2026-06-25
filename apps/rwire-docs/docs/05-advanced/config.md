@@ -75,7 +75,7 @@ let config = CapsuleConfig::new()
     .theme(
         Theme::dark()
             .accent("#5E81AC")
-            .style(ThemeStyle::Soft)
+            .style(ThemeStyle::soft())
     )
     .font(FontFace::google("Inter", &[400, 500, 600]));
 ```
@@ -85,12 +85,13 @@ let config = CapsuleConfig::new()
 Sets the visual theme. The `Theme` struct controls mode (light/dark), border radius scale, style preset, color palette, and seed colors:
 
 ```rust
-use rwire::theme::{Theme, ThemeStyle, RadiusScale};
+use rwire::theme::{Theme, RadiusScale};
+use rwire_themes::styles;
 
 Theme::dark()
     .accent("#5E81AC")
     .radius(RadiusScale::Large)
-    .style(ThemeStyle::Brutalist)
+    .style(styles::brutalist())
 ```
 
 Color configuration methods on `Theme`:
@@ -98,9 +99,11 @@ Color configuration methods on `Theme`:
 - `.accent(color)` -- Sets accent color from hex or oklch string (auto-generates 12-step scale)
 - `.neutral(color)` -- Sets neutral color from hex or oklch string
 - `.error(color)` / `.success(color)` / `.warning(color)` -- Sets status colors
-- `.palette(ColorPalette)` -- Full palette override (e.g., `ColorPalette::nord()`)
+- `.palette(ColorPalette)` -- Full palette override (e.g., `rwire_themes::palettes::nord()`)
 
-Presets: `Theme::dark_nord()`, `Theme::light_nord()`.
+Apply a named palette with `Theme::dark().palette(rwire_themes::palettes::nord())`. The
+`rwire-themes` crate ships nord, indigo, catppuccin, dracula, solarized, gruvbox, tokyo_night,
+rose_pine, and one_dark.
 
 ### .font(FontFace)
 

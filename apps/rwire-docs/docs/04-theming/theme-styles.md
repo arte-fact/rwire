@@ -1,118 +1,93 @@
 ---
 title: Theme Styles
-description: Default, Soft, Brutalist, and Minimal presets
+description: Soft, Solid, Brutalist, Minimal, Glass, and Neon presets
 order: 4
 ---
 # Theme Styles
 
-Theme styles control the *feel* of your application -- solid vs subtle buttons, sharp vs rounded corners, heavy vs invisible borders -- without changing individual components. Four presets are available:
+Theme styles control the *feel* of your application -- solid vs subtle buttons, sharp vs rounded
+corners, heavy vs invisible borders -- without changing individual components.
+
+`ThemeStyle` is a struct (a small bundle of CSS-remapping callbacks). The core crate ships one
+built-in, `ThemeStyle::soft()`, which is also the **default**. Additional presets live in the
+`rwire-themes` crate:
 
 ```rust
 use rwire::theme::{Theme, ThemeStyle};
+use rwire_themes::styles;
 
-let theme = Theme::light().style(ThemeStyle::Soft);
+let theme = Theme::light().style(ThemeStyle::soft());   // built-in default
+let theme = Theme::light().style(styles::brutalist());  // from rwire-themes
 ```
 
-## The Four Presets
+## The Presets
 
-### Default
+| Preset | Where | Feel |
+|--------|-------|------|
+| `ThemeStyle::soft()` | core (default) | Tinted backgrounds instead of solid fills; softened borders |
+| `styles::solid()` | rwire-themes | Solid accent fills, medium radius, subtle shadows (the classic look) |
+| `styles::brutalist()` | rwire-themes | Sharp corners, heavy near-black borders, high contrast |
+| `styles::minimal()` | rwire-themes | Near-invisible borders, relies on typography for structure |
+| `styles::glass()` | rwire-themes | Translucent, blurred surfaces |
+| `styles::neon()` | rwire-themes | Saturated accents and glow |
 
-Solid accent fills, medium border radius, subtle shadows. This is the standard look.
+`styles::ALL` is a slice of all `rwire-themes` preset constructors, handy for building a switcher.
 
-```rust
-Theme::new() // ThemeStyle::Default is the default
-```
-
-### Soft
-
-Tinted backgrounds instead of solid fills. Buttons use light accent tints with darker accent text. Borders are softened.
-
-```rust
-Theme::light().style(ThemeStyle::Soft)
-```
-
-The Soft preset remaps primary and destructive colors to their subtle variants:
-- Primary background becomes a light accent tint (accent step 3)
-- Primary text becomes the darker accent (accent step 11)
-- Borders shift to a lighter neutral
-
-### Brutalist
-
-Sharp corners, heavy borders, high contrast. Borders use the darkest neutral for maximum definition.
-
-```rust
-Theme::light().style(ThemeStyle::Brutalist)
-```
-
-The Brutalist preset pushes borders to extremes:
-- Default borders become near-black (neutral step 12)
-- Subtle borders become prominent (neutral step 10)
-
-### Minimal
-
-Near-invisible borders, generous spacing, relies on typography hierarchy for structure.
-
-```rust
-Theme::light().style(ThemeStyle::Minimal)
-```
-
-The Minimal preset removes visual noise:
-- Default borders become transparent
-- Subtle borders become transparent
+The **Soft** preset, for example, remaps primary and destructive colors to subtle variants
+(primary background → a light accent tint, primary text → the darker accent, borders → a lighter
+neutral); **Brutalist** pushes borders toward the darkest neutral; **Minimal** makes them
+transparent.
 
 ## How Styles Work
 
-Each preset sets a `data-style` attribute on the root element. CSS rules scoped to `[data-style="soft"]`, etc., remap semantic variables with resolved color values.
+A style does **not** set a `data-style` attribute or rely on `[data-style="…"]` selectors.
+Instead, its callbacks write overrides *inline* into the single `:root{}` block when the theme
+CSS is generated:
 
 ```css
-[data-style="soft"]{
-  --v:oklch(0.93 0.03 250);  /* primary = accent tint */
+:root{
+  --v:oklch(0.93 0.03 250);  /* primary = accent tint (Soft) */
   --w:oklch(0.25 0.06 250);  /* on-primary = accent text */
   --h:oklch(0.88 0 0);       /* border-default = softer */
 }
 ```
 
-Components use the same `St` tokens regardless of the active style. A `Button::primary("Save")` renders correctly across all four presets.
+Components use the same `St` tokens regardless of the active style. A `Button::primary("Save")`
+renders correctly under every preset.
 
 ## Combining with Other Theme Options
 
 Styles compose freely with palettes, dark mode, and radius scales:
 
 ```rust
-use rwire::theme::{Theme, ThemeStyle, RadiusScale};
-use rwire::capsule_gen::CapsuleConfig;
+use rwire::theme::{Theme, RadiusScale};
+use rwire_themes::{styles, palettes};
 
-let config = CapsuleConfig::new()
-    .theme(
-        Theme::dark()
-            .style(ThemeStyle::Soft)
-            .radius(RadiusScale::Large)
-            .accent("#5E81AC")
-    );
+Theme::dark()
+    .style(styles::brutalist())
+    .radius(RadiusScale::Large)
+    .palette(palettes::nord())
 ```
 
-## Cycling Styles at Runtime
+## Switching Styles at Runtime
 
-You can let users switch styles by storing the current style in state and rebuilding the theme:
+`Theme` is a state type, so a handler takes `&mut Theme` and sets `theme.style` directly -- no
+style index in your own app state, no `data-style` attribute. The built-in theme renderer
+re-emits the `:root{}` variables and the client patches them.
 
 ```rust
-#[derive(State, Default)]
-#[storage(memory)]
-struct AppState {
-    style_index: usize,
-}
-
-const STYLES: [ThemeStyle; 4] = [
-    ThemeStyle::Default,
-    ThemeStyle::Soft,
-    ThemeStyle::Brutalist,
-    ThemeStyle::Minimal,
-];
+use rwire::{handler};
+use rwire::theme::{Theme, ThemeStyle};
+use rwire_themes::styles;
 
 #[handler]
-fn cycle_style(state: &mut AppState) {
-    state.style_index = (state.style_index + 1) % STYLES.len();
+fn cycle_theme_style(theme: &mut Theme) {
+    // soft (built-in) + every rwire-themes preset
+    let mut all = vec![ThemeStyle::soft()];
+    all.extend(styles::ALL.iter().map(|f| f()));
+    let idx = all.iter().position(|s| *s == theme.style).unwrap_or(0);
+    theme.style = all[(idx + 1) % all.len()];
 }
 ```
 
-The server re-renders the root element with the updated `data-style` attribute, and all components instantly reflect the new preset.
+You can also set one explicitly with `theme.set_style(styles::glass())`.

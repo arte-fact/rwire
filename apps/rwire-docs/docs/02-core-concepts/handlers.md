@@ -54,7 +54,7 @@ fn add_todo(state: &mut TodoState, ctx: &EventContext) {
 |--------|---------|--------|
 | `ctx.text()` | `Option<&str>` | Input/textarea value |
 | `ctx.data("key")` | `Option<&str>` | Element `data-*` attributes |
-| `ctx.form()` | `Option<&HashMap>` | Form field values on submit |
+| `ctx.field("name")` | `Option<&str>` | A single form field value on submit |
 | `ctx.item_ref::<T>()` | `Option<ItemRef<T>>` | Typed item reference from `.on_ref()` |
 
 ## ItemRef Handlers

@@ -141,25 +141,24 @@ Active items get an accent-colored dot. A connecting line runs between items (hi
 
 ---
 
-## Prose
+## Text
 
-Typography container for rich text content like rendered markdown or documentation.
+Typography component for headings, body copy, and captions with consistent sizing and color.
 
 ```rust
-use rwire_components::{Prose, ProseSize};
+use rwire_components::{Text, TextVariant, TextColor};
 
-Prose::new()
-    .child(el(El::H1).text("Introduction"))
-    .child(el(El::P).text("Welcome to the documentation."))
-    .child(Code::block("let x = 42;").build())
-    .build()
+Text::heading1("Introduction").build()
+Text::body("Welcome to the documentation.").build()
+Text::caption("Last updated today").muted().build()
 
-// Full width, small text
-Prose::new()
-    .size(ProseSize::Sm)
-    .full_width()
-    .children(content_elements)
+// Explicit variant + color
+Text::new()
+    .variant(TextVariant::Body)
+    .color(TextColor::Accent)
     .build()
 ```
 
-Prose applies relaxed line-height, consistent vertical spacing between children, and a max-width constraint by default. Sizes: `Sm`, `Base` (default), `Lg`.
+Constructors: `Text::heading1/2/3()`, `Text::body()`, `Text::body_small()`, `Text::caption()`.
+Variants: `Body`, `BodySmall`, `Label`, `Caption`. Colors: `Default`, `High`, `Muted`, `Accent`,
+`Success`, `Warning`, `Error` (or the `.muted()` shorthand).
