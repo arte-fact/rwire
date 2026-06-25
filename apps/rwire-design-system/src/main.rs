@@ -4,7 +4,7 @@
 
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::icons::{icon, Icon};
-use rwire::router::{Link, Router};
+use rwire::router::Link;
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, At, El, ElementBuilder, Ev, Server, State};
@@ -101,21 +101,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9002 in your browser");
     println!();
 
-    let router = Router::new()
-        .page("/", |_| build_landing())
-        .page("/components/:slug", |params| {
-            let slug = params.get("slug").unwrap_or("");
-            build_component_page(slug)
-        });
-
-    // Element maps are shipped whole now — markdown elements need no declaring.
+    // Navigation uses the `on_route` + root-rerender model: `Link` clicks send the
+    // path, `on_route_change` updates `DesignSystemState.current_slug`, and the `root`
+    // renderer re-renders the page from it. (No `Router`/`outlet()` here — installing a
+    // router would route navigation through an outlet swap this app has no outlet for,
+    // freezing the page. Element/event maps ship whole and St-token CSS is delivered
+    // lazily over the wire, so component-page demos need no startup tree-shaking.)
     let capsule_config = CapsuleConfig::new()
         .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind(&config.bind_addr)?
         .root(root)
         .on_route(on_route_change())
-        .routes(router)
         .capsule_config(capsule_config)
         .theme(app_theme())
         .run()
@@ -401,7 +398,10 @@ fn build_landing() -> ElementBuilder {
                 .text("rwire Design System"),
             el(El::P)
                 .st([St::TextLg, St::TextMuted, St::TextCenter, St::MaxWLg])
-                .text("50 production-ready components with type-safe variants, design tokens, and theme support."),
+                .text(&format!(
+                    "{} production-ready components with type-safe variants, design tokens, and theme support.",
+                    catalog::catalog().len()
+                )),
         ])
         .build();
 
@@ -458,58 +458,6 @@ fn build_landing() -> ElementBuilder {
                 .build(),
         )
         .build()
-}
-
-// ============================================================================
-// Component Page (for router tree-shaking)
-// ============================================================================
-
-fn build_component_page(slug: &str) -> ElementBuilder {
-    // When called with empty slug (router tree-shaking), build ALL demos
-    // so every component's tokens get discovered.
-    let demo = if slug.is_empty() {
-        let demos: Vec<ElementBuilder> = catalog::catalog()
-            .iter()
-            .map(|e| (e.build_demo)(&[], &[]))
-            .collect();
-        el(El::Div).append(demos)
-    } else {
-        catalog::find(slug)
-            .map(|e| (e.build_demo)(&[], &[]))
-            .unwrap_or_else(|| el(El::Div))
-    };
-
-    // Return a representative tree with all element types used in the full page
-    // layout so they get tree-shaken into the capsule.
-    el(El::Div).append([
-        // Sidebar: needs md:DisplayBlock for responsive visibility
-        el(El::Aside)
-            .st([St::DisplayNone])
-            .md([St::DisplayBlock])
-            .append([el(El::Nav).append([
-                Link::to("/", "x").hover([St::BgHover]),
-            ])]),
-        // Main content wrapper
-        el(El::Main).append([
-            // Breadcrumb
-            Breadcrumb::new()
-                .item("x", Some("/"))
-                .item("y", None::<&str>)
-                .build(),
-            // Playground controls (Input, Label via Checkbox)
-            Checkbox::new().label("x").build(),
-            // Code example
-            Code::block("x").language("rust").build(),
-            // Props table
-            Table::new().headers(["a"]).build(),
-            // Variant selector button (captures hover pseudo pair)
-            el(El::Button)
-                .st([St::BgSecondary])
-                .hover([St::BgSecondaryHover]),
-            // Component demo
-            demo,
-        ]),
-    ])
 }
 
 // ============================================================================
@@ -830,8 +778,7 @@ fn build_footer() -> ElementBuilder {
         )
         .column(
             FooterColumn::new("Community")
-                .external_link("GitHub", "https://github.com")
-                .external_link("Discord", "https://discord.gg"),
+                .external_link("GitHub", "https://github.com/arte-fact/rwire"),
         )
         .copyright("\u{00a9} 2026 rwire contributors. MIT License.")
         .build()

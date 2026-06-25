@@ -5,12 +5,12 @@
 
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::icons::{icon, Icon};
-use rwire::router::{Link, Router};
+use rwire::router::Link;
 use rwire::style_tokens::St;
 use rwire::theme::{Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Ev, Server, State};
 use rwire_components::*;
-use rwire_markdown::{parse_markdown, DocPage, DocSite, SearchResult, TableOfContents};
+use rwire_markdown::{parse_markdown, DocPage, DocSite, TableOfContents};
 use rwire_themes::{palettes, styles};
 
 // ============================================================================
@@ -101,31 +101,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Open http://127.0.0.1:9001 in your browser");
     println!();
 
-    let router = Router::new()
-        .page("/docs/*", |_| {
-            let site = DocSite::load(docs_dir());
-            let path = site
-                .sections()
-                .first()
-                .and_then(|(_, paths)| paths.first())
-                .cloned()
-                .unwrap_or_default();
-            let sidebar = build_sidebar(&site, &path);
-            el(El::Div).append([build_header(), sidebar, build_doc_page(&site, &path)])
-        })
-        .page("/search", |_| {
-            build_search_results(&DocSite::load(docs_dir()), "example")
-        });
-
-    // Element maps are shipped whole now, so markdown's table/pre/code elements
-    // no longer need declaring — see docs/tree-shaking-redesign.md.
+    // Navigation uses the `on_route` + root-rerender model: `Link` clicks send the
+    // path, `on_route_change` updates `DocsState.current_path`, and the `root`
+    // renderer re-renders the page from it. (No `Router`/`outlet()` here — installing
+    // a router would route navigation through the outlet swap instead, which this
+    // app has no outlet for, freezing the page.)
     let capsule_config = CapsuleConfig::new()
         .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind(&config.bind_addr)?
         .root(root)
         .on_route(on_route_change())
-        .routes(router)
         .capsule_config(capsule_config)
         .theme(site_theme())
         .run()
@@ -594,65 +580,6 @@ fn build_prev_next_nav(prev: Option<&DocPage>, next: Option<&DocPage>) -> Elemen
 
     nav = nav.append([prev_el, next_el]);
     nav
-}
-
-// ============================================================================
-// Search Results
-// ============================================================================
-
-fn build_search_results(site: &DocSite, query: &str) -> ElementBuilder {
-    let results = site.search(query, 20);
-
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            el(El::H2)
-                .st([St::TextXl, St::FontSemibold])
-                .text(&format!("Search results for \"{query}\"")),
-            if results.is_empty() {
-                EmptyState::new()
-                    .title("No results found")
-                    .description("Try adjusting your search terms.")
-                    .build()
-            } else {
-                el(El::Div).st([St::SpaceYSm]).append(
-                    results
-                        .iter()
-                        .map(build_search_result_card)
-                        .collect::<Vec<_>>(),
-                )
-            },
-        ])
-        .build()
-}
-
-fn build_search_result_card(result: &SearchResult) -> ElementBuilder {
-    let card = Card::new()
-        .shadow(CardShadow::None)
-        .child(
-            Stack::column()
-                .gap(Gap::Xs)
-                .children([
-                    el(El::H3)
-                        .st([St::FontMedium, St::TextAccent])
-                        .text(&result.title),
-                    el(El::P)
-                        .st([St::TextXs, St::TextMuted])
-                        .text(&result.section),
-                    el(El::P).st([St::TextSm]).text(&result.snippet),
-                ])
-                .build(),
-        )
-        .build();
-
-    Link::to_with_content(&result.path, card)
-        .st([
-            St::NoDecoration,
-            St::CursorPointer,
-            St::RoundedLg,
-            St::TransitionColors,
-        ])
-        .hover([St::BgHover])
 }
 
 // ============================================================================
