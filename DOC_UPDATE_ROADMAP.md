@@ -39,8 +39,8 @@ The docs were written in the project's first two weeks. The framework overhaul o
 | P0 | Compile-breaking & false headline numbers | 9 | ✅ 9 / 9 |
 | P1 | Architecture rewrites | 7 | ✅ 7 / 7 |
 | P2 | Inventory & stale numbers | 7 | ✅ 7 / 7 |
-| P3 | Verification & coverage gaps (links, README) | 2 | ✅ 2 / 2 |
-| — | **Total** | **27** | **✅ 27 / 27** |
+| P3 | Verification & coverage gaps (links, README, CLAUDE.md) | 3 | ✅ 3 / 3 |
+| — | **Total** | **28** | **✅ 28 / 28** |
 
 > **Phase Pre gates the size numbers.** Several doc/copy claims are about runtime/capsule
 > size (P0-2, P2-7). We do not want to document the *current* number and then immediately change
@@ -309,6 +309,12 @@ and out-of-scope content the audit didn't reach.
   - "tree-shaken per app" / "720+ tokens" → lazy-over-wire / "700+ tokens"
   - "52 components" (×2) → 51; todo-combined "SQLite persistence" → "JSON file persistence"
   - Quick-start snippet already used `#[async_std::main]` + `.run().await` (no change needed)
+
+- [x] **P3-3 · Reconcile `CLAUDE.md`** ✅ done (internal AI-instructions file)
+  - "~1.5KB runtime" (×2) → "~13KB"; "52 components" → 51; `ThemeStyle::Soft` → `ThemeStyle::soft()`
+  - "Tree Shaking" section + design-decision #3 → lazy `MAP_DEF`/`STYLE_DEF` delivery (no static pass)
+  - crate-structure comments (builder.rs / capsule_gen.rs) → lazy CSS/name-map prefixes
+  - protocol opcode table → added `STYLE_DEF` (0x87) + `MAP_DEF` (0x88), noted varint encoding
 
 ---
 

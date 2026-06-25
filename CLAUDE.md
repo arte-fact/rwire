@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-rwire is a WebSocket-based UI framework where the server owns all state and renders DOM via a compact binary protocol. The browser runs a minimal ~1.5KB JavaScript runtime that executes DOM opcodes and sends events back to the server.
+rwire is a WebSocket-based UI framework where the server owns all state and renders DOM via a compact binary protocol. The browser runs a small (~13KB) JavaScript runtime that executes DOM opcodes and sends events back to the server.
 
 ## Quick Start
 
@@ -15,7 +15,7 @@ cargo run -p counter
 ## Architecture
 
 ```
-Server (Rust)                    Browser (JS ~1.5KB)
+Server (Rust)                    Browser (JS ~13KB)
 ┌─────────────────┐              ┌─────────────────┐
 │ State + Logic   │  ──binary──> │ Opcode Executor │
 │ ElementBuilder  │  <──events── │ Event Sender    │
@@ -30,9 +30,9 @@ Server (Rust)                    Browser (JS ~1.5KB)
 rwire/
 ├── libs/
 │   ├── rwire/               # Core framework library
-│   │   ├── builder.rs       # Fluent el() API, BuildContext, tree-shaking
+│   │   ├── builder.rs       # Fluent el() API, BuildContext, lazy CSS/name-map prefixes
 │   │   ├── capsule.rs       # HTTP serving for capsule HTML
-│   │   ├── capsule_gen.rs   # JS runtime generation with tree-shaking
+│   │   ├── capsule_gen.rs   # JS runtime generation; lazy CSS + name-map delivery
 │   │   ├── config.rs        # Server configuration (bind address, max connections)
 │   │   ├── form.rs          # Form builder and validation rules
 │   │   ├── health.rs        # Health check endpoints (/health, /ready)
@@ -58,7 +58,7 @@ rwire/
 │   │       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
 │   │       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
-│   ├── rwire-components/    # UI component library (52 components)
+│   ├── rwire-components/    # UI component library (51 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
 │   └── rwire-themes/        # Predefined styles and palettes
 ├── apps/
@@ -76,12 +76,13 @@ rwire/
 ## Binary Protocol
 
 Single-byte opcodes followed by arguments. Strings are interned in a symbol table.
+`ref`, symbol index, and handler index are varint-encoded (1-3 bytes); type codes are single bytes.
 
 | Opcode | Hex | Format | Description |
 |--------|-----|--------|-------------|
-| SYMBOLS | 0xF0 | `[count, len, bytes...]` | Symbol table |
+| SYMBOLS | 0xF0 | `[count, len, bytes...]` (varints) | Symbol table |
 | GET_BY_ID | 0x01 | `[sym]` | Get element by ID |
-| CREATE | 0x02 | `[type]` | Create element |
+| CREATE | 0x02 | `[type]` | Create element (type→name via MAP_DEF) |
 | SET_CLASS | 0x10 | `[ref, sym]` | Set className |
 | SET_TEXT | 0x11 | `[ref, sym]` | Set textContent |
 | SET_ATTR | 0x12 | `[ref, attr, val]` | setAttribute |
@@ -91,9 +92,15 @@ Single-byte opcodes followed by arguments. Strings are interned in a symbol tabl
 | BIND_REMOTE | 0x31 | `[ref, ev, handler]` | Server round-trip event |
 | BIND_DEBOUNCED | 0x33 | `[ref, ev, handler, ms_hi, ms_lo]` | Debounced event |
 | BIND_REMOTE_PARAM | 0x34 | `[ref, ev, handler, len, params...]` | Event with item params |
+| STYLE_DEF | 0x87 | `[count, (rule_len, rule)...]` | Lazy CSS rule delivery |
+| MAP_DEF | 0x88 | `[count, (kind, code, len, name)...]` | Lazy name-map delivery |
 | BATCH_END | 0xFF | | End of message |
 
 Symbol indices: 0x00-0x7F reserved (e.g., 0x04="id"), 0x80-0xFF session-specific.
+
+The capsule ships empty name maps and only global CSS; `MAP_DEF` (element/event/attr/style-token
+names) and `STYLE_DEF` (utility/pseudo/breakpoint rules) stream over the wire the first time a
+connection references each, deduped per connection (`ConnectionState.sent_maps` / `sent_css`).
 
 ## Key Patterns
 
@@ -213,12 +220,16 @@ struct AppState { count: i32 }
 struct UserData { name: String }
 ```
 
-## Tree Shaking
+## Capsule Size (lazy delivery)
 
-The capsule JS is generated with only used element/event types:
-- `BuildContext::collect_symbols()` tracks `used_elements` and `used_events`
-- `capsule_gen::generate_capsule()` filters `ELEMENT_MAPPINGS` and `EVENT_MAPPINGS`
-- Result: Counter app capsule is ~1.5KB instead of ~2KB
+The capsule is just the runtime — there is no static tree-shaking pass. The name maps and CSS
+stream over the wire on first use:
+- Capsule ships empty maps (`const E={},V={}...`) and only global CSS (reset, vars, theme, composites)
+- `MAP_DEF` (0x88) delivers element/event/attr/style-token names; `STYLE_DEF` (0x87) delivers
+  utility/pseudo/breakpoint CSS — both the first time a connection references them, deduped via
+  `ConnectionState.sent_maps` / `sent_css` (see `map_def_prefix` / `style_def_prefix` in builder.rs)
+- Result: a minimal app's capsule is ~17KB (~13KB runtime + ~4KB global CSS); per connection, a
+  one-time ~0.5KB stream of only the names it uses
 
 ## Theme System
 
@@ -250,7 +261,7 @@ Define a theme with the `#[theme]` macro and pass it to the server:
 ```rust
 #[theme]
 fn app_theme() -> Theme {
-    Theme::dark().accent("#5E81AC").style(ThemeStyle::Soft)
+    Theme::dark().accent("#5E81AC").style(ThemeStyle::soft())
 }
 
 Server::bind("127.0.0.1:9000")?
@@ -422,7 +433,7 @@ Kill existing process: `fuser -k 9000/tcp`
 
 2. **Binary protocol**: Compact, fast to parse, symbol interning reduces repetition.
 
-3. **Tree shaking at startup**: Analyze root once, serve minimal capsule to all clients.
+3. **Lazy delivery**: the capsule is just the runtime; names (`MAP_DEF`) and CSS (`STYLE_DEF`) stream over the wire on first use, deduped per connection. No static tree-shaking.
 
 4. **ItemRef for dynamic content**: Type-safe item binding without runtime string parsing or data attributes.
 
