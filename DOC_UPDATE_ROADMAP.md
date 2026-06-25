@@ -39,8 +39,8 @@ The docs were written in the project's first two weeks. The framework overhaul o
 | P0 | Compile-breaking & false headline numbers | 9 | ✅ 9 / 9 |
 | P1 | Architecture rewrites | 7 | ✅ 7 / 7 |
 | P2 | Inventory & stale numbers | 7 | ✅ 7 / 7 |
-| P3 | Verification & coverage gaps (links, README, CLAUDE.md, visual QA) | 4 | ✅ 4 / 4 |
-| — | **Total** | **29** | **✅ 29 / 29** |
+| P3 | Verification & coverage gaps (links, README, CLAUDE.md, visual QA, component QA) | 5 | ✅ 5 / 5 |
+| — | **Total** | **30** | **✅ 30 / 30** |
 
 > **Phase Pre gates the size numbers.** Several doc/copy claims are about runtime/capsule
 > size (P0-2, P2-7). We do not want to document the *current* number and then immediately change
@@ -324,6 +324,21 @@ and out-of-scope content the audit didn't reach.
   - **Zero console errors** throughout
   - **Caught a real bug:** the component count is **50**, not 51 (the design-system hero showed the
     correct dynamic count). Fixed the hardcoded "51" in website/README/CLAUDE.md (→ P2-1 note).
+
+- [x] **P3-5 · Full component-library QA (all 50, params × themes × palettes)** ✅ done
+  Drove the running design-system through every component page (Playwright), measuring each demo's
+  rendered footprint + console errors, in light and dark, and verified palette switching.
+  - **Zero console errors** on all 50 pages.
+  - **Found & fixed 2 library bugs:** `Progress` and multi-line `Skeleton` collapsed to ~0 width in
+    a shrink-to-fit (flex-centered) context — their containers were auto-width with percentage/
+    `WFull` content (progress demo measured 8×8px, skeleton 0×64px). Added `St::WFull` to the
+    progress container (`progress.rs`) and the skeleton multi-line column (`skeleton.rs`) so they
+    span their parent — correct behavior everywhere, not just the playground.
+  - Post-fix sweep: **no collapses** across all 50 (≥16px footprint each).
+  - **Dark mode:** all 50 render with good contrast. **Palettes:** switching remaps accent +
+    neutrals correctly (verified `--v` indigo → Nord). Params (variants/bool props) re-render the
+    live preview + code snippet.
+  - `cargo test -p rwire-components` (239 tests) green; clippy clean.
 
 ---
 

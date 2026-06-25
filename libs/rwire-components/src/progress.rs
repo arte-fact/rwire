@@ -76,8 +76,11 @@ impl Progress {
     }
 
     /// Compute style tokens for the progress container.
+    ///
+    /// `WFull` makes the bar span its container — without it the track is auto-width and
+    /// collapses to nothing in a shrink-to-fit (e.g. flex-centered) context.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::BgMuted, St::RoundedFull, St::OverflowHidden]
+        vec![St::WFull, St::BgMuted, St::RoundedFull, St::OverflowHidden]
     }
 
     /// Build the progress bar into an ElementBuilder.
