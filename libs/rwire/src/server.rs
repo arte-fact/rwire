@@ -7,7 +7,8 @@
 use async_std::future::timeout;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
-use async_tungstenite::accept_async;
+use async_tungstenite::accept_async_with_config;
+use async_tungstenite::tungstenite::protocol::WebSocketConfig;
 use async_tungstenite::tungstenite::Message;
 use futures::prelude::*;
 use std::any::{Any, TypeId};
@@ -19,12 +20,14 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::builder::{
-    build_synced_update_with_known_symbols, extract_renderers, BuildContext, ElementBuilder,
-    SyncedElement,
+    build_synced_update_with_known_symbols, extract_renderers, BuildContext, ClientActionIndices,
+    ElementBuilder, SyncedElement,
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
+use crate::config::ServerConfig;
 use crate::protocol::ClientEvent;
+use crate::registry::{AdmissionError, ConnectionRegistry};
 use crate::session::SessionId;
 use crate::state::{ChangeSet, EventContext, HandlerFn, HandlerSpec, State, StorageType};
 use crate::theme::ThemeProvider;
@@ -52,6 +55,30 @@ struct CachedSession {
     states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
     cached_at: Instant,
 }
+
+/// Upper bound on disconnected-session states retained for reconnection. Caps the
+/// memory an attacker can pin by churning connections within the eviction TTL.
+const MAX_CACHED_SESSIONS: usize = 10_000;
+
+/// Maximum size of an incoming WebSocket message/frame the server will buffer.
+/// Client→server traffic is small (binary events, route strings; the protocol
+/// decoder caps a parsed payload at 64KB), so a few hundred KB is generous while
+/// far below tungstenite's 64 MiB / 16 MiB defaults. Limits reads only.
+const MAX_WS_MESSAGE_SIZE: usize = 256 * 1024;
+const MAX_WS_FRAME_SIZE: usize = 256 * 1024;
+
+/// Per-connection inbound-event rate limit (token bucket). Capacity is the burst
+/// allowance; refill is the sustained rate. 100/s with a 100-event burst is far
+/// above human interaction (clicks, typing, even a 60 fps drag) yet caps a
+/// well-formed event flood that would otherwise drive unbounded render/broadcast work.
+const EVENT_BUCKET_CAPACITY: f64 = 100.0;
+const EVENT_REFILL_PER_SEC: f64 = 100.0;
+
+/// Per-connection ceiling on the interned symbol table (distinct strings sent to
+/// the client). The table can't be evicted safely (wire indices are positional),
+/// so a connection that exceeds this is dropped rather than allowed to grow without
+/// bound. Set far above any realistic app vocabulary; a reconnect resets the table.
+const MAX_SENT_SYMBOLS: usize = 50_000;
 
 /// Shared state across all connections.
 ///
@@ -354,6 +381,11 @@ impl SharedServerState {
     }
 
     /// Cache session state on disconnect for later reconnection.
+    ///
+    /// The cache is bounded to [`MAX_CACHED_SESSIONS`]: if inserting would exceed
+    /// it, the oldest entry is evicted first. Without this bound, an attacker
+    /// looping connect → disconnect with a fresh cookie each time would accumulate
+    /// per-session state for the full 5-minute TTL with no ceiling (memory DoS).
     pub fn cache_session(
         &self,
         session_id: &str,
@@ -362,16 +394,30 @@ impl SharedServerState {
         if states.is_empty() {
             return;
         }
-        self.session_state_cache
+        let mut cache = self
+            .session_state_cache
             .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                session_id.to_string(),
-                CachedSession {
-                    states,
-                    cached_at: Instant::now(),
-                },
-            );
+            .unwrap_or_else(|e| e.into_inner());
+
+        // Evict the oldest entry when at capacity (and this is a new session id,
+        // so the insert would grow the map rather than replace in place).
+        if cache.len() >= MAX_CACHED_SESSIONS && !cache.contains_key(session_id) {
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, c)| c.cached_at)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            }
+        }
+
+        cache.insert(
+            session_id.to_string(),
+            CachedSession {
+                states,
+                cached_at: Instant::now(),
+            },
+        );
     }
 
     /// Restore cached session state on reconnect (removes from cache).
@@ -582,6 +628,7 @@ pub struct ServerWithRoot<F> {
     router: Option<crate::router::Router>,
     theme_provider: Option<ThemeProvider>,
     auth: Option<AuthGate>,
+    config: ServerConfig,
 }
 
 impl Server {
@@ -623,6 +670,7 @@ impl ServerBuilder {
             router: None,
             theme_provider: None,
             auth: None,
+            config: ServerConfig::default(),
         }
     }
 }
@@ -682,6 +730,16 @@ where
     /// The capsule will include tree-shaken CSS for only the components used.
     pub fn capsule_config(mut self, config: CapsuleConfig) -> Self {
         self.capsule_config = Some(config);
+        self
+    }
+
+    /// Configure connection limits and timeouts (admission control).
+    ///
+    /// Sets the total/per-IP connection caps enforced before each WebSocket
+    /// upgrade, and the limits surfaced by the `/health` and `/ready` endpoints.
+    /// Defaults to [`ServerConfig::default`] (10k total, 100 per IP).
+    pub fn config(mut self, config: ServerConfig) -> Self {
+        self.config = config;
         self
     }
 
@@ -870,6 +928,16 @@ where
             println!("Auth: HTTP Basic enabled");
         }
 
+        // Admission control: a shared registry tracks live connections so the
+        // accept loop can reject over-limit clients (total + per-IP) before doing
+        // any per-connection work, and the /health and /ready endpoints can report.
+        let registry = Arc::new(ConnectionRegistry::new());
+        let config = Arc::new(self.config);
+        println!(
+            "Limits: {} total, {} per IP",
+            config.max_connections, config.max_connections_per_ip
+        );
+
         // Spawn session eviction task (5-minute TTL)
         {
             let shared = Arc::clone(&shared);
@@ -884,6 +952,8 @@ where
             let initial_theme = initial_theme.clone();
             let composite_table = Arc::clone(&composite_table);
             let auth = Arc::clone(&auth);
+            let registry = Arc::clone(&registry);
+            let config = Arc::clone(&config);
             task::spawn(async move {
                 handle_client(
                     stream,
@@ -895,6 +965,8 @@ where
                     initial_theme,
                     composite_table,
                     auth,
+                    registry,
+                    config,
                 )
                 .await;
             });
@@ -1108,6 +1180,25 @@ fn extract_cookie_from_request(request: &str) -> Option<String> {
     None
 }
 
+/// True if the client-facing connection is HTTPS, per the `X-Forwarded-Proto`
+/// header a TLS-terminating proxy sets.
+///
+/// rwire serves plain HTTP itself, so this header is the signal used to decide
+/// whether the session cookie should carry `Secure` (the cookie must not be
+/// `Secure` over plain HTTP or the browser drops it). A proxy chain may send a
+/// comma-separated list; the first (original client) value is authoritative.
+fn forwarded_https(request: &str) -> bool {
+    for line in request.lines() {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("x-forwarded-proto") {
+                let proto = value.split(',').next().unwrap_or("").trim();
+                return proto.eq_ignore_ascii_case("https");
+            }
+        }
+    }
+    false
+}
+
 /// Build the capsule config used to render the static login page: the app theme
 /// (for `:root` vars) plus the composite classes, so the login uses the design
 /// system. Cheap enough to build per login-page render (a rare request).
@@ -1133,6 +1224,8 @@ async fn handle_client<F>(
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
     auth: Arc<Option<AuthGate>>,
+    registry: Arc<ConnectionRegistry>,
+    config: Arc<ServerConfig>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -1147,6 +1240,27 @@ async fn handle_client<F>(
     };
 
     let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
+
+    // Health/readiness probes: answered before auth and admission so load
+    // balancers and orchestrators can reach them without a session and even
+    // while the server is at capacity.
+    if peek_str.starts_with("GET ") {
+        let (_, path) = request_line(&peek_str);
+        if path == "/health" || path == "/ready" {
+            let mut drain = vec![0u8; n];
+            let _ = stream.read_exact(&mut drain).await;
+            let max = config.max_connections;
+            let result = if path == "/health" {
+                crate::health::serve_health(stream, &registry, max).await
+            } else {
+                crate::health::serve_ready(stream, &registry, max).await
+            };
+            if let Err(e) = result {
+                eprintln!("[{}] {} endpoint error: {}", peer_addr, path, e);
+            }
+            return;
+        }
+    }
 
     // Auth gate (page + WebSocket): handle the login lifecycle and reject any
     // request that lacks a valid session cookie.
@@ -1201,27 +1315,56 @@ async fn handle_client<F>(
         // Valid session: fall through to normal capsule/WebSocket handling.
     }
 
-    // Extract session ID from cookie, or generate new one
-    let (session_id, is_new_session) =
-        if let Some(cookie_value) = extract_cookie_from_request(&peek_str) {
-            if let Some(sid) = SessionId::from_cookie(&cookie_value) {
-                println!("[{}] Found session: {}", peer_addr, sid);
-                (sid, false)
-            } else {
-                let sid = SessionId::generate();
-                println!("[{}] New session (no valid cookie): {}", peer_addr, sid);
-                (sid, true)
-            }
-        } else {
+    // Extract the session ID from the cookie, but only trust it if it has the
+    // exact format we mint (32 hex chars). A missing, malformed, or crafted value
+    // (e.g. one containing `:` to confuse the persisted-state cache key, or an
+    // attempt at session fixation) yields a fresh server-generated id instead.
+    let (session_id, is_new_session) = match extract_cookie_from_request(&peek_str)
+        .and_then(|c| SessionId::from_cookie(&c))
+        .filter(|sid| sid.is_valid_format())
+    {
+        Some(sid) => {
+            println!("[{}] Found session: {}", peer_addr, sid);
+            (sid, false)
+        }
+        None => {
             let sid = SessionId::generate();
             println!("[{}] New session: {}", peer_addr, sid);
             (sid, true)
-        };
+        }
+    };
 
     // Check if this is a WebSocket upgrade request
     if capsule::is_websocket_upgrade(&peek_str) {
+        // Admission control: enforce total and per-IP connection caps before
+        // spawning the (long-lived, stateful) WebSocket session. Rejected clients
+        // get a 503 instead of an upgrade.
+        let ip = peer_addr.ip();
+        if let Err(reason) =
+            registry.check_admission(ip, config.max_connections, config.max_connections_per_ip)
+        {
+            let why = match reason {
+                AdmissionError::AtCapacity => "at_capacity",
+                AdmissionError::TooManyFromIp => "too_many_from_ip",
+            };
+            println!("[{}] WebSocket rejected: {}", peer_addr, why);
+            let _ = crate::health::serve_unavailable(stream, why).await;
+            return;
+        }
+        // Held for the lifetime of the connection; the guard decrements the
+        // registry counts on drop (normal close, error, or panic).
+        let _conn_guard = registry.register(ip);
+
         println!("[{}] WebSocket connection", peer_addr);
-        match accept_async(stream).await {
+        // Bound incoming message/frame size so a malicious client can't make the
+        // WebSocket layer buffer a huge frame before our 64KB protocol decode runs.
+        // These limit reads only (server→client DOM messages are unaffected).
+        let ws_config = WebSocketConfig {
+            max_message_size: Some(MAX_WS_MESSAGE_SIZE),
+            max_frame_size: Some(MAX_WS_FRAME_SIZE),
+            ..Default::default()
+        };
+        match accept_async_with_config(stream, Some(ws_config)).await {
             Ok(ws_stream) => {
                 if let Err(e) = handle_websocket(
                     ws_stream,
@@ -1253,7 +1396,19 @@ async fn handle_client<F>(
 
         // Serve capsule HTML (CSS is embedded in <style> tag)
         println!("[{}] HTTP request - serving capsule", peer_addr);
-        if let Err(e) = capsule::serve(stream, &capsule, Some(&session_id), is_new_session).await {
+        // Mark the session cookie `Secure` when the client-facing connection is
+        // HTTPS (auto-detected from the proxy's X-Forwarded-Proto), or when the
+        // config forces it on. Off for plain-HTTP dev so the cookie isn't dropped.
+        let secure_cookie = config.secure_cookies || forwarded_https(&peek_str);
+        if let Err(e) = capsule::serve(
+            stream,
+            &capsule,
+            Some(&session_id),
+            is_new_session,
+            secure_cookie,
+        )
+        .await
+        {
             eprintln!("[{}] Failed to serve capsule: {}", peer_addr, e);
         }
     } else {
@@ -1289,6 +1444,15 @@ struct ConnectionState {
     /// `(category, code)` name-map entries already delivered to this client (lazy names).
     /// Each is sent once via `MAP_DEF` the first time its code is referenced.
     sent_maps: HashSet<(u8, u8)>,
+    /// Target/selector slot indices assigned during the initial render. Synced
+    /// updates reuse these to re-bind regenerated elements to the client-side
+    /// action state set up by the initial DOM's INIT_TARGET/INIT_SELECTOR opcodes.
+    client_actions: ClientActionIndices,
+    /// Token-bucket allowance for inbound events (rate limiting). Refilled lazily
+    /// based on elapsed time; each processed event/route message consumes one token.
+    event_tokens: f64,
+    /// When `event_tokens` was last refilled.
+    last_event_refill: Instant,
 }
 
 impl ConnectionState {
@@ -1304,6 +1468,31 @@ impl ConnectionState {
             synced_hashes: HashMap::new(),
             sent_css: HashSet::new(),
             sent_maps: HashSet::new(),
+            client_actions: ClientActionIndices::default(),
+            // Start with a full bucket so a fresh connection can burst.
+            event_tokens: EVENT_BUCKET_CAPACITY,
+            last_event_refill: Instant::now(),
+        }
+    }
+
+    /// Token-bucket rate limit for inbound client messages.
+    ///
+    /// Returns true if the message is within budget (and consumes a token), false
+    /// if it should be dropped. Refills `EVENT_REFILL_PER_SEC` tokens/second up to
+    /// `EVENT_BUCKET_CAPACITY`, allowing brief human-speed bursts while capping a
+    /// flood of well-formed events (each of which would otherwise run a handler,
+    /// re-render synced regions, and possibly broadcast to every connection).
+    fn allow_event(&mut self) -> bool {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_event_refill).as_secs_f64();
+        self.last_event_refill = now;
+        self.event_tokens =
+            (self.event_tokens + elapsed * EVENT_REFILL_PER_SEC).min(EVENT_BUCKET_CAPACITY);
+        if self.event_tokens >= 1.0 {
+            self.event_tokens -= 1.0;
+            true
+        } else {
+            false
         }
     }
 
@@ -1548,6 +1737,9 @@ where
         conn_state.synced_elements = ctx.take_synced_elements();
         // Capture sent symbols for incremental updates
         conn_state.sent_symbols = ctx.take_symbol_map();
+        // Capture client-action slot indices so synced updates can re-bind
+        // regenerated elements to the same client-side target/selector state.
+        conn_state.client_actions = ctx.client_action_indices();
 
         // Prepend STYLE_DEF for the styles this initial render uses (lazy CSS):
         // the capsule ships only global CSS; class rules arrive over the wire.
@@ -1576,6 +1768,22 @@ where
     let mut broadcast_open = true;
 
     loop {
+        // Symbol-table ceiling (memory DoS guard): `sent_symbols` interns each
+        // distinct text/class string sent to this client and is never evicted (the
+        // wire indices are positional, so eviction would desync the client table).
+        // A connection fed a torrent of unique strings (e.g. echoed user text) would
+        // otherwise grow it without bound. Past the cap, drop the connection — a
+        // reconnect starts the table fresh. The cap is far above any normal app's
+        // string vocabulary, and the inbound rate limit (above) bounds how fast an
+        // attacker can approach it.
+        if conn_state.sent_symbols.len() > MAX_SENT_SYMBOLS {
+            eprintln!(
+                "[{}] Symbol table exceeded {} entries, disconnecting",
+                peer_addr, MAX_SENT_SYMBOLS
+            );
+            break;
+        }
+
         // Race the client read against the broadcast channel. A broadcast means
         // some state changed outside this connection's events (a background task
         // via `notify_all`, or another connection's persisted write); re-render
@@ -1632,6 +1840,7 @@ where
                             Some(&mut conn_state.sent_maps),
                             None,
                             0,
+                            Some(&conn_state.client_actions),
                         )
                     };
 
@@ -1668,6 +1877,14 @@ where
             Ok(Message::Binary(data)) => match ClientEvent::decode(&data) {
                 Ok(event) => {
                     consecutive_decode_errors = 0;
+
+                    // Rate limit: drop well-formed events that exceed the per-connection
+                    // token bucket before doing any handler/render/broadcast work. The
+                    // client-side debounce is only advisory, so this is enforced here.
+                    if !conn_state.allow_event() {
+                        continue;
+                    }
+
                     println!(
                         "[{}] Event: handler=0x{:02X} type={} target_ref={}",
                         peer_addr,
@@ -1775,6 +1992,7 @@ where
                                 Some(&mut conn_state.sent_maps),
                                 None,
                                 0,
+                                Some(&conn_state.client_actions),
                             )
                             // cache_guard dropped here at end of block
                         };
@@ -1819,6 +2037,11 @@ where
                 }
             },
             Ok(Message::Text(text)) => {
+                // Route changes also drive a re-render (and possibly a broadcast), so
+                // they draw from the same per-connection rate budget as events.
+                if !conn_state.allow_event() {
+                    continue;
+                }
                 if let Some(path) = text.strip_prefix('R') {
                     // Built-in router: update CurrentRoute so the outlet re-renders the
                     // matched view, then reconcile the view's renderer registrations so
@@ -1925,6 +2148,7 @@ where
                                 Some(&mut conn_state.sent_maps),
                                 Some(&mut discovered),
                                 synced_id_floor,
+                                Some(&conn_state.client_actions),
                             )
                         };
 
@@ -2046,6 +2270,7 @@ where
                                     Some(&mut conn_state.sent_maps),
                                     None,
                                     0,
+                                    Some(&conn_state.client_actions),
                                 )
                             };
 
@@ -2127,6 +2352,50 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_cache_is_bounded() {
+        // Churning distinct sessions must not grow the reconnect cache without
+        // bound (memory DoS guard). Insert past the cap and confirm it holds.
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        for i in 0..(MAX_CACHED_SESSIONS + 50) {
+            let mut states: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+            states.insert(TypeId::of::<i32>(), Box::new(i as i32));
+            shared.cache_session(&format!("sess-{i}"), states);
+        }
+        let len = shared
+            .session_state_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len();
+        assert!(
+            len <= MAX_CACHED_SESSIONS,
+            "cache grew past cap: {len} > {MAX_CACHED_SESSIONS}"
+        );
+    }
+
+    #[test]
+    fn event_rate_limit_caps_a_flood() {
+        // A fresh connection may burst, but a tight flood is capped near the bucket
+        // capacity rather than processed unbounded.
+        let mut conn = ConnectionState::new(1, SessionId::new("a".repeat(32)));
+        let mut allowed = 0usize;
+        for _ in 0..10_000 {
+            if conn.allow_event() {
+                allowed += 1;
+            }
+        }
+        // The initial burst is honored...
+        assert!(
+            allowed >= EVENT_BUCKET_CAPACITY as usize,
+            "expected at least the burst capacity to pass, got {allowed}"
+        );
+        // ...but the flood is throttled far below the 10k attempts (tiny refill only).
+        assert!(
+            allowed < EVENT_BUCKET_CAPACITY as usize + 100,
+            "flood not capped: {allowed} allowed out of 10000"
+        );
+    }
 
     #[derive(Default)]
     struct SharedCounter {
@@ -2421,6 +2690,29 @@ mod tests {
             cookie,
             Some("foo=bar; rwire_sid=xyz789; other=value".to_string())
         );
+    }
+
+    #[test]
+    fn test_forwarded_https() {
+        // Proxy signals HTTPS → Secure cookie.
+        assert!(super::forwarded_https(
+            "GET / HTTP/1.1\r\nX-Forwarded-Proto: https\r\n\r\n"
+        ));
+        // Case-insensitive header name and value.
+        assert!(super::forwarded_https(
+            "GET / HTTP/1.1\r\nx-forwarded-proto: HTTPS\r\n\r\n"
+        ));
+        // Proxy chain: first value is authoritative.
+        assert!(super::forwarded_https(
+            "GET / HTTP/1.1\r\nX-Forwarded-Proto: https, http\r\n\r\n"
+        ));
+        // Plain HTTP (header absent or http) → not secure.
+        assert!(!super::forwarded_https(
+            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        ));
+        assert!(!super::forwarded_https(
+            "GET / HTTP/1.1\r\nX-Forwarded-Proto: http\r\n\r\n"
+        ));
     }
 
     #[test]

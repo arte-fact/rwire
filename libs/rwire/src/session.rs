@@ -36,18 +36,47 @@ impl SessionId {
         Self(id)
     }
 
-    /// Generate a new random session ID.
+    /// Generate a new session ID with 128 bits of cryptographically secure
+    /// randomness from the OS CSPRNG.
+    ///
+    /// The session ID is a bearer token for the user's persisted state (it keys
+    /// `shared_cache_key`), so it must be unguessable. Reading `/dev/urandom`
+    /// yields 16 random bytes rendered as 32 hex chars. If the OS RNG is
+    /// somehow unavailable we fall back to time-based mixing to avoid panicking,
+    /// but that path is not cryptographically secure.
     pub fn generate() -> Self {
-        // Use timestamp + random-ish value for uniqueness
+        match Self::random_hex() {
+            Some(hex) => Self(hex),
+            None => Self(Self::weak_timestamp_id()),
+        }
+    }
+
+    /// Read 16 bytes from the OS CSPRNG and hex-encode them. Returns `None` if
+    /// `/dev/urandom` cannot be read (extremely rare; triggers the weak fallback).
+    fn random_hex() -> Option<String> {
+        use std::fmt::Write as _;
+        use std::io::Read as _;
+
+        let mut buf = [0u8; 16];
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut buf))
+            .ok()?;
+
+        let mut hex = String::with_capacity(32);
+        for byte in buf {
+            let _ = write!(hex, "{byte:02x}");
+        }
+        Some(hex)
+    }
+
+    /// Non-cryptographic fallback used only when the OS RNG is unavailable.
+    fn weak_timestamp_id() -> String {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-
-        // Simple pseudo-random using timestamp mixing
-        let random = timestamp.wrapping_mul(0x5851F42D4C957F2D);
-
-        Self(format!("{:016x}{:016x}", timestamp as u64, random as u64))
+        let mixed = timestamp.wrapping_mul(0x5851F42D4C957F2D);
+        format!("{:016x}{:016x}", timestamp as u64, mixed as u64)
     }
 
     /// Parse a session ID from a cookie header value.
@@ -75,14 +104,35 @@ impl SessionId {
         &self.0
     }
 
+    /// True only if this id has the exact shape [`generate`](Self::generate)
+    /// produces: 32 hex characters.
+    ///
+    /// Used at the trust boundary to reject client-supplied cookie values before
+    /// they are used as a persisted-state cache key. Requiring hex rules out a
+    /// crafted value containing `:` (which could collide with the `__shared__:`
+    /// key namespace) and bounds the length, mitigating session fixation and
+    /// cache-key injection.
+    pub fn is_valid_format(&self) -> bool {
+        self.0.len() == 32 && self.0.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+
     /// Create a Set-Cookie header value for this session ID.
-    pub fn to_cookie(&self, max_age: Option<Duration>) -> String {
-        self.to_cookie_named(COOKIE_NAME, max_age)
+    ///
+    /// When `secure` is true the `Secure` attribute is added so the cookie is
+    /// only sent over HTTPS — enable it when the server is reachable over TLS
+    /// (e.g. behind a TLS-terminating proxy); leave it off for plain-HTTP local
+    /// development, where `Secure` would prevent the cookie being sent at all.
+    pub fn to_cookie(&self, max_age: Option<Duration>, secure: bool) -> String {
+        self.to_cookie_named(COOKIE_NAME, max_age, secure)
     }
 
     /// Create a Set-Cookie header value with a custom cookie name.
-    pub fn to_cookie_named(&self, name: &str, max_age: Option<Duration>) -> String {
+    pub fn to_cookie_named(&self, name: &str, max_age: Option<Duration>, secure: bool) -> String {
         let mut cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Strict", name, self.0);
+
+        if secure {
+            cookie.push_str("; Secure");
+        }
 
         if let Some(age) = max_age {
             cookie.push_str(&format!("; Max-Age={}", age.as_secs()));
@@ -205,6 +255,27 @@ mod tests {
     }
 
     #[test]
+    fn test_session_id_is_128bit_hex() {
+        // 16 random bytes rendered as lowercase hex => 32 chars, all hex digits.
+        let id = SessionId::generate();
+        assert_eq!(id.as_str().len(), 32, "expected 128-bit hex id");
+        assert!(
+            id.as_str().bytes().all(|b| b.is_ascii_hexdigit()),
+            "session id must be hex: {}",
+            id.as_str()
+        );
+    }
+
+    #[test]
+    fn test_session_id_high_entropy_no_collisions() {
+        // A predictable/time-derived generator collides under tight loops; a CSPRNG
+        // does not. Generate many in quick succession and require all distinct.
+        use std::collections::HashSet;
+        let ids: HashSet<String> = (0..10_000).map(|_| SessionId::generate().0).collect();
+        assert_eq!(ids.len(), 10_000, "session ids must be unique");
+    }
+
+    #[test]
     fn test_session_id_from_cookie() {
         let cookie = "rwire_sid=abc123; other=value";
         let id = SessionId::from_cookie(cookie);
@@ -225,17 +296,36 @@ mod tests {
     #[test]
     fn test_session_id_to_cookie() {
         let id = SessionId::new("test123".to_string());
-        let cookie = id.to_cookie(Some(Duration::from_secs(3600)));
+        let cookie = id.to_cookie(Some(Duration::from_secs(3600)), false);
 
         assert!(cookie.contains("rwire_sid=test123"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("Max-Age=3600"));
+        // Secure omitted by default (plain-HTTP dev).
+        assert!(!cookie.contains("Secure"));
+    }
+
+    #[test]
+    fn test_session_id_to_cookie_secure() {
+        let id = SessionId::new("test123".to_string());
+        let cookie = id.to_cookie(Some(Duration::from_secs(3600)), true);
+        assert!(cookie.contains("; Secure"));
+    }
+
+    #[test]
+    fn test_session_id_is_valid_format() {
+        // A freshly generated id passes; crafted/short/`:`-bearing values do not.
+        assert!(SessionId::generate().is_valid_format());
+        assert!(!SessionId::new("abc123".to_string()).is_valid_format()); // too short
+        assert!(!SessionId::new("__shared__:shared_counter".to_string()).is_valid_format());
+        assert!(!SessionId::new("z".repeat(32)).is_valid_format()); // non-hex
+        assert!(SessionId::new("a".repeat(32)).is_valid_format());
     }
 
     #[test]
     fn test_session_cookie_roundtrip() {
         let id = SessionId::generate();
-        let set_cookie = id.to_cookie(Some(Duration::from_secs(3600)));
+        let set_cookie = id.to_cookie(Some(Duration::from_secs(3600)), false);
 
         // Simulate browser sending cookie back (just the name=value part)
         let cookie_value = format!("{}={}", COOKIE_NAME, id.as_str());

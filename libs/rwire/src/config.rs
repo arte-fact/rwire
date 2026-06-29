@@ -18,6 +18,16 @@ pub struct ServerConfig {
 
     /// Maximum memory per connection state in bytes. Default: 1MB
     pub state_memory_limit: usize,
+
+    /// Force the `Secure` attribute on the session cookie regardless of the
+    /// request scheme. Default: false.
+    ///
+    /// Normally this is unnecessary: the server auto-detects HTTPS from the
+    /// proxy's `X-Forwarded-Proto` header and marks the cookie `Secure` then,
+    /// while leaving it off for plain-HTTP dev (where a `Secure` cookie would be
+    /// dropped by the browser). Set this only to force `Secure` on in a setup
+    /// that doesn't send that header.
+    pub secure_cookies: bool,
 }
 
 impl Default for ServerConfig {
@@ -27,6 +37,7 @@ impl Default for ServerConfig {
             max_connections_per_ip: 100,
             idle_timeout: Duration::from_secs(300),
             state_memory_limit: 1024 * 1024, // 1MB
+            secure_cookies: false,
         }
     }
 }
@@ -58,6 +69,13 @@ impl ServerConfig {
     /// Set the maximum memory per connection state.
     pub fn state_memory_limit(mut self, limit: usize) -> Self {
         self.state_memory_limit = limit;
+        self
+    }
+
+    /// Force the `Secure` attribute on the session cookie even without an
+    /// `X-Forwarded-Proto: https` header (which is otherwise auto-detected).
+    pub fn secure_cookies(mut self, secure: bool) -> Self {
+        self.secure_cookies = secure;
         self
     }
 }

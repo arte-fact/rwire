@@ -2121,6 +2121,18 @@ impl BuildContext {
         self.has_client_actions
     }
 
+    /// Snapshot the target/selector index assignments made during this render.
+    ///
+    /// Synced updates re-render regions with a free `emit_update_element` that has
+    /// no `BuildContext`, so the connection keeps this snapshot to re-emit
+    /// `BIND_TARGET`/`BIND_SELECTOR`/etc against the same client-side slots.
+    pub fn client_action_indices(&self) -> ClientActionIndices {
+        ClientActionIndices {
+            targets: self.target_indices.clone(),
+            selectors: self.selector_indices.clone(),
+        }
+    }
+
     /// Get or assign a u8 index for a target TypeId.
     fn get_or_create_target_idx(&mut self, type_id: TypeId, default: bool) -> u8 {
         if let Some(&idx) = self.target_indices.get(&type_id) {
@@ -2218,16 +2230,20 @@ impl Default for BuildContext {
     }
 }
 
-/// Build an update for synced elements that need to re-render.
+/// Target/selector index assignments captured from the initial render.
 ///
-/// This version uses a single state for all synced elements (backwards compatible).
-/// Re-renders all synced elements (uses `ChangeSet::all()`).
-/// Note: This version doesn't support registering new handlers during re-render.
-pub fn build_synced_update(synced: &[SyncedElement], state: &(dyn Any + Send + Sync)) -> Bytes {
-    let mut states = HashMap::new();
-    states.insert(state.type_id(), state);
-    let mut handlers = HashMap::new();
-    build_synced_update_multi(synced, &states, &mut handlers, ChangeSet::all())
+/// Client-side actions (`.target()`, `.toggle()`, `.selector()`, `.timed_toggle()`,
+/// auto-toggles) reference a per-`TypeId` `u8` slot that is `INIT`-ed once in the
+/// initial DOM. A synced re-render regenerates the elements carrying those
+/// bindings, so the connection holds this snapshot to re-emit the per-element
+/// `BIND_*` opcodes against the same slots. (The `INIT_*` opcodes are not
+/// repeated — the client retains the slots from initial render.)
+#[derive(Default, Clone)]
+pub struct ClientActionIndices {
+    /// TypeId → target slot index.
+    pub targets: HashMap<TypeId, u8>,
+    /// TypeId → selector slot index.
+    pub selectors: HashMap<TypeId, u8>,
 }
 
 /// Type alias for the optional per-connection set of CSS rules already delivered.
@@ -2257,7 +2273,7 @@ pub fn build_synced_update_multi(
     changes: ChangeSet,
 ) -> Bytes {
     build_synced_update_with_known_symbols(
-        synced, states, handlers, changes, None, None, None, None, None, None, 0,
+        synced, states, handlers, changes, None, None, None, None, None, None, 0, None,
     )
 }
 
@@ -2291,25 +2307,28 @@ pub fn build_synced_update_with_known_symbols(
     sent_maps: SentMaps<'_>,
     discovered_out: Option<&mut Vec<SyncedElement>>,
     synced_id_floor: u32,
+    client_actions: Option<&ClientActionIndices>,
 ) -> Bytes {
     let mut buf = OpcodeBuffer::new();
 
     // Collect all symbols first (but NOT synced element IDs - those use GET_SYNCED opcode)
     let mut new_symbols: Vec<String> = Vec::new();
-    let mut symbol_map: HashMap<String, u32> = HashMap::new();
 
-    // If we have known symbols, seed the symbol_map with them
-    let next_symbol_idx: u32 = if let Some(known) = &known_symbols {
-        // Copy known symbols into symbol_map
-        for (sym, idx) in known.iter() {
-            symbol_map.insert(sym.clone(), *idx);
-        }
-        // Next index is 0x80 + count of known symbols
-        0x80u32 + known.len() as u32
-    } else {
-        0x80u32
+    // Work directly on the connection's known-symbol map when present, rather than
+    // cloning the whole table in (and writing it back out) on every event. New
+    // strings are interned into this map in place and the delta tracked in
+    // `new_symbols` for the SYMBOLS_EXTEND opcode; the connection's map is thus
+    // updated as a side effect, exactly as before but without the O(N) clones.
+    // Without a known map (full render) a local map backs the same logic.
+    let had_known = known_symbols.is_some();
+    let mut local_map: HashMap<String, u32> = HashMap::new();
+    let symbol_map: &mut HashMap<String, u32> = match known_symbols {
+        Some(known) => known,
+        None => &mut local_map,
     };
 
+    // New symbols are assigned indices immediately after the ones already known.
+    let next_symbol_idx: u32 = 0x80u32 + symbol_map.len() as u32;
     let mut current_next_idx = next_symbol_idx;
 
     // Single-render path: render each synced element ONCE and cache the result.
@@ -2357,7 +2376,7 @@ pub fn build_synced_update_with_known_symbols(
                 collect_symbols_recursive_with_known(
                     &rendered,
                     &mut new_symbols,
-                    &mut symbol_map,
+                    symbol_map,
                     &mut current_next_idx,
                     &mut synced_counter,
                     states,
@@ -2375,7 +2394,7 @@ pub fn build_synced_update_with_known_symbols(
 
     // Emit symbol table if we have any NEW symbols
     if !new_symbols.is_empty() {
-        if known_symbols.is_some() {
+        if had_known {
             // Use SYMBOLS_EXTEND for incremental update
             buf.begin_symbols_extend(new_symbols.len() as u32, next_symbol_idx);
         } else {
@@ -2387,12 +2406,8 @@ pub fn build_synced_update_with_known_symbols(
         }
     }
 
-    // Update known_symbols with new symbols
-    if let Some(known) = known_symbols {
-        for (sym, idx) in symbol_map.iter() {
-            known.insert(sym.clone(), *idx);
-        }
-    }
+    // (No write-back needed: when `known_symbols` was supplied we interned new
+    // strings directly into it above, so the connection's map is already current.)
 
     // Emit pass: use cached renders (no second render call).
     //
@@ -2437,7 +2452,7 @@ pub fn build_synced_update_with_known_symbols(
                 &rendered,
                 wrapper_ref,
                 &mut buf,
-                &symbol_map,
+                &*symbol_map,
                 handlers,
                 &ids_by_type,
                 &mut next_idx_by_type,
@@ -2445,6 +2460,7 @@ pub fn build_synced_update_with_known_symbols(
                 states,
                 Some(se.id),
                 &mut discovered,
+                client_actions,
             );
         }
     }
@@ -2513,6 +2529,7 @@ fn emit_update_element(
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
     enclosing_synced: Option<u32>,
     discovered: &mut Vec<SyncedElement>,
+    client_actions: Option<&ClientActionIndices>,
 ) -> u32 {
     // Handle nested synced elements
     if let Some(renderer) = &el.synced {
@@ -2581,6 +2598,7 @@ fn emit_update_element(
                     states,
                     Some(synced_id),
                     discovered,
+                    client_actions,
                 );
             }
         }
@@ -2678,6 +2696,45 @@ fn emit_update_element(
         }
     }
 
+    // Re-emit client-side action bindings (target/selector/toggle) against the
+    // index slots captured at initial render, so elements regenerated by this
+    // synced update stay wired to the same client-side target/selector state.
+    // INIT_TARGET/INIT_SELECTOR are NOT repeated (the client keeps the slots from
+    // initial render); only the per-element BIND_* opcodes are re-emitted. A type
+    // never registered at initial render has no client slot, so it is skipped.
+    if let Some(ca) = client_actions {
+        for tb in &el.target_bindings {
+            if let Some(&idx) = ca.targets.get(&tb.type_id) {
+                buf.bind_target(ref_idx, idx, tb.st, tb.invert);
+            }
+        }
+        for tt in &el.target_toggles {
+            if let Some(&idx) = ca.targets.get(&tt.type_id) {
+                buf.bind_toggle(ref_idx, tt.ev.as_u8(), idx);
+            }
+        }
+        for sb in &el.selector_bindings {
+            if let Some(&idx) = ca.selectors.get(&sb.type_id) {
+                buf.bind_selector(ref_idx, idx, sb.match_val, sb.st);
+            }
+        }
+        for ss in &el.selector_sets {
+            if let Some(&idx) = ca.selectors.get(&ss.type_id) {
+                buf.bind_select(ref_idx, ss.ev.as_u8(), idx, ss.val);
+            }
+        }
+        for tt in &el.timed_toggles {
+            if let Some(&idx) = ca.targets.get(&tt.type_id) {
+                buf.bind_timed_toggle(ref_idx, tt.ev.as_u8(), idx, tt.delay_ms);
+            }
+        }
+        for at in &el.auto_toggles {
+            if let Some(&idx) = ca.targets.get(&at.type_id) {
+                buf.auto_toggle(idx, at.delay_ms);
+            }
+        }
+    }
+
     // Recursively emit children (same enclosing region — regular elements are not a
     // synced boundary).
     for child in &el.children {
@@ -2693,6 +2750,7 @@ fn emit_update_element(
             states,
             enclosing_synced,
             discovered,
+            client_actions,
         );
     }
 
@@ -2813,5 +2871,70 @@ mod map_def_tests {
         assert_eq!(bytes[0], MAP_DEF);
         assert_eq!(bytes[2], 6, "svg element uses kind 6");
         assert_eq!(bytes[3], 0x18);
+    }
+}
+
+#[cfg(test)]
+mod client_action_update_tests {
+    use super::*;
+    use crate::action::Target;
+    use crate::protocol::opcodes::BIND_TOGGLE;
+
+    struct TestTarget;
+    impl Target for TestTarget {}
+
+    /// Drive a single element carrying a `.toggle()` binding through the synced
+    /// update emitter and return the produced opcode bytes.
+    fn emit_toggle_update(client_actions: Option<&ClientActionIndices>) -> Vec<u8> {
+        let el = el(El::Button).text("x").toggle::<TestTarget>(Ev::Click);
+
+        let mut buf = OpcodeBuffer::new();
+        let mut handlers: HashMap<u32, HandlerFn> = HashMap::new();
+        let ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
+        let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
+        let mut synced_counter = 0u32;
+        let states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+        let mut discovered: Vec<SyncedElement> = Vec::new();
+
+        emit_update_element(
+            &el,
+            0,
+            &mut buf,
+            &HashMap::new(),
+            &mut handlers,
+            &ids_by_type,
+            &mut next_idx_by_type,
+            &mut synced_counter,
+            &states,
+            None,
+            &mut discovered,
+            client_actions,
+        );
+        buf.end();
+        buf.finish().to_vec()
+    }
+
+    #[test]
+    fn synced_update_reemits_client_action_bindings() {
+        // Regression for M1: a `.toggle()` inside a synced region must keep its
+        // client-side binding after the region re-renders. With the index map the
+        // update stream re-emits BIND_TOGGLE; without it (legacy behavior) it does not.
+        let mut indices = ClientActionIndices::default();
+        indices.targets.insert(TypeId::of::<TestTarget>(), 0);
+
+        let with = emit_toggle_update(Some(&indices));
+        assert!(
+            with.contains(&BIND_TOGGLE),
+            "expected BIND_TOGGLE (0x{BIND_TOGGLE:02x}) to be re-emitted on synced update"
+        );
+
+        // No index map → no client-action binding emitted (documents the old gap).
+        let without = emit_toggle_update(None);
+        assert!(!without.contains(&BIND_TOGGLE));
+
+        // An unknown target type (never registered at init) is skipped, not panicked.
+        let empty = ClientActionIndices::default();
+        let unknown = emit_toggle_update(Some(&empty));
+        assert!(!unknown.contains(&BIND_TOGGLE));
     }
 }

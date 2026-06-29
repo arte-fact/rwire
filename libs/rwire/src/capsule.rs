@@ -24,6 +24,7 @@ pub async fn serve(
     capsule: &str,
     session_id: Option<&SessionId>,
     is_new_session: bool,
+    secure_cookie: bool,
 ) -> std::io::Result<()> {
     // Build HTTP response headers
     let mut headers = String::from("HTTP/1.1 200 OK\r\n");
@@ -34,7 +35,10 @@ pub async fn serve(
     // Set session cookie if this is a new session
     if let Some(sid) = session_id {
         if is_new_session {
-            let cookie = sid.to_cookie(Some(Duration::from_secs(COOKIE_MAX_AGE_SECS)));
+            let cookie = sid.to_cookie(
+                Some(Duration::from_secs(COOKIE_MAX_AGE_SECS)),
+                secure_cookie,
+            );
             headers.push_str(&format!("Set-Cookie: {}\r\n", cookie));
         }
     }
