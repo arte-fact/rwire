@@ -66,6 +66,7 @@ pub mod item_ref;
 pub mod metrics;
 pub mod persist;
 pub mod protocol;
+pub mod pwa;
 pub mod registry;
 pub mod router;
 pub mod server;
@@ -108,6 +109,7 @@ pub use rusqlite;
 pub use config::ServerConfig;
 
 // Registry exports
+pub use pwa::{Pwa, PwaDisplay};
 pub use registry::{AdmissionError, ConnectionGuard, ConnectionRegistry};
 
 // Health exports

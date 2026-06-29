@@ -890,8 +890,9 @@ where
         // Resolve initial theme if provider is set
         let initial_theme = self.theme_provider.as_ref().map(|p| p.init());
 
-        // Generate capsule - styled if config provided, basic otherwise
-        let capsule = if let Some(config) = self.capsule_config {
+        // Generate capsule - styled if config provided, basic otherwise.
+        // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
+        let (capsule, pwa_assets) = if let Some(config) = self.capsule_config {
             // If theme provider is set, override config theme with initial theme
             let config = if let Some(ref theme) = initial_theme {
                 config.theme(theme.clone())
@@ -910,9 +911,19 @@ where
 
             // Generate CSS and embed in capsule HTML <style> tag.
             let css = capsule_gen::generate_capsule_css(&config);
-            capsule_gen::generate_styled_capsule(&config, &css)
+            let capsule = capsule_gen::generate_styled_capsule(&config, &css);
+
+            // PWA: version the service-worker cache by the capsule's hash so a new
+            // build invalidates the old shell. The head tags are already inlined.
+            let pwa_assets = config.pwa.as_ref().map(|p| {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                capsule.hash(&mut h);
+                Arc::new(p.freeze_served(&config.theme, h.finish()))
+            });
+            (capsule, pwa_assets)
         } else {
-            capsule_gen::generate_capsule()
+            (capsule_gen::generate_capsule(), None)
         };
 
         let capsule_size = capsule.len();
@@ -959,6 +970,7 @@ where
             let registry = Arc::clone(&registry);
             let config = Arc::clone(&config);
             let metrics = Arc::clone(&metrics);
+            let pwa_assets = pwa_assets.clone();
             task::spawn(async move {
                 handle_client(
                     stream,
@@ -973,6 +985,7 @@ where
                     registry,
                     config,
                     metrics,
+                    pwa_assets,
                 )
                 .await;
             });
@@ -1233,6 +1246,7 @@ async fn handle_client<F>(
     registry: Arc<ConnectionRegistry>,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
+    pwa_assets: Option<Arc<crate::pwa::PwaAssets>>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -1272,6 +1286,33 @@ async fn handle_client<F>(
                 eprintln!("[{}] {} endpoint error: {}", peer_addr, path, e);
             }
             return;
+        }
+    }
+
+    // PWA assets (manifest, service worker, icons): served before auth so the
+    // browser can fetch them to evaluate installability without a session.
+    if let Some(pwa) = &pwa_assets {
+        if peek_str.starts_with("GET ") {
+            let (_, path) = request_line(&peek_str);
+            let served: Option<(&str, &[u8])> = match path {
+                "/manifest.webmanifest" => {
+                    Some(("application/manifest+json", pwa.manifest.as_bytes()))
+                }
+                "/sw.js" => Some(("text/javascript", pwa.service_worker.as_bytes())),
+                p => pwa
+                    .icons
+                    .iter()
+                    .find(|(ip, _, _)| ip == p)
+                    .map(|(_, mime, bytes)| (*mime, bytes.as_ref())),
+            };
+            if let Some((ctype, bytes)) = served {
+                let mut drain = vec![0u8; n];
+                let _ = stream.read_exact(&mut drain).await;
+                if let Err(e) = crate::health::serve_static(stream, ctype, bytes).await {
+                    eprintln!("[{}] {} error: {}", peer_addr, path, e);
+                }
+                return;
+            }
         }
     }
 
@@ -1414,6 +1455,19 @@ async fn handle_client<F>(
 
         // Serve capsule HTML (CSS is embedded in <style> tag)
         println!("[{}] HTTP request - serving capsule", peer_addr);
+        // PWA installs need a secure context. Warn once if a non-loopback client is
+        // reaching us over plain HTTP while PWA is enabled (localhost is exempt — it's
+        // a secure context for installability).
+        if pwa_assets.is_some() && !forwarded_https(&peek_str) && !peer_addr.ip().is_loopback() {
+            static PWA_TLS_WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !PWA_TLS_WARNED.swap(true, Ordering::Relaxed) {
+                eprintln!(
+                    "[pwa] reachable over plain HTTP from a non-loopback client — installs \
+                     require HTTPS. Terminate TLS at a proxy and forward 'X-Forwarded-Proto: https'."
+                );
+            }
+        }
         // Mark the session cookie `Secure` when the client-facing connection is
         // HTTPS (auto-detected from the proxy's X-Forwarded-Proto), or when the
         // config forces it on. Off for plain-HTTP dev so the cookie isn't dropped.

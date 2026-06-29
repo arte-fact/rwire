@@ -361,6 +361,14 @@ fn srgb_to_oklch(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     )
 }
 
+/// Convert any supported CSS color string (`#rgb`, `#rrggbb`, or `oklch(L C H)`)
+/// to an sRGB `#rrggbb` hex string. Used to derive concrete colors (e.g. a PWA
+/// manifest `theme_color`) from a resolved theme variable.
+pub fn css_color_to_hex(css: &str) -> String {
+    let (l, c, h) = parse_to_oklch(css);
+    oklch_to_hex(l, c, h)
+}
+
 /// Convert an Oklch color (`L` 0..1, `C` chroma, `H` degrees) to an sRGB `#rrggbb`
 /// hex string — the inverse of [`srgb_to_oklch`].
 ///
@@ -465,7 +473,9 @@ mod tests {
     #[test]
     fn test_oklch_hex_round_trip() {
         // hex → oklch → hex should land within a couple of 8-bit steps for in-gamut colors.
-        for hex in ["#5e81ac", "#2e3440", "#a3be8c", "#bf616a", "#ebcb8b", "#ffffff", "#000000"] {
+        for hex in [
+            "#5e81ac", "#2e3440", "#a3be8c", "#bf616a", "#ebcb8b", "#ffffff", "#000000",
+        ] {
             let (l, c, h) = parse_to_oklch(hex);
             let back = oklch_to_hex(l, c, h);
             let parse = |s: &str| {
@@ -479,7 +489,10 @@ mod tests {
             let (a, b) = (parse(hex), parse(&back));
             for ch in 0..3 {
                 let d = (a[ch] as i16 - b[ch] as i16).abs();
-                assert!(d <= 3, "round-trip {hex} -> {back}: channel {ch} off by {d}");
+                assert!(
+                    d <= 3,
+                    "round-trip {hex} -> {back}: channel {ch} off by {d}"
+                );
             }
         }
     }

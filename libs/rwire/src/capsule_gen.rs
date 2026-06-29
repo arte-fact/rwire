@@ -342,6 +342,8 @@ pub struct CapsuleConfig {
     pub(crate) composite_css: String,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
+    /// Optional PWA configuration (manifest, service worker, icons, head tags).
+    pub(crate) pwa: Option<crate::pwa::Pwa>,
 }
 
 impl CapsuleConfig {
@@ -375,6 +377,17 @@ impl CapsuleConfig {
     /// Set pre-generated composite CSS from style grouping analysis.
     pub(crate) fn with_composite_css(mut self, css: String) -> Self {
         self.composite_css = css;
+        self
+    }
+
+    /// Enable PWA support (installable: manifest, service worker, icons, head tags).
+    ///
+    /// ```ignore
+    /// CapsuleConfig::new().theme(app_theme())
+    ///     .pwa(Pwa::new("My App").short_name("App"))
+    /// ```
+    pub fn pwa(mut self, pwa: crate::pwa::Pwa) -> Self {
+        self.pwa = Some(pwa);
         self
     }
 
@@ -520,8 +533,15 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
         ""
     };
 
+    // PWA head tags (title, theme-color, manifest link, icons, SW registration).
+    let pwa_head = config
+        .pwa
+        .as_ref()
+        .map(|p| p.head(&config.theme))
+        .unwrap_or_default();
+
     format!(
-        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{pwa_head}
 <style>{css}</style></head><body>
 <div id="rw"></div>
 <script>

@@ -23,8 +23,12 @@ Tracking doc for adding installable-PWA support to rwire via a high-level
 | Batch | Total | Done |
 |-------|-------|------|
 | 1 — Foundations | 2 | 2 |
-| 2 — PWA module  | 8 | 0 |
-| **All** | **10** | **2** |
+| 2 — PWA module  | 8 | 8 |
+| **All** | **10** | **10** |
+
+**Complete.** Enable with `CapsuleConfig::new().theme(t).pwa(Pwa::new("My App"))`.
+Verified live: SW active, manifest parsed by Chrome (theme-color derived from theme),
+icon served, shell precached (`/`, manifest, icon), secure-context install criteria met.
 
 ---
 
@@ -59,41 +63,41 @@ Tracking doc for adding installable-PWA support to rwire via a high-level
 ## Batch 2 — PWA module, config & serving (commit 2)
 
 ### B2.1 — `pwa.rs` types + builder
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `Pwa`/`PwaDisplay`/`PwaIcon` + builders in `pwa.rs`.
 - `Pwa`, `PwaDisplay`, `PwaIcon` + builder methods (name/short_name/description/display/
   icon/maskable_icon/theme_color/background_color/start_url/scope).
 
 ### B2.2 — Default glyph asset
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. Embedded 512×512 default glyph (`assets/pwa-icon-default.png`, Nord `rw` mark).
 - Embed a 512×512 rwire-mark PNG used when no icons are supplied.
 
 ### B2.3 — `PwaAssets::freeze`
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `head()` + `freeze_served()` generate manifest JSON (colors via `css_color_to_hex`/`oklch_to_hex` from theme `bg-app`), `sw.js` (hash-versioned, probes excluded, no `skipWaiting`), and the icon list.
 - Generate manifest JSON (derive colors via `oklch_to_hex` from theme initial mode),
   `sw.js` (cache-versioned by shell hash; `/ready`·`/health`·`/metrics` excluded; no
   `skipWaiting`/`claim`), the `<head>` fragment, and the icon `(path, mime, bytes)` list.
 
 ### B2.4 — `CapsuleConfig.pwa` field + `.pwa()` builder
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `CapsuleConfig.pwa` field + `.pwa()` builder.
 
 ### B2.5 — Head injection
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `{pwa_head}` slot in `generate_styled_capsule` (title/theme-color/manifest/icons + SW register).
 - `generate_styled_capsule` gains a `{pwa_head}` slot + the SW-register snippet (empty
   when not configured).
 
 ### B2.6 — Server wiring
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `run()` hashes the capsule → `freeze_served` → `Arc<PwaAssets>` threaded into `handle_client`; GET routes for manifest/sw/icons via `health::serve_static`; HTTPS log-once for non-loopback plain-HTTP.
 - `run()`: freeze → `Arc<PwaAssets>`, inject head, thread into `handle_client`.
 - GET routes (same block as `/health`): `/manifest.webmanifest`, `/sw.js`,
   `/pwa/icon-*.png` via a `serve_static(mime, bytes)` helper.
 - HTTPS **log-once** (`AtomicBool`) on first insecure page request while PWA is on.
 
 ### B2.7 — `lib.rs` exports
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `pub mod pwa;` + `pub use pwa::{Pwa, PwaDisplay};`.
 - `pub mod pwa;` + re-export `Pwa`, `PwaDisplay`.
 
 ### B2.8 — Tests + live verification
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. 6 module unit tests; live: manifest valid JSON + derived `#242933`, sw.js valid + caches `/`,manifest,icon, icon a valid 512×512 PNG, SW active, secure context, install criteria met.
 - Unit: manifest shape + derived colors, sw.js contents (shell list, probe exclusion, no
   `skipWaiting`), head tags, route content-types, `oklch_to_hex` round-trip.
 - Live: enable PWA on one app; Chrome shows it installable; offline → overlay; manifest +

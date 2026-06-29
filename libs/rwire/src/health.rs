@@ -188,6 +188,29 @@ pub async fn serve_ready(
     Ok(())
 }
 
+/// Serve a static byte body with a given content type and a long cache header.
+/// Used for PWA assets (manifest, service worker, icons).
+pub async fn serve_static(
+    mut stream: TcpStream,
+    content_type: &str,
+    body: &[u8],
+) -> io::Result<()> {
+    let header = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {}\r\n\
+         Content-Length: {}\r\n\
+         Cache-Control: public, max-age=3600\r\n\
+         Connection: close\r\n\
+         \r\n",
+        content_type,
+        body.len()
+    );
+    stream.write_all(header.as_bytes()).await?;
+    stream.write_all(body).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 /// Serve a Prometheus text-format metrics response (`GET /metrics`).
 pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> {
     let http_response = format!(
