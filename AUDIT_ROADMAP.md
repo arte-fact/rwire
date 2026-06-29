@@ -27,9 +27,9 @@ graph and verified against source.
 |----------|-------|------|
 | Critical | 1 | 1 |
 | High     | 3 | 3 |
-| Medium   | 6 | 3 |
-| Low      | 6 | 4 |
-| **All**  | **16** | **11** |
+| Medium   | 6 | 4 |
+| Low      | 6 | 5 |
+| **All**  | **16** | **13** |
 
 **Done so far:** C1 (CSPRNG session IDs), H1 (admission control + health endpoints +
 session-cache cap), H2 (session-ID validation), H3 (per-event symbol-clone elimination),
@@ -209,7 +209,13 @@ auto-detected from `X-Forwarded-Proto`). See per-item notes below.
 - **Risk:** Low–Medium. Needs care not to drop legitimate bursts (typing).
 
 ### M4 — O(synced²) child-scan in the emit loop
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. Replaced the per-region rescan of all synced elements with a
+  single O(synced) pass that indexes children into a `HashMap<parent_id,
+  HashMap<TypeId, Vec<u32>>>` (and computes `emit_synced_counter` in the same pass).
+  Each region now indexes its children by reference — no per-region scan, no clone.
+  Children stay in `synced` order within each bucket so nested-region id reuse is
+  unchanged; output is byte-identical (nested_renderer/synced_update/fine_grained tests
+  pass). `builder.rs`.
 - **Location:** `libs/rwire/src/builder.rs:2416-2430` (and `emit_synced_counter` `:2404-2410`)
 - **Problem:** For each rendered region the loop rescans **all** synced elements to build
   `ids_by_type` (`synced.iter().filter(|s| s.parent == Some(se.id))`). Linear for narrow
@@ -276,7 +282,17 @@ auto-detected from `X-Forwarded-Proto`). See per-item notes below.
 - **Risk:** Very low.
 
 ### L3 — Guard rail for DOM XSS via attribute sink
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. Added a `sa(e,n,v)` helper to the JS runtime that all
+  app/user-controllable attribute writes go through (`O.A` dynamic name+value, `O.AK`
+  enum-name + dynamic value). It (1) refuses attribute names starting with `on` (blocks
+  inline event-handler injection — rwire events go through the binary BIND system, never
+  inline handlers) and (2) refuses `javascript:` values on URL attributes
+  (`href`/`src`/`xlink:href`/`formaction`/`action`), stripping control chars + whitespace
+  first to defeat ` java\tscript:` tricks. `data:` is intentionally allowed (legitimate
+  for inline images). Enum-only opcodes (`O.AE`/`O.AB`) and the morph attribute-copy read
+  from already-guarded sources, so the two entry points are sufficient. Verified: 14 node
+  behavioral cases (blocks/allows) + full runtime JS syntax check; runtime stays ~12.8KB.
+  `capsule_gen.rs`.
 - **Location:** `libs/rwire/src/capsule_gen.rs:94` (`O.A`) and `:97` (`O.AK`)
 - **Problem:** The attribute path calls `setAttribute(name, value)` with both drawn from
   the symbol table and **no validation**. App code doing `.attr("href", user_input)` or a

@@ -2416,13 +2416,26 @@ pub fn build_synced_update_with_known_symbols(
     // CREATE_SYNCED placeholder (so the morph preserves the live span) while the
     // nested region's own entry here emits its standalone GET_SYNCED + rebuild.
 
-    let mut emit_synced_counter: u32 = synced
-        .iter()
-        .map(|se| se.id)
-        .max()
-        .map(|m| m + 1)
-        .unwrap_or(0)
-        .max(synced_id_floor);
+    // Single O(synced) pass: index every region's children by (parent, state type)
+    // and find the highest existing id. This replaces both the per-region child
+    // rescan below (which was O(regions × synced)) and a separate max() over all ids.
+    // Children stay in `synced` order within each bucket, matching id reuse order.
+    let mut children_by_parent: HashMap<u32, HashMap<TypeId, Vec<u32>>> = HashMap::new();
+    let mut emit_synced_counter: u32 = synced_id_floor;
+    for s in synced {
+        if s.id >= emit_synced_counter {
+            emit_synced_counter = s.id + 1;
+        }
+        if let Some(parent) = s.parent {
+            children_by_parent
+                .entry(parent)
+                .or_default()
+                .entry(s.state_type_id)
+                .or_default()
+                .push(s.id);
+        }
+    }
+    let no_children: HashMap<TypeId, Vec<u32>> = HashMap::new();
 
     // Nested regions encountered while re-rendering each region this pass, tagged with
     // their owning parent — the caller reconciles registrations from this.
@@ -2436,13 +2449,7 @@ pub fn build_synced_update_with_known_symbols(
             // reuse their previous ids — while a sibling region's same-typed regions
             // (e.g. after a router view swap) are treated as new rather than hijacking
             // another region's live spans.
-            let mut ids_by_type: HashMap<TypeId, Vec<u32>> = HashMap::new();
-            for child in synced.iter().filter(|s| s.parent == Some(se.id)) {
-                ids_by_type
-                    .entry(child.state_type_id)
-                    .or_default()
-                    .push(child.id);
-            }
+            let ids_by_type = children_by_parent.get(&se.id).unwrap_or(&no_children);
             let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
 
             let wrapper_ref = buf.get_synced(se.id);
@@ -2454,7 +2461,7 @@ pub fn build_synced_update_with_known_symbols(
                 &mut buf,
                 &*symbol_map,
                 handlers,
-                &ids_by_type,
+                ids_by_type,
                 &mut next_idx_by_type,
                 &mut emit_synced_counter,
                 states,

@@ -37,6 +37,7 @@ const A={4:'id'};
 let s={},wt=[],w,sc=0,K={},DS,pm=null;
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
 function wv(a,v){if(v<128)a.push(v);else if(v<16512){v-=128;a.push(128|(v>>8),v&255)}else{v-=16512;a.push(192|(v>>16),(v>>8)&255,v&255)}}
+function sa(e,n,v){n=(''+n).toLowerCase();if(n.slice(0,2)==='on')return;if(/^(href|src|xlink:href|formaction|action)$/.test(n)&&/^javascript:/.test((''+v).replace(/[\u0000-\u0020]+/g,'').toLowerCase()))return;e.setAttribute(n,v)}
 function gp(e,el){
 let t=el.tagName.toLowerCase();
 if(e.type==='submit'&&t==='form'){e.preventDefault();let fd=new FormData(el),obj={};fd.forEach((v,k)=>obj[k]=v);return JSON.stringify({t:'form',v:obj})}
@@ -91,10 +92,10 @@ else if(o===O.T){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].textContent=
 else if(o===O.TW){let[f,fl]=rv(d,i);i+=fl;let n=d[i++],ws=[];while(n--)ws.push(wt[d[i++]]||'');r[f].textContent=ws.join(' ')}
 else if(o===O.TI){let[f,fl]=rv(d,i);i+=fl;let[v,l]=rv(d,i);i+=l;let n=(v>>>1)^-(v&1);r[f].textContent=n.toString()}
 else if(o===O.L){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].className=s[k]||''}
-else if(o===O.A){let[f,fl]=rv(d,i);i+=fl;let[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';r[f].setAttribute(an,s[vk]||'')}
+else if(o===O.A){let[f,fl]=rv(d,i);i+=fl;let[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';sa(r[f],an,s[vk]||'')}
 else if(o===O.AE){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],v=d[i++];r[f].setAttribute(AT[k]||'data',AV[v]||'')}
 else if(o===O.AB){let[f,fl]=rv(d,i);i+=fl;let k=d[i++];r[f].setAttribute(AT[k]||'data','')}
-else if(o===O.AK){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],[v,l]=rv(d,i);i+=l;r[f].setAttribute(AT[k]||'data',s[v]||'')}
+else if(o===O.AK){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],[v,l]=rv(d,i);i+=l;sa(r[f],AT[k]||'data',s[v]||'')}
 else if(o===O.D){let[f,fl]=rv(d,i);i+=fl;let[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
 else if(o===O.P){let[p,pl]=rv(d,i);i+=pl;let[c,cl]=rv(d,i);i+=cl;(p<0xFFFF?r[p]:document.body).appendChild(r[c])}
 else if(o===O.CC){let[f,fl]=rv(d,i);i+=fl;fm();let lv=r[f];let sh=document.createElement(lv.tagName||'DIV');pm={live:lv,shadow:sh};r[f]=sh}
