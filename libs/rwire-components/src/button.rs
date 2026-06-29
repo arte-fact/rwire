@@ -26,7 +26,7 @@
 
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder, Ev, HandlerSpec};
+use rwire::{el, icons, El, ElementBuilder, Ev, HandlerSpec, Icon};
 use std::borrow::Cow;
 
 /// Button visual intent.
@@ -60,7 +60,9 @@ pub enum ButtonSize {
 pub struct Button {
     intent: ButtonIntent,
     size: ButtonSize,
+    icon: Option<Icon>,
     text: Option<Cow<'static, str>>,
+    aria_label: Option<Cow<'static, str>>,
     disabled: bool,
     loading: bool,
     full_width: bool,
@@ -96,6 +98,12 @@ impl Button {
     /// Destructive button with text.
     pub fn destructive(text: impl Into<Cow<'static, str>>) -> Self {
         Self::new().intent(ButtonIntent::Destructive).text(text)
+    }
+
+    /// Icon-only button. Renders a square button with no visible text, so it
+    /// requires an accessible label (applied as `aria-label`).
+    pub fn icon_only(icon: Icon, label: impl Into<Cow<'static, str>>) -> Self {
+        Self::new().icon(icon).aria_label(label)
     }
 
     // ========================================================================
@@ -144,9 +152,31 @@ impl Button {
         self
     }
 
+    /// Set a leading icon, rendered before the text and sized to the button.
+    pub fn icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// Set an accessible label (`aria-label`). Recommended for icon-only buttons,
+    /// which have no visible text for assistive technology to announce.
+    pub fn aria_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
+        self.aria_label = Some(label.into());
+        self
+    }
+
     // ========================================================================
     // Token computation
     // ========================================================================
+
+    /// Icon edge length (px), scaled to the button size.
+    fn icon_px(&self) -> u32 {
+        match self.size {
+            ButtonSize::Sm => 12,
+            ButtonSize::Md => 14,
+            ButtonSize::Lg => 16,
+        }
+    }
 
     /// Compute style tokens for this button configuration.
     pub fn compute_tokens(&self) -> Vec<St> {
@@ -161,6 +191,8 @@ impl Button {
             St::CursorPointer,
             St::TransTheme,
             St::TextSm,
+            // Inherit the page font rather than the UA button default.
+            St::FontInheritAll,
         ];
 
         match self.intent {
@@ -200,18 +232,29 @@ impl Button {
 
         builder = match self.intent {
             ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
-            ButtonIntent::Secondary => {
-                builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
-            }
+            ButtonIntent::Secondary => builder.hover([St::BgSecondaryHover, St::BorderEmphasis]),
             ButtonIntent::Ghost => builder.hover([St::BgHover]),
             ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
         };
 
         if self.disabled {
-            builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+            builder = builder.disabled_style([
+                St::Opacity50,
+                St::CursorNotAllowed,
+                St::PointerEventsNone,
+            ]);
         }
         if self.loading {
-            builder = builder.after([St::ContentEmpty, St::PositionAbsolute, St::W1rem, St::H1rem, St::Border2, St::BorderRTransparent, St::RoundedFull, St::AnimateSpinFast]);
+            builder = builder.after([
+                St::ContentEmpty,
+                St::PositionAbsolute,
+                St::W1rem,
+                St::H1rem,
+                St::Border2,
+                St::BorderRTransparent,
+                St::RoundedFull,
+                St::AnimateSpinFast,
+            ]);
         }
 
         builder
@@ -231,27 +274,48 @@ impl Button {
     // ========================================================================
 
     /// Build the button into an ElementBuilder.
-    pub fn build(self) -> ElementBuilder {
+    pub fn build(mut self) -> ElementBuilder {
+        let icon_only = self.icon.is_some() && self.text.is_none();
+        // The spinner overlay replaces the icon while loading, so don't render both.
+        let show_icon = self.icon.is_some() && !self.loading;
+        let icon_px = self.icon_px();
+
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size_tokens());
-        let mut builder = self.apply_pseudo(
-            el(El::Button).st(tokens)
-        );
+        if icon_only {
+            // Square it: drop the horizontal padding and let aspect-ratio match
+            // the width to the height, centering the glyph.
+            tokens.retain(|t| !matches!(t, St::PxSp3 | St::PxMd | St::PxLg));
+            tokens.push(St::AspectSquare);
+        }
+        let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
 
-        if let Some(text) = self.text {
-            builder = builder.text(&text);
+        // Render the icon and text as element children so the appended icon isn't
+        // clobbered by `textContent` (and stays *before* the label). Text-only
+        // buttons set `textContent` directly — fewer bytes, no wrapper span.
+        let icon = self.icon.take();
+        let text = self.text.take();
+        if show_icon {
+            let icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            builder = match text {
+                Some(t) => builder.append([icon_el, el(El::Span).text(&t)]),
+                None => builder.append([icon_el]),
+            };
+        } else if let Some(t) = text {
+            builder = builder.text(&t);
         }
 
+        if let Some(label) = self.aria_label {
+            builder = builder.at_str(At::AriaLabel, &label);
+        }
         if self.disabled {
             builder = builder.bool_attr(At::Disabled);
         }
-
         if self.loading {
             builder = builder.at(At::AriaBusy, Av::True);
         }
-
-        if let Some(ref extra) = self.extra_class {
-            builder = builder.class(extra.as_ref());
+        if let Some(extra) = self.extra_class {
+            builder = builder.class(&extra);
         }
 
         builder
@@ -329,6 +393,54 @@ mod tests {
     }
 
     #[test]
+    fn test_icon_px_scales_with_size() {
+        assert_eq!(Button::new().size(ButtonSize::Sm).icon_px(), 12);
+        assert_eq!(Button::new().size(ButtonSize::Md).icon_px(), 14);
+        assert_eq!(Button::new().size(ButtonSize::Lg).icon_px(), 16);
+    }
+
+    #[test]
+    fn test_icon_with_text_renders_both_as_children() {
+        // The icon must not be clobbered by textContent: icon + label become an
+        // <svg> and a <span> child, in that order, with no button-level text.
+        let btn = Button::primary("Save").icon(Icon::Check).build();
+        assert_eq!(btn.text_content(), None);
+        let kids = btn.children();
+        assert_eq!(kids.len(), 2);
+        assert_eq!(kids[0].el_type(), El::Svg);
+        assert_eq!(kids[1].el_type(), El::Span);
+        assert_eq!(kids[1].text_content(), Some("Save"));
+    }
+
+    #[test]
+    fn test_text_only_uses_text_content() {
+        // No icon → plain textContent, no wrapper span (fewer bytes).
+        let btn = Button::primary("Save").build();
+        assert!(btn.children().is_empty());
+        assert_eq!(btn.text_content(), Some("Save"));
+    }
+
+    #[test]
+    fn test_icon_only_is_square_with_label() {
+        let btn = Button::icon_only(Icon::ChevronDown, "Expand").build();
+        // One icon child, no text, square aspect.
+        assert_eq!(btn.children().len(), 1);
+        assert_eq!(btn.text_content(), None);
+        assert!(btn.get_style_utils().contains(&(St::AspectSquare as u16)));
+    }
+
+    #[test]
+    fn test_loading_hides_icon() {
+        // The spinner overlay replaces the icon, so it isn't rendered while loading.
+        let btn = Button::primary("Save")
+            .icon(Icon::Check)
+            .loading(true)
+            .build();
+        assert!(btn.children().is_empty());
+        assert_eq!(btn.text_content(), Some("Save"));
+    }
+
+    #[test]
     fn test_button_size_tokens() {
         let btn = Button::new().size(ButtonSize::Sm);
         let tokens = btn.size_tokens();
@@ -342,5 +454,4 @@ mod tests {
         let tokens = btn.size_tokens();
         assert_eq!(tokens, vec![St::H2_75rem, St::Py0, St::PxLg]);
     }
-
 }

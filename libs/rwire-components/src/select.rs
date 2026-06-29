@@ -29,10 +29,11 @@ fn select_arrow() -> ElementBuilder {
         .at(At::Height, Av::V12)
         .at(At::ViewBox, Av::ViewBox12)
         .at(At::Fill, Av::CurrentColor)
-        .attr("style", "right:var(--S3);top:50%;transform:translateY(-50%)")
-        .append([
-            el(El::Path).at_str(At::D, "M6 9L1 4h10z")
-        ])
+        .attr(
+            "style",
+            "right:var(--S3);top:50%;transform:translateY(-50%)",
+        )
+        .append([el(El::Path).at_str(At::D, "M6 9L1 4h10z")])
 }
 
 /// A single option in a select dropdown.
@@ -74,7 +75,11 @@ impl Select {
     }
 
     /// Add an option to the select.
-    pub fn option(mut self, value: impl Into<Cow<'static, str>>, label: impl Into<Cow<'static, str>>) -> Self {
+    pub fn option(
+        mut self,
+        value: impl Into<Cow<'static, str>>,
+        label: impl Into<Cow<'static, str>>,
+    ) -> Self {
         self.options.push(SelectOption::new(value, label));
         self
     }
@@ -130,9 +135,18 @@ impl Select {
     /// Compute style tokens for this select configuration.
     pub fn compute_tokens(&self) -> Vec<St> {
         let mut tokens = vec![
-            St::DisplayBlock, St::WFull, St::TextSm, St::TextHigh,
-            St::BgApp, St::BorderDefault, St::RoundedMd, St::CursorPointer,
-            St::TransTheme, St::BorderWTheme, St::AppearanceNone,
+            St::DisplayBlock,
+            St::WFull,
+            St::TextSm,
+            St::TextHigh,
+            St::BgApp,
+            St::BorderDefault,
+            St::RoundedMd,
+            St::CursorPointer,
+            St::TransTheme,
+            St::BorderWTheme,
+            St::AppearanceNone,
+            St::FontInheritAll,
         ];
         if self.invalid {
             tokens.push(St::BorderRed8);
@@ -149,7 +163,8 @@ impl Select {
             .hover([St::BorderEmphasis])
             .focus_visible([St::RingFocus]);
         if self.disabled {
-            select = select.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+            select =
+                select.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
         }
 
         if let Some(ref id) = self.id {
@@ -231,9 +246,7 @@ mod tests {
     #[test]
     fn test_select_builds_with_arrow() {
         // build() returns a wrapper div containing the select + SVG arrow
-        let sel = Select::new()
-            .option("a", "Option A")
-            .build();
+        let sel = Select::new().option("a", "Option A").build();
         drop(sel); // smoke test: builds without panic
     }
 
@@ -253,5 +266,4 @@ mod tests {
         assert_eq!(sel.options.len(), 2);
         assert_eq!(sel.value.as_deref(), Some("a"));
     }
-
 }

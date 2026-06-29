@@ -3,7 +3,7 @@
 //! Each component self-describes its variants, boolean props, and provides
 //! a `build_demo` function that renders a live preview from selections.
 
-use rwire::{el, El, ElementBuilder};
+use rwire::{el, El, ElementBuilder, Icon};
 
 // ============================================================================
 // Types
@@ -213,15 +213,37 @@ const PROGRESS_TEXT: &[TextProp] = &[TextProp {
 fn progress_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Progress;
     let value = p.nums.first().copied().unwrap_or(65).clamp(0, 100) as u32;
-    let label = p.texts.first().copied().unwrap_or("Upload progress").to_string();
+    let label = p
+        .texts
+        .first()
+        .copied()
+        .unwrap_or("Upload progress")
+        .to_string();
     Progress::new().value(value).max(100).label(label).build()
 }
 
 const SLIDER_NUM: &[NumProp] = &[
-    NumProp { name: "value", default: 50, min: 0, max: 100, step: 1, slider: true },
-    NumProp { name: "step", default: 1, min: 1, max: 25, step: 1, slider: false },
+    NumProp {
+        name: "value",
+        default: 50,
+        min: 0,
+        max: 100,
+        step: 1,
+        slider: true,
+    },
+    NumProp {
+        name: "step",
+        default: 1,
+        min: 1,
+        max: 25,
+        step: 1,
+        slider: false,
+    },
 ];
-const SLIDER_TEXT: &[TextProp] = &[TextProp { name: "label", default: "Volume" }];
+const SLIDER_TEXT: &[TextProp] = &[TextProp {
+    name: "label",
+    default: "Volume",
+}];
 fn slider_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Slider;
     Slider::new()
@@ -235,9 +257,30 @@ fn slider_rich(p: &DemoParams) -> ElementBuilder {
 }
 
 const PAGINATION_NUM: &[NumProp] = &[
-    NumProp { name: "current_page", default: 3, min: 1, max: 20, step: 1, slider: true },
-    NumProp { name: "total_pages", default: 10, min: 1, max: 20, step: 1, slider: true },
-    NumProp { name: "max_visible", default: 5, min: 3, max: 9, step: 1, slider: false },
+    NumProp {
+        name: "current_page",
+        default: 3,
+        min: 1,
+        max: 20,
+        step: 1,
+        slider: true,
+    },
+    NumProp {
+        name: "total_pages",
+        default: 10,
+        min: 1,
+        max: 20,
+        step: 1,
+        slider: true,
+    },
+    NumProp {
+        name: "max_visible",
+        default: 5,
+        min: 3,
+        max: 9,
+        step: 1,
+        slider: false,
+    },
 ];
 fn pagination_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Pagination;
@@ -270,7 +313,13 @@ fn textarea_rich(p: &DemoParams) -> ElementBuilder {
     };
     Textarea::new()
         .size(size)
-        .placeholder(p.texts.first().copied().unwrap_or("Enter a description...").to_string())
+        .placeholder(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("Enter a description...")
+                .to_string(),
+        )
         .rows(p.nums.first().copied().unwrap_or(4).max(1) as u32)
         .disabled(b(p.bools, 0))
         .readonly(b(p.bools, 1))
@@ -279,7 +328,10 @@ fn textarea_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const BADGE_TEXT: &[TextProp] = &[TextProp { name: "text", default: "Badge" }];
+const BADGE_TEXT: &[TextProp] = &[TextProp {
+    name: "text",
+    default: "Badge",
+}];
 fn badge_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Badge, BadgeIntent};
     let intent = match v(p.variants, 0) {
@@ -302,7 +354,13 @@ const CHECKBOX_TEXT: &[TextProp] = &[TextProp {
 fn checkbox_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Checkbox;
     Checkbox::new()
-        .label(p.texts.first().copied().unwrap_or("Accept terms and conditions").to_string())
+        .label(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("Accept terms and conditions")
+                .to_string(),
+        )
         .checked(b(p.bools, 0))
         .disabled(b(p.bools, 1))
         .required(b(p.bools, 2))
@@ -317,7 +375,13 @@ const SWITCH_TEXT: &[TextProp] = &[TextProp {
 fn switch_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Switch;
     Switch::new()
-        .label(p.texts.first().copied().unwrap_or("Enable notifications").to_string())
+        .label(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("Enable notifications")
+                .to_string(),
+        )
         .checked(b(p.bools, 0))
         .disabled(b(p.bools, 1))
         .required(b(p.bools, 2))
@@ -325,7 +389,10 @@ fn switch_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const BUTTON_TEXT: &[TextProp] = &[TextProp { name: "text", default: "Button" }];
+const BUTTON_TEXT: &[TextProp] = &[TextProp {
+    name: "text",
+    default: "Button",
+}];
 fn button_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Button, ButtonIntent, ButtonSize};
     let intent = match v(p.variants, 0) {
@@ -339,18 +406,24 @@ fn button_rich(p: &DemoParams) -> ElementBuilder {
         2 => ButtonSize::Lg,
         _ => ButtonSize::Md,
     };
-    Button::new()
+    let mut btn = Button::new()
         .intent(intent)
         .size(size)
         .text(p.texts.first().copied().unwrap_or("Button").to_string())
         .disabled(b(p.bools, 0))
         .loading(b(p.bools, 1))
-        .full_width(b(p.bools, 2))
-        .build()
+        .full_width(b(p.bools, 2));
+    if b(p.bools, 3) {
+        btn = btn.icon(Icon::Check);
+    }
+    btn.build()
 }
 
 const ALERT_TEXT: &[TextProp] = &[
-    TextProp { name: "title", default: "Alert Title" },
+    TextProp {
+        name: "title",
+        default: "Alert Title",
+    },
     TextProp {
         name: "message",
         default: "This is an alert message with important information.",
@@ -366,7 +439,13 @@ fn alert_rich(p: &DemoParams) -> ElementBuilder {
     };
     Alert::new()
         .intent(intent)
-        .title(p.texts.first().copied().unwrap_or("Alert Title").to_string())
+        .title(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("Alert Title")
+                .to_string(),
+        )
         .message(
             p.texts
                 .get(1)
@@ -377,7 +456,10 @@ fn alert_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const MODAL_TEXT: &[TextProp] = &[TextProp { name: "title", default: "Confirm Action" }];
+const MODAL_TEXT: &[TextProp] = &[TextProp {
+    name: "title",
+    default: "Confirm Action",
+}];
 fn modal_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Modal, ModalSize};
     let size = match v(p.variants, 0) {
@@ -396,7 +478,10 @@ fn modal_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const DRAWER_TEXT: &[TextProp] = &[TextProp { name: "title", default: "Navigation" }];
+const DRAWER_TEXT: &[TextProp] = &[TextProp {
+    name: "title",
+    default: "Navigation",
+}];
 fn drawer_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Drawer, DrawerPosition};
     let position = match v(p.variants, 0) {
@@ -412,7 +497,10 @@ fn drawer_rich(p: &DemoParams) -> ElementBuilder {
 }
 
 const EMPTY_STATE_TEXT: &[TextProp] = &[
-    TextProp { name: "title", default: "No results found" },
+    TextProp {
+        name: "title",
+        default: "No results found",
+    },
     TextProp {
         name: "description",
         default: "Try adjusting your search or filter criteria.",
@@ -421,7 +509,13 @@ const EMPTY_STATE_TEXT: &[TextProp] = &[
 fn empty_state_rich(p: &DemoParams) -> ElementBuilder {
     use crate::EmptyState;
     EmptyState::new()
-        .title(p.texts.first().copied().unwrap_or("No results found").to_string())
+        .title(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("No results found")
+                .to_string(),
+        )
         .description(
             p.texts
                 .get(1)
@@ -433,8 +527,35 @@ fn empty_state_rich(p: &DemoParams) -> ElementBuilder {
 }
 
 const INPUT_TEXT: &[TextProp] = &[
-    TextProp { name: "placeholder", default: "Enter text..." },
-    TextProp { name: "value", default: "" },
+    TextProp {
+        name: "placeholder",
+        default: "Enter text...",
+    },
+    TextProp {
+        name: "value",
+        default: "",
+    },
+    TextProp {
+        name: "autocomplete",
+        default: "",
+    },
+    TextProp {
+        name: "pattern",
+        default: "",
+    },
+    // min/max/step apply to number/range inputs (ignored by the browser otherwise).
+    TextProp {
+        name: "min",
+        default: "",
+    },
+    TextProp {
+        name: "max",
+        default: "",
+    },
+    TextProp {
+        name: "step",
+        default: "",
+    },
 ];
 fn input_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Input, InputSize, InputType};
@@ -455,14 +576,40 @@ fn input_rich(p: &DemoParams) -> ElementBuilder {
     let mut input = Input::new()
         .input_type(input_type)
         .size(size)
-        .placeholder(p.texts.first().copied().unwrap_or("Enter text...").to_string())
+        .placeholder(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("Enter text...")
+                .to_string(),
+        )
         .disabled(b(p.bools, 0))
         .readonly(b(p.bools, 1))
         .required(b(p.bools, 2))
-        .invalid(b(p.bools, 3));
-    let val = p.texts.get(1).copied().unwrap_or("");
-    if !val.is_empty() {
-        input = input.value(val.to_string());
+        .invalid(b(p.bools, 3))
+        .autofocus(b(p.bools, 4));
+    if b(p.bools, 5) {
+        input = input.spellcheck(true);
+    }
+    // Optional string-typed attributes — applied only when provided.
+    let txt = |i: usize| p.texts.get(i).copied().unwrap_or("");
+    if !txt(1).is_empty() {
+        input = input.value(txt(1).to_string());
+    }
+    if !txt(2).is_empty() {
+        input = input.autocomplete(txt(2).to_string());
+    }
+    if !txt(3).is_empty() {
+        input = input.pattern(txt(3).to_string());
+    }
+    if !txt(4).is_empty() {
+        input = input.min(txt(4).to_string());
+    }
+    if !txt(5).is_empty() {
+        input = input.max(txt(5).to_string());
+    }
+    if !txt(6).is_empty() {
+        input = input.step(txt(6).to_string());
     }
     input.build()
 }
@@ -504,8 +651,22 @@ fn stepper_rich(p: &DemoParams) -> ElementBuilder {
 }
 
 const APP_SHELL_NUM: &[NumProp] = &[
-    NumProp { name: "sidebar_width", default: 240, min: 120, max: 400, step: 10, slider: true },
-    NumProp { name: "header_height", default: 56, min: 40, max: 120, step: 4, slider: true },
+    NumProp {
+        name: "sidebar_width",
+        default: 240,
+        min: 120,
+        max: 400,
+        step: 10,
+        slider: true,
+    },
+    NumProp {
+        name: "header_height",
+        default: 56,
+        min: 40,
+        max: 120,
+        step: 4,
+        slider: true,
+    },
 ];
 fn app_shell_rich(p: &DemoParams) -> ElementBuilder {
     use crate::AppShell;
@@ -562,24 +723,40 @@ const TEXT_TEXT: &[TextProp] = &[TextProp {
 fn text_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Text, TextColor, TextVariant};
     let variant = match v(p.variants, 0) {
-        1 => TextVariant::BodySmall, 2 => TextVariant::Heading1,
-        3 => TextVariant::Heading2, 4 => TextVariant::Heading3,
-        5 => TextVariant::Label, 6 => TextVariant::Caption,
+        1 => TextVariant::BodySmall,
+        2 => TextVariant::Heading1,
+        3 => TextVariant::Heading2,
+        4 => TextVariant::Heading3,
+        5 => TextVariant::Label,
+        6 => TextVariant::Caption,
         _ => TextVariant::Body,
     };
     let color = match v(p.variants, 1) {
-        1 => TextColor::High, 2 => TextColor::Muted, 3 => TextColor::Accent,
-        4 => TextColor::Success, 5 => TextColor::Warning, 6 => TextColor::Error,
+        1 => TextColor::High,
+        2 => TextColor::Muted,
+        3 => TextColor::Accent,
+        4 => TextColor::Success,
+        5 => TextColor::Warning,
+        6 => TextColor::Error,
         _ => TextColor::Default,
     };
     Text::new()
         .variant(variant)
         .color(color)
-        .content(p.texts.first().copied().unwrap_or("The quick brown fox jumps over the lazy dog.").to_string())
+        .content(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("The quick brown fox jumps over the lazy dog.")
+                .to_string(),
+        )
         .build()
 }
 
-const SPINNER_TEXT: &[TextProp] = &[TextProp { name: "label", default: "Loading..." }];
+const SPINNER_TEXT: &[TextProp] = &[TextProp {
+    name: "label",
+    default: "Loading...",
+}];
 fn spinner_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Spinner, SpinnerSize};
     let size = match v(p.variants, 0) {
@@ -593,7 +770,10 @@ fn spinner_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const AVATAR_TEXT: &[TextProp] = &[TextProp { name: "fallback", default: "JD" }];
+const AVATAR_TEXT: &[TextProp] = &[TextProp {
+    name: "fallback",
+    default: "JD",
+}];
 fn avatar_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Avatar, AvatarSize};
     let size = match v(p.variants, 0) {
@@ -612,13 +792,25 @@ const FOOTER_TEXT: &[TextProp] = &[
         name: "tagline",
         default: "Building the future, one component at a time.",
     },
-    TextProp { name: "copyright", default: "2026 Brand Inc." },
+    TextProp {
+        name: "copyright",
+        default: "2026 Brand Inc.",
+    },
 ];
 fn footer_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Footer, FooterColumn};
     Footer::new()
-        .logo(el(El::Span).st([rwire::St::TextLg, rwire::St::FontBold]).text("Brand"))
-        .tagline(p.texts.first().copied().unwrap_or("Building the future, one component at a time."))
+        .logo(
+            el(El::Span)
+                .st([rwire::St::TextLg, rwire::St::FontBold])
+                .text("Brand"),
+        )
+        .tagline(
+            p.texts
+                .first()
+                .copied()
+                .unwrap_or("Building the future, one component at a time."),
+        )
         .column(
             FooterColumn::new("Product")
                 .link("Features", "/features")
@@ -633,7 +825,10 @@ fn footer_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const NAV_MENU_TEXT: &[TextProp] = &[TextProp { name: "active_path", default: "/" }];
+const NAV_MENU_TEXT: &[TextProp] = &[TextProp {
+    name: "active_path",
+    default: "/",
+}];
 fn nav_menu_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{NavItem, NavMenu};
     NavMenu::new()
@@ -644,7 +839,10 @@ fn nav_menu_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const SELECT_TEXT: &[TextProp] = &[TextProp { name: "aria_label", default: "Country" }];
+const SELECT_TEXT: &[TextProp] = &[TextProp {
+    name: "aria_label",
+    default: "Country",
+}];
 fn select_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Select;
     Select::new()
@@ -671,12 +869,21 @@ fn toast_rich(p: &DemoParams) -> ElementBuilder {
         3 => ToastIntent::Error,
         _ => ToastIntent::Info,
     };
-    Toast::new(p.texts.first().copied().unwrap_or("Toast notification message").to_string())
-        .intent(intent)
-        .build()
+    Toast::new(
+        p.texts
+            .first()
+            .copied()
+            .unwrap_or("Toast notification message")
+            .to_string(),
+    )
+    .intent(intent)
+    .build()
 }
 
-const TAG_TEXT: &[TextProp] = &[TextProp { name: "text", default: "Tag" }];
+const TAG_TEXT: &[TextProp] = &[TextProp {
+    name: "text",
+    default: "Tag",
+}];
 fn tag_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Tag, TagIntent};
     let intent = match v(p.variants, 0) {
@@ -692,7 +899,10 @@ fn tag_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const TOOLTIP_TEXT: &[TextProp] = &[TextProp { name: "text", default: "Tooltip text" }];
+const TOOLTIP_TEXT: &[TextProp] = &[TextProp {
+    name: "text",
+    default: "Tooltip text",
+}];
 fn tooltip_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Tooltip, TooltipPosition};
     let position = match v(p.variants, 0) {
@@ -701,35 +911,60 @@ fn tooltip_rich(p: &DemoParams) -> ElementBuilder {
         3 => TooltipPosition::Right,
         _ => TooltipPosition::Top,
     };
-    Tooltip::new(p.texts.first().copied().unwrap_or("Tooltip text").to_string())
-        .position(position)
-        .child(
-            el(El::Button)
-                .st([
-                    rwire::St::BgPrimary, rwire::St::TextOnPrimary,
-                    rwire::St::PxMd, rwire::St::PySm, rwire::St::RoundedMd,
-                    rwire::St::BorderNone, rwire::St::CursorPointer,
-                ])
-                .text("Hover me"),
-        )
-        .build()
+    Tooltip::new(
+        p.texts
+            .first()
+            .copied()
+            .unwrap_or("Tooltip text")
+            .to_string(),
+    )
+    .position(position)
+    .child(
+        el(El::Button)
+            .st([
+                rwire::St::BgPrimary,
+                rwire::St::TextOnPrimary,
+                rwire::St::PxMd,
+                rwire::St::PySm,
+                rwire::St::RoundedMd,
+                rwire::St::BorderNone,
+                rwire::St::CursorPointer,
+            ])
+            .text("Hover me"),
+    )
+    .build()
 }
 
-const LABEL_TEXT: &[TextProp] = &[TextProp { name: "text", default: "Email address" }];
+const LABEL_TEXT: &[TextProp] = &[TextProp {
+    name: "text",
+    default: "Email address",
+}];
 fn label_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Label;
-    Label::new(p.texts.first().copied().unwrap_or("Email address").to_string())
-        .required(b(p.bools, 0))
-        .build()
+    Label::new(
+        p.texts
+            .first()
+            .copied()
+            .unwrap_or("Email address")
+            .to_string(),
+    )
+    .required(b(p.bools, 0))
+    .build()
 }
 
-const KBD_TEXT: &[TextProp] = &[TextProp { name: "key", default: "Ctrl" }];
+const KBD_TEXT: &[TextProp] = &[TextProp {
+    name: "key",
+    default: "Ctrl",
+}];
 fn kbd_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Kbd;
     Kbd::new(p.texts.first().copied().unwrap_or("Ctrl").to_string()).build()
 }
 
-const COPY_BUTTON_TEXT: &[TextProp] = &[TextProp { name: "text", default: "cargo add rwire" }];
+const COPY_BUTTON_TEXT: &[TextProp] = &[TextProp {
+    name: "text",
+    default: "cargo add rwire",
+}];
 fn copy_button_rich(p: &DemoParams) -> ElementBuilder {
     use crate::CopyButton;
     CopyButton::new(p.texts.first().copied().unwrap_or("cargo add rwire")).build()
@@ -740,7 +975,10 @@ const BLOCKQUOTE_TEXT: &[TextProp] = &[
         name: "content",
         default: "The best way to predict the future is to invent it.",
     },
-    TextProp { name: "cite", default: "Alan Kay" },
+    TextProp {
+        name: "cite",
+        default: "Alan Kay",
+    },
 ];
 fn blockquote_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Blockquote;
@@ -756,13 +994,24 @@ fn blockquote_rich(p: &DemoParams) -> ElementBuilder {
 }
 
 const LINK_TEXT: &[TextProp] = &[
-    TextProp { name: "href", default: "/docs" },
-    TextProp { name: "text", default: "Internal Link" },
+    TextProp {
+        name: "href",
+        default: "/docs",
+    },
+    TextProp {
+        name: "text",
+        default: "Internal Link",
+    },
 ];
 fn link_rich(p: &DemoParams) -> ElementBuilder {
     use crate::Link;
     let href = p.texts.first().copied().unwrap_or("/docs").to_string();
-    let text = p.texts.get(1).copied().unwrap_or("Internal Link").to_string();
+    let text = p
+        .texts
+        .get(1)
+        .copied()
+        .unwrap_or("Internal Link")
+        .to_string();
     if b(p.bools, 0) {
         Link::external(href).text(text).build()
     } else {
@@ -771,8 +1020,14 @@ fn link_rich(p: &DemoParams) -> ElementBuilder {
 }
 
 const STAT_TEXT: &[TextProp] = &[
-    TextProp { name: "value", default: "$12,345" },
-    TextProp { name: "label", default: "Revenue" },
+    TextProp {
+        name: "value",
+        default: "$12,345",
+    },
+    TextProp {
+        name: "label",
+        default: "Revenue",
+    },
     TextProp {
         name: "description",
         default: "+12.5% from last month",
@@ -787,14 +1042,26 @@ fn stat_rich(p: &DemoParams) -> ElementBuilder {
     };
     Stat::new(p.texts.first().copied().unwrap_or("$12,345").to_string())
         .label(p.texts.get(1).copied().unwrap_or("Revenue").to_string())
-        .description(p.texts.get(2).copied().unwrap_or("+12.5% from last month").to_string())
+        .description(
+            p.texts
+                .get(2)
+                .copied()
+                .unwrap_or("+12.5% from last month")
+                .to_string(),
+        )
         .trend(trend, "+12.5%")
         .build()
 }
 
 const IMAGE_TEXT: &[TextProp] = &[
-    TextProp { name: "src", default: "https://picsum.photos/400/300" },
-    TextProp { name: "alt", default: "Sample image" },
+    TextProp {
+        name: "src",
+        default: "https://picsum.photos/400/300",
+    },
+    TextProp {
+        name: "alt",
+        default: "Sample image",
+    },
 ];
 fn image_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Image, ImageFit};
@@ -804,8 +1071,18 @@ fn image_rich(p: &DemoParams) -> ElementBuilder {
         3 => ImageFit::None,
         _ => ImageFit::Cover,
     };
-    let src = p.texts.first().copied().unwrap_or("https://picsum.photos/400/300").to_string();
-    let alt = p.texts.get(1).copied().unwrap_or("Sample image").to_string();
+    let src = p
+        .texts
+        .first()
+        .copied()
+        .unwrap_or("https://picsum.photos/400/300")
+        .to_string();
+    let alt = p
+        .texts
+        .get(1)
+        .copied()
+        .unwrap_or("Sample image")
+        .to_string();
     let mut img = Image::new(src).alt(alt).fit(fit);
     match v(p.variants, 1) {
         1 => img = img.aspect_square(),
@@ -1023,7 +1300,10 @@ fn composite_children(slug: &str) -> &'static [&'static str] {
 pub fn generate_code(entry: &ComponentEntry, c: &CodeCtx) -> String {
     let lines: Vec<String> = match entry.slug {
         "toast" => {
-            let mut l = vec![format!("Toast::new({:?})", ctext(c, 0, "Toast notification message"))];
+            let mut l = vec![format!(
+                "Toast::new({:?})",
+                ctext(c, 0, "Toast notification message")
+            )];
             if let Some(e) = vexpr(entry, c, 0) {
                 l.push(format!("    .intent({e})"));
             }
@@ -1058,17 +1338,29 @@ pub fn generate_code(entry: &ComponentEntry, c: &CodeCtx) -> String {
         "stat" => vec![
             format!("Stat::new({:?})", ctext(c, 0, "$12,345")),
             format!("    .label({:?})", ctext(c, 1, "Revenue")),
-            format!("    .description({:?})", ctext(c, 2, "+12.5% from last month")),
+            format!(
+                "    .description({:?})",
+                ctext(c, 2, "+12.5% from last month")
+            ),
             format!("    .trend({}, {:?})", vexpr_always(entry, c, 0), "+12.5%"),
         ],
-        "copy-button" => vec![format!("CopyButton::new({:?})", ctext(c, 0, "cargo add rwire"))],
+        "copy-button" => vec![format!(
+            "CopyButton::new({:?})",
+            ctext(c, 0, "cargo add rwire")
+        )],
         "blockquote" => vec![
-            format!("Blockquote::new({:?})", ctext(c, 0, "The best way to predict the future is to invent it.")),
+            format!(
+                "Blockquote::new({:?})",
+                ctext(c, 0, "The best way to predict the future is to invent it.")
+            ),
             format!("    .cite({:?})", ctext(c, 1, "Alan Kay")),
         ],
         "image" => {
             let mut l = vec![
-                format!("Image::new({:?})", ctext(c, 0, "https://picsum.photos/400/300")),
+                format!(
+                    "Image::new({:?})",
+                    ctext(c, 0, "https://picsum.photos/400/300")
+                ),
                 format!("    .alt({:?})", ctext(c, 1, "Sample image")),
             ];
             if let Some(e) = vexpr(entry, c, 0) {
@@ -1104,7 +1396,10 @@ pub fn generate_code(entry: &ComponentEntry, c: &CodeCtx) -> String {
         },
         "code" => match c.variants.first().copied().unwrap_or(0) {
             1 => vec![
-                format!("Code::block({:?})", "fn main() {\n    println!(\"Hello, world!\");\n}"),
+                format!(
+                    "Code::block({:?})",
+                    "fn main() {\n    println!(\"Hello, world!\");\n}"
+                ),
                 format!("    .language({:?})", "rust"),
             ],
             _ => vec![format!("Code::inline({:?})", "cargo run")],
@@ -1150,6 +1445,31 @@ pub fn generate_code(entry: &ComponentEntry, c: &CodeCtx) -> String {
                 ]
             }
         }
+        // Custom arm: the `icon` bool maps to an `Icon` value, not `.icon(true)`,
+        // so the generic chain can't express it.
+        "button" => {
+            let mut l = vec!["Button::new()".to_string()];
+            if let Some(e) = vexpr(entry, c, 0) {
+                l.push(format!("    .intent({e})"));
+            }
+            if let Some(e) = vexpr(entry, c, 1) {
+                l.push(format!("    .size({e})"));
+            }
+            l.push(format!("    .text({:?})", ctext(c, 0, "Button")));
+            if cb(c, 0) {
+                l.push("    .disabled(true)".to_string());
+            }
+            if cb(c, 1) {
+                l.push("    .loading(true)".to_string());
+            }
+            if cb(c, 2) {
+                l.push("    .full_width(true)".to_string());
+            }
+            if cb(c, 3) {
+                l.push("    .icon(Icon::Check)".to_string());
+            }
+            l
+        }
         _ => {
             let mut l = vec![format!("{}::new()", entry.name)];
             l.extend(composite_children(entry.slug).iter().map(|s| s.to_string()));
@@ -1171,22 +1491,35 @@ fn stack_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
         _ => StackDirection::Column,
     };
     let gap = match v(variants, 1) {
-        0 => Gap::None, 1 => Gap::Xs, 2 => Gap::Sm,
-        4 => Gap::Lg, 5 => Gap::Xl, _ => Gap::Md,
+        0 => Gap::None,
+        1 => Gap::Xs,
+        2 => Gap::Sm,
+        4 => Gap::Lg,
+        5 => Gap::Xl,
+        _ => Gap::Md,
     };
     let align = match v(variants, 2) {
-        1 => StackAlign::Start, 2 => StackAlign::Center,
-        3 => StackAlign::End, _ => StackAlign::Stretch,
+        1 => StackAlign::Start,
+        2 => StackAlign::Center,
+        3 => StackAlign::End,
+        _ => StackAlign::Stretch,
     };
     let justify = match v(variants, 3) {
-        1 => StackJustify::Center, 2 => StackJustify::End,
-        3 => StackJustify::Between, 4 => StackJustify::Around,
+        1 => StackJustify::Center,
+        2 => StackJustify::End,
+        3 => StackJustify::Between,
+        4 => StackJustify::Around,
         _ => StackJustify::Start,
     };
     let wrap = b(bools, 0);
     let item = || {
         el(El::Div)
-            .st([rwire::St::BgMuted, rwire::St::RoundedMd, rwire::St::PMd, rwire::St::TextSm])
+            .st([
+                rwire::St::BgMuted,
+                rwire::St::RoundedMd,
+                rwire::St::PMd,
+                rwire::St::TextSm,
+            ])
             .text("Item")
     };
     Stack::new()
@@ -1202,30 +1535,53 @@ fn stack_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn grid_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Gap, Grid, GridColumns};
     let cols = match v(variants, 0) {
-        0 => GridColumns::Auto, 1 => GridColumns::Fixed1, 2 => GridColumns::Fixed2,
-        4 => GridColumns::Fixed4, _ => GridColumns::Fixed3,
+        0 => GridColumns::Auto,
+        1 => GridColumns::Fixed1,
+        2 => GridColumns::Fixed2,
+        4 => GridColumns::Fixed4,
+        _ => GridColumns::Fixed3,
     };
     let gap = match v(variants, 1) {
-        0 => Gap::None, 1 => Gap::Xs, 2 => Gap::Sm,
-        4 => Gap::Lg, 5 => Gap::Xl, _ => Gap::Md,
+        0 => Gap::None,
+        1 => Gap::Xs,
+        2 => Gap::Sm,
+        4 => Gap::Lg,
+        5 => Gap::Xl,
+        _ => Gap::Md,
     };
     let item = |n: &str| {
         el(El::Div)
-            .st([rwire::St::BgMuted, rwire::St::RoundedMd, rwire::St::PMd, rwire::St::TextSm])
+            .st([
+                rwire::St::BgMuted,
+                rwire::St::RoundedMd,
+                rwire::St::PMd,
+                rwire::St::TextSm,
+            ])
             .text(n)
     };
     Grid::new()
         .columns(cols)
         .gap(gap)
-        .children([item("1"), item("2"), item("3"), item("4"), item("5"), item("6")])
+        .children([
+            item("1"),
+            item("2"),
+            item("3"),
+            item("4"),
+            item("5"),
+            item("6"),
+        ])
         .build()
 }
 
 fn container_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Container, ContainerSize};
     let size = match v(variants, 0) {
-        0 => ContainerSize::Sm, 1 => ContainerSize::Md, 2 => ContainerSize::Lg,
-        3 => ContainerSize::Xl, 4 => ContainerSize::Full, _ => ContainerSize::Md,
+        0 => ContainerSize::Sm,
+        1 => ContainerSize::Md,
+        2 => ContainerSize::Lg,
+        3 => ContainerSize::Xl,
+        4 => ContainerSize::Full,
+        _ => ContainerSize::Md,
     };
     Container::new()
         .size(size)
@@ -1233,7 +1589,12 @@ fn container_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .padding(b(bools, 1))
         .child(
             el(El::Div)
-                .st([rwire::St::BgMuted, rwire::St::RoundedMd, rwire::St::PMd, rwire::St::TextSm])
+                .st([
+                    rwire::St::BgMuted,
+                    rwire::St::RoundedMd,
+                    rwire::St::PMd,
+                    rwire::St::TextSm,
+                ])
                 .text("Container content"),
         )
         .build()
@@ -1242,12 +1603,16 @@ fn container_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn card_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Card, CardPadding, CardShadow};
     let padding = match v(variants, 0) {
-        0 => CardPadding::None, 1 => CardPadding::Sm,
-        3 => CardPadding::Lg, _ => CardPadding::Md,
+        0 => CardPadding::None,
+        1 => CardPadding::Sm,
+        3 => CardPadding::Lg,
+        _ => CardPadding::Md,
     };
     let shadow = match v(variants, 1) {
-        0 => CardShadow::None, 2 => CardShadow::Md,
-        3 => CardShadow::Lg, _ => CardShadow::Sm,
+        0 => CardShadow::None,
+        2 => CardShadow::Md,
+        3 => CardShadow::Lg,
+        _ => CardShadow::Sm,
     };
     Card::new()
         .padding(padding)
@@ -1269,8 +1634,12 @@ fn app_shell_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn spacer_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Spacer, SpacingSize};
     let size = match v(variants, 0) {
-        0 => SpacingSize::None, 1 => SpacingSize::Xs, 2 => SpacingSize::Sm,
-        4 => SpacingSize::Lg, 5 => SpacingSize::Xl, _ => SpacingSize::Md,
+        0 => SpacingSize::None,
+        1 => SpacingSize::Xs,
+        2 => SpacingSize::Sm,
+        4 => SpacingSize::Lg,
+        5 => SpacingSize::Xl,
+        _ => SpacingSize::Md,
     };
     let horizontal = b(bools, 0);
     let mut spacer = Spacer::new(size);
@@ -1279,12 +1648,21 @@ fn spacer_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     }
     let line = || {
         el(El::Div)
-            .st([rwire::St::BgMuted, rwire::St::RoundedMd, rwire::St::PMd, rwire::St::TextSm])
+            .st([
+                rwire::St::BgMuted,
+                rwire::St::RoundedMd,
+                rwire::St::PMd,
+                rwire::St::TextSm,
+            ])
             .text("Content")
     };
     if horizontal {
         el(El::Div)
-            .st([rwire::St::DisplayFlex, rwire::St::FlexRow, rwire::St::ItemsCenter])
+            .st([
+                rwire::St::DisplayFlex,
+                rwire::St::FlexRow,
+                rwire::St::ItemsCenter,
+            ])
             .append([line(), spacer.build(), line()])
     } else {
         el(El::Div).append([line(), spacer.build(), line()])
@@ -1294,8 +1672,12 @@ fn spacer_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn divider_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Divider, SpacingSize};
     let margin = match v(variants, 0) {
-        0 => SpacingSize::None, 1 => SpacingSize::Xs, 2 => SpacingSize::Sm,
-        4 => SpacingSize::Lg, 5 => SpacingSize::Xl, _ => SpacingSize::Md,
+        0 => SpacingSize::None,
+        1 => SpacingSize::Xs,
+        2 => SpacingSize::Sm,
+        4 => SpacingSize::Lg,
+        5 => SpacingSize::Xl,
+        _ => SpacingSize::Md,
     };
     let vertical = b(bools, 0);
     let divider = if vertical {
@@ -1306,7 +1688,12 @@ fn divider_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     let line = |t: &str| el(El::P).st([rwire::St::TextSm]).text(t);
     if vertical {
         el(El::Div)
-            .st([rwire::St::DisplayFlex, rwire::St::FlexRow, rwire::St::ItemsCenter, rwire::St::HFull])
+            .st([
+                rwire::St::DisplayFlex,
+                rwire::St::FlexRow,
+                rwire::St::ItemsCenter,
+                rwire::St::HFull,
+            ])
             .append([line("Left"), divider.build(), line("Right")])
     } else {
         el(El::Div).append([line("Above"), divider.build(), line("Below")])
@@ -1321,32 +1708,44 @@ fn divider_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn button_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Button, ButtonIntent, ButtonSize};
     let intent = match v(variants, 0) {
-        1 => ButtonIntent::Secondary, 2 => ButtonIntent::Ghost,
-        3 => ButtonIntent::Destructive, _ => ButtonIntent::Primary,
+        1 => ButtonIntent::Secondary,
+        2 => ButtonIntent::Ghost,
+        3 => ButtonIntent::Destructive,
+        _ => ButtonIntent::Primary,
     };
     let size = match v(variants, 1) {
-        0 => ButtonSize::Sm, 2 => ButtonSize::Lg, _ => ButtonSize::Md,
+        0 => ButtonSize::Sm,
+        2 => ButtonSize::Lg,
+        _ => ButtonSize::Md,
     };
-    Button::new()
+    let mut btn = Button::new()
         .intent(intent)
         .size(size)
         .text("Button")
         .disabled(b(bools, 0))
         .loading(b(bools, 1))
-        .full_width(b(bools, 2))
-        .build()
+        .full_width(b(bools, 2));
+    if b(bools, 3) {
+        btn = btn.icon(Icon::Check);
+    }
+    btn.build()
 }
 
 fn input_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Input, InputSize, InputType};
     let input_type = match v(variants, 0) {
-        1 => InputType::Password, 2 => InputType::Email,
-        3 => InputType::Number, 4 => InputType::Search,
-        5 => InputType::Tel, 6 => InputType::Url,
+        1 => InputType::Password,
+        2 => InputType::Email,
+        3 => InputType::Number,
+        4 => InputType::Search,
+        5 => InputType::Tel,
+        6 => InputType::Url,
         _ => InputType::Text,
     };
     let size = match v(variants, 1) {
-        0 => InputSize::Sm, 2 => InputSize::Lg, _ => InputSize::Md,
+        0 => InputSize::Sm,
+        2 => InputSize::Lg,
+        _ => InputSize::Md,
     };
     Input::new()
         .input_type(input_type)
@@ -1360,10 +1759,12 @@ fn input_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 }
 
 fn textarea_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
-    use crate::Textarea;
     use crate::textarea::TextareaSize;
+    use crate::Textarea;
     let size = match v(variants, 0) {
-        0 => TextareaSize::Sm, 2 => TextareaSize::Lg, _ => TextareaSize::Md,
+        0 => TextareaSize::Sm,
+        2 => TextareaSize::Lg,
+        _ => TextareaSize::Md,
     };
     Textarea::new()
         .size(size)
@@ -1402,18 +1803,28 @@ fn checkbox_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
 }
 
 fn radio_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
-    use crate::{Radio, Stack, Gap};
+    use crate::{Gap, Radio, Stack};
     Stack::column()
         .gap(Gap::Sm)
         .children([
             Radio::new()
-                .name("plan").value("free").label("Free Plan")
-                .checked(!b(bools, 0)).disabled(b(bools, 1))
-                .required(b(bools, 2)).invalid(b(bools, 3)).build(),
+                .name("plan")
+                .value("free")
+                .label("Free Plan")
+                .checked(!b(bools, 0))
+                .disabled(b(bools, 1))
+                .required(b(bools, 2))
+                .invalid(b(bools, 3))
+                .build(),
             Radio::new()
-                .name("plan").value("pro").label("Pro Plan")
-                .checked(b(bools, 0)).disabled(b(bools, 1))
-                .required(b(bools, 2)).invalid(b(bools, 3)).build(),
+                .name("plan")
+                .value("pro")
+                .label("Pro Plan")
+                .checked(b(bools, 0))
+                .disabled(b(bools, 1))
+                .required(b(bools, 2))
+                .invalid(b(bools, 3))
+                .build(),
         ])
         .build()
 }
@@ -1430,7 +1841,10 @@ fn switch_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn slider_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Slider;
     Slider::new()
-        .min(0).max(100).value(50).step(1)
+        .min(0)
+        .max(100)
+        .value(50)
+        .step(1)
         .label("Volume")
         .disabled(b(bools, 0))
         .build()
@@ -1438,9 +1852,7 @@ fn slider_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
 
 fn label_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Label;
-    Label::new("Email address")
-        .required(b(bools, 0))
-        .build()
+    Label::new("Email address").required(b(bools, 0)).build()
 }
 
 fn form_field_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
@@ -1464,14 +1876,21 @@ fn form_field_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn text_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Text, TextColor, TextVariant};
     let variant = match v(variants, 0) {
-        1 => TextVariant::BodySmall, 2 => TextVariant::Heading1,
-        3 => TextVariant::Heading2, 4 => TextVariant::Heading3,
-        5 => TextVariant::Label, 6 => TextVariant::Caption,
+        1 => TextVariant::BodySmall,
+        2 => TextVariant::Heading1,
+        3 => TextVariant::Heading2,
+        4 => TextVariant::Heading3,
+        5 => TextVariant::Label,
+        6 => TextVariant::Caption,
         _ => TextVariant::Body,
     };
     let color = match v(variants, 1) {
-        1 => TextColor::High, 2 => TextColor::Muted, 3 => TextColor::Accent,
-        4 => TextColor::Success, 5 => TextColor::Warning, 6 => TextColor::Error,
+        1 => TextColor::High,
+        2 => TextColor::Muted,
+        3 => TextColor::Accent,
+        4 => TextColor::Success,
+        5 => TextColor::Warning,
+        6 => TextColor::Error,
         _ => TextColor::Default,
     };
     Text::new()
@@ -1484,8 +1903,10 @@ fn text_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Badge, BadgeIntent};
     let intent = match v(variants, 0) {
-        1 => BadgeIntent::Primary, 2 => BadgeIntent::Success,
-        3 => BadgeIntent::Warning, 4 => BadgeIntent::Error,
+        1 => BadgeIntent::Primary,
+        2 => BadgeIntent::Success,
+        3 => BadgeIntent::Warning,
+        4 => BadgeIntent::Error,
         _ => BadgeIntent::Default,
     };
     Badge::new().intent(intent).text("Badge").build()
@@ -1494,8 +1915,10 @@ fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn tag_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Tag, TagIntent};
     let intent = match v(variants, 0) {
-        1 => TagIntent::Primary, 2 => TagIntent::Success,
-        3 => TagIntent::Warning, 4 => TagIntent::Error,
+        1 => TagIntent::Primary,
+        2 => TagIntent::Success,
+        3 => TagIntent::Warning,
+        4 => TagIntent::Error,
         _ => TagIntent::Default,
     };
     Tag::new("Tag")
@@ -1507,13 +1930,15 @@ fn tag_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn code_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::Code;
     match v(variants, 0) {
-        1 => Code::block("fn main() {\n    println!(\"Hello, world!\");\n}").language("rust").build(),
+        1 => Code::block("fn main() {\n    println!(\"Hello, world!\");\n}")
+            .language("rust")
+            .build(),
         _ => Code::inline("cargo run").build(),
     }
 }
 
 fn kbd_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::{Kbd, Stack, Gap};
+    use crate::{Gap, Kbd, Stack};
     Stack::row()
         .gap(Gap::Sm)
         .children([
@@ -1528,7 +1953,12 @@ fn table_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Table, TableRow};
     Table::new()
         .headers(["Name", "Role", "Status"])
-        .row(TableRow::new().cell("Alice").cell("Engineer").cell("Active"))
+        .row(
+            TableRow::new()
+                .cell("Alice")
+                .cell("Engineer")
+                .cell("Active"),
+        )
         .row(TableRow::new().cell("Bob").cell("Designer").cell("Active"))
         .row(TableRow::new().cell("Carol").cell("Manager").cell("Away"))
         .striped(b(bools, 0))
@@ -1538,7 +1968,9 @@ fn table_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
 fn stat_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Stat, StatTrend};
     let trend = match v(variants, 0) {
-        1 => StatTrend::Down, 2 => StatTrend::Neutral, _ => StatTrend::Up,
+        1 => StatTrend::Down,
+        2 => StatTrend::Neutral,
+        _ => StatTrend::Up,
     };
     Stat::new("$12,345")
         .label("Revenue")
@@ -1550,7 +1982,9 @@ fn stat_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn avatar_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Avatar, AvatarSize};
     let size = match v(variants, 0) {
-        0 => AvatarSize::Sm, 2 => AvatarSize::Lg, _ => AvatarSize::Md,
+        0 => AvatarSize::Sm,
+        2 => AvatarSize::Lg,
+        _ => AvatarSize::Md,
     };
     Avatar::new().fallback("JD").size(size).build()
 }
@@ -1569,7 +2003,9 @@ fn avatar_group_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn image_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Image, ImageFit};
     let fit = match v(variants, 0) {
-        1 => ImageFit::Contain, 2 => ImageFit::Fill, 3 => ImageFit::None,
+        1 => ImageFit::Contain,
+        2 => ImageFit::Fill,
+        3 => ImageFit::None,
         _ => ImageFit::Cover,
     };
     let mut img = Image::new("https://picsum.photos/400/300")
@@ -1580,14 +2016,22 @@ fn image_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
         2 => img = img.aspect_video(),
         _ => {}
     }
-    if b(bools, 0) { img = img.rounded(); }
-    if b(bools, 1) { img = img.full_width(); }
+    if b(bools, 0) {
+        img = img.rounded();
+    }
+    if b(bools, 1) {
+        img = img.full_width();
+    }
     img.build()
 }
 
 fn list_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{List, ListItem};
-    let mut list = if b(bools, 0) { List::ordered() } else { List::unordered() };
+    let mut list = if b(bools, 0) {
+        List::ordered()
+    } else {
+        List::unordered()
+    };
     list = list.children([
         ListItem::new("First item").build(),
         ListItem::new("Second item").build(),
@@ -1606,8 +2050,16 @@ fn blockquote_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn timeline_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Timeline, TimelineItem};
     Timeline::new()
-        .item(TimelineItem::new("Order placed").description("Jan 1, 2026").active(true))
-        .item(TimelineItem::new("Shipped").description("Jan 3, 2026").active(true))
+        .item(
+            TimelineItem::new("Order placed")
+                .description("Jan 1, 2026")
+                .active(true),
+        )
+        .item(
+            TimelineItem::new("Shipped")
+                .description("Jan 3, 2026")
+                .active(true),
+        )
         .item(TimelineItem::new("Delivered").description("Pending"))
         .build()
 }
@@ -1619,8 +2071,10 @@ fn timeline_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn alert_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Alert, AlertIntent};
     let intent = match v(variants, 0) {
-        1 => AlertIntent::Success, 2 => AlertIntent::Warning,
-        3 => AlertIntent::Error, _ => AlertIntent::Info,
+        1 => AlertIntent::Success,
+        2 => AlertIntent::Warning,
+        3 => AlertIntent::Error,
+        _ => AlertIntent::Info,
     };
     Alert::new()
         .intent(intent)
@@ -1632,8 +2086,10 @@ fn alert_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn toast_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Toast, ToastIntent};
     let intent = match v(variants, 0) {
-        1 => ToastIntent::Success, 2 => ToastIntent::Warning,
-        3 => ToastIntent::Error, _ => ToastIntent::Info,
+        1 => ToastIntent::Success,
+        2 => ToastIntent::Warning,
+        3 => ToastIntent::Error,
+        _ => ToastIntent::Info,
     };
     Toast::new("Toast notification message")
         .intent(intent)
@@ -1643,14 +2099,20 @@ fn toast_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn spinner_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Spinner, SpinnerSize};
     let size = match v(variants, 0) {
-        0 => SpinnerSize::Sm, 2 => SpinnerSize::Lg, _ => SpinnerSize::Md,
+        0 => SpinnerSize::Sm,
+        2 => SpinnerSize::Lg,
+        _ => SpinnerSize::Md,
     };
     Spinner::new().size(size).label("Loading...").build()
 }
 
 fn progress_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::Progress;
-    Progress::new().value(65).max(100).label("Upload progress").build()
+    Progress::new()
+        .value(65)
+        .max(100)
+        .label("Upload progress")
+        .build()
 }
 
 fn skeleton_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
@@ -1673,17 +2135,23 @@ fn empty_state_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn tooltip_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Tooltip, TooltipPosition};
     let position = match v(variants, 0) {
-        1 => TooltipPosition::Bottom, 2 => TooltipPosition::Left,
-        3 => TooltipPosition::Right, _ => TooltipPosition::Top,
+        1 => TooltipPosition::Bottom,
+        2 => TooltipPosition::Left,
+        3 => TooltipPosition::Right,
+        _ => TooltipPosition::Top,
     };
     Tooltip::new("Tooltip text")
         .position(position)
         .child(
             el(El::Button)
                 .st([
-                    rwire::St::BgPrimary, rwire::St::TextOnPrimary,
-                    rwire::St::PxMd, rwire::St::PySm, rwire::St::RoundedMd,
-                    rwire::St::BorderNone, rwire::St::CursorPointer,
+                    rwire::St::BgPrimary,
+                    rwire::St::TextOnPrimary,
+                    rwire::St::PxMd,
+                    rwire::St::PySm,
+                    rwire::St::RoundedMd,
+                    rwire::St::BorderNone,
+                    rwire::St::CursorPointer,
                 ])
                 .text("Hover me"),
         )
@@ -1697,7 +2165,9 @@ fn tooltip_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn link_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Link;
     if b(bools, 0) {
-        Link::external("https://example.com").text("External Link").build()
+        Link::external("https://example.com")
+            .text("External Link")
+            .build()
     } else {
         Link::new("/docs").text("Internal Link").build()
     }
@@ -1734,16 +2204,17 @@ fn tabs_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 
 fn pagination_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::Pagination;
-    Pagination::new()
-        .current_page(3)
-        .total_pages(10)
-        .build()
+    Pagination::new().current_page(3).total_pages(10).build()
 }
 
 fn footer_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{Footer, FooterColumn};
     Footer::new()
-        .logo(el(El::Span).st([rwire::St::TextLg, rwire::St::FontBold]).text("Brand"))
+        .logo(
+            el(El::Span)
+                .st([rwire::St::TextLg, rwire::St::FontBold])
+                .text("Brand"),
+        )
         .tagline("Building the future, one component at a time.")
         .column(
             FooterColumn::new("Product")
@@ -1767,8 +2238,10 @@ fn footer_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn modal_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Modal, ModalSize};
     let size = match v(variants, 0) {
-        0 => ModalSize::Sm, 2 => ModalSize::Lg,
-        3 => ModalSize::Xl, 4 => ModalSize::Full,
+        0 => ModalSize::Sm,
+        2 => ModalSize::Lg,
+        3 => ModalSize::Xl,
+        4 => ModalSize::Full,
         _ => ModalSize::Md,
     };
     Modal::new()
@@ -1831,7 +2304,9 @@ fn copy_button_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn theme_toggle_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{ThemeToggle, ThemeToggleMode, ToggleSize};
     let size = match v(variants, 0) {
-        0 => ToggleSize::Sm, 2 => ToggleSize::Lg, _ => ToggleSize::Md,
+        0 => ToggleSize::Sm,
+        2 => ToggleSize::Lg,
+        _ => ToggleSize::Md,
     };
     let mode = match v(variants, 1) {
         1 => ThemeToggleMode::Dark,
@@ -1862,43 +2337,102 @@ fn stepper_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 
 const STACK_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "direction", display_name: "Direction", rust_type: "StackDirection",
+        name: "direction",
+        display_name: "Direction",
+        rust_type: "StackDirection",
         values: &[
-            VariantValue { label: "Column", rust_expr: "StackDirection::Column" },
-            VariantValue { label: "Row", rust_expr: "StackDirection::Row" },
+            VariantValue {
+                label: "Column",
+                rust_expr: "StackDirection::Column",
+            },
+            VariantValue {
+                label: "Row",
+                rust_expr: "StackDirection::Row",
+            },
         ],
         default_index: 0,
     },
     VariantAxis {
-        name: "gap", display_name: "Gap", rust_type: "Gap",
+        name: "gap",
+        display_name: "Gap",
+        rust_type: "Gap",
         values: &[
-            VariantValue { label: "None", rust_expr: "Gap::None" },
-            VariantValue { label: "Xs", rust_expr: "Gap::Xs" },
-            VariantValue { label: "Sm", rust_expr: "Gap::Sm" },
-            VariantValue { label: "Md", rust_expr: "Gap::Md" },
-            VariantValue { label: "Lg", rust_expr: "Gap::Lg" },
-            VariantValue { label: "Xl", rust_expr: "Gap::Xl" },
+            VariantValue {
+                label: "None",
+                rust_expr: "Gap::None",
+            },
+            VariantValue {
+                label: "Xs",
+                rust_expr: "Gap::Xs",
+            },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "Gap::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "Gap::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "Gap::Lg",
+            },
+            VariantValue {
+                label: "Xl",
+                rust_expr: "Gap::Xl",
+            },
         ],
         default_index: 3,
     },
     VariantAxis {
-        name: "align", display_name: "Align", rust_type: "StackAlign",
+        name: "align",
+        display_name: "Align",
+        rust_type: "StackAlign",
         values: &[
-            VariantValue { label: "Stretch", rust_expr: "StackAlign::Stretch" },
-            VariantValue { label: "Start", rust_expr: "StackAlign::Start" },
-            VariantValue { label: "Center", rust_expr: "StackAlign::Center" },
-            VariantValue { label: "End", rust_expr: "StackAlign::End" },
+            VariantValue {
+                label: "Stretch",
+                rust_expr: "StackAlign::Stretch",
+            },
+            VariantValue {
+                label: "Start",
+                rust_expr: "StackAlign::Start",
+            },
+            VariantValue {
+                label: "Center",
+                rust_expr: "StackAlign::Center",
+            },
+            VariantValue {
+                label: "End",
+                rust_expr: "StackAlign::End",
+            },
         ],
         default_index: 0,
     },
     VariantAxis {
-        name: "justify", display_name: "Justify", rust_type: "StackJustify",
+        name: "justify",
+        display_name: "Justify",
+        rust_type: "StackJustify",
         values: &[
-            VariantValue { label: "Start", rust_expr: "StackJustify::Start" },
-            VariantValue { label: "Center", rust_expr: "StackJustify::Center" },
-            VariantValue { label: "End", rust_expr: "StackJustify::End" },
-            VariantValue { label: "Between", rust_expr: "StackJustify::Between" },
-            VariantValue { label: "Around", rust_expr: "StackJustify::Around" },
+            VariantValue {
+                label: "Start",
+                rust_expr: "StackJustify::Start",
+            },
+            VariantValue {
+                label: "Center",
+                rust_expr: "StackJustify::Center",
+            },
+            VariantValue {
+                label: "End",
+                rust_expr: "StackJustify::End",
+            },
+            VariantValue {
+                label: "Between",
+                rust_expr: "StackJustify::Between",
+            },
+            VariantValue {
+                label: "Around",
+                rust_expr: "StackJustify::Around",
+            },
         ],
         default_index: 0,
     },
@@ -1906,101 +2440,224 @@ const STACK_VARIANTS: &[VariantAxis] = &[
 
 const GRID_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "columns", display_name: "Columns", rust_type: "GridColumns",
+        name: "columns",
+        display_name: "Columns",
+        rust_type: "GridColumns",
         values: &[
-            VariantValue { label: "Auto", rust_expr: "GridColumns::Auto" },
-            VariantValue { label: "1", rust_expr: "GridColumns::Fixed1" },
-            VariantValue { label: "2", rust_expr: "GridColumns::Fixed2" },
-            VariantValue { label: "3", rust_expr: "GridColumns::Fixed3" },
-            VariantValue { label: "4", rust_expr: "GridColumns::Fixed4" },
+            VariantValue {
+                label: "Auto",
+                rust_expr: "GridColumns::Auto",
+            },
+            VariantValue {
+                label: "1",
+                rust_expr: "GridColumns::Fixed1",
+            },
+            VariantValue {
+                label: "2",
+                rust_expr: "GridColumns::Fixed2",
+            },
+            VariantValue {
+                label: "3",
+                rust_expr: "GridColumns::Fixed3",
+            },
+            VariantValue {
+                label: "4",
+                rust_expr: "GridColumns::Fixed4",
+            },
         ],
         default_index: 3,
     },
     VariantAxis {
-        name: "gap", display_name: "Gap", rust_type: "Gap",
+        name: "gap",
+        display_name: "Gap",
+        rust_type: "Gap",
         values: &[
-            VariantValue { label: "None", rust_expr: "Gap::None" },
-            VariantValue { label: "Xs", rust_expr: "Gap::Xs" },
-            VariantValue { label: "Sm", rust_expr: "Gap::Sm" },
-            VariantValue { label: "Md", rust_expr: "Gap::Md" },
-            VariantValue { label: "Lg", rust_expr: "Gap::Lg" },
-            VariantValue { label: "Xl", rust_expr: "Gap::Xl" },
+            VariantValue {
+                label: "None",
+                rust_expr: "Gap::None",
+            },
+            VariantValue {
+                label: "Xs",
+                rust_expr: "Gap::Xs",
+            },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "Gap::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "Gap::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "Gap::Lg",
+            },
+            VariantValue {
+                label: "Xl",
+                rust_expr: "Gap::Xl",
+            },
         ],
         default_index: 3,
     },
 ];
 
-const CONTAINER_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "size", display_name: "Size", rust_type: "ContainerSize",
-        values: &[
-            VariantValue { label: "Sm", rust_expr: "ContainerSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "ContainerSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "ContainerSize::Lg" },
-            VariantValue { label: "Xl", rust_expr: "ContainerSize::Xl" },
-            VariantValue { label: "Full", rust_expr: "ContainerSize::Full" },
-        ],
-        default_index: 1,
-    },
-];
+const CONTAINER_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "size",
+    display_name: "Size",
+    rust_type: "ContainerSize",
+    values: &[
+        VariantValue {
+            label: "Sm",
+            rust_expr: "ContainerSize::Sm",
+        },
+        VariantValue {
+            label: "Md",
+            rust_expr: "ContainerSize::Md",
+        },
+        VariantValue {
+            label: "Lg",
+            rust_expr: "ContainerSize::Lg",
+        },
+        VariantValue {
+            label: "Xl",
+            rust_expr: "ContainerSize::Xl",
+        },
+        VariantValue {
+            label: "Full",
+            rust_expr: "ContainerSize::Full",
+        },
+    ],
+    default_index: 1,
+}];
 
 const CARD_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "padding", display_name: "Padding", rust_type: "CardPadding",
+        name: "padding",
+        display_name: "Padding",
+        rust_type: "CardPadding",
         values: &[
-            VariantValue { label: "None", rust_expr: "CardPadding::None" },
-            VariantValue { label: "Sm", rust_expr: "CardPadding::Sm" },
-            VariantValue { label: "Md", rust_expr: "CardPadding::Md" },
-            VariantValue { label: "Lg", rust_expr: "CardPadding::Lg" },
+            VariantValue {
+                label: "None",
+                rust_expr: "CardPadding::None",
+            },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "CardPadding::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "CardPadding::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "CardPadding::Lg",
+            },
         ],
         default_index: 2,
     },
     VariantAxis {
-        name: "shadow", display_name: "Shadow", rust_type: "CardShadow",
+        name: "shadow",
+        display_name: "Shadow",
+        rust_type: "CardShadow",
         values: &[
-            VariantValue { label: "None", rust_expr: "CardShadow::None" },
-            VariantValue { label: "Sm", rust_expr: "CardShadow::Sm" },
-            VariantValue { label: "Md", rust_expr: "CardShadow::Md" },
-            VariantValue { label: "Lg", rust_expr: "CardShadow::Lg" },
+            VariantValue {
+                label: "None",
+                rust_expr: "CardShadow::None",
+            },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "CardShadow::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "CardShadow::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "CardShadow::Lg",
+            },
         ],
         default_index: 1,
     },
 ];
 
-const SPACING_SIZE_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "size", display_name: "Size", rust_type: "SpacingSize",
-        values: &[
-            VariantValue { label: "None", rust_expr: "SpacingSize::None" },
-            VariantValue { label: "Xs", rust_expr: "SpacingSize::Xs" },
-            VariantValue { label: "Sm", rust_expr: "SpacingSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "SpacingSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "SpacingSize::Lg" },
-            VariantValue { label: "Xl", rust_expr: "SpacingSize::Xl" },
-        ],
-        default_index: 3,
-    },
-];
+const SPACING_SIZE_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "size",
+    display_name: "Size",
+    rust_type: "SpacingSize",
+    values: &[
+        VariantValue {
+            label: "None",
+            rust_expr: "SpacingSize::None",
+        },
+        VariantValue {
+            label: "Xs",
+            rust_expr: "SpacingSize::Xs",
+        },
+        VariantValue {
+            label: "Sm",
+            rust_expr: "SpacingSize::Sm",
+        },
+        VariantValue {
+            label: "Md",
+            rust_expr: "SpacingSize::Md",
+        },
+        VariantValue {
+            label: "Lg",
+            rust_expr: "SpacingSize::Lg",
+        },
+        VariantValue {
+            label: "Xl",
+            rust_expr: "SpacingSize::Xl",
+        },
+    ],
+    default_index: 3,
+}];
 
 // --- Forms ---
 
 const BUTTON_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "intent", display_name: "Intent", rust_type: "ButtonIntent",
+        name: "intent",
+        display_name: "Intent",
+        rust_type: "ButtonIntent",
         values: &[
-            VariantValue { label: "Primary", rust_expr: "ButtonIntent::Primary" },
-            VariantValue { label: "Secondary", rust_expr: "ButtonIntent::Secondary" },
-            VariantValue { label: "Ghost", rust_expr: "ButtonIntent::Ghost" },
-            VariantValue { label: "Destructive", rust_expr: "ButtonIntent::Destructive" },
+            VariantValue {
+                label: "Primary",
+                rust_expr: "ButtonIntent::Primary",
+            },
+            VariantValue {
+                label: "Secondary",
+                rust_expr: "ButtonIntent::Secondary",
+            },
+            VariantValue {
+                label: "Ghost",
+                rust_expr: "ButtonIntent::Ghost",
+            },
+            VariantValue {
+                label: "Destructive",
+                rust_expr: "ButtonIntent::Destructive",
+            },
         ],
         default_index: 0,
     },
     VariantAxis {
-        name: "size", display_name: "Size", rust_type: "ButtonSize",
+        name: "size",
+        display_name: "Size",
+        rust_type: "ButtonSize",
         values: &[
-            VariantValue { label: "Sm", rust_expr: "ButtonSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "ButtonSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "ButtonSize::Lg" },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "ButtonSize::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "ButtonSize::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "ButtonSize::Lg",
+            },
         ],
         default_index: 1,
     },
@@ -2008,131 +2665,274 @@ const BUTTON_VARIANTS: &[VariantAxis] = &[
 
 const INPUT_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "type", display_name: "Type", rust_type: "InputType",
+        name: "type",
+        display_name: "Type",
+        rust_type: "InputType",
         values: &[
-            VariantValue { label: "Text", rust_expr: "InputType::Text" },
-            VariantValue { label: "Password", rust_expr: "InputType::Password" },
-            VariantValue { label: "Email", rust_expr: "InputType::Email" },
-            VariantValue { label: "Number", rust_expr: "InputType::Number" },
-            VariantValue { label: "Search", rust_expr: "InputType::Search" },
-            VariantValue { label: "Tel", rust_expr: "InputType::Tel" },
-            VariantValue { label: "Url", rust_expr: "InputType::Url" },
+            VariantValue {
+                label: "Text",
+                rust_expr: "InputType::Text",
+            },
+            VariantValue {
+                label: "Password",
+                rust_expr: "InputType::Password",
+            },
+            VariantValue {
+                label: "Email",
+                rust_expr: "InputType::Email",
+            },
+            VariantValue {
+                label: "Number",
+                rust_expr: "InputType::Number",
+            },
+            VariantValue {
+                label: "Search",
+                rust_expr: "InputType::Search",
+            },
+            VariantValue {
+                label: "Tel",
+                rust_expr: "InputType::Tel",
+            },
+            VariantValue {
+                label: "Url",
+                rust_expr: "InputType::Url",
+            },
         ],
         default_index: 0,
     },
     VariantAxis {
-        name: "size", display_name: "Size", rust_type: "InputSize",
+        name: "size",
+        display_name: "Size",
+        rust_type: "InputSize",
         values: &[
-            VariantValue { label: "Sm", rust_expr: "InputSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "InputSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "InputSize::Lg" },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "InputSize::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "InputSize::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "InputSize::Lg",
+            },
         ],
         default_index: 1,
     },
 ];
 
-const TEXTAREA_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "size", display_name: "Size", rust_type: "TextareaSize",
-        values: &[
-            VariantValue { label: "Sm", rust_expr: "TextareaSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "TextareaSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "TextareaSize::Lg" },
-        ],
-        default_index: 1,
-    },
-];
+const TEXTAREA_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "size",
+    display_name: "Size",
+    rust_type: "TextareaSize",
+    values: &[
+        VariantValue {
+            label: "Sm",
+            rust_expr: "TextareaSize::Sm",
+        },
+        VariantValue {
+            label: "Md",
+            rust_expr: "TextareaSize::Md",
+        },
+        VariantValue {
+            label: "Lg",
+            rust_expr: "TextareaSize::Lg",
+        },
+    ],
+    default_index: 1,
+}];
 
 // --- Data Display ---
 
 const TEXT_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "variant", display_name: "Variant", rust_type: "TextVariant",
+        name: "variant",
+        display_name: "Variant",
+        rust_type: "TextVariant",
         values: &[
-            VariantValue { label: "Body", rust_expr: "TextVariant::Body" },
-            VariantValue { label: "BodySmall", rust_expr: "TextVariant::BodySmall" },
-            VariantValue { label: "Heading1", rust_expr: "TextVariant::Heading1" },
-            VariantValue { label: "Heading2", rust_expr: "TextVariant::Heading2" },
-            VariantValue { label: "Heading3", rust_expr: "TextVariant::Heading3" },
-            VariantValue { label: "Label", rust_expr: "TextVariant::Label" },
-            VariantValue { label: "Caption", rust_expr: "TextVariant::Caption" },
+            VariantValue {
+                label: "Body",
+                rust_expr: "TextVariant::Body",
+            },
+            VariantValue {
+                label: "BodySmall",
+                rust_expr: "TextVariant::BodySmall",
+            },
+            VariantValue {
+                label: "Heading1",
+                rust_expr: "TextVariant::Heading1",
+            },
+            VariantValue {
+                label: "Heading2",
+                rust_expr: "TextVariant::Heading2",
+            },
+            VariantValue {
+                label: "Heading3",
+                rust_expr: "TextVariant::Heading3",
+            },
+            VariantValue {
+                label: "Label",
+                rust_expr: "TextVariant::Label",
+            },
+            VariantValue {
+                label: "Caption",
+                rust_expr: "TextVariant::Caption",
+            },
         ],
         default_index: 0,
     },
     VariantAxis {
-        name: "color", display_name: "Color", rust_type: "TextColor",
+        name: "color",
+        display_name: "Color",
+        rust_type: "TextColor",
         values: &[
-            VariantValue { label: "Default", rust_expr: "TextColor::Default" },
-            VariantValue { label: "High", rust_expr: "TextColor::High" },
-            VariantValue { label: "Muted", rust_expr: "TextColor::Muted" },
-            VariantValue { label: "Accent", rust_expr: "TextColor::Accent" },
-            VariantValue { label: "Success", rust_expr: "TextColor::Success" },
-            VariantValue { label: "Warning", rust_expr: "TextColor::Warning" },
-            VariantValue { label: "Error", rust_expr: "TextColor::Error" },
+            VariantValue {
+                label: "Default",
+                rust_expr: "TextColor::Default",
+            },
+            VariantValue {
+                label: "High",
+                rust_expr: "TextColor::High",
+            },
+            VariantValue {
+                label: "Muted",
+                rust_expr: "TextColor::Muted",
+            },
+            VariantValue {
+                label: "Accent",
+                rust_expr: "TextColor::Accent",
+            },
+            VariantValue {
+                label: "Success",
+                rust_expr: "TextColor::Success",
+            },
+            VariantValue {
+                label: "Warning",
+                rust_expr: "TextColor::Warning",
+            },
+            VariantValue {
+                label: "Error",
+                rust_expr: "TextColor::Error",
+            },
         ],
         default_index: 0,
     },
 ];
 
-const BADGE_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "intent", display_name: "Intent", rust_type: "BadgeIntent",
-        values: &[
-            VariantValue { label: "Default", rust_expr: "BadgeIntent::Default" },
-            VariantValue { label: "Primary", rust_expr: "BadgeIntent::Primary" },
-            VariantValue { label: "Success", rust_expr: "BadgeIntent::Success" },
-            VariantValue { label: "Warning", rust_expr: "BadgeIntent::Warning" },
-            VariantValue { label: "Error", rust_expr: "BadgeIntent::Error" },
-        ],
-        default_index: 0,
-    },
-];
+const BADGE_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "intent",
+    display_name: "Intent",
+    rust_type: "BadgeIntent",
+    values: &[
+        VariantValue {
+            label: "Default",
+            rust_expr: "BadgeIntent::Default",
+        },
+        VariantValue {
+            label: "Primary",
+            rust_expr: "BadgeIntent::Primary",
+        },
+        VariantValue {
+            label: "Success",
+            rust_expr: "BadgeIntent::Success",
+        },
+        VariantValue {
+            label: "Warning",
+            rust_expr: "BadgeIntent::Warning",
+        },
+        VariantValue {
+            label: "Error",
+            rust_expr: "BadgeIntent::Error",
+        },
+    ],
+    default_index: 0,
+}];
 
-const TAG_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "intent", display_name: "Intent", rust_type: "TagIntent",
-        values: &[
-            VariantValue { label: "Default", rust_expr: "TagIntent::Default" },
-            VariantValue { label: "Primary", rust_expr: "TagIntent::Primary" },
-            VariantValue { label: "Success", rust_expr: "TagIntent::Success" },
-            VariantValue { label: "Warning", rust_expr: "TagIntent::Warning" },
-            VariantValue { label: "Error", rust_expr: "TagIntent::Error" },
-        ],
-        default_index: 0,
-    },
-];
+const TAG_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "intent",
+    display_name: "Intent",
+    rust_type: "TagIntent",
+    values: &[
+        VariantValue {
+            label: "Default",
+            rust_expr: "TagIntent::Default",
+        },
+        VariantValue {
+            label: "Primary",
+            rust_expr: "TagIntent::Primary",
+        },
+        VariantValue {
+            label: "Success",
+            rust_expr: "TagIntent::Success",
+        },
+        VariantValue {
+            label: "Warning",
+            rust_expr: "TagIntent::Warning",
+        },
+        VariantValue {
+            label: "Error",
+            rust_expr: "TagIntent::Error",
+        },
+    ],
+    default_index: 0,
+}];
 
-const CODE_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "mode", display_name: "Mode", rust_type: "CodeMode",
-        values: &[
-            VariantValue { label: "Inline", rust_expr: "CodeMode::Inline" },
-            VariantValue { label: "Block", rust_expr: "CodeMode::Block" },
-        ],
-        default_index: 0,
-    },
-];
+const CODE_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "mode",
+    display_name: "Mode",
+    rust_type: "CodeMode",
+    values: &[
+        VariantValue {
+            label: "Inline",
+            rust_expr: "CodeMode::Inline",
+        },
+        VariantValue {
+            label: "Block",
+            rust_expr: "CodeMode::Block",
+        },
+    ],
+    default_index: 0,
+}];
 
-const STAT_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "trend", display_name: "Trend", rust_type: "StatTrend",
-        values: &[
-            VariantValue { label: "Up", rust_expr: "StatTrend::Up" },
-            VariantValue { label: "Down", rust_expr: "StatTrend::Down" },
-            VariantValue { label: "Neutral", rust_expr: "StatTrend::Neutral" },
-        ],
-        default_index: 0,
-    },
-];
+const STAT_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "trend",
+    display_name: "Trend",
+    rust_type: "StatTrend",
+    values: &[
+        VariantValue {
+            label: "Up",
+            rust_expr: "StatTrend::Up",
+        },
+        VariantValue {
+            label: "Down",
+            rust_expr: "StatTrend::Down",
+        },
+        VariantValue {
+            label: "Neutral",
+            rust_expr: "StatTrend::Neutral",
+        },
+    ],
+    default_index: 0,
+}];
 
 const AVATAR_SIZE: &[VariantAxis] = &[VariantAxis {
     name: "size",
     display_name: "Size",
     rust_type: "AvatarSize",
     values: &[
-        VariantValue { label: "Sm", rust_expr: "AvatarSize::Sm" },
-        VariantValue { label: "Md", rust_expr: "AvatarSize::Md" },
-        VariantValue { label: "Lg", rust_expr: "AvatarSize::Lg" },
+        VariantValue {
+            label: "Sm",
+            rust_expr: "AvatarSize::Sm",
+        },
+        VariantValue {
+            label: "Md",
+            rust_expr: "AvatarSize::Md",
+        },
+        VariantValue {
+            label: "Lg",
+            rust_expr: "AvatarSize::Lg",
+        },
     ],
     default_index: 1,
 }];
@@ -2142,30 +2942,64 @@ const SPINNER_SIZE: &[VariantAxis] = &[VariantAxis {
     display_name: "Size",
     rust_type: "SpinnerSize",
     values: &[
-        VariantValue { label: "Sm", rust_expr: "SpinnerSize::Sm" },
-        VariantValue { label: "Md", rust_expr: "SpinnerSize::Md" },
-        VariantValue { label: "Lg", rust_expr: "SpinnerSize::Lg" },
+        VariantValue {
+            label: "Sm",
+            rust_expr: "SpinnerSize::Sm",
+        },
+        VariantValue {
+            label: "Md",
+            rust_expr: "SpinnerSize::Md",
+        },
+        VariantValue {
+            label: "Lg",
+            rust_expr: "SpinnerSize::Lg",
+        },
     ],
     default_index: 1,
 }];
 
 const IMAGE_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "fit", display_name: "Fit", rust_type: "ImageFit",
+        name: "fit",
+        display_name: "Fit",
+        rust_type: "ImageFit",
         values: &[
-            VariantValue { label: "Cover", rust_expr: "ImageFit::Cover" },
-            VariantValue { label: "Contain", rust_expr: "ImageFit::Contain" },
-            VariantValue { label: "Fill", rust_expr: "ImageFit::Fill" },
-            VariantValue { label: "None", rust_expr: "ImageFit::None" },
+            VariantValue {
+                label: "Cover",
+                rust_expr: "ImageFit::Cover",
+            },
+            VariantValue {
+                label: "Contain",
+                rust_expr: "ImageFit::Contain",
+            },
+            VariantValue {
+                label: "Fill",
+                rust_expr: "ImageFit::Fill",
+            },
+            VariantValue {
+                label: "None",
+                rust_expr: "ImageFit::None",
+            },
         ],
         default_index: 0,
     },
     VariantAxis {
-        name: "aspect", display_name: "Aspect", rust_type: "ImageAspect",
+        name: "aspect",
+        display_name: "Aspect",
+        rust_type: "ImageAspect",
         values: &[
-            VariantValue { label: "Auto", rust_expr: "ImageAspect::Auto" },
-            VariantValue { label: "Square", rust_expr: "ImageAspect::Square" },
-            VariantValue { label: "Video", rust_expr: "ImageAspect::Video" },
+            VariantValue {
+                label: "Auto",
+                rust_expr: "ImageAspect::Auto",
+            },
+            VariantValue {
+                label: "Square",
+                rust_expr: "ImageAspect::Square",
+            },
+            VariantValue {
+                label: "Video",
+                rust_expr: "ImageAspect::Video",
+            },
         ],
         default_index: 0,
     },
@@ -2173,99 +3007,184 @@ const IMAGE_VARIANTS: &[VariantAxis] = &[
 
 // --- Feedback ---
 
-const ALERT_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "intent", display_name: "Intent", rust_type: "AlertIntent",
-        values: &[
-            VariantValue { label: "Info", rust_expr: "AlertIntent::Info" },
-            VariantValue { label: "Success", rust_expr: "AlertIntent::Success" },
-            VariantValue { label: "Warning", rust_expr: "AlertIntent::Warning" },
-            VariantValue { label: "Error", rust_expr: "AlertIntent::Error" },
-        ],
-        default_index: 0,
-    },
-];
+const ALERT_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "intent",
+    display_name: "Intent",
+    rust_type: "AlertIntent",
+    values: &[
+        VariantValue {
+            label: "Info",
+            rust_expr: "AlertIntent::Info",
+        },
+        VariantValue {
+            label: "Success",
+            rust_expr: "AlertIntent::Success",
+        },
+        VariantValue {
+            label: "Warning",
+            rust_expr: "AlertIntent::Warning",
+        },
+        VariantValue {
+            label: "Error",
+            rust_expr: "AlertIntent::Error",
+        },
+    ],
+    default_index: 0,
+}];
 
-const TOAST_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "intent", display_name: "Intent", rust_type: "ToastIntent",
-        values: &[
-            VariantValue { label: "Info", rust_expr: "ToastIntent::Info" },
-            VariantValue { label: "Success", rust_expr: "ToastIntent::Success" },
-            VariantValue { label: "Warning", rust_expr: "ToastIntent::Warning" },
-            VariantValue { label: "Error", rust_expr: "ToastIntent::Error" },
-        ],
-        default_index: 0,
-    },
-];
+const TOAST_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "intent",
+    display_name: "Intent",
+    rust_type: "ToastIntent",
+    values: &[
+        VariantValue {
+            label: "Info",
+            rust_expr: "ToastIntent::Info",
+        },
+        VariantValue {
+            label: "Success",
+            rust_expr: "ToastIntent::Success",
+        },
+        VariantValue {
+            label: "Warning",
+            rust_expr: "ToastIntent::Warning",
+        },
+        VariantValue {
+            label: "Error",
+            rust_expr: "ToastIntent::Error",
+        },
+    ],
+    default_index: 0,
+}];
 
-const SKELETON_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "shape", display_name: "Shape", rust_type: "SkeletonShape",
-        values: &[
-            VariantValue { label: "Text", rust_expr: "SkeletonShape::Text" },
-            VariantValue { label: "Circle", rust_expr: "SkeletonShape::Circle" },
-            VariantValue { label: "Rect", rust_expr: "SkeletonShape::Rect" },
-        ],
-        default_index: 0,
-    },
-];
+const SKELETON_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "shape",
+    display_name: "Shape",
+    rust_type: "SkeletonShape",
+    values: &[
+        VariantValue {
+            label: "Text",
+            rust_expr: "SkeletonShape::Text",
+        },
+        VariantValue {
+            label: "Circle",
+            rust_expr: "SkeletonShape::Circle",
+        },
+        VariantValue {
+            label: "Rect",
+            rust_expr: "SkeletonShape::Rect",
+        },
+    ],
+    default_index: 0,
+}];
 
-const TOOLTIP_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "position", display_name: "Position", rust_type: "TooltipPosition",
-        values: &[
-            VariantValue { label: "Top", rust_expr: "TooltipPosition::Top" },
-            VariantValue { label: "Bottom", rust_expr: "TooltipPosition::Bottom" },
-            VariantValue { label: "Left", rust_expr: "TooltipPosition::Left" },
-            VariantValue { label: "Right", rust_expr: "TooltipPosition::Right" },
-        ],
-        default_index: 0,
-    },
-];
+const TOOLTIP_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "position",
+    display_name: "Position",
+    rust_type: "TooltipPosition",
+    values: &[
+        VariantValue {
+            label: "Top",
+            rust_expr: "TooltipPosition::Top",
+        },
+        VariantValue {
+            label: "Bottom",
+            rust_expr: "TooltipPosition::Bottom",
+        },
+        VariantValue {
+            label: "Left",
+            rust_expr: "TooltipPosition::Left",
+        },
+        VariantValue {
+            label: "Right",
+            rust_expr: "TooltipPosition::Right",
+        },
+    ],
+    default_index: 0,
+}];
 
 // --- Overlay ---
 
-const MODAL_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "size", display_name: "Size", rust_type: "ModalSize",
-        values: &[
-            VariantValue { label: "Sm", rust_expr: "ModalSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "ModalSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "ModalSize::Lg" },
-            VariantValue { label: "Xl", rust_expr: "ModalSize::Xl" },
-            VariantValue { label: "Full", rust_expr: "ModalSize::Full" },
-        ],
-        default_index: 1,
-    },
-];
+const MODAL_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "size",
+    display_name: "Size",
+    rust_type: "ModalSize",
+    values: &[
+        VariantValue {
+            label: "Sm",
+            rust_expr: "ModalSize::Sm",
+        },
+        VariantValue {
+            label: "Md",
+            rust_expr: "ModalSize::Md",
+        },
+        VariantValue {
+            label: "Lg",
+            rust_expr: "ModalSize::Lg",
+        },
+        VariantValue {
+            label: "Xl",
+            rust_expr: "ModalSize::Xl",
+        },
+        VariantValue {
+            label: "Full",
+            rust_expr: "ModalSize::Full",
+        },
+    ],
+    default_index: 1,
+}];
 
-const DRAWER_VARIANTS: &[VariantAxis] = &[
-    VariantAxis {
-        name: "position", display_name: "Position", rust_type: "DrawerPosition",
-        values: &[
-            VariantValue { label: "Left", rust_expr: "DrawerPosition::Left" },
-            VariantValue { label: "Right", rust_expr: "DrawerPosition::Right" },
-        ],
-        default_index: 0,
-    },
-];
+const DRAWER_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "position",
+    display_name: "Position",
+    rust_type: "DrawerPosition",
+    values: &[
+        VariantValue {
+            label: "Left",
+            rust_expr: "DrawerPosition::Left",
+        },
+        VariantValue {
+            label: "Right",
+            rust_expr: "DrawerPosition::Right",
+        },
+    ],
+    default_index: 0,
+}];
 
 const THEME_TOGGLE_VARIANTS: &[VariantAxis] = &[
     VariantAxis {
-        name: "size", display_name: "Size", rust_type: "ToggleSize",
+        name: "size",
+        display_name: "Size",
+        rust_type: "ToggleSize",
         values: &[
-            VariantValue { label: "Sm", rust_expr: "ToggleSize::Sm" },
-            VariantValue { label: "Md", rust_expr: "ToggleSize::Md" },
-            VariantValue { label: "Lg", rust_expr: "ToggleSize::Lg" },
+            VariantValue {
+                label: "Sm",
+                rust_expr: "ToggleSize::Sm",
+            },
+            VariantValue {
+                label: "Md",
+                rust_expr: "ToggleSize::Md",
+            },
+            VariantValue {
+                label: "Lg",
+                rust_expr: "ToggleSize::Lg",
+            },
         ],
         default_index: 1,
     },
     VariantAxis {
-        name: "mode", display_name: "Mode", rust_type: "ThemeToggleMode",
+        name: "mode",
+        display_name: "Mode",
+        rust_type: "ThemeToggleMode",
         values: &[
-            VariantValue { label: "Light", rust_expr: "ThemeToggleMode::Light" },
-            VariantValue { label: "Dark", rust_expr: "ThemeToggleMode::Dark" },
+            VariantValue {
+                label: "Light",
+                rust_expr: "ThemeToggleMode::Light",
+            },
+            VariantValue {
+                label: "Dark",
+                rust_expr: "ThemeToggleMode::Dark",
+            },
         ],
         default_index: 0,
     },
@@ -2273,26 +3192,98 @@ const THEME_TOGGLE_VARIANTS: &[VariantAxis] = &[
 
 // --- Common Bool Prop Sets ---
 
-const BOOL_DISABLED: &[BoolProp] = &[
-    BoolProp { name: "disabled", description: "Prevent interaction", default: false },
-];
+const BOOL_DISABLED: &[BoolProp] = &[BoolProp {
+    name: "disabled",
+    description: "Prevent interaction",
+    default: false,
+}];
 
 const BOOL_FORM_FULL: &[BoolProp] = &[
-    BoolProp { name: "disabled", description: "Prevent interaction", default: false },
-    BoolProp { name: "readonly", description: "Read-only mode", default: false },
-    BoolProp { name: "required", description: "Mark as required", default: false },
-    BoolProp { name: "invalid", description: "Show error state", default: false },
+    BoolProp {
+        name: "disabled",
+        description: "Prevent interaction",
+        default: false,
+    },
+    BoolProp {
+        name: "readonly",
+        description: "Read-only mode",
+        default: false,
+    },
+    BoolProp {
+        name: "required",
+        description: "Mark as required",
+        default: false,
+    },
+    BoolProp {
+        name: "invalid",
+        description: "Show error state",
+        default: false,
+    },
+];
+
+// Input adds the form bools plus its own focus/spellcheck toggles.
+const INPUT_BOOL: &[BoolProp] = &[
+    BoolProp {
+        name: "disabled",
+        description: "Prevent interaction",
+        default: false,
+    },
+    BoolProp {
+        name: "readonly",
+        description: "Read-only mode",
+        default: false,
+    },
+    BoolProp {
+        name: "required",
+        description: "Mark as required",
+        default: false,
+    },
+    BoolProp {
+        name: "invalid",
+        description: "Show error state",
+        default: false,
+    },
+    BoolProp {
+        name: "autofocus",
+        description: "Focus on mount",
+        default: false,
+    },
+    BoolProp {
+        name: "spellcheck",
+        description: "Enable spellcheck",
+        default: false,
+    },
 ];
 
 const BOOL_CHECK_FORM: &[BoolProp] = &[
-    BoolProp { name: "checked", description: "Toggle checked state", default: false },
-    BoolProp { name: "disabled", description: "Prevent interaction", default: false },
-    BoolProp { name: "required", description: "Mark as required", default: false },
-    BoolProp { name: "invalid", description: "Show error state", default: false },
+    BoolProp {
+        name: "checked",
+        description: "Toggle checked state",
+        default: false,
+    },
+    BoolProp {
+        name: "disabled",
+        description: "Prevent interaction",
+        default: false,
+    },
+    BoolProp {
+        name: "required",
+        description: "Mark as required",
+        default: false,
+    },
+    BoolProp {
+        name: "invalid",
+        description: "Show error state",
+        default: false,
+    },
 ];
 
 const MODAL_BOOLS: &[BoolProp] = &[
-    BoolProp { name: "open", description: "Show component", default: false },
+    BoolProp {
+        name: "open",
+        description: "Show component",
+        default: false,
+    },
     BoolProp {
         name: "close_on_backdrop_click",
         description: "Close when the backdrop is clicked",
@@ -2306,9 +3297,11 @@ const THEME_TOGGLE_BOOLS: &[BoolProp] = &[BoolProp {
     default: false,
 }];
 
-const BOOL_OPEN: &[BoolProp] = &[
-    BoolProp { name: "open", description: "Show component", default: false },
-];
+const BOOL_OPEN: &[BoolProp] = &[BoolProp {
+    name: "open",
+    description: "Show component",
+    default: false,
+}];
 
 // ============================================================================
 // Catalog Entries
@@ -2317,444 +3310,664 @@ const BOOL_OPEN: &[BoolProp] = &[
 const ENTRIES: &[ComponentEntry] = &[
     // --- Layout (order 1xx) ---
     ComponentEntry {
-        name: "Stack", slug: "stack",
+        name: "Stack",
+        slug: "stack",
         description: "Flexbox layout with configurable direction and spacing.",
-        category: Category::Layout, order: 100,
+        category: Category::Layout,
+        order: 100,
         variants: STACK_VARIANTS,
-        bool_props: &[BoolProp { name: "wrap", description: "Enable flex wrap", default: false }],
+        bool_props: &[BoolProp {
+            name: "wrap",
+            description: "Enable flex wrap",
+            default: false,
+        }],
         build_demo: stack_demo,
     },
     ComponentEntry {
-        name: "Grid", slug: "grid",
+        name: "Grid",
+        slug: "grid",
         description: "CSS Grid layout with configurable columns.",
-        category: Category::Layout, order: 101,
+        category: Category::Layout,
+        order: 101,
         variants: GRID_VARIANTS,
         bool_props: &[],
         build_demo: grid_demo,
     },
     ComponentEntry {
-        name: "Container", slug: "container",
+        name: "Container",
+        slug: "container",
         description: "Constrained-width content wrapper.",
-        category: Category::Layout, order: 102,
+        category: Category::Layout,
+        order: 102,
         variants: CONTAINER_VARIANTS,
         bool_props: &[
-            BoolProp { name: "centered", description: "Center horizontally", default: false },
-            BoolProp { name: "padding", description: "Add horizontal padding", default: false },
+            BoolProp {
+                name: "centered",
+                description: "Center horizontally",
+                default: false,
+            },
+            BoolProp {
+                name: "padding",
+                description: "Add horizontal padding",
+                default: false,
+            },
         ],
         build_demo: container_demo,
     },
     ComponentEntry {
-        name: "Card", slug: "card",
+        name: "Card",
+        slug: "card",
         description: "Surface container with padding, border, and shadow.",
-        category: Category::Layout, order: 103,
+        category: Category::Layout,
+        order: 103,
         variants: CARD_VARIANTS,
-        bool_props: &[BoolProp { name: "bordered", description: "Show border", default: true }],
+        bool_props: &[BoolProp {
+            name: "bordered",
+            description: "Show border",
+            default: true,
+        }],
         build_demo: card_demo,
     },
     ComponentEntry {
-        name: "AppShell", slug: "app-shell",
+        name: "AppShell",
+        slug: "app-shell",
         description: "Application shell with header, sidebar, and main content areas.",
-        category: Category::Layout, order: 104,
+        category: Category::Layout,
+        order: 104,
         variants: &[],
         bool_props: &[],
         build_demo: app_shell_demo,
     },
     ComponentEntry {
-        name: "Spacer", slug: "spacer",
+        name: "Spacer",
+        slug: "spacer",
         description: "Creates space between elements.",
-        category: Category::Layout, order: 105,
+        category: Category::Layout,
+        order: 105,
         variants: SPACING_SIZE_VARIANTS,
-        bool_props: &[BoolProp { name: "horizontal", description: "Horizontal spacing", default: false }],
+        bool_props: &[BoolProp {
+            name: "horizontal",
+            description: "Horizontal spacing",
+            default: false,
+        }],
         build_demo: spacer_demo,
     },
     ComponentEntry {
-        name: "Divider", slug: "divider",
+        name: "Divider",
+        slug: "divider",
         description: "Horizontal or vertical separator line.",
-        category: Category::Layout, order: 106,
+        category: Category::Layout,
+        order: 106,
         variants: &[VariantAxis {
-            name: "margin", display_name: "Margin", rust_type: "SpacingSize",
+            name: "margin",
+            display_name: "Margin",
+            rust_type: "SpacingSize",
             values: &[
-                VariantValue { label: "None", rust_expr: "SpacingSize::None" },
-                VariantValue { label: "Xs", rust_expr: "SpacingSize::Xs" },
-                VariantValue { label: "Sm", rust_expr: "SpacingSize::Sm" },
-                VariantValue { label: "Md", rust_expr: "SpacingSize::Md" },
-                VariantValue { label: "Lg", rust_expr: "SpacingSize::Lg" },
-                VariantValue { label: "Xl", rust_expr: "SpacingSize::Xl" },
+                VariantValue {
+                    label: "None",
+                    rust_expr: "SpacingSize::None",
+                },
+                VariantValue {
+                    label: "Xs",
+                    rust_expr: "SpacingSize::Xs",
+                },
+                VariantValue {
+                    label: "Sm",
+                    rust_expr: "SpacingSize::Sm",
+                },
+                VariantValue {
+                    label: "Md",
+                    rust_expr: "SpacingSize::Md",
+                },
+                VariantValue {
+                    label: "Lg",
+                    rust_expr: "SpacingSize::Lg",
+                },
+                VariantValue {
+                    label: "Xl",
+                    rust_expr: "SpacingSize::Xl",
+                },
             ],
             default_index: 3,
         }],
-        bool_props: &[BoolProp { name: "vertical", description: "Vertical orientation", default: false }],
+        bool_props: &[BoolProp {
+            name: "vertical",
+            description: "Vertical orientation",
+            default: false,
+        }],
         build_demo: divider_demo,
     },
-
     // --- Forms (order 2xx) ---
     ComponentEntry {
-        name: "Button", slug: "button",
+        name: "Button",
+        slug: "button",
         description: "Trigger actions with primary, secondary, ghost, and destructive variants.",
-        category: Category::Forms, order: 200,
+        category: Category::Forms,
+        order: 200,
         variants: BUTTON_VARIANTS,
         bool_props: &[
-            BoolProp { name: "disabled", description: "Prevent interaction", default: false },
-            BoolProp { name: "loading", description: "Show loading spinner", default: false },
-            BoolProp { name: "full_width", description: "Stretch to full width", default: false },
+            BoolProp {
+                name: "disabled",
+                description: "Prevent interaction",
+                default: false,
+            },
+            BoolProp {
+                name: "loading",
+                description: "Show loading spinner",
+                default: false,
+            },
+            BoolProp {
+                name: "full_width",
+                description: "Stretch to full width",
+                default: false,
+            },
+            BoolProp {
+                name: "icon",
+                description: "Show a leading icon",
+                default: false,
+            },
         ],
         build_demo: button_demo,
     },
     ComponentEntry {
-        name: "Input", slug: "input",
+        name: "Input",
+        slug: "input",
         description: "Text inputs with various types and sizes.",
-        category: Category::Forms, order: 201,
+        category: Category::Forms,
+        order: 201,
         variants: INPUT_VARIANTS,
-        bool_props: BOOL_FORM_FULL,
+        bool_props: INPUT_BOOL,
         build_demo: input_demo,
     },
     ComponentEntry {
-        name: "Textarea", slug: "textarea",
+        name: "Textarea",
+        slug: "textarea",
         description: "Multi-line text input with customizable rows.",
-        category: Category::Forms, order: 202,
+        category: Category::Forms,
+        order: 202,
         variants: TEXTAREA_VARIANTS,
         bool_props: BOOL_FORM_FULL,
         build_demo: textarea_demo,
     },
     ComponentEntry {
-        name: "Select", slug: "select",
+        name: "Select",
+        slug: "select",
         description: "Dropdown select with options.",
-        category: Category::Forms, order: 203,
+        category: Category::Forms,
+        order: 203,
         variants: &[],
         bool_props: &[
-            BoolProp { name: "disabled", description: "Prevent interaction", default: false },
-            BoolProp { name: "required", description: "Mark as required", default: false },
-            BoolProp { name: "invalid", description: "Show error state", default: false },
+            BoolProp {
+                name: "disabled",
+                description: "Prevent interaction",
+                default: false,
+            },
+            BoolProp {
+                name: "required",
+                description: "Mark as required",
+                default: false,
+            },
+            BoolProp {
+                name: "invalid",
+                description: "Show error state",
+                default: false,
+            },
         ],
         build_demo: select_demo,
     },
     ComponentEntry {
-        name: "Checkbox", slug: "checkbox",
+        name: "Checkbox",
+        slug: "checkbox",
         description: "Boolean checkbox with optional label.",
-        category: Category::Forms, order: 204,
+        category: Category::Forms,
+        order: 204,
         variants: &[],
         bool_props: &[
-            BoolProp { name: "checked", description: "Toggle checked state", default: false },
-            BoolProp { name: "disabled", description: "Prevent interaction", default: false },
-            BoolProp { name: "required", description: "Mark as required", default: false },
-            BoolProp { name: "invalid", description: "Show error state", default: false },
+            BoolProp {
+                name: "checked",
+                description: "Toggle checked state",
+                default: false,
+            },
+            BoolProp {
+                name: "disabled",
+                description: "Prevent interaction",
+                default: false,
+            },
+            BoolProp {
+                name: "required",
+                description: "Mark as required",
+                default: false,
+            },
+            BoolProp {
+                name: "invalid",
+                description: "Show error state",
+                default: false,
+            },
         ],
         build_demo: checkbox_demo,
     },
     ComponentEntry {
-        name: "Radio", slug: "radio",
+        name: "Radio",
+        slug: "radio",
         description: "Radio buttons for mutually exclusive options.",
-        category: Category::Forms, order: 205,
+        category: Category::Forms,
+        order: 205,
         variants: &[],
         bool_props: BOOL_CHECK_FORM,
         build_demo: radio_demo,
     },
     ComponentEntry {
-        name: "Switch", slug: "switch",
+        name: "Switch",
+        slug: "switch",
         description: "Toggle switch for boolean states.",
-        category: Category::Forms, order: 206,
+        category: Category::Forms,
+        order: 206,
         variants: &[],
         bool_props: BOOL_CHECK_FORM,
         build_demo: switch_demo,
     },
     ComponentEntry {
-        name: "Slider", slug: "slider",
+        name: "Slider",
+        slug: "slider",
         description: "Range slider for numeric values.",
-        category: Category::Forms, order: 207,
+        category: Category::Forms,
+        order: 207,
         variants: &[],
         bool_props: BOOL_DISABLED,
         build_demo: slider_demo,
     },
     ComponentEntry {
-        name: "Label", slug: "label",
+        name: "Label",
+        slug: "label",
         description: "Form labels with optional required indicator.",
-        category: Category::Forms, order: 208,
+        category: Category::Forms,
+        order: 208,
         variants: &[],
-        bool_props: &[BoolProp { name: "required", description: "Show required indicator", default: false }],
+        bool_props: &[BoolProp {
+            name: "required",
+            description: "Show required indicator",
+            default: false,
+        }],
         build_demo: label_demo,
     },
     ComponentEntry {
-        name: "FormField", slug: "form-field",
+        name: "FormField",
+        slug: "form-field",
         description: "Composition wrapper with label, input, help text, and validation.",
-        category: Category::Forms, order: 209,
+        category: Category::Forms,
+        order: 209,
         variants: &[],
         bool_props: &[
-            BoolProp { name: "required", description: "Mark as required", default: false },
-            BoolProp { name: "error", description: "Show error message", default: false },
+            BoolProp {
+                name: "required",
+                description: "Mark as required",
+                default: false,
+            },
+            BoolProp {
+                name: "error",
+                description: "Show error message",
+                default: false,
+            },
         ],
         build_demo: form_field_demo,
     },
-
     // --- Data Display (order 3xx) ---
     ComponentEntry {
-        name: "Text", slug: "text",
+        name: "Text",
+        slug: "text",
         description: "Typography component with semantic variants and colors.",
-        category: Category::DataDisplay, order: 300,
+        category: Category::DataDisplay,
+        order: 300,
         variants: TEXT_VARIANTS,
         bool_props: &[],
         build_demo: text_demo,
     },
     ComponentEntry {
-        name: "Badge", slug: "badge",
+        name: "Badge",
+        slug: "badge",
         description: "Status indicators and labels.",
-        category: Category::DataDisplay, order: 301,
+        category: Category::DataDisplay,
+        order: 301,
         variants: BADGE_VARIANTS,
         bool_props: &[],
         build_demo: badge_demo,
     },
     ComponentEntry {
-        name: "Tag", slug: "tag",
+        name: "Tag",
+        slug: "tag",
         description: "Categorization labels with optional remove action.",
-        category: Category::DataDisplay, order: 302,
+        category: Category::DataDisplay,
+        order: 302,
         variants: TAG_VARIANTS,
-        bool_props: &[BoolProp { name: "removable", description: "Show remove button", default: false }],
+        bool_props: &[BoolProp {
+            name: "removable",
+            description: "Show remove button",
+            default: false,
+        }],
         build_demo: tag_demo,
     },
     ComponentEntry {
-        name: "Code", slug: "code",
+        name: "Code",
+        slug: "code",
         description: "Inline and block code display.",
-        category: Category::DataDisplay, order: 303,
+        category: Category::DataDisplay,
+        order: 303,
         variants: CODE_VARIANTS,
         bool_props: &[],
         build_demo: code_demo,
     },
     ComponentEntry {
-        name: "Kbd", slug: "kbd",
+        name: "Kbd",
+        slug: "kbd",
         description: "Keyboard shortcut indicators.",
-        category: Category::DataDisplay, order: 304,
+        category: Category::DataDisplay,
+        order: 304,
         variants: &[],
         bool_props: &[],
         build_demo: kbd_demo,
     },
     ComponentEntry {
-        name: "Table", slug: "table",
+        name: "Table",
+        slug: "table",
         description: "Data tables with headers and rows.",
-        category: Category::DataDisplay, order: 305,
+        category: Category::DataDisplay,
+        order: 305,
         variants: &[],
-        bool_props: &[BoolProp { name: "striped", description: "Alternate row colors", default: false }],
+        bool_props: &[BoolProp {
+            name: "striped",
+            description: "Alternate row colors",
+            default: false,
+        }],
         build_demo: table_demo,
     },
     ComponentEntry {
-        name: "Stat", slug: "stat",
+        name: "Stat",
+        slug: "stat",
         description: "Key metric display with trend indicator.",
-        category: Category::DataDisplay, order: 306,
+        category: Category::DataDisplay,
+        order: 306,
         variants: STAT_VARIANTS,
         bool_props: &[],
         build_demo: stat_demo,
     },
     ComponentEntry {
-        name: "Avatar", slug: "avatar",
+        name: "Avatar",
+        slug: "avatar",
         description: "User avatars with image or fallback text.",
-        category: Category::DataDisplay, order: 307,
+        category: Category::DataDisplay,
+        order: 307,
         variants: AVATAR_SIZE,
         bool_props: &[],
         build_demo: avatar_demo,
     },
     ComponentEntry {
-        name: "AvatarGroup", slug: "avatar-group",
+        name: "AvatarGroup",
+        slug: "avatar-group",
         description: "Group of avatars with overflow count.",
-        category: Category::DataDisplay, order: 308,
+        category: Category::DataDisplay,
+        order: 308,
         variants: &[],
         bool_props: &[],
         build_demo: avatar_group_demo,
     },
     ComponentEntry {
-        name: "Image", slug: "image",
+        name: "Image",
+        slug: "image",
         description: "Responsive images with fit and aspect controls.",
-        category: Category::DataDisplay, order: 309,
+        category: Category::DataDisplay,
+        order: 309,
         variants: IMAGE_VARIANTS,
         bool_props: &[
-            BoolProp { name: "rounded", description: "Round corners", default: false },
-            BoolProp { name: "full_width", description: "Stretch to full width", default: false },
+            BoolProp {
+                name: "rounded",
+                description: "Round corners",
+                default: false,
+            },
+            BoolProp {
+                name: "full_width",
+                description: "Stretch to full width",
+                default: false,
+            },
         ],
         build_demo: image_demo,
     },
     ComponentEntry {
-        name: "List", slug: "list",
+        name: "List",
+        slug: "list",
         description: "Ordered and unordered lists.",
-        category: Category::DataDisplay, order: 310,
+        category: Category::DataDisplay,
+        order: 310,
         variants: &[],
-        bool_props: &[BoolProp { name: "is_ordered", description: "Show as ordered list", default: false }],
+        bool_props: &[BoolProp {
+            name: "is_ordered",
+            description: "Show as ordered list",
+            default: false,
+        }],
         build_demo: list_demo,
     },
     ComponentEntry {
-        name: "Blockquote", slug: "blockquote",
+        name: "Blockquote",
+        slug: "blockquote",
         description: "Quoted text with optional citation.",
-        category: Category::DataDisplay, order: 311,
+        category: Category::DataDisplay,
+        order: 311,
         variants: &[],
         bool_props: &[],
         build_demo: blockquote_demo,
     },
     ComponentEntry {
-        name: "Timeline", slug: "timeline",
+        name: "Timeline",
+        slug: "timeline",
         description: "Vertical timeline of events.",
-        category: Category::DataDisplay, order: 312,
+        category: Category::DataDisplay,
+        order: 312,
         variants: &[],
         bool_props: &[],
         build_demo: timeline_demo,
     },
-
     // --- Feedback (order 4xx) ---
     ComponentEntry {
-        name: "Alert", slug: "alert",
+        name: "Alert",
+        slug: "alert",
         description: "Alert messages with different intent levels.",
-        category: Category::Feedback, order: 400,
+        category: Category::Feedback,
+        order: 400,
         variants: ALERT_VARIANTS,
         bool_props: &[],
         build_demo: alert_demo,
     },
     ComponentEntry {
-        name: "Toast", slug: "toast",
+        name: "Toast",
+        slug: "toast",
         description: "Temporary notification messages.",
-        category: Category::Feedback, order: 401,
+        category: Category::Feedback,
+        order: 401,
         variants: TOAST_VARIANTS,
         bool_props: &[],
         build_demo: toast_demo,
     },
     ComponentEntry {
-        name: "Spinner", slug: "spinner",
+        name: "Spinner",
+        slug: "spinner",
         description: "Loading indicators with size variants.",
-        category: Category::Feedback, order: 402,
+        category: Category::Feedback,
+        order: 402,
         variants: SPINNER_SIZE,
         bool_props: &[],
         build_demo: spinner_demo,
     },
     ComponentEntry {
-        name: "Progress", slug: "progress",
+        name: "Progress",
+        slug: "progress",
         description: "Progress bars showing task completion.",
-        category: Category::Feedback, order: 403,
+        category: Category::Feedback,
+        order: 403,
         variants: &[],
         bool_props: &[],
         build_demo: progress_demo,
     },
     ComponentEntry {
-        name: "Skeleton", slug: "skeleton",
+        name: "Skeleton",
+        slug: "skeleton",
         description: "Loading placeholder that shows content shape.",
-        category: Category::Feedback, order: 404,
+        category: Category::Feedback,
+        order: 404,
         variants: SKELETON_VARIANTS,
         bool_props: &[],
         build_demo: skeleton_demo,
     },
     ComponentEntry {
-        name: "EmptyState", slug: "empty-state",
+        name: "EmptyState",
+        slug: "empty-state",
         description: "Placeholder for empty content areas.",
-        category: Category::Feedback, order: 405,
+        category: Category::Feedback,
+        order: 405,
         variants: &[],
         bool_props: &[],
         build_demo: empty_state_demo,
     },
     ComponentEntry {
-        name: "Tooltip", slug: "tooltip",
+        name: "Tooltip",
+        slug: "tooltip",
         description: "Contextual information on hover.",
-        category: Category::Feedback, order: 406,
+        category: Category::Feedback,
+        order: 406,
         variants: TOOLTIP_VARIANTS,
         bool_props: &[],
         build_demo: tooltip_demo,
     },
-
     // --- Navigation (order 5xx) ---
     ComponentEntry {
-        name: "Link", slug: "link",
+        name: "Link",
+        slug: "link",
         description: "Navigation links with internal and external variants.",
-        category: Category::Navigation, order: 500,
+        category: Category::Navigation,
+        order: 500,
         variants: &[],
-        bool_props: &[BoolProp { name: "external", description: "Open in new tab", default: false }],
+        bool_props: &[BoolProp {
+            name: "external",
+            description: "Open in new tab",
+            default: false,
+        }],
         build_demo: link_demo,
     },
     ComponentEntry {
-        name: "NavMenu", slug: "nav-menu",
+        name: "NavMenu",
+        slug: "nav-menu",
         description: "Navigation menu with active state.",
-        category: Category::Navigation, order: 501,
+        category: Category::Navigation,
+        order: 501,
         variants: &[],
         bool_props: &[],
         build_demo: nav_menu_demo,
     },
     ComponentEntry {
-        name: "Breadcrumb", slug: "breadcrumb",
+        name: "Breadcrumb",
+        slug: "breadcrumb",
         description: "Navigation breadcrumb trails.",
-        category: Category::Navigation, order: 502,
+        category: Category::Navigation,
+        order: 502,
         variants: &[],
         bool_props: &[],
         build_demo: breadcrumb_demo,
     },
     ComponentEntry {
-        name: "Tabs", slug: "tabs",
+        name: "Tabs",
+        slug: "tabs",
         description: "Tab navigation for content sections.",
-        category: Category::Navigation, order: 503,
+        category: Category::Navigation,
+        order: 503,
         variants: &[],
         bool_props: &[],
         build_demo: tabs_demo,
     },
     ComponentEntry {
-        name: "Pagination", slug: "pagination",
+        name: "Pagination",
+        slug: "pagination",
         description: "Page navigation for lists and tables.",
-        category: Category::Navigation, order: 504,
+        category: Category::Navigation,
+        order: 504,
         variants: &[],
         bool_props: &[],
         build_demo: pagination_demo,
     },
     ComponentEntry {
-        name: "Footer", slug: "footer",
+        name: "Footer",
+        slug: "footer",
         description: "Page footer with logo, links, and copyright.",
-        category: Category::Navigation, order: 505,
+        category: Category::Navigation,
+        order: 505,
         variants: &[],
         bool_props: &[],
         build_demo: footer_demo,
     },
-
     // --- Overlay (order 6xx) ---
     ComponentEntry {
-        name: "Modal", slug: "modal",
+        name: "Modal",
+        slug: "modal",
         description: "Dialog overlay for confirmations and forms.",
-        category: Category::Overlay, order: 600,
+        category: Category::Overlay,
+        order: 600,
         variants: MODAL_VARIANTS,
         bool_props: MODAL_BOOLS,
         build_demo: modal_demo,
     },
     ComponentEntry {
-        name: "Drawer", slug: "drawer",
+        name: "Drawer",
+        slug: "drawer",
         description: "Slide-out panel from left or right edge.",
-        category: Category::Overlay, order: 601,
+        category: Category::Overlay,
+        order: 601,
         variants: DRAWER_VARIANTS,
         bool_props: BOOL_OPEN,
         build_demo: drawer_demo,
     },
     ComponentEntry {
-        name: "DropdownMenu", slug: "dropdown",
+        name: "DropdownMenu",
+        slug: "dropdown",
         description: "Dropdown menu with actions.",
-        category: Category::Overlay, order: 602,
+        category: Category::Overlay,
+        order: 602,
         variants: &[],
         bool_props: BOOL_OPEN,
         build_demo: dropdown_demo,
     },
     ComponentEntry {
-        name: "Accordion", slug: "accordion",
+        name: "Accordion",
+        slug: "accordion",
         description: "Collapsible content sections.",
-        category: Category::Overlay, order: 603,
+        category: Category::Overlay,
+        order: 603,
         variants: &[],
         bool_props: &[],
         build_demo: accordion_demo,
     },
     ComponentEntry {
-        name: "CopyButton", slug: "copy-button",
+        name: "CopyButton",
+        slug: "copy-button",
         description: "One-click text copy to clipboard.",
-        category: Category::Overlay, order: 604,
+        category: Category::Overlay,
+        order: 604,
         variants: &[],
         bool_props: &[],
         build_demo: copy_button_demo,
     },
     ComponentEntry {
-        name: "ThemeToggle", slug: "theme-toggle",
+        name: "ThemeToggle",
+        slug: "theme-toggle",
         description: "Toggle between light and dark modes.",
-        category: Category::Overlay, order: 605,
+        category: Category::Overlay,
+        order: 605,
         variants: THEME_TOGGLE_VARIANTS,
         bool_props: THEME_TOGGLE_BOOLS,
         build_demo: theme_toggle_demo,
     },
     ComponentEntry {
-        name: "Stepper", slug: "stepper",
+        name: "Stepper",
+        slug: "stepper",
         description: "Multi-step progress indicator.",
-        category: Category::Overlay, order: 606,
+        category: Category::Overlay,
+        order: 606,
         variants: &[],
         bool_props: &[],
         build_demo: stepper_demo,

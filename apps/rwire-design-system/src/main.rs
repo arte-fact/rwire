@@ -79,7 +79,7 @@ struct DesignSystemState {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::default().palette(palettes::indigo())
+    Theme::default().palette(palettes::nord())
 }
 
 #[async_std::main]
@@ -93,7 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DOCS_DIR = Box::leak(
             env_or(
                 "DOCS_DIR",
-                concat!(env!("CARGO_MANIFEST_DIR"), "/../../libs/rwire-components/docs"),
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../libs/rwire-components/docs"
+                ),
             )
             .into_boxed_str(),
         );
@@ -109,8 +112,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // router would route navigation through an outlet swap this app has no outlet for,
     // freezing the page. Element/event maps ship whole and St-token CSS is delivered
     // lazily over the wire, so component-page demos need no startup tree-shaking.)
-    let capsule_config = CapsuleConfig::new()
-        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
+    let capsule_config =
+        CapsuleConfig::new().font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind(&config.bind_addr)?
         .root(root)
@@ -147,9 +150,9 @@ fn root(state: &DesignSystemState) -> ElementBuilder {
     let body = if on_landing {
         el(El::Div)
             .st([St::DisplayFlex, St::MinHScreen])
-            .append([
-                el(El::Main).st([St::Flex1, St::MinW0]).append([build_landing()]),
-            ])
+            .append([el(El::Main)
+                .st([St::Flex1, St::MinW0])
+                .append([build_landing()])])
     } else {
         let entry = catalog::find(slug_str);
 
@@ -183,14 +186,12 @@ fn root(state: &DesignSystemState) -> ElementBuilder {
             ])
         };
 
-        el(El::Div)
-            .st([St::DisplayFlex, St::MinHScreen])
-            .append([
-                desktop_sidebar,
-                el(El::Main)
-                    .st([St::Flex1, St::MinW0, St::PMd, St::PbXl])
-                    .append([main_content]),
-            ])
+        el(El::Div).st([St::DisplayFlex, St::MinHScreen]).append([
+            desktop_sidebar,
+            el(El::Main)
+                .st([St::Flex1, St::MinW0, St::PMd, St::PbXl])
+                .append([main_content]),
+        ])
     };
 
     // Always: Div > [Header, Drawer, Body, Footer] — stable 4-child structure
@@ -231,7 +232,12 @@ fn build_header() -> ElementBuilder {
                     "style",
                     "font-family:'Quicksand',sans-serif;font-weight:300;letter-spacing:0.02em",
                 )
-                .st([St::TextLg, St::CursorPointer, St::TextDefault, St::NoDecoration])
+                .st([
+                    St::TextLg,
+                    St::CursorPointer,
+                    St::TextDefault,
+                    St::NoDecoration,
+                ])
                 .text("rwire"),
             Badge::primary("Design System").build(),
         ])
@@ -243,12 +249,22 @@ fn build_header() -> ElementBuilder {
         .children([
             el(El::A)
                 .attr("href", docs_url())
-                .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                .st([
+                    St::TextSm,
+                    St::TextMuted,
+                    St::NoDecoration,
+                    St::CursorPointer,
+                ])
                 .hover([St::TextDefault])
                 .text("Docs"),
             el(El::A)
                 .attr("href", examples_url())
-                .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                .st([
+                    St::TextSm,
+                    St::TextMuted,
+                    St::NoDecoration,
+                    St::CursorPointer,
+                ])
                 .hover([St::TextDefault])
                 .text("Examples"),
             el(El::Div)
@@ -296,8 +312,16 @@ fn render_style_switcher(theme: &Theme) -> ElementBuilder {
                 .size(ButtonSize::Sm)
                 .on_click(cycle_theme_style()),
             Button::ghost({
-                let is_nord = theme.palette_ref().is_some_and(|p| p.accent.step(8) == "#5E81AC");
-                if is_nord { "Nord" } else if theme.palette_ref().is_some() { "Indigo" } else { "Default" }
+                let is_nord = theme
+                    .palette_ref()
+                    .is_some_and(|p| p.accent.step(8) == "#5E81AC");
+                if is_nord {
+                    "Nord"
+                } else if theme.palette_ref().is_some() {
+                    "Indigo"
+                } else {
+                    "Default"
+                }
             })
             .size(ButtonSize::Sm)
             .on_click(cycle_palette()),
@@ -320,10 +344,8 @@ fn build_sidebar(active_slug: &str) -> ElementBuilder {
     ]);
 
     for category in Category::ALL {
-        let category_entries: Vec<&ComponentEntry> = catalog
-            .iter()
-            .filter(|e| e.category == *category)
-            .collect();
+        let category_entries: Vec<&ComponentEntry> =
+            catalog.iter().filter(|e| e.category == *category).collect();
 
         if category_entries.is_empty() {
             continue;
@@ -409,10 +431,8 @@ fn build_landing() -> ElementBuilder {
 
     let mut cards = Vec::new();
     for category in Category::ALL {
-        let entries: Vec<&ComponentEntry> = catalog
-            .iter()
-            .filter(|e| e.category == *category)
-            .collect();
+        let entries: Vec<&ComponentEntry> =
+            catalog.iter().filter(|e| e.category == *category).collect();
 
         let count = entries.len();
         let names: Vec<&str> = entries.iter().take(5).map(|e| e.name).collect();
@@ -425,7 +445,9 @@ fn build_landing() -> ElementBuilder {
                     Stack::column()
                         .gap(Gap::Sm)
                         .children([
-                            el(El::H3).st([St::FontSemibold, St::TextLg]).text(category.label()),
+                            el(El::H3)
+                                .st([St::FontSemibold, St::TextLg])
+                                .text(category.label()),
                             el(El::P)
                                 .st([St::TextSm, St::TextMuted])
                                 .text(&format!("{count} components")),
@@ -478,9 +500,7 @@ fn build_component_content(entry: &ComponentEntry, state: &DesignSystemState) ->
     let header = Stack::column()
         .gap(Gap::Xs)
         .children([
-            el(El::H1)
-                .st([St::Text3xl, St::FontBold])
-                .text(entry.name),
+            el(El::H1).st([St::Text3xl, St::FontBold]).text(entry.name),
             el(El::P)
                 .st([St::TextLg, St::TextMuted])
                 .text(entry.description),
@@ -501,7 +521,14 @@ fn build_component_content(entry: &ComponentEntry, state: &DesignSystemState) ->
 
     Stack::column()
         .gap(Gap::Lg)
-        .children([breadcrumb, header, playground, code_example, props_table, markdown_docs])
+        .children([
+            breadcrumb,
+            header,
+            playground,
+            code_example,
+            props_table,
+            markdown_docs,
+        ])
         .build()
 }
 
@@ -526,18 +553,35 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
             let btn = el(El::Button)
                 .st(if selected {
                     vec![
-                        St::BgPrimary, St::TextOnPrimary, St::PxSm, St::PySm,
-                        St::RoundedMd, St::TextXs, St::FontMedium, St::BorderNone,
+                        St::BgPrimary,
+                        St::TextOnPrimary,
+                        St::PxSm,
+                        St::PySm,
+                        St::RoundedMd,
+                        St::TextXs,
+                        St::FontMedium,
+                        St::BorderNone,
                         St::CursorPointer,
                     ]
                 } else {
                     vec![
-                        St::BgSecondary, St::TextOnSecondary, St::PxSm, St::PySm,
-                        St::RoundedMd, St::TextXs, St::FontMedium, St::BorderNone,
-                        St::CursorPointer, St::TransitionColors,
+                        St::BgSecondary,
+                        St::TextOnSecondary,
+                        St::PxSm,
+                        St::PySm,
+                        St::RoundedMd,
+                        St::TextXs,
+                        St::FontMedium,
+                        St::BorderNone,
+                        St::CursorPointer,
+                        St::TransitionColors,
                     ]
                 })
-                .hover(if selected { vec![] } else { vec![St::BgSecondaryHover] })
+                .hover(if selected {
+                    vec![]
+                } else {
+                    vec![St::BgSecondaryHover]
+                })
                 .data("axis", &axis_idx.to_string())
                 .data("val", &val_idx.to_string())
                 .on(Ev::Click, select_variant())
@@ -554,10 +598,7 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
                     .st([St::TextXs, St::TextMuted, St::FontMedium])
                     .attr("style", "min-width:64px")
                     .text(axis.display_name),
-                Stack::row()
-                    .gap(Gap::Xs)
-                    .children(buttons)
-                    .build(),
+                Stack::row().gap(Gap::Xs).children(buttons).build(),
             ])
             .build();
         controls.push(row);
@@ -584,12 +625,7 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
 
             toggles.push(toggle);
         }
-        controls.push(
-            Stack::row()
-                .gap(Gap::Md)
-                .children(toggles)
-                .build(),
-        );
+        controls.push(Stack::row().gap(Gap::Md).children(toggles).build());
     }
 
     // Number params -> sliders (easy to drag), with the live value shown alongside.
@@ -613,13 +649,15 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
             .text(np.name)];
         if np.slider {
             // Range slider (best for visual magnitudes) + live value.
-            row_children.push(el(El::Div).st([St::Flex1]).append([Slider::new()
-                .min(np.min)
-                .max(np.max)
-                .value(cur)
-                .step(np.step)
-                .on_change(h)
-                .build()]));
+            row_children.push(
+                el(El::Div).st([St::Flex1]).append([Slider::new()
+                    .min(np.min)
+                    .max(np.max)
+                    .value(cur)
+                    .step(np.step)
+                    .on_change(h)
+                    .build()]),
+            );
             row_children.push(
                 el(El::Span)
                     .st([St::TextXs, St::FontMono, St::TextDefault])
@@ -628,13 +666,17 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
             );
         } else {
             // Number input (best for discrete counts) — native steppers, min/max clamp.
-            row_children.push(el(El::Div).attr("style", "width:96px").append([Input::number()
-                .value(cur.to_string())
-                .size(InputSize::Sm)
-                .on_input_debounced(h, 400)
-                .attr("min", &np.min.to_string())
-                .attr("max", &np.max.to_string())
-                .attr("step", &np.step.to_string())]));
+            row_children.push(
+                el(El::Div)
+                    .attr("style", "width:96px")
+                    .append([Input::number()
+                        .value(cur.to_string())
+                        .size(InputSize::Sm)
+                        .on_input_debounced(h, 400)
+                        .attr("min", &np.min.to_string())
+                        .attr("max", &np.max.to_string())
+                        .attr("step", &np.step.to_string())]),
+            );
         }
         controls.push(
             Stack::row()
@@ -722,7 +764,13 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
     if !controls.is_empty() {
         playground_children.push(
             el(El::Div)
-                .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::PbMd, St::BorderBDefault])
+                .st([
+                    St::DisplayFlex,
+                    St::FlexCol,
+                    St::GapSm,
+                    St::PbMd,
+                    St::BorderBDefault,
+                ])
                 .append(controls),
         );
     }
@@ -754,8 +802,15 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
                 el(El::Button)
                     .text("\u{2715} Close demo")
                     .st([
-                        St::BgPrimary, St::TextOnPrimary, St::PxMd, St::PySm, St::RoundedMd,
-                        St::BorderNone, St::CursorPointer, St::FontMedium, St::ShadowLg,
+                        St::BgPrimary,
+                        St::TextOnPrimary,
+                        St::PxMd,
+                        St::PySm,
+                        St::RoundedMd,
+                        St::BorderNone,
+                        St::CursorPointer,
+                        St::FontMedium,
+                        St::ShadowLg,
                     ])
                     .attr("style", "position:fixed;top:1rem;right:1rem;z-index:9999")
                     .data("idx", &open_idx.to_string())
@@ -764,9 +819,7 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
         }
     }
 
-    Card::new()
-        .children(playground_children)
-        .build()
+    Card::new().children(playground_children).build()
 }
 
 // ============================================================================
@@ -872,12 +925,13 @@ fn build_props_table(entry: &ComponentEntry) -> ElementBuilder {
     }
 
     for tp in texts {
-        table = table.row(
-            TableRow::new()
-                .cell(tp.name)
-                .cell("&str")
-                .cell(if tp.default.is_empty() { "—" } else { tp.default }),
-        );
+        table = table.row(TableRow::new().cell(tp.name).cell("&str").cell(
+            if tp.default.is_empty() {
+                "—"
+            } else {
+                tp.default
+            },
+        ));
     }
 
     Stack::column()
@@ -1025,21 +1079,37 @@ fn set_text_at(state: &mut DesignSystemState, ctx: &rwire::EventContext, i: usiz
 }
 
 #[handler]
-fn set_num_0(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 0); }
+fn set_num_0(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_num_at(state, ctx, 0);
+}
 #[handler]
-fn set_num_1(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 1); }
+fn set_num_1(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_num_at(state, ctx, 1);
+}
 #[handler]
-fn set_num_2(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 2); }
+fn set_num_2(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_num_at(state, ctx, 2);
+}
 #[handler]
-fn set_num_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_num_at(state, ctx, 3); }
+fn set_num_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_num_at(state, ctx, 3);
+}
 #[handler]
-fn set_text_0(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 0); }
+fn set_text_0(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_text_at(state, ctx, 0);
+}
 #[handler]
-fn set_text_1(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 1); }
+fn set_text_1(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_text_at(state, ctx, 1);
+}
 #[handler]
-fn set_text_2(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 2); }
+fn set_text_2(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_text_at(state, ctx, 2);
+}
 #[handler]
-fn set_text_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) { set_text_at(state, ctx, 3); }
+fn set_text_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
+    set_text_at(state, ctx, 3);
+}
 
 #[handler]
 fn toggle_theme(theme: &mut Theme) {
@@ -1057,13 +1127,17 @@ fn cycle_theme_style(theme: &mut Theme) {
 #[handler]
 fn cycle_palette(theme: &mut Theme) {
     // Cycle: Indigo → Nord → default (no palette)
-    let is_nord = theme.palette_ref().is_some_and(|p| p.accent.step(8) == "#5E81AC");
-    let is_indigo = theme.palette_ref().is_some_and(|p| p.accent.step(8) == "#3730A3");
+    let is_nord = theme
+        .palette_ref()
+        .is_some_and(|p| p.accent.step(8) == "#5E81AC");
+    let is_indigo = theme
+        .palette_ref()
+        .is_some_and(|p| p.accent.step(8) == "#3730A3");
     if is_indigo {
         theme.set_palette(palettes::nord());
     } else if is_nord {
         theme.clear_palette();
     } else {
-        theme.set_palette(palettes::indigo());
+        theme.set_palette(palettes::nord());
     }
 }

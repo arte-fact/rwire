@@ -15,7 +15,7 @@
 //!     .build()
 //! ```
 
-use rwire::attr_tokens::At;
+use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec};
 
@@ -101,24 +101,22 @@ impl Slider {
         let track = el(El::Div)
             .st([St::SliderTrack, St::PositionAbsolute, St::RoundedSm])
             .attr("style", "top:50%;left:0;right:0;transform:translateY(-50%)")
-            .append([
-                el(El::Div)
-                    .st([St::SliderFill])
-                    .attr("style", &format!("width:{fill_pct:.1}%")),
-            ]);
+            .append([el(El::Div)
+                .st([St::SliderFill])
+                .attr("style", &format!("width:{fill_pct:.1}%"))]);
 
         // Native range input overlaid on top of the track so the thumb sits ON the bar.
         // Transparent track (the visual track shows through); only the thumb is painted.
         let mut input = el(El::Input)
             .st([St::SliderInput, St::SliderThumb, St::PositionAbsolute])
             .attr("style", "top:0;left:0;width:100%;height:100%")
-            .attr("type", "range")
-            .attr("min", &self.min.to_string())
-            .attr("max", &self.max.to_string())
-            .attr("value", &self.value.to_string());
+            .at(At::Type, Av::Range)
+            .at_str(At::Min, &self.min.to_string())
+            .at_str(At::Max, &self.max.to_string())
+            .at_str(At::Value, &self.value.to_string());
 
         if let Some(step) = self.step {
-            input = input.attr("step", &step.to_string());
+            input = input.at_str(At::Step, &step.to_string());
         }
 
         if self.disabled {

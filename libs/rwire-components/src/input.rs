@@ -75,6 +75,13 @@ pub struct Input {
     readonly: bool,
     required: bool,
     invalid: bool,
+    autocomplete: Option<Cow<'static, str>>,
+    spellcheck: Option<bool>,
+    min: Option<Cow<'static, str>>,
+    max: Option<Cow<'static, str>>,
+    step: Option<Cow<'static, str>>,
+    pattern: Option<Cow<'static, str>>,
+    autofocus: bool,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -176,6 +183,48 @@ impl Input {
         self
     }
 
+    /// Set the `autocomplete` attribute (e.g. `"off"`, `"username"`, `"current-password"`).
+    pub fn autocomplete(mut self, value: impl Into<Cow<'static, str>>) -> Self {
+        self.autocomplete = Some(value.into());
+        self
+    }
+
+    /// Set the `spellcheck` attribute.
+    pub fn spellcheck(mut self, on: bool) -> Self {
+        self.spellcheck = Some(on);
+        self
+    }
+
+    /// Set the `min` attribute (for `number`/`range`/date inputs).
+    pub fn min(mut self, min: impl Into<Cow<'static, str>>) -> Self {
+        self.min = Some(min.into());
+        self
+    }
+
+    /// Set the `max` attribute (for `number`/`range`/date inputs).
+    pub fn max(mut self, max: impl Into<Cow<'static, str>>) -> Self {
+        self.max = Some(max.into());
+        self
+    }
+
+    /// Set the `step` attribute (for `number`/`range` inputs).
+    pub fn step(mut self, step: impl Into<Cow<'static, str>>) -> Self {
+        self.step = Some(step.into());
+        self
+    }
+
+    /// Set the `pattern` attribute (a validation regex).
+    pub fn pattern(mut self, pattern: impl Into<Cow<'static, str>>) -> Self {
+        self.pattern = Some(pattern.into());
+        self
+    }
+
+    /// Autofocus the input on mount.
+    pub fn autofocus(mut self, autofocus: bool) -> Self {
+        self.autofocus = autofocus;
+        self
+    }
+
     // ========================================================================
     // Token computation
     // ========================================================================
@@ -193,6 +242,9 @@ impl Input {
             St::RoundedMd,
             St::TransTheme,
             St::BorderWTheme,
+            // Inherit the page font (family + size + weight) so the control doesn't fall
+            // back to the UA default.
+            St::FontInheritAll,
         ];
 
         match self.size {
@@ -238,7 +290,11 @@ impl Input {
             .focus([St::BorderPrimary, St::OutlineTheme])
             .at(At::Type, self.input_type.av());
         if self.disabled {
-            builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+            builder = builder.disabled_style([
+                St::Opacity50,
+                St::CursorNotAllowed,
+                St::PointerEventsNone,
+            ]);
         }
 
         if let Some(ref placeholder) = self.placeholder {
@@ -264,6 +320,30 @@ impl Input {
         }
         if self.invalid {
             builder = builder.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref autocomplete) = self.autocomplete {
+            builder = builder.at_str(At::Autocomplete, autocomplete);
+        }
+        if let Some(spellcheck) = self.spellcheck {
+            builder = builder.at(
+                At::Spellcheck,
+                if spellcheck { Av::True } else { Av::False },
+            );
+        }
+        if let Some(ref min) = self.min {
+            builder = builder.at_str(At::Min, min);
+        }
+        if let Some(ref max) = self.max {
+            builder = builder.at_str(At::Max, max);
+        }
+        if let Some(ref step) = self.step {
+            builder = builder.at_str(At::Step, step);
+        }
+        if let Some(ref pattern) = self.pattern {
+            builder = builder.at_str(At::Pattern, pattern);
+        }
+        if self.autofocus {
+            builder = builder.bool_attr(At::Autofocus);
         }
         if let Some(ref extra) = self.extra_class {
             builder = builder.class(extra.as_ref());

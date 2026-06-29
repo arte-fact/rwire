@@ -155,18 +155,18 @@ fn login_card(error: bool, brand: Option<&str>) -> ElementBuilder {
         "Username",
         login_input(
             el(El::Input)
-                .attr("name", "username")
-                .attr("autofocus", "")
-                .attr("autocomplete", "username"),
+                .at_str(At::Name, "username")
+                .bool_attr(At::Autofocus)
+                .at(At::Autocomplete, Av::Username),
         ),
     ));
     children.push(login_field(
         "Password",
         login_input(
             el(El::Input)
-                .attr("name", "password")
+                .at_str(At::Name, "password")
                 .at(At::Type, Av::Password)
-                .attr("autocomplete", "current-password"),
+                .at(At::Autocomplete, Av::CurrentPassword),
         ),
     ));
     children.push(

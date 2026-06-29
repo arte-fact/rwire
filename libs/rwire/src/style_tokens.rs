@@ -895,6 +895,17 @@ define_token_enum! {
         TextOnWarningSubtle = 0x340 => "color:var(--N1)",
         BgErrorSubtle = 0x341 => "background:var(--P)",
         TextOnErrorSubtle = 0x342 => "color:var(--P1)",
+
+        // Font reset for form controls — the full `font` shorthand (inherits family,
+        // size, weight, style, line-height) so inputs/buttons match the page font, unlike
+        // `FontInherit` which only inherits font-family.
+        FontInheritAll = 0x343 => "font:inherit",
+
+        // Dynamic viewport heights — mobile-safe alternative to the `vh` Screen tokens,
+        // which over/undershoot when the browser chrome shows/hides.
+        HDvh = 0x344 => "height:100dvh",
+        MinHDvh = 0x345 => "min-height:100dvh",
+        MaxHDvh = 0x346 => "max-height:100dvh",
     }
 }
 

@@ -65,6 +65,21 @@ define_token_enum! {
         AriaChecked = 0x2E => "aria-checked",
         AriaLabelledby = 0x2F => "aria-labelledby",
 
+        // Forms / inputs (0x50-0x5C)
+        Min = 0x50 => "min",
+        Max = 0x51 => "max",
+        Step = 0x52 => "step",
+        Autocomplete = 0x53 => "autocomplete",
+        Spellcheck = 0x54 => "spellcheck",
+        Minlength = 0x55 => "minlength",
+        Maxlength = 0x56 => "maxlength",
+        Pattern = 0x57 => "pattern",
+        Multiple = 0x58 => "multiple",
+        Inputmode = 0x59 => "inputmode",
+        Cols = 0x5A => "cols",
+        Wrap = 0x5B => "wrap",
+        Autofocus = 0x5C => "autofocus",
+
         // SVG (0x40-0x49)
         Xmlns = 0x40 => "xmlns",
         ViewBox = 0x41 => "viewBox",
@@ -110,6 +125,7 @@ define_token_enum! {
         Search = 0x19 => "search",
         Tel = 0x1A => "tel",
         Url = 0x1B => "url",
+        Range = 0x1C => "range",
 
         // ARIA roles (0x20-0x2F)
         RoleButton = 0x20 => "button",
@@ -158,6 +174,16 @@ define_token_enum! {
         V16 = 0x62 => "16",
         V32 = 0x63 => "32",
         V48 = 0x64 => "48",
+
+        // Autocomplete + form-control values (0x70-0x77)
+        Off = 0x70 => "off",
+        On = 0x71 => "on",
+        Username = 0x72 => "username",
+        CurrentPassword = 0x73 => "current-password",
+        NewPassword = 0x74 => "new-password",
+        OneTimeCode = 0x75 => "one-time-code",
+        Numeric = 0x76 => "numeric",
+        Decimal = 0x77 => "decimal",
     }
 }
 

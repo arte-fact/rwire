@@ -43,6 +43,11 @@ pub struct Textarea {
     readonly: bool,
     required: bool,
     invalid: bool,
+    autocomplete: Option<Cow<'static, str>>,
+    spellcheck: Option<bool>,
+    maxlength: Option<u32>,
+    wrap: Option<Cow<'static, str>>,
+    autofocus: bool,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -59,6 +64,11 @@ impl Default for Textarea {
             readonly: false,
             required: false,
             invalid: false,
+            autocomplete: None,
+            spellcheck: None,
+            maxlength: None,
+            wrap: None,
+            autofocus: false,
             extra_class: None,
         }
     }
@@ -137,6 +147,36 @@ impl Textarea {
         self
     }
 
+    /// Set the `autocomplete` attribute (e.g. `"off"`).
+    pub fn autocomplete(mut self, value: impl Into<Cow<'static, str>>) -> Self {
+        self.autocomplete = Some(value.into());
+        self
+    }
+
+    /// Set the `spellcheck` attribute.
+    pub fn spellcheck(mut self, on: bool) -> Self {
+        self.spellcheck = Some(on);
+        self
+    }
+
+    /// Set the `maxlength` attribute.
+    pub fn maxlength(mut self, max: u32) -> Self {
+        self.maxlength = Some(max);
+        self
+    }
+
+    /// Set the `wrap` attribute (`"soft"`, `"hard"`, or `"off"`).
+    pub fn wrap(mut self, wrap: impl Into<Cow<'static, str>>) -> Self {
+        self.wrap = Some(wrap.into());
+        self
+    }
+
+    /// Autofocus the textarea on mount.
+    pub fn autofocus(mut self, autofocus: bool) -> Self {
+        self.autofocus = autofocus;
+        self
+    }
+
     // ========================================================================
     // Token computation
     // ========================================================================
@@ -177,9 +217,9 @@ impl Textarea {
     /// Compute size-specific style tokens.
     fn size_tokens(&self) -> Vec<St> {
         match self.size {
-            TextareaSize::Sm => vec![St::PSm, St::MinH4rem, St::ResizeY, St::FontInherit],
-            TextareaSize::Md => vec![St::PSp3, St::MinH5rem, St::ResizeY, St::FontInherit],
-            TextareaSize::Lg => vec![St::PMd, St::MinH6rem, St::ResizeY, St::FontInherit],
+            TextareaSize::Sm => vec![St::PSm, St::MinH4rem, St::ResizeY, St::FontInheritAll],
+            TextareaSize::Md => vec![St::PSp3, St::MinH5rem, St::ResizeY, St::FontInheritAll],
+            TextareaSize::Lg => vec![St::PMd, St::MinH6rem, St::ResizeY, St::FontInheritAll],
         }
     }
 
@@ -197,7 +237,11 @@ impl Textarea {
             .hover([St::BorderEmphasis])
             .focus([St::BorderPrimary, St::OutlineNone]);
         if self.disabled {
-            builder = builder.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+            builder = builder.disabled_style([
+                St::Opacity50,
+                St::CursorNotAllowed,
+                St::PointerEventsNone,
+            ]);
         }
 
         if let Some(ref placeholder) = self.placeholder {
@@ -226,6 +270,24 @@ impl Textarea {
         }
         if self.invalid {
             builder = builder.at(At::AriaInvalid, Av::True);
+        }
+        if let Some(ref autocomplete) = self.autocomplete {
+            builder = builder.at_str(At::Autocomplete, autocomplete);
+        }
+        if let Some(spellcheck) = self.spellcheck {
+            builder = builder.at(
+                At::Spellcheck,
+                if spellcheck { Av::True } else { Av::False },
+            );
+        }
+        if let Some(maxlength) = self.maxlength {
+            builder = builder.at_str(At::Maxlength, &maxlength.to_string());
+        }
+        if let Some(ref wrap) = self.wrap {
+            builder = builder.at_str(At::Wrap, wrap);
+        }
+        if self.autofocus {
+            builder = builder.bool_attr(At::Autofocus);
         }
         if let Some(ref extra) = self.extra_class {
             builder = builder.class(extra.as_ref());
