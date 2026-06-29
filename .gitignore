@@ -1,5 +1,8 @@
 /target
 
+# Local env file (the checked-in template is .env.local)
+/.env
+
 # SQLite database files
 *.db
 *.db-shm
