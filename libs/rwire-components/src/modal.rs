@@ -225,8 +225,11 @@ impl Modal {
             .st(container_tokens)
             .append([
                 backdrop,
+                // Panel wrapper sits above the backdrop within the container's stacking
+                // context (Z1400 > backdrop Z1300); without an explicit z-index the
+                // positioned backdrop would paint over the panel and dim it.
                 el(El::Div)
-                    .st([St::PositionFixed, St::Inset0, St::DisplayFlex, St::ItemsCenter, St::JustifyCenter, St::PointerEventsNone, St::PMd])
+                    .st([St::PositionFixed, St::Inset0, St::Z1400, St::DisplayFlex, St::ItemsCenter, St::JustifyCenter, St::PointerEventsNone, St::PMd])
                     .append([modal_inner])
             ])
     }

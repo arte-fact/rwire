@@ -60,7 +60,7 @@ if(a.nodeType!==1)return;
 let ba=b.attributes;for(let k=0;k<ba.length;k++){let n=ba[k].name;if(a.getAttribute(n)!==ba[k].value)a.setAttribute(n,ba[k].value)}
 let aa=a.attributes;for(let k=aa.length-1;k>=0;k--){let n=aa[k].name;if(!b.hasAttribute(n))a.removeAttribute(n)}
 a.__hk=b.__hk;
-if(a.id&&a.id.indexOf('__synced_')===0)return; // nested region: its own update owns it
+if(typeof a.id==='string'&&a.id.indexOf('__synced_')===0)return; // nested region: its own update owns it (guard non-string id so the morph never throws and freezes the stream)
 mk(a,b)}
 function mk(a,b){
 let byId={};for(let c=a.firstChild;c;c=c.nextSibling)if(c.nodeType===1&&c.id)byId[c.id]=c;
@@ -128,7 +128,7 @@ else if(o===O.TT){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++],ms=(d[i++]<<8)|d[
 else if(o===O.AT2){let ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){setTimeout(()=>{fl2[ti]=!fl2[ti];uf2(ti)},ms)}}
 else if(o===O.E){fm();if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
-}}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '))}}
+}}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '));try{w.close()}catch(_){}}}
 function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
 if('scrollRestoration' in history)history.scrollRestoration='manual';
 let rc=0,rn=false,op=false,ot;
