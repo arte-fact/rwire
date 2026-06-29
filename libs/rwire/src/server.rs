@@ -10,6 +10,7 @@ use async_std::task;
 use async_tungstenite::accept_async_with_config;
 use async_tungstenite::tungstenite::protocol::WebSocketConfig;
 use async_tungstenite::tungstenite::Message;
+use bytes::Bytes;
 use futures::prelude::*;
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
@@ -1369,12 +1370,14 @@ async fn handle_client<F>(
                 if let Err(e) = handle_websocket(
                     ws_stream,
                     peer_addr,
-                    root,
-                    shared,
-                    session_id,
-                    route_handler,
-                    initial_theme,
-                    composite_table,
+                    ConnContext {
+                        root,
+                        shared,
+                        session_id,
+                        route_handler,
+                        initial_theme,
+                        composite_table,
+                    },
                 )
                 .await
                 {
@@ -1496,6 +1499,264 @@ impl ConnectionState {
         }
     }
 
+    /// Build a synced-update message for `changed_type` after `changes`,
+    /// optionally injecting the authoritative shared/persisted copy keyed by
+    /// `inject_key` (read from the shared cache). The broadcast path and the
+    /// post-handler render paths differ only in that key, so they share this.
+    fn build_type_update(
+        &mut self,
+        shared: &SharedServerState,
+        changed_type: TypeId,
+        changes: ChangeSet,
+        inject_key: Option<&str>,
+    ) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+        // Only take the read lock when there's a shared/persisted copy to inject.
+        let cache_guard = match inject_key {
+            Some(_) => Some(
+                shared
+                    .shared_cache
+                    .read()
+                    .map_err(|_| "shared cache lock poisoned")?,
+            ),
+            None => None,
+        };
+        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+            self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+        if let (Some(key), Some(cache)) = (inject_key, &cache_guard) {
+            if let Some(state) = cache.get(key) {
+                states_map.insert(changed_type, state.as_ref());
+            }
+        }
+        Ok(build_synced_update_with_known_symbols(
+            &self.synced_elements,
+            &states_map,
+            &mut self.handlers,
+            changes,
+            Some(&mut self.sent_symbols),
+            Some(changed_type),
+            Some(&mut self.synced_hashes),
+            Some(&mut self.sent_css),
+            Some(&mut self.sent_maps),
+            None,
+            0,
+            Some(&self.client_actions),
+        ))
+    }
+
+    /// Run `handler` against its state. Shared/persisted state executes on (and is
+    /// written back to) the shared cache, is marked dirty if persisted, broadcast to
+    /// other subscribers, and subscribed to; memory state executes on the connection.
+    /// Returns the cache key (Some for shared/persisted) so the caller can render
+    /// from the copy the handler just wrote.
+    fn dispatch_handler(
+        &mut self,
+        shared: &SharedServerState,
+        handler: &HandlerFn,
+        ctx: &EventContext,
+    ) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+        let state_type_id = handler.state_type_id();
+        let cache_key = shared_cache_key(
+            handler.storage_type(),
+            handler.table_name(),
+            &self.session_id,
+        );
+        if let Some(key) = &cache_key {
+            // Shared/persisted: execute on the shared cache, then write-back side effects.
+            let mut cache = shared
+                .shared_cache
+                .write()
+                .map_err(|_| "shared cache lock poisoned")?;
+            let state = cache
+                .entry(key.clone())
+                .or_insert_with(|| handler.create_state());
+            handler.call_with_context(state.as_mut(), ctx);
+            drop(cache);
+
+            if handler.storage_type() == StorageType::Persisted {
+                shared.mark_dirty(key);
+            }
+            shared.broadcast(key, state_type_id, handler.changes(), self.connection_id);
+            if self.subscribed_keys.insert(key.clone()) {
+                shared.subscribe(self.connection_id, key);
+            }
+        } else {
+            // Memory state: connection-local.
+            self.ensure_state_initialized_for(handler);
+            if let Some(state) = self.get_state_mut(state_type_id) {
+                handler.call_with_context(state, ctx);
+            }
+        }
+        Ok(cache_key)
+    }
+
+    /// Swap the built-in router's outlet to `path`: update `CurrentRoute`, seed the
+    /// matched view's renderer states, prune the previous view's regions, render the
+    /// new view (ids floored above any still on the client), then register the new
+    /// regions and subscribe any shared/persisted state they read. Returns the update
+    /// bytes for the caller to send.
+    fn render_route_view_swap(
+        &mut self,
+        shared: &SharedServerState,
+        router: &crate::router::Router,
+        path: &str,
+    ) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+        let route_tid = TypeId::of::<crate::router::CurrentRoute>();
+        self.states
+            .entry(route_tid)
+            .or_insert_with(|| Box::new(crate::router::CurrentRoute::default()));
+        if let Some(route) = self
+            .get_state_mut(route_tid)
+            .and_then(|s| s.downcast_mut::<crate::router::CurrentRoute>())
+        {
+            route.set_path(path);
+        }
+
+        // Initialize any state the matched view's renderers read, so the outlet can
+        // render them inline. `or_insert` preserves state from a prior visit.
+        let view = router.build_for_path(path);
+        for r in crate::builder::extract_renderers(&view) {
+            self.states
+                .entry(r.state_type_id())
+                .or_insert_with(|| r.create_default_state());
+        }
+
+        // Prune the previous view's regions (every synced region descended from a
+        // CurrentRoute region) so the new view's regions render fresh, not against
+        // stale ids.
+        let route_regions: HashSet<u32> = self
+            .synced_elements
+            .iter()
+            .filter(|se| se.state_type_id == route_tid)
+            .map(|se| se.id)
+            .collect();
+        let mut stale = HashSet::new();
+        let mut frontier: Vec<u32> = route_regions.iter().copied().collect();
+        while !frontier.is_empty() {
+            let next: Vec<u32> = self
+                .synced_elements
+                .iter()
+                .filter(|se| {
+                    se.parent.is_some_and(|p| frontier.contains(&p)) && !stale.contains(&se.id)
+                })
+                .map(|se| se.id)
+                .collect();
+            for id in &next {
+                stale.insert(*id);
+            }
+            frontier = next;
+        }
+        // Floor new ids above every id currently on the client (including the view
+        // being pruned), so a swapped-in region never reuses a just-removed id (which
+        // the client morph would preserve as a stale span). Computed before the retain.
+        let synced_id_floor = self
+            .synced_elements
+            .iter()
+            .map(|se| se.id)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
+        self.synced_elements.retain(|se| !stale.contains(&se.id));
+
+        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
+        let update = {
+            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+            // `states` only holds defaults for shared state; the authoritative copy is
+            // in the shared cache. Override before rendering so the swapped-in view
+            // doesn't paint from empty defaults.
+            let cache_guard = shared
+                .shared_cache
+                .read()
+                .map_err(|_| "shared cache lock poisoned")?;
+            for (tid, key) in
+                shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+            {
+                if let Some(state) = cache_guard.get(&key) {
+                    states_map.insert(tid, state.as_ref());
+                }
+            }
+            build_synced_update_with_known_symbols(
+                &self.synced_elements,
+                &states_map,
+                &mut self.handlers,
+                ChangeSet::all(),
+                Some(&mut self.sent_symbols),
+                Some(route_tid),
+                Some(&mut self.synced_hashes),
+                Some(&mut self.sent_css),
+                Some(&mut self.sent_maps),
+                Some(&mut discovered),
+                synced_id_floor,
+                Some(&self.client_actions),
+            )
+        };
+
+        // Register the new view's regions so later state changes re-render them, and
+        // subscribe any shared/persisted state they read.
+        for region in discovered {
+            if !self.synced_elements.iter().any(|se| se.id == region.id) {
+                self.synced_elements.push(region);
+            }
+        }
+        for (_, key) in
+            shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+        {
+            if self.subscribed_keys.insert(key.clone()) {
+                shared.subscribe(self.connection_id, &key);
+            }
+        }
+        Ok(update)
+    }
+
+    /// Render the full initial DOM for this connection: render every region with the
+    /// authoritative state (memory from the connection, shared/persisted from the
+    /// cache), reusing the startup composite table so composite ids match the capsule
+    /// CSS, then capture handlers/synced/symbols/client-actions and prepend lazy CSS.
+    fn render_initial_dom(
+        &mut self,
+        shared: &SharedServerState,
+        root_element: &ElementBuilder,
+        composite_table: &crate::style_groups::CompositeTable,
+    ) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+        let mut ctx = BuildContext::new();
+
+        let cache_guard = shared
+            .shared_cache
+            .read()
+            .map_err(|_| "shared cache lock poisoned")?;
+        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+            self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+        // Override memory defaults with the shared/persisted instances from the cache.
+        for (tid, key) in
+            shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+        {
+            if let Some(state) = cache_guard.get(&key) {
+                states_map.insert(tid, state.as_ref());
+            }
+        }
+
+        // Reuse the startup composite table so composite ids match the CSS baked into
+        // the capsule (re-analyzing different DOM state would reassign ids).
+        ctx.set_composite_table(composite_table.clone());
+        if states_map.is_empty() {
+            let placeholder: () = ();
+            ctx.collect_symbols(root_element, &placeholder);
+            ctx.emit(root_element, &placeholder);
+        } else {
+            ctx.collect_symbols_multi(root_element, &states_map);
+            ctx.emit_multi(root_element);
+        }
+        drop(cache_guard);
+
+        self.handlers = ctx.handlers().clone();
+        self.synced_elements = ctx.take_synced_elements();
+        self.sent_symbols = ctx.take_symbol_map();
+        self.client_actions = ctx.client_action_indices();
+        // Prepend STYLE_DEF for the styles this render uses (lazy CSS): the capsule
+        // ships only global CSS; class rules arrive over the wire.
+        Ok(ctx.finish_with_style_defs(&mut self.sent_css, &mut self.sent_maps))
+    }
+
     /// Ensure state of a given type is initialized using the handler's factory.
     fn ensure_state_initialized_for(&mut self, handler: &HandlerFn) {
         let type_id = handler.state_type_id();
@@ -1568,20 +1829,33 @@ impl Drop for ConnectionGuard {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_websocket<F>(
-    ws_stream: async_tungstenite::WebSocketStream<TcpStream>,
-    peer_addr: SocketAddr,
+/// Per-connection context for [`handle_websocket`]: the app root and shared state
+/// plus the resolved appearance/routing config, cloned per connection in `run()`.
+struct ConnContext<F> {
     root: Arc<F>,
     shared: Arc<SharedServerState>,
     session_id: SessionId,
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
+}
+
+async fn handle_websocket<F>(
+    ws_stream: async_tungstenite::WebSocketStream<TcpStream>,
+    peer_addr: SocketAddr,
+    cx: ConnContext<F>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
+    let ConnContext {
+        root,
+        shared,
+        session_id,
+        route_handler,
+        initial_theme,
+        composite_table,
+    } = cx;
     let (mut write, mut read) = ws_stream.split();
 
     // Allocate connection ID and register broadcast channel. The receiver is
@@ -1687,64 +1961,7 @@ where
     // Now rebuild the DOM with all states available
     // Build a HashMap of all states for multi-state rendering
     // For persisted state, use shared cache; for memory state, use connection state
-    let initial_dom = {
-        let mut ctx = BuildContext::new();
-
-        // Acquire read lock on shared cache
-        let cache_guard = shared
-            .shared_cache
-            .read()
-            .map_err(|_| "shared cache lock poisoned")?;
-
-        // Build states_map with connection state, then override with shared cache
-        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
-            .states
-            .iter()
-            .map(|(k, v)| (*k, v.as_ref()))
-            .collect();
-
-        // Override memory state with shared/persisted instances from the cache.
-        for (tid, key) in shared_persisted_keys(
-            &conn_state.handlers,
-            &conn_state.synced_elements,
-            &conn_state.session_id,
-        ) {
-            if let Some(state) = cache_guard.get(&key) {
-                states_map.insert(tid, state.as_ref());
-            }
-        }
-
-        // Reuse the startup composite table so that composite IDs match
-        // the CSS baked into the capsule (different DOM state would produce
-        // different ID assignments if we re-analyzed here).
-        ctx.set_composite_table((*composite_table).clone());
-
-        if states_map.is_empty() {
-            // No states available, use placeholder
-            ctx.collect_symbols(&root_element, &placeholder_state);
-            ctx.emit(&root_element, &placeholder_state);
-        } else {
-            // Use multi-state methods to render all synced elements correctly
-            ctx.collect_symbols_multi(&root_element, &states_map);
-            ctx.emit_multi(&root_element);
-        }
-
-        // Drop cache_guard before continuing (it's automatically dropped at end of scope)
-        drop(cache_guard);
-
-        // Re-extract handlers and synced elements (they should be the same)
-        conn_state.handlers = ctx.handlers().clone();
-        conn_state.synced_elements = ctx.take_synced_elements();
-        // Capture sent symbols for incremental updates
-        conn_state.sent_symbols = ctx.take_symbol_map();
-        // Capture client-action slot indices so synced updates can re-bind
-        // regenerated elements to the same client-side target/selector state.
-        conn_state.client_actions = ctx.client_action_indices();
-
-        // Prepend STYLE_DEF for the styles this initial render uses (lazy CSS):
-        // the capsule ships only global CSS; class rules arrive over the wire.
-        ctx.finish_with_style_defs(&mut conn_state.sent_css, &mut conn_state.sent_maps)
-    };
+    let initial_dom = conn_state.render_initial_dom(&shared, &root_element, &composite_table)?;
 
     // Send initial DOM message (global CSS is in the capsule; class rules are
     // delivered lazily via STYLE_DEF, starting with this initial batch).
@@ -1808,41 +2025,11 @@ where
                     }),
                     _,
                 )) => {
-                    let update = {
-                        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> = conn_state
-                            .states
-                            .iter()
-                            .map(|(k, v)| (*k, v.as_ref()))
-                            .collect();
-
-                        // Keyed (persisted) updates read the authoritative copy
-                        // from the shared cache; keyless (global) updates render
-                        // from this connection's own memory state.
-                        let cache_guard = shared
-                            .shared_cache
-                            .read()
-                            .map_err(|_| "shared cache lock poisoned")?;
-                        if !key.is_empty() {
-                            if let Some(state) = cache_guard.get(&key) {
-                                states_map.insert(state_type_id, state.as_ref());
-                            }
-                        }
-
-                        build_synced_update_with_known_symbols(
-                            &conn_state.synced_elements,
-                            &states_map,
-                            &mut conn_state.handlers,
-                            changes,
-                            Some(&mut conn_state.sent_symbols),
-                            Some(state_type_id),
-                            Some(&mut conn_state.synced_hashes),
-                            Some(&mut conn_state.sent_css),
-                            Some(&mut conn_state.sent_maps),
-                            None,
-                            0,
-                            Some(&conn_state.client_actions),
-                        )
-                    };
+                    // Keyed (persisted) broadcasts inject the authoritative copy by
+                    // key; keyless (global) ones render from this connection's state.
+                    let inject = (!key.is_empty()).then_some(key.as_str());
+                    let update =
+                        conn_state.build_type_update(&shared, state_type_id, changes, inject)?;
 
                     if !update.is_empty() {
                         write.send(Message::Binary(update.to_vec())).await?;
@@ -1896,106 +2083,22 @@ where
                     if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned() {
                         // Create EventContext from payload and param_bytes
                         let ctx = EventContext::new_with_params(event.payload, event.param_bytes);
-
-                        // Resolve where this handler's state lives: connection-
-                        // local (memory) or the shared cache (persisted/shared).
                         let state_type_id = handler.state_type_id();
-                        let cache_key = shared_cache_key(
-                            handler.storage_type(),
-                            handler.table_name(),
-                            &conn_state.session_id,
-                        );
 
-                        if let Some(key) = &cache_key {
-                            // Shared/persisted: get from shared cache, execute, write back
-                            let mut cache = shared
-                                .shared_cache
-                                .write()
-                                .map_err(|_| "shared cache lock poisoned")?;
-                            let state = cache
-                                .entry(key.clone())
-                                .or_insert_with(|| handler.create_state());
-                            handler.call_with_context(state.as_mut(), &ctx);
-                            drop(cache);
+                        // Execute the handler against its state (shared cache or memory)
+                        // and learn whether it was shared/persisted (cache key).
+                        let cache_key = conn_state.dispatch_handler(&shared, &handler, &ctx)?;
 
-                            // Only persisted state is queued for DB writes.
-                            if handler.storage_type() == StorageType::Persisted {
-                                shared.mark_dirty(key);
-                            }
-
-                            // Notify other connections sharing this state
-                            // (cross-tab for persisted, fan-out for shared).
-                            shared.broadcast(
-                                key,
-                                state_type_id,
-                                handler.changes(),
-                                conn_state.connection_id,
-                            );
-
-                            // Subscribe this connection to updates for this key
-                            if !conn_state.subscribed_keys.contains(key) {
-                                shared.subscribe(conn_state.connection_id, key);
-                                conn_state.subscribed_keys.insert(key.clone());
-                            }
-                        } else {
-                            // Memory state: use connection-local state
-                            conn_state.ensure_state_initialized_for(&handler);
-                            if let Some(state) = conn_state.get_state_mut(state_type_id) {
-                                handler.call_with_context(state, &ctx);
-                            }
-                        }
-
-                        // Re-render synced elements using multi-state support
-                        // Build states map that includes both local and shared state
+                        // Re-render this handler's state type (TypeId-filtered; hash
+                        // dedup skips identical output). Persisted/shared state is
+                        // injected from the cache the handler just wrote.
                         let changes = handler.changes();
-
-                        // Build the update bytes within a block to limit lock scope
-                        let update = {
-                            // Acquire read lock on shared cache (if needed)
-                            let cache_guard = if cache_key.is_some() {
-                                Some(
-                                    shared
-                                        .shared_cache
-                                        .read()
-                                        .map_err(|_| "shared cache lock poisoned")?,
-                                )
-                            } else {
-                                None
-                            };
-
-                            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                                conn_state
-                                    .states
-                                    .iter()
-                                    .map(|(k, v)| (*k, v.as_ref()))
-                                    .collect();
-
-                            // For persisted state, add the shared state to the map
-                            if let (Some(key), Some(ref cache)) = (&cache_key, &cache_guard) {
-                                if let Some(state) = cache.get(key) {
-                                    states_map.insert(state_type_id, state.as_ref());
-                                }
-                            }
-
-                            // Use incremental symbols - pass known symbols and update them
-                            // TypeId filter: only re-render synced elements for this handler's state type
-                            // Hash dedup: skip emission if rendered output is identical to last send
-                            build_synced_update_with_known_symbols(
-                                &conn_state.synced_elements,
-                                &states_map,
-                                &mut conn_state.handlers,
-                                changes,
-                                Some(&mut conn_state.sent_symbols),
-                                Some(state_type_id),
-                                Some(&mut conn_state.synced_hashes),
-                                Some(&mut conn_state.sent_css),
-                                Some(&mut conn_state.sent_maps),
-                                None,
-                                0,
-                                Some(&conn_state.client_actions),
-                            )
-                            // cache_guard dropped here at end of block
-                        };
+                        let update = conn_state.build_type_update(
+                            &shared,
+                            state_type_id,
+                            changes,
+                            cache_key.as_deref(),
+                        )?;
 
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;
@@ -2047,132 +2150,7 @@ where
                     // matched view, then reconcile the view's renderer registrations so
                     // its stateful regions stay live (and the prior view's are pruned).
                     if let Some(router) = crate::router::installed_router() {
-                        let route_tid = TypeId::of::<crate::router::CurrentRoute>();
-                        conn_state
-                            .states
-                            .entry(route_tid)
-                            .or_insert_with(|| Box::new(crate::router::CurrentRoute::default()));
-                        if let Some(route) = conn_state
-                            .get_state_mut(route_tid)
-                            .and_then(|s| s.downcast_mut::<crate::router::CurrentRoute>())
-                        {
-                            route.set_path(path);
-                        }
-
-                        // Initialize any state the matched view's renderers read, so the
-                        // outlet can render them inline. `or_insert` preserves state from a
-                        // prior visit (e.g. a counter keeps its value across navigations).
-                        let view = router.build_for_path(path);
-                        for r in crate::builder::extract_renderers(&view) {
-                            conn_state
-                                .states
-                                .entry(r.state_type_id())
-                                .or_insert_with(|| r.create_default_state());
-                        }
-
-                        // Prune the previous view's regions (every synced region descended
-                        // from a CurrentRoute region) so the new view's regions render fresh
-                        // rather than matching stale ids.
-                        let route_regions: std::collections::HashSet<u32> = conn_state
-                            .synced_elements
-                            .iter()
-                            .filter(|se| se.state_type_id == route_tid)
-                            .map(|se| se.id)
-                            .collect();
-                        let mut stale = std::collections::HashSet::new();
-                        let mut frontier: Vec<u32> = route_regions.iter().copied().collect();
-                        while !frontier.is_empty() {
-                            let next: Vec<u32> = conn_state
-                                .synced_elements
-                                .iter()
-                                .filter(|se| {
-                                    se.parent.is_some_and(|p| frontier.contains(&p))
-                                        && !stale.contains(&se.id)
-                                })
-                                .map(|se| se.id)
-                                .collect();
-                            for id in &next {
-                                stale.insert(*id);
-                            }
-                            frontier = next;
-                        }
-                        // Floor for new ids: above every id currently on the client
-                        // (including the view we're pruning), so the swapped-in view's
-                        // regions never reuse a just-removed id (which the client morph
-                        // would preserve as a stale span). Computed before the retain.
-                        let synced_id_floor = conn_state
-                            .synced_elements
-                            .iter()
-                            .map(|se| se.id)
-                            .max()
-                            .map(|m| m + 1)
-                            .unwrap_or(0);
-                        conn_state
-                            .synced_elements
-                            .retain(|se| !stale.contains(&se.id));
-
-                        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
-                        let update = {
-                            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                                conn_state
-                                    .states
-                                    .iter()
-                                    .map(|(k, v)| (*k, v.as_ref()))
-                                    .collect();
-                            // The per-connection `states` only holds defaults for shared
-                            // state; the authoritative copy lives in the shared cache. The
-                            // matched view's renderers read it, so override before rendering
-                            // (otherwise the swapped-in view paints from empty defaults).
-                            let cache_guard = shared
-                                .shared_cache
-                                .read()
-                                .map_err(|_| "shared cache lock poisoned")?;
-                            for (tid, key) in shared_persisted_keys(
-                                &conn_state.handlers,
-                                &conn_state.synced_elements,
-                                &conn_state.session_id,
-                            ) {
-                                if let Some(state) = cache_guard.get(&key) {
-                                    states_map.insert(tid, state.as_ref());
-                                }
-                            }
-                            build_synced_update_with_known_symbols(
-                                &conn_state.synced_elements,
-                                &states_map,
-                                &mut conn_state.handlers,
-                                ChangeSet::all(),
-                                Some(&mut conn_state.sent_symbols),
-                                Some(route_tid),
-                                Some(&mut conn_state.synced_hashes),
-                                Some(&mut conn_state.sent_css),
-                                Some(&mut conn_state.sent_maps),
-                                Some(&mut discovered),
-                                synced_id_floor,
-                                Some(&conn_state.client_actions),
-                            )
-                        };
-
-                        // Register the new view's regions so subsequent state changes
-                        // re-render them, and subscribe any shared/persisted state they read.
-                        for region in discovered {
-                            if !conn_state
-                                .synced_elements
-                                .iter()
-                                .any(|se| se.id == region.id)
-                            {
-                                conn_state.synced_elements.push(region);
-                            }
-                        }
-                        for (_, key) in shared_persisted_keys(
-                            &conn_state.handlers,
-                            &conn_state.synced_elements,
-                            &conn_state.session_id,
-                        ) {
-                            if conn_state.subscribed_keys.insert(key.clone()) {
-                                shared.subscribe(conn_state.connection_id, &key);
-                            }
-                        }
-
+                        let update = conn_state.render_route_view_swap(&shared, router, path)?;
                         if !update.is_empty() {
                             write.send(Message::Binary(update.to_vec())).await?;
                         }
@@ -2198,81 +2176,17 @@ where
                             }
                         } else {
                             // No router: dispatch like a regular event handler —
-                            // shared/persisted state executes on (and renders from) the
-                            // shared cache, memory state on the connection.
-                            let cache_key = shared_cache_key(
-                                handler.storage_type(),
-                                handler.table_name(),
-                                &conn_state.session_id,
-                            );
-                            if let Some(key) = &cache_key {
-                                let mut cache = shared
-                                    .shared_cache
-                                    .write()
-                                    .map_err(|_| "shared cache lock poisoned")?;
-                                let state = cache
-                                    .entry(key.clone())
-                                    .or_insert_with(|| handler.create_state());
-                                handler.call_with_context(state.as_mut(), &ctx);
-                                drop(cache);
-                                if handler.storage_type() == StorageType::Persisted {
-                                    shared.mark_dirty(key);
-                                }
-                                shared.broadcast(
-                                    key,
-                                    state_type_id,
-                                    handler.changes(),
-                                    conn_state.connection_id,
-                                );
-                                if !conn_state.subscribed_keys.contains(key) {
-                                    shared.subscribe(conn_state.connection_id, key);
-                                    conn_state.subscribed_keys.insert(key.clone());
-                                }
-                            } else {
-                                conn_state.ensure_state_initialized_for(handler);
-                                if let Some(state) = conn_state.get_state_mut(state_type_id) {
-                                    handler.call_with_context(state, &ctx);
-                                }
-                            }
+                            // shared/persisted executes on the shared cache (broadcast +
+                            // subscribed), memory state on the connection.
+                            let cache_key = conn_state.dispatch_handler(&shared, handler, &ctx)?;
 
                             let changes = handler.changes();
-                            let update = {
-                                let cache_guard = if cache_key.is_some() {
-                                    Some(
-                                        shared
-                                            .shared_cache
-                                            .read()
-                                            .map_err(|_| "shared cache lock poisoned")?,
-                                    )
-                                } else {
-                                    None
-                                };
-                                let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                                    conn_state
-                                        .states
-                                        .iter()
-                                        .map(|(k, v)| (*k, v.as_ref()))
-                                        .collect();
-                                if let (Some(key), Some(ref cache)) = (&cache_key, &cache_guard) {
-                                    if let Some(state) = cache.get(key) {
-                                        states_map.insert(state_type_id, state.as_ref());
-                                    }
-                                }
-                                build_synced_update_with_known_symbols(
-                                    &conn_state.synced_elements,
-                                    &states_map,
-                                    &mut conn_state.handlers,
-                                    changes,
-                                    Some(&mut conn_state.sent_symbols),
-                                    Some(state_type_id),
-                                    Some(&mut conn_state.synced_hashes),
-                                    Some(&mut conn_state.sent_css),
-                                    Some(&mut conn_state.sent_maps),
-                                    None,
-                                    0,
-                                    Some(&conn_state.client_actions),
-                                )
-                            };
+                            let update = conn_state.build_type_update(
+                                &shared,
+                                state_type_id,
+                                changes,
+                                cache_key.as_deref(),
+                            )?;
 
                             if !update.is_empty() {
                                 write.send(Message::Binary(update.to_vec())).await?;

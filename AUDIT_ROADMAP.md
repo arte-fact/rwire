@@ -27,9 +27,9 @@ graph and verified against source.
 |----------|-------|------|
 | Critical | 1 | 1 |
 | High     | 3 | 3 |
-| Medium   | 6 | 4 |
+| Medium   | 6 | 5 |
 | Low      | 6 | 5 |
-| **All**  | **16** | **13** |
+| **All**  | **16** | **14** |
 
 **Done so far:** C1 (CSPRNG session IDs), H1 (admission control + health endpoints +
 session-cache cap), H2 (session-ID validation), H3 (per-event symbol-clone elimination),
@@ -228,7 +228,22 @@ auto-detected from `X-Forwarded-Proto`). See per-item notes below.
 - **Risk:** Low–Medium. Hot path; keep output identical.
 
 ### M5 — Decompose `handle_websocket` (701 lines, cyclomatic 73)
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (substantially). `handle_websocket` is **737 → 377 lines** with
+  four cohesive `ConnectionState` methods extracted, eliminating the 4× duplicated
+  "build synced update" block and the 2× "dispatch handler → cache/memory + broadcast +
+  subscribe" block:
+  - `build_type_update` (39 lines) — the shared re-render path (broadcast + post-handler)
+  - `dispatch_handler` (40) — run a handler against shared-cache or memory state
+  - `render_route_view_swap` (113) — the router outlet swap (prune + render + register)
+  - `render_initial_dom` (44) — the full initial render
+  Bundled the 8 params into a `ConnContext<F>` struct and **removed
+  `handle_websocket`'s `#[allow(clippy::too_many_arguments)]`**. Behavior validated live
+  in a browser: counter events (0→3), router view swap Home→Counter→About→Counter with
+  state preserved (count stays 2) and re-bound `+` working after swap.
+  **Remaining (optional follow-up):** the main fn (377) and `render_route_view_swap`
+  (113) are still >80 lines; fully extracting the loop's match arms into async helpers
+  is higher-risk for diminishing returns and is left as future work. The `handle_client`
+  `too_many_arguments` allow (11 params, connection setup) is separate and untouched.
 - **Location:** `libs/rwire/src/server.rs:1383`
 - **Problem:** By far the largest single function in the codebase — dwarfs everything else.
   Violates the >50-line rule and carries `#[allow(clippy::too_many_arguments)]` (`:1382`).
