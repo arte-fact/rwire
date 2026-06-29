@@ -361,6 +361,46 @@ fn srgb_to_oklch(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     )
 }
 
+/// Convert an Oklch color (`L` 0..1, `C` chroma, `H` degrees) to an sRGB `#rrggbb`
+/// hex string — the inverse of [`srgb_to_oklch`].
+///
+/// Uses the canonical Oklab→linear-sRGB coefficients. Out-of-sRGB-gamut inputs are
+/// clamped per channel (a simple clip, adequate for UI chrome colors like a PWA
+/// `theme_color` derived from a theme variable).
+pub fn oklch_to_hex(l: f32, c: f32, h: f32) -> String {
+    // Oklch → Oklab
+    let hr = h.to_radians();
+    let a = c * hr.cos();
+    let b = c * hr.sin();
+
+    // Oklab → LMS' (cube-root space)
+    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
+    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
+    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
+
+    // LMS' → LMS
+    let lc = l_ * l_ * l_;
+    let mc = m_ * m_ * m_;
+    let sc = s_ * s_ * s_;
+
+    // LMS → linear sRGB
+    let lr = 4.076_741_7 * lc - 3.307_711_6 * mc + 0.230_969_94 * sc;
+    let lg = -1.268_438 * lc + 2.609_757_4 * mc - 0.341_319_38 * sc;
+    let lb = -0.004_196_086_3 * lc - 0.703_418_6 * mc + 1.707_614_7 * sc;
+
+    // linear sRGB → gamma-encoded sRGB byte, clamping to the [0,1] gamut.
+    let enc = |v: f32| -> u8 {
+        let v = v.clamp(0.0, 1.0);
+        let s = if v <= 0.003_130_8 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round().clamp(0.0, 255.0) as u8
+    };
+    format!("#{:02x}{:02x}{:02x}", enc(lr), enc(lg), enc(lb))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,6 +453,44 @@ mod tests {
         assert_eq!(palette.neutral.step(0), "#FFF");
         // Others unchanged
         assert!(palette.accent.step(0).contains("oklch"));
+    }
+
+    #[test]
+    fn test_oklch_to_hex_endpoints() {
+        // White and black are exact (achromatic).
+        assert_eq!(oklch_to_hex(1.0, 0.0, 0.0), "#ffffff");
+        assert_eq!(oklch_to_hex(0.0, 0.0, 0.0), "#000000");
+    }
+
+    #[test]
+    fn test_oklch_hex_round_trip() {
+        // hex → oklch → hex should land within a couple of 8-bit steps for in-gamut colors.
+        for hex in ["#5e81ac", "#2e3440", "#a3be8c", "#bf616a", "#ebcb8b", "#ffffff", "#000000"] {
+            let (l, c, h) = parse_to_oklch(hex);
+            let back = oklch_to_hex(l, c, h);
+            let parse = |s: &str| {
+                let s = s.trim_start_matches('#');
+                [
+                    u8::from_str_radix(&s[0..2], 16).unwrap(),
+                    u8::from_str_radix(&s[2..4], 16).unwrap(),
+                    u8::from_str_radix(&s[4..6], 16).unwrap(),
+                ]
+            };
+            let (a, b) = (parse(hex), parse(&back));
+            for ch in 0..3 {
+                let d = (a[ch] as i16 - b[ch] as i16).abs();
+                assert!(d <= 3, "round-trip {hex} -> {back}: channel {ch} off by {d}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_oklch_to_hex_out_of_gamut_clamps() {
+        // Very high chroma is outside sRGB; must clamp to a valid hex, not panic/overflow.
+        let hex = oklch_to_hex(0.6, 0.5, 30.0);
+        assert_eq!(hex.len(), 7);
+        assert!(hex.starts_with('#'));
+        assert!(hex[1..].bytes().all(|b| b.is_ascii_hexdigit()));
     }
 
     #[test]
