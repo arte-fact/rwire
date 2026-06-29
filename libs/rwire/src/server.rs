@@ -27,6 +27,7 @@ use crate::builder::{
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
 use crate::config::ServerConfig;
+use crate::metrics::Metrics;
 use crate::protocol::ClientEvent;
 use crate::registry::{AdmissionError, ConnectionRegistry};
 use crate::session::SessionId;
@@ -934,6 +935,8 @@ where
         // any per-connection work, and the /health and /ready endpoints can report.
         let registry = Arc::new(ConnectionRegistry::new());
         let config = Arc::new(self.config);
+        // Prometheus metrics, exported at GET /metrics.
+        let metrics = Arc::new(Metrics::new());
         println!(
             "Limits: {} total, {} per IP",
             config.max_connections, config.max_connections_per_ip
@@ -955,6 +958,7 @@ where
             let auth = Arc::clone(&auth);
             let registry = Arc::clone(&registry);
             let config = Arc::clone(&config);
+            let metrics = Arc::clone(&metrics);
             task::spawn(async move {
                 handle_client(
                     stream,
@@ -968,6 +972,7 @@ where
                     auth,
                     registry,
                     config,
+                    metrics,
                 )
                 .await;
             });
@@ -1227,6 +1232,7 @@ async fn handle_client<F>(
     auth: Arc<Option<AuthGate>>,
     registry: Arc<ConnectionRegistry>,
     config: Arc<ServerConfig>,
+    metrics: Arc<Metrics>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -1247,14 +1253,20 @@ async fn handle_client<F>(
     // while the server is at capacity.
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
-        if path == "/health" || path == "/ready" {
+        if path == "/health" || path == "/ready" || path == "/metrics" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             let max = config.max_connections;
-            let result = if path == "/health" {
-                crate::health::serve_health(stream, &registry, max).await
-            } else {
-                crate::health::serve_ready(stream, &registry, max).await
+            let result = match path {
+                "/health" => crate::health::serve_health(stream, &registry, max).await,
+                "/ready" => crate::health::serve_ready(stream, &registry, max).await,
+                _ => {
+                    // Reflect the registry's live count into the gauge, then export.
+                    metrics
+                        .active_connections
+                        .set(registry.total_connections() as u64);
+                    crate::health::serve_metrics(stream, &metrics.to_prometheus()).await
+                }
             };
             if let Err(e) = result {
                 eprintln!("[{}] {} endpoint error: {}", peer_addr, path, e);
@@ -1349,12 +1361,14 @@ async fn handle_client<F>(
                 AdmissionError::TooManyFromIp => "too_many_from_ip",
             };
             println!("[{}] WebSocket rejected: {}", peer_addr, why);
+            metrics.connections_rejected.inc();
             let _ = crate::health::serve_unavailable(stream, why).await;
             return;
         }
         // Held for the lifetime of the connection; the guard decrements the
         // registry counts on drop (normal close, error, or panic).
         let _conn_guard = registry.register(ip);
+        metrics.connections_total.inc();
 
         println!("[{}] WebSocket connection", peer_addr);
         // Bound incoming message/frame size so a malicious client can't make the
@@ -1377,6 +1391,7 @@ async fn handle_client<F>(
                         route_handler,
                         initial_theme,
                         composite_table,
+                        metrics,
                     },
                 )
                 .await
@@ -1838,6 +1853,7 @@ struct ConnContext<F> {
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
+    metrics: Arc<Metrics>,
 }
 
 async fn handle_websocket<F>(
@@ -1855,6 +1871,7 @@ where
         route_handler,
         initial_theme,
         composite_table,
+        metrics,
     } = cx;
     let (mut write, mut read) = ws_stream.split();
 
@@ -2044,6 +2061,7 @@ where
         let msg = match read_result {
             Ok(Some(msg)) => {
                 awaiting_pong = false; // any message = alive
+                metrics.messages_received.inc();
                 msg
             }
             Ok(None) => break, // stream ended

@@ -188,6 +188,24 @@ pub async fn serve_ready(
     Ok(())
 }
 
+/// Serve a Prometheus text-format metrics response (`GET /metrics`).
+pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> {
+    let http_response = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        body.len(),
+        body
+    );
+
+    stream.write_all(http_response.as_bytes()).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 /// Serve a 503 Service Unavailable response for admission control.
 pub async fn serve_unavailable(mut stream: TcpStream, reason: &str) -> io::Result<()> {
     let body = format!(r#"{{"error":"service_unavailable","reason":"{}"}}"#, reason);

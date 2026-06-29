@@ -27,9 +27,9 @@ graph and verified against source.
 |----------|-------|------|
 | Critical | 1 | 1 |
 | High     | 3 | 3 |
-| Medium   | 6 | 5 |
+| Medium   | 6 | 6 |
 | Low      | 6 | 5 |
-| **All**  | **16** | **14** |
+| **All**  | **16** | **15** |
 
 **Done so far:** C1 (CSPRNG session IDs), H1 (admission control + health endpoints +
 session-cache cap), H2 (session-ID validation), H3 (per-event symbol-clone elimination),
@@ -255,7 +255,15 @@ auto-detected from `X-Forwarded-Proto`). See per-item notes below.
 - **Risk:** Medium. Large mechanical refactor; lean on tests + compiler.
 
 ### M6 — Wire a `/metrics` endpoint (split out of H1)
-- **Status:** `[ ]`
+- **Status:** `[x]` Done. `run()` builds an `Arc<Metrics>`, threaded to `handle_client`
+  (and into `ConnContext` for `handle_websocket`). `GET /metrics` is routed alongside
+  `/health`/`/ready` (before auth) via a new `health::serve_metrics`, returning
+  `metrics.to_prometheus()` with `Content-Type: text/plain; version=0.0.4`. Live counters:
+  `connections_total`/`connections_rejected` incremented at admission, `active_connections`
+  set from the registry at serve time, `messages_received` incremented per inbound WS
+  message. Verified live: baseline all-zero → during a connection sending 5 events,
+  `connections_total=1`, `active_connections=1`, `messages_received=5`; after close,
+  `active_connections=0`. `server.rs`, `health.rs`.
 - **Location:** `libs/rwire/src/metrics.rs`, `server.rs` accept/HTTP routing
 - **Problem:** `metrics.rs` provides a Prometheus-format exporter but is never wired to
   the server, and the docs imply `/metrics` exists. Unlike `/health`·`/ready` (which
