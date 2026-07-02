@@ -78,6 +78,23 @@ impl Avatar {
     }
 
     /// Set fallback text (shown if no image).
+    /// Set the fallback from a display name — up to two initials, uppercased ("Ada
+    /// Lovelace" → "AL"). The common case every app rebuilds by hand.
+    pub fn name(mut self, name: &str) -> Self {
+        let initials: String = name
+            .split_whitespace()
+            .filter_map(|word| word.chars().next())
+            .take(2)
+            .collect::<String>()
+            .to_uppercase();
+        self.fallback = Some(if initials.is_empty() {
+            "?".into()
+        } else {
+            initials.into()
+        });
+        self
+    }
+
     pub fn fallback(mut self, fallback: impl Into<Cow<'static, str>>) -> Self {
         self.fallback = Some(fallback.into());
         self

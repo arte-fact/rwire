@@ -911,6 +911,10 @@ define_token_enum! {
         HDvh = 0x344 => "height:100dvh",
         MinHDvh = 0x345 => "min-height:100dvh",
         MaxHDvh = 0x346 => "max-height:100dvh",
+        /// Auto-grow a textarea/input to its content (pair with a max-height cap).
+        FieldSizingContent = 0x347 => "field-sizing:content",
+        BgGreen9 = 0x348 => "background:var(--P9)",
+        BgAmber9 = 0x349 => "background:var(--M9)",
     }
 }
 

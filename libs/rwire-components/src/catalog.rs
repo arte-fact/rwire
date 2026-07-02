@@ -1935,6 +1935,51 @@ fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         .build()
 }
 
+const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "intent",
+    display_name: "Intent",
+    rust_type: "StatusDotIntent",
+    default_index: 1,
+    values: &[
+        VariantValue {
+            label: "Muted",
+            rust_expr: "StatusDotIntent::Muted",
+        },
+        VariantValue {
+            label: "Primary",
+            rust_expr: "StatusDotIntent::Primary",
+        },
+        VariantValue {
+            label: "Success",
+            rust_expr: "StatusDotIntent::Success",
+        },
+        VariantValue {
+            label: "Warning",
+            rust_expr: "StatusDotIntent::Warning",
+        },
+        VariantValue {
+            label: "Error",
+            rust_expr: "StatusDotIntent::Error",
+        },
+    ],
+}];
+
+fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{StatusDot, StatusDotIntent};
+    let intent = match v(variants, 0) {
+        1 => StatusDotIntent::Primary,
+        2 => StatusDotIntent::Success,
+        3 => StatusDotIntent::Warning,
+        4 => StatusDotIntent::Error,
+        _ => StatusDotIntent::Muted,
+    };
+    let mut dot = StatusDot::new().intent(intent).pulse(b(bools, 0));
+    if b(bools, 1) {
+        dot = dot.label("running");
+    }
+    dot.build()
+}
+
 fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Chip;
     el(El::Div)
@@ -3733,6 +3778,27 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: BADGE_VARIANTS,
         bool_props: &[],
         build_demo: badge_demo,
+    },
+    ComponentEntry {
+        name: "StatusDot",
+        slug: "status-dot",
+        description: "Presence/status dot with optional pulse and inline label.",
+        category: Category::DataDisplay,
+        order: 302,
+        variants: STATUS_DOT_VARIANTS,
+        bool_props: &[
+            BoolProp {
+                name: "pulse",
+                description: "Pulse while live",
+                default: true,
+            },
+            BoolProp {
+                name: "label",
+                description: "Show an inline label",
+                default: false,
+            },
+        ],
+        build_demo: status_dot_demo,
     },
     ComponentEntry {
         name: "Tag",
