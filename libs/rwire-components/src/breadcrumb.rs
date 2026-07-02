@@ -28,7 +28,10 @@ pub struct BreadcrumbItem {
 
 impl BreadcrumbItem {
     /// Create a new breadcrumb item.
-    pub fn new(label: impl Into<Cow<'static, str>>, link: Option<impl Into<Cow<'static, str>>>) -> Self {
+    pub fn new(
+        label: impl Into<Cow<'static, str>>,
+        link: Option<impl Into<Cow<'static, str>>>,
+    ) -> Self {
         Self {
             label: label.into(),
             link: link.map(|l| l.into()),
@@ -51,7 +54,11 @@ impl Breadcrumb {
     }
 
     /// Add an item to the breadcrumb.
-    pub fn item(mut self, label: impl Into<Cow<'static, str>>, link: Option<impl Into<Cow<'static, str>>>) -> Self {
+    pub fn item(
+        mut self,
+        label: impl Into<Cow<'static, str>>,
+        link: Option<impl Into<Cow<'static, str>>>,
+    ) -> Self {
         self.items.push(BreadcrumbItem::new(label, link));
         self
     }
@@ -64,7 +71,14 @@ impl Breadcrumb {
 
     /// Compute style tokens for the breadcrumb list.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::DisplayFlex, St::ItemsCenter, St::GapSm, St::ListStyleNone, St::M0, St::P0]
+        vec![
+            St::DisplayFlex,
+            St::ItemsCenter,
+            St::GapSm,
+            St::ListStyleNone,
+            St::M0,
+            St::P0,
+        ]
     }
 
     /// Build the breadcrumb into an ElementBuilder.
@@ -81,8 +95,7 @@ impl Breadcrumb {
         for (idx, item) in self.items.into_iter().enumerate() {
             let is_last = idx == total - 1;
 
-            let mut li = el(El::Li)
-                .st([St::DisplayFlex, St::ItemsCenter, St::TextSm]);
+            let mut li = el(El::Li).st([St::DisplayFlex, St::ItemsCenter, St::TextSm]);
 
             if !is_last {
                 li = li.after([St::ContentSlash, St::MxSp2, St::TextMuted]);
@@ -95,27 +108,17 @@ impl Breadcrumb {
             // If link is provided and not last item, render as anchor
             if let Some(link_url) = item.link {
                 if !is_last {
-                    li = li.append([
-                        el(El::A)
-                            .st([St::TextAccent, St::NoDecoration])
-                            .hover([St::Underline])
-                            .at_str(At::Href, &link_url)
-                            .text(&item.label)
-                    ]);
+                    li = li.append([el(El::A)
+                        .st([St::TextAccent, St::NoDecoration])
+                        .hover([St::Underline])
+                        .at_str(At::Href, &link_url)
+                        .text(&item.label)]);
                 } else {
-                    li = li.append([
-                        el(El::Span)
-                            .st([St::TextMedium])
-                            .text(&item.label)
-                    ]);
+                    li = li.append([el(El::Span).st([St::TextMedium]).text(&item.label)]);
                 }
             } else {
                 // No link, just text
-                li = li.append([
-                    el(El::Span)
-                        .st([St::TextMedium])
-                        .text(&item.label)
-                ]);
+                li = li.append([el(El::Span).st([St::TextMedium]).text(&item.label)]);
             }
 
             ol = ol.append([li]);
@@ -155,5 +158,4 @@ mod tests {
             .item("Laptop", None::<&str>);
         assert_eq!(bc.items.len(), 3);
     }
-
 }

@@ -505,10 +505,8 @@ fn field_index_consts(
     fields
         .iter()
         .map(|f| {
-            let const_name = syn::Ident::new(
-                &format!("FIELD_{}", f.to_string().to_uppercase()),
-                f.span(),
-            );
+            let const_name =
+                syn::Ident::new(&format!("FIELD_{}", f.to_string().to_uppercase()), f.span());
             quote! { <#state_type>::#const_name }
         })
         .collect()
@@ -605,12 +603,9 @@ pub fn derive_target(input: TokenStream) -> TokenStream {
             }
         }
         _ => {
-            return syn::Error::new_spanned(
-                &input,
-                "Target can only be derived for unit structs",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&input, "Target can only be derived for unit structs")
+                .to_compile_error()
+                .into();
         }
     }
 
@@ -647,12 +642,9 @@ pub fn derive_selector(input: TokenStream) -> TokenStream {
     let variants = match &input.data {
         syn::Data::Enum(data) => &data.variants,
         _ => {
-            return syn::Error::new_spanned(
-                &input,
-                "Selector can only be derived for enums",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&input, "Selector can only be derived for enums")
+                .to_compile_error()
+                .into();
         }
     };
 

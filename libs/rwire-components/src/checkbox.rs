@@ -100,8 +100,11 @@ impl Checkbox {
     /// Compute style tokens for this checkbox configuration.
     pub fn compute_tokens(&self) -> Vec<St> {
         let mut tokens = vec![
-            St::RoundedSm, St::BgApp, St::CursorPointer,
-            St::TransitionAll, St::FlexShrink0,
+            St::RoundedSm,
+            St::BgApp,
+            St::CursorPointer,
+            St::TransitionAll,
+            St::FlexShrink0,
         ];
         if self.invalid {
             tokens.push(St::BorderRed8);
@@ -130,7 +133,8 @@ impl Checkbox {
             .at(At::Type, Av::Checkbox);
 
         if self.disabled {
-            input = input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+            input =
+                input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
         }
 
         if !element_id.is_empty() {
@@ -161,7 +165,7 @@ impl Checkbox {
 
         // If label is provided, wrap in a container with label
         if let Some(label_text) = self.label {
-            use crate::{Stack, Gap};
+            use crate::{Gap, Stack};
             Stack::row()
                 .gap(Gap::Xs)
                 .children([
@@ -226,5 +230,4 @@ mod tests {
         let groups = cb.get_pseudo_groups();
         assert!(!groups.is_empty());
     }
-
 }

@@ -210,9 +210,13 @@ impl Drawer {
         }
 
         // Backdrop — always present, visibility toggled
-        let mut backdrop = el(El::Div)
-            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50,
-                 St::TransitionOpacity]);
+        let mut backdrop = el(El::Div).st([
+            St::PositionFixed,
+            St::Inset0,
+            St::Z1300,
+            St::BgOverlay50,
+            St::TransitionOpacity,
+        ]);
 
         if !self.open {
             backdrop = backdrop.st([St::Opacity0, St::PointerEventsNone]);

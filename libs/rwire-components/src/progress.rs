@@ -115,7 +115,13 @@ impl Progress {
         // jitter does not churn the bytes pushed on every re-render — identical
         // rounded values hash-dedup to no update at all.
         let bar = el(El::Div)
-            .st([St::HFull, St::BgPrimary, St::RoundedFull, St::TransitionAll, St::MinW05rem])
+            .st([
+                St::HFull,
+                St::BgPrimary,
+                St::RoundedFull,
+                St::TransitionAll,
+                St::MinW05rem,
+            ])
             .style(Style::new().width(&format!("{percentage:.1}%")));
 
         container.append([bar])
@@ -145,13 +151,9 @@ mod tests {
 
     #[test]
     fn test_progress_with_values() {
-        let progress = Progress::new()
-            .value(50)
-            .max(100)
-            .label("Loading");
+        let progress = Progress::new().value(50).max(100).label("Loading");
         assert_eq!(progress.value, 50);
         assert_eq!(progress.max, 100);
         assert_eq!(progress.label.as_deref(), Some("Loading"));
     }
-
 }

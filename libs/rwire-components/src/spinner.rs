@@ -73,9 +73,27 @@ impl Spinner {
     /// Compute size-specific style tokens.
     fn size_tokens(&self) -> Vec<St> {
         match self.size {
-            SpinnerSize::Sm => vec![St::W1rem, St::H1rem, St::Border2, St::BorderRTransparent, St::AnimateSpinFast],
-            SpinnerSize::Md => vec![St::W1_5rem, St::H1_5rem, St::Border2, St::BorderRTransparent, St::AnimateSpinFast],
-            SpinnerSize::Lg => vec![St::W2rem, St::H2rem, St::Bw3, St::BorderRTransparent, St::AnimateSpinFast],
+            SpinnerSize::Sm => vec![
+                St::W1rem,
+                St::H1rem,
+                St::Border2,
+                St::BorderRTransparent,
+                St::AnimateSpinFast,
+            ],
+            SpinnerSize::Md => vec![
+                St::W1_5rem,
+                St::H1_5rem,
+                St::Border2,
+                St::BorderRTransparent,
+                St::AnimateSpinFast,
+            ],
+            SpinnerSize::Lg => vec![
+                St::W2rem,
+                St::H2rem,
+                St::Bw3,
+                St::BorderRTransparent,
+                St::AnimateSpinFast,
+            ],
         }
     }
 
@@ -83,9 +101,7 @@ impl Spinner {
     pub fn build(self) -> ElementBuilder {
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size_tokens());
-        let mut spinner = el(El::Span)
-            .st(tokens)
-            .at(At::Role, Av::RoleStatus);
+        let mut spinner = el(El::Span).st(tokens).at(At::Role, Av::RoleStatus);
 
         if let Some(label_text) = self.label {
             spinner = spinner.at_str(At::AriaLabel, &label_text);
@@ -154,5 +170,4 @@ mod tests {
         let tokens = spinner.size_tokens();
         assert!(tokens.contains(&St::AnimateSpinFast));
     }
-
 }

@@ -39,6 +39,8 @@ pub enum ButtonIntent {
     Secondary,
     /// Ghost button (transparent, text only)
     Ghost,
+    /// Bordered, muted text that lifts on hover — between Secondary and Ghost.
+    Outline,
     /// Destructive action (red)
     Destructive,
 }
@@ -93,6 +95,11 @@ impl Button {
     /// Ghost button with text.
     pub fn ghost(text: impl Into<Cow<'static, str>>) -> Self {
         Self::new().intent(ButtonIntent::Ghost).text(text)
+    }
+
+    /// Outline button with text.
+    pub fn outline(text: impl Into<Cow<'static, str>>) -> Self {
+        Self::new().intent(ButtonIntent::Outline).text(text)
     }
 
     /// Destructive button with text.
@@ -201,6 +208,9 @@ impl Button {
                 tokens.extend([St::BgSecondary, St::TextOnSecondary, St::BorderDefault])
             }
             ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
+            ButtonIntent::Outline => {
+                tokens.extend([St::BgTransparent, St::TextMuted, St::BorderDefault])
+            }
             ButtonIntent::Destructive => tokens.extend([St::BgDestructive, St::TextOnDestructive]),
         }
 
@@ -234,6 +244,7 @@ impl Button {
             ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
             ButtonIntent::Secondary => builder.hover([St::BgSecondaryHover, St::BorderEmphasis]),
             ButtonIntent::Ghost => builder.hover([St::BgHover]),
+            ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
             ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
         };
 

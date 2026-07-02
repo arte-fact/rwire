@@ -13,11 +13,10 @@
 //! Open: http://127.0.0.1:9000
 
 use rwire::{
-    el, handler, persist_task, renderer, theme, El, ElementBuilder, Ev, IterWithRef, PersistError,
-    PersistableType, Server, SqliteStore, State,
-    Theme, CapsuleConfig,
+    el, handler, persist_task, renderer, theme, CapsuleConfig, El, ElementBuilder, Ev, IterWithRef,
+    PersistError, PersistableType, Server, SqliteStore, State, Theme,
 };
-use rwire_components::{Button, ButtonSize, Input, Stack, Gap, Card, CardPadding};
+use rwire_components::{Button, ButtonSize, Card, CardPadding, Gap, Input, Stack};
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::sync::Arc;
@@ -186,16 +185,13 @@ fn build_app() -> ElementBuilder {
         .class("app")
         .children([
             el(El::H1).text("rwire Multi-State TodoMVC"),
-            el(El::P)
-                .class("subtitle")
-                .text("Two todo lists demonstrating different storage strategies with EventContext"),
+            el(El::P).class("subtitle").text(
+                "Two todo lists demonstrating different storage strategies with EventContext",
+            ),
             Stack::row()
                 .gap(Gap::Lg)
                 .class("columns")
-                .children([
-                    build_memory_column(),
-                    build_persisted_column(),
-                ])
+                .children([build_memory_column(), build_persisted_column()])
                 .build(),
         ])
         .build()
@@ -227,8 +223,9 @@ fn build_memory_column() -> ElementBuilder {
                     Stack::row()
                         .gap(Gap::Sm)
                         .class("controls")
-                        .children([Button::secondary("Clear Done")
-                            .on_click(clear_memory_completed())])
+                        .children([
+                            Button::secondary("Clear Done").on_click(clear_memory_completed())
+                        ])
                         .build(),
                     render_memory_items(),
                 ])
@@ -257,15 +254,14 @@ fn build_persisted_column() -> ElementBuilder {
                                 .placeholder("What needs to be done?")
                                 .name("todo")
                                 .build(),
-                            Button::primary("Add")
-                                .build()
-                                .attr("type", "submit"),
+                            Button::primary("Add").build().attr("type", "submit"),
                         ]),
                     Stack::row()
                         .gap(Gap::Sm)
                         .class("controls")
-                        .children([Button::secondary("Clear Done")
-                            .on_click(clear_persisted_completed())])
+                        .children([
+                            Button::secondary("Clear Done").on_click(clear_persisted_completed())
+                        ])
                         .build(),
                     render_persisted_items(),
                 ])
@@ -476,7 +472,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Hydrate state from database
     let hydrated = shared.hydrate(&store)?;
     if hydrated > 0 {
-        println!("Hydrated {} persisted state entries from database", hydrated);
+        println!(
+            "Hydrated {} persisted state entries from database",
+            hydrated
+        );
     }
 
     // Spawn background persist task
@@ -554,11 +553,14 @@ fn save_todo_state(
     )?;
 
     // Insert current items
-    let mut stmt = conn.prepare(
-        "INSERT INTO todos_items (parent_session_id, text, done) VALUES (?1, ?2, ?3)",
-    )?;
+    let mut stmt = conn
+        .prepare("INSERT INTO todos_items (parent_session_id, text, done) VALUES (?1, ?2, ?3)")?;
     for item in &state.items {
-        stmt.execute(rwire::rusqlite::params![session_id, &item.text, item.done as i32])?;
+        stmt.execute(rwire::rusqlite::params![
+            session_id,
+            &item.text,
+            item.done as i32
+        ])?;
     }
 
     Ok(())

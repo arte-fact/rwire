@@ -100,8 +100,12 @@ impl Switch {
     /// Compute style tokens for this switch configuration.
     pub fn compute_tokens(&self) -> Vec<St> {
         let mut tokens = vec![
-            St::PositionRelative, St::RoundedFull, St::BgMuted,
-            St::CursorPointer, St::TransitionAll, St::FlexShrink0,
+            St::PositionRelative,
+            St::RoundedFull,
+            St::BgMuted,
+            St::CursorPointer,
+            St::TransitionAll,
+            St::FlexShrink0,
             St::AppearanceNone,
         ];
         if self.invalid {
@@ -125,16 +129,28 @@ impl Switch {
         tokens.extend([St::W2_5rem, St::H1_25rem, St::Border2Default]);
         let mut input = el(El::Input)
             .st(tokens)
-            .after([St::ContentEmpty, St::PositionAbsolute, St::W1rem, St::H1rem, St::BgWhite, St::RoundedFull, St::TransitionTransformFast])
+            .after([
+                St::ContentEmpty,
+                St::PositionAbsolute,
+                St::W1rem,
+                St::H1rem,
+                St::BgWhite,
+                St::RoundedFull,
+                St::TransitionTransformFast,
+            ])
             .checked([St::BgPrimary])
             .checked_after([St::TranslateXFull])
             .focus_visible([St::RingFocus])
             .at(At::Type, Av::Checkbox)
             .at(At::Role, Av::RoleSwitch)
-            .at(At::AriaChecked, if self.checked { Av::True } else { Av::False });
+            .at(
+                At::AriaChecked,
+                if self.checked { Av::True } else { Av::False },
+            );
 
         if self.disabled {
-            input = input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
+            input =
+                input.disabled_style([St::Opacity50, St::CursorNotAllowed, St::PointerEventsNone]);
         }
 
         if !element_id.is_empty() {
@@ -165,7 +181,7 @@ impl Switch {
 
         // If label is provided, wrap in a container with label
         if let Some(label_text) = self.label {
-            use crate::{Stack, Gap};
+            use crate::{Gap, Stack};
             Stack::row()
                 .gap(Gap::Xs)
                 .children([
@@ -232,5 +248,4 @@ mod tests {
         let groups = sw.get_pseudo_groups();
         assert!(!groups.is_empty());
     }
-
 }

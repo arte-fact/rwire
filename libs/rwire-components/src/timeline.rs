@@ -116,30 +116,22 @@ impl Timeline {
                 .append([dot]);
 
             if !is_last {
-                left = left.append([
-                    el(El::Div).st([St::Flex1, St::TimelineLine]),
-                ]);
+                left = left.append([el(El::Div).st([St::Flex1, St::TimelineLine])]);
             }
 
             // Right column: content
-            let mut content = el(El::Div)
-                .st([St::Flex1, St::PbMd])
-                .append([
-                    el(El::Div)
-                        .st([St::FontMedium, St::TextDefault])
-                        .text(&item.title),
-                ]);
+            let mut content = el(El::Div).st([St::Flex1, St::PbMd]).append([el(El::Div)
+                .st([St::FontMedium, St::TextDefault])
+                .text(&item.title)]);
 
             if let Some(ref desc) = item.description {
-                content = content.append([
-                    el(El::P).st([St::TextSm, St::TextMuted, St::MtXs]).text(desc),
-                ]);
+                content = content.append([el(El::P)
+                    .st([St::TextSm, St::TextMuted, St::MtXs])
+                    .text(desc)]);
             }
 
             if let Some(ref time) = item.time {
-                content = content.append([
-                    el(El::Span).st([St::TextXs, St::TextMuted]).text(time),
-                ]);
+                content = content.append([el(El::Span).st([St::TextXs, St::TextMuted]).text(time)]);
             }
 
             let row = el(El::Div)

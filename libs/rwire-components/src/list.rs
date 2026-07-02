@@ -92,8 +92,7 @@ impl List {
         let element = if self.ordered { El::Ol } else { El::Ul };
         let mut tokens = self.compute_tokens();
         tokens.push(St::PlLg);
-        let mut builder = el(element)
-            .st(tokens);
+        let mut builder = el(element).st(tokens);
 
         if let Some(ref extra) = self.extra_class {
             builder = builder.class(extra.as_ref());
@@ -160,9 +159,7 @@ impl ListItem {
 
     /// Build the list item into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        let mut builder = el(El::Li)
-            .st(self.compute_tokens())
-            .last_child([St::Mb0]);
+        let mut builder = el(El::Li).st(self.compute_tokens()).last_child([St::Mb0]);
 
         if let Some(ref extra) = self.extra_class {
             builder = builder.class(extra.as_ref());
@@ -219,5 +216,4 @@ mod tests {
         let groups = item.get_pseudo_groups();
         assert!(groups.iter().any(|(pc, _)| *pc == 0x0A)); // Pc::LastChild
     }
-
 }

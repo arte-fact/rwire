@@ -18,7 +18,7 @@ use std::error::Error;
 use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::theme::Theme;
-use rwire::{ElementBuilder, Server, St, State, handler, renderer, theme};
+use rwire::{handler, renderer, theme, ElementBuilder, Server, St, State};
 use rwire_components::{
     Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack, Text, TextColor,
 };
@@ -103,7 +103,11 @@ fn render_outer(state: &Demo) -> ElementBuilder {
         .gap(Gap::Sm)
         .align_center()
         .children([
-            Text::body(format!("outer ticks: {} (rows={})", state.ticks, state.rows)).build(),
+            Text::body(format!(
+                "outer ticks: {} (rows={})",
+                state.ticks, state.rows
+            ))
+            .build(),
             // NESTED synced region, bound to the same state but different fields.
             render_inner(),
         ])
@@ -114,11 +118,9 @@ fn render_outer(state: &Demo) -> ElementBuilder {
 /// tracks `rows`; shrinking it must drop the removed rows from the DOM.
 #[renderer]
 fn render_inner(state: &Demo) -> ElementBuilder {
-    let mut children = vec![
-        Text::heading1(format!("inner count: {}", state.count))
-            .color(TextColor::Accent)
-            .build(),
-    ];
+    let mut children = vec![Text::heading1(format!("inner count: {}", state.count))
+        .color(TextColor::Accent)
+        .build()];
     for i in 0..state.rows.max(0) {
         children.push(Text::body(format!("row {i}")).build());
     }

@@ -29,8 +29,9 @@
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
 use rwire::{
-    el, El, Ev, ElementBuilder, HandlerSpec,
+    el,
     icons::{icon, Icon},
+    El, ElementBuilder, Ev, HandlerSpec,
 };
 
 /// ThemeToggle builder.
@@ -103,12 +104,17 @@ impl ThemeToggle {
     /// Compute style tokens for the theme toggle button.
     pub fn compute_tokens(&self) -> Vec<St> {
         vec![
-            St::DisplayInlineFlex, St::ItemsCenter, St::JustifyCenter,
-            St::BgTransparent, St::BorderDefault, St::RoundedMd,
-            St::TextDefault, St::CursorPointer, St::TransitionColors,
+            St::DisplayInlineFlex,
+            St::ItemsCenter,
+            St::JustifyCenter,
+            St::BgTransparent,
+            St::BorderDefault,
+            St::RoundedMd,
+            St::TextDefault,
+            St::CursorPointer,
+            St::TransitionColors,
         ]
     }
-
 
     fn size_token(&self) -> St {
         match self.size {
@@ -190,5 +196,4 @@ mod tests {
         let toggle = ThemeToggle::new().mode(ThemeToggleMode::Dark);
         assert_eq!(toggle.current_mode, ThemeToggleMode::Dark);
     }
-
 }

@@ -143,30 +143,26 @@ impl Toast {
             toast = toast.class(extra.as_ref());
         }
 
-        toast = toast.append([
-            el(El::Span).st([St::Flex1]).text(&self.message),
-        ]);
+        toast = toast.append([el(El::Span).st([St::Flex1]).text(&self.message)]);
 
         if let Some(handler) = self.on_dismiss {
             use rwire::icons::{icon, Icon};
-            toast = toast.append([
-                el(El::Button)
-                    .st([
-                        St::DisplayFlex,
-                        St::ItemsCenter,
-                        St::BgTransparent,
-                        St::BorderNone,
-                        St::TextMuted,
-                        St::CursorPointer,
-                        St::P0,
-                        St::FlexShrink0,
-                    ])
-                    .hover([St::TextDefault])
-                    .at(At::Type, Av::Button)
-                    .at_str(At::AriaLabel, "Dismiss")
-                    .on(Ev::Click, handler)
-                    .append([icon(Icon::Close)]),
-            ]);
+            toast = toast.append([el(El::Button)
+                .st([
+                    St::DisplayFlex,
+                    St::ItemsCenter,
+                    St::BgTransparent,
+                    St::BorderNone,
+                    St::TextMuted,
+                    St::CursorPointer,
+                    St::P0,
+                    St::FlexShrink0,
+                ])
+                .hover([St::TextDefault])
+                .at(At::Type, Av::Button)
+                .at_str(At::AriaLabel, "Dismiss")
+                .on(Ev::Click, handler)
+                .append([icon(Icon::Close)])]);
         }
 
         toast

@@ -176,8 +176,7 @@ impl DropdownMenu {
 
         // Invisible backdrop to close menu on outside click — always rendered
         if let Some(handler) = self.on_toggle.clone() {
-            let mut backdrop = el(El::Div)
-                .st([St::PositionFixed, St::Inset0, St::Z40]);
+            let mut backdrop = el(El::Div).st([St::PositionFixed, St::Inset0, St::Z40]);
             if self.open {
                 backdrop = backdrop.on(Ev::Click, handler);
             } else {
@@ -201,11 +200,7 @@ impl DropdownMenu {
 
         for item in &self.items {
             if item.divider_before {
-                menu = menu.append([el(El::Hr).st([
-                    St::MySm,
-                    St::BorderNone,
-                    St::BorderTSubtle,
-                ])]);
+                menu = menu.append([el(El::Hr).st([St::MySm, St::BorderNone, St::BorderTSubtle])]);
             }
 
             let mut item_tokens = Self::compute_item_tokens();

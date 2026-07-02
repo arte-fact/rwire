@@ -38,7 +38,10 @@ impl Kbd {
     /// Create a kbd for a key combination (e.g., Ctrl+K).
     pub fn combo(keys: &[impl AsRef<str> + Clone]) -> Self {
         Self {
-            keys: keys.iter().map(|k| Cow::Owned(k.as_ref().to_string())).collect(),
+            keys: keys
+                .iter()
+                .map(|k| Cow::Owned(k.as_ref().to_string()))
+                .collect(),
             ..Self::default()
         }
     }
@@ -78,8 +81,8 @@ impl Kbd {
 
             key
         } else {
-            let mut container = el(El::Span)
-                .st([St::DisplayInlineFlex, St::ItemsCenter, St::GapXs]);
+            let mut container =
+                el(El::Span).st([St::DisplayInlineFlex, St::ItemsCenter, St::GapXs]);
 
             if let Some(ref extra) = self.extra_class {
                 container = container.class(extra.as_ref());
@@ -87,13 +90,11 @@ impl Kbd {
 
             for (i, key) in self.keys.iter().enumerate() {
                 if i > 0 {
-                    container = container.append([
-                        el(El::Span).st([St::TextXs, St::TextMuted]).text("+"),
-                    ]);
+                    container =
+                        container.append([el(El::Span).st([St::TextXs, St::TextMuted]).text("+")]);
                 }
-                container = container.append([
-                    el(El::Kbd).st(Self::compute_key_tokens()).text(key),
-                ]);
+                container =
+                    container.append([el(El::Kbd).st(Self::compute_key_tokens()).text(key)]);
             }
 
             container

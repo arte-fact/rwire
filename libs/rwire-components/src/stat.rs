@@ -89,11 +89,9 @@ impl Stat {
 
         // Label (above value)
         if let Some(label) = self.label {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextSm, St::TextMuted, St::FontMedium])
-                    .text(&label),
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextSm, St::TextMuted, St::FontMedium])
+                .text(&label)]);
         }
 
         // Value row with optional trend
@@ -109,7 +107,7 @@ impl Stat {
             };
 
             let arrow = match dir {
-                StatTrend::Up => "\u{2191} ", // ↑
+                StatTrend::Up => "\u{2191} ",   // ↑
                 StatTrend::Down => "\u{2193} ", // ↓
                 StatTrend::Neutral => "",
             };
@@ -118,22 +116,18 @@ impl Stat {
                 .st(trend_tokens)
                 .text(&format!("{arrow}{trend_text}"));
 
-            container = container.append([
-                el(El::Div)
-                    .st([St::DisplayFlex, St::ItemsBaseline, St::GapSm])
-                    .append([value_el, trend_el]),
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::DisplayFlex, St::ItemsBaseline, St::GapSm])
+                .append([value_el, trend_el])]);
         } else {
             container = container.append([value_el]);
         }
 
         // Description
         if let Some(description) = self.description {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextSm, St::TextMuted])
-                    .text(&description),
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextSm, St::TextMuted])
+                .text(&description)]);
         }
 
         container

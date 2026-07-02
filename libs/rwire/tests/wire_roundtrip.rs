@@ -107,7 +107,9 @@ fn card_list() -> ElementBuilder {
         list = list.append([el(El::Div)
             .st([St::BgSurface, St::PMd, St::RoundedMd, St::FontInheritAll])
             .append([
-                el(El::H3).st([St::TextLg, St::FontSemibold]).text("Card title"),
+                el(El::H3)
+                    .st([St::TextLg, St::FontSemibold])
+                    .text("Card title"),
                 el(El::P)
                     .style(
                         Style::new()
@@ -116,7 +118,11 @@ fn card_list() -> ElementBuilder {
                             .set("-webkit-box-orient", "vertical")
                             .set("overflow", "hidden"),
                     )
-                    .text(if i % 2 == 0 { "even card body" } else { "odd card body, longer" }),
+                    .text(if i % 2 == 0 {
+                        "even card body"
+                    } else {
+                        "odd card body, longer"
+                    }),
             ])]);
     }
     list
@@ -134,11 +140,20 @@ struct CardState {
 struct CardRenderer;
 impl SyncedRenderer for CardRenderer {
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
-        let v = state.downcast_ref::<CardState>().map(|s| s.variant).unwrap_or(0);
+        let v = state
+            .downcast_ref::<CardState>()
+            .map(|s| s.variant)
+            .unwrap_or(0);
         let (clamp, text): (&str, &str) = match v {
             0 => ("2", "first card body"),
-            1 => ("3", "second card body, noticeably longer so it clamps differently"),
-            _ => ("4", "third card body — different again, with more distinct content here"),
+            1 => (
+                "3",
+                "second card body, noticeably longer so it clamps differently",
+            ),
+            _ => (
+                "4",
+                "third card body — different again, with more distinct content here",
+            ),
         };
         Some(
             el(El::Div)
@@ -232,7 +247,11 @@ fn wire_streams_parse_cleanly() {
     }
 
     let harness = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/wire_roundtrip.mjs");
-    let out = match std::process::Command::new("node").arg(harness).arg(&dir).output() {
+    let out = match std::process::Command::new("node")
+        .arg(harness)
+        .arg(&dir)
+        .output()
+    {
         Ok(o) => o,
         Err(e) => {
             // Node is the harness runtime; without it we can't parse. Don't fail CI

@@ -336,9 +336,7 @@ fn render_gallery(state: &GalleryState) -> ElementBuilder {
     let all_examples = examples();
     let filtered: Vec<&Example> = all_examples
         .iter()
-        .filter(|e| {
-            state.active_filter == 0 || e.complexity.filter_index() == state.active_filter
-        })
+        .filter(|e| state.active_filter == 0 || e.complexity.filter_index() == state.active_filter)
         .collect();
 
     let f = state.active_filter;
@@ -351,21 +349,46 @@ fn render_gallery(state: &GalleryState) -> ElementBuilder {
                 .gap(Gap::Sm)
                 .justify(StackJustify::Center)
                 .children([
-                    if f == 0 { Button::primary("All") } else { Button::ghost("All") }
-                        .size(ButtonSize::Sm).on_click(set_filter_all()),
-                    if f == 1 { Button::primary("Beginner") } else { Button::ghost("Beginner") }
-                        .size(ButtonSize::Sm).on_click(set_filter_beginner()),
-                    if f == 2 { Button::primary("Intermediate") } else { Button::ghost("Intermediate") }
-                        .size(ButtonSize::Sm).on_click(set_filter_intermediate()),
-                    if f == 3 { Button::primary("Advanced") } else { Button::ghost("Advanced") }
-                        .size(ButtonSize::Sm).on_click(set_filter_advanced()),
+                    if f == 0 {
+                        Button::primary("All")
+                    } else {
+                        Button::ghost("All")
+                    }
+                    .size(ButtonSize::Sm)
+                    .on_click(set_filter_all()),
+                    if f == 1 {
+                        Button::primary("Beginner")
+                    } else {
+                        Button::ghost("Beginner")
+                    }
+                    .size(ButtonSize::Sm)
+                    .on_click(set_filter_beginner()),
+                    if f == 2 {
+                        Button::primary("Intermediate")
+                    } else {
+                        Button::ghost("Intermediate")
+                    }
+                    .size(ButtonSize::Sm)
+                    .on_click(set_filter_intermediate()),
+                    if f == 3 {
+                        Button::primary("Advanced")
+                    } else {
+                        Button::ghost("Advanced")
+                    }
+                    .size(ButtonSize::Sm)
+                    .on_click(set_filter_advanced()),
                 ])
                 .build(),
             // Grid
             el(El::Div)
                 .st([St::DisplayGrid, St::GridCols1, St::GapLg, St::MtLg])
                 .md([St::GridCols2])
-                .append(filtered.iter().map(|e| build_example_card(e)).collect::<Vec<_>>()),
+                .append(
+                    filtered
+                        .iter()
+                        .map(|e| build_example_card(e))
+                        .collect::<Vec<_>>(),
+                ),
         ])
 }
 
@@ -411,42 +434,41 @@ fn build_example_card(example: &Example) -> ElementBuilder {
     // Code preview (first ~20 lines)
     if let Some(code) = example.code {
         let preview: String = code.lines().take(20).collect::<Vec<_>>().join("\n");
-        content = content.children([
-            el(El::Div)
-                .st([St::OverflowXAuto, St::RoundedMd, St::MtSm])
-                .append([Code::block(preview).language("rust").build()]),
-        ]);
+        content = content.children([el(El::Div)
+            .st([St::OverflowXAuto, St::RoundedMd, St::MtSm])
+            .append([Code::block(preview).language("rust").build()])]);
     }
 
     // Run command
-    content = content.children([
-        el(El::Div)
-            .st([
-                St::DisplayFlex,
-                St::ItemsCenter,
-                St::GapSm,
-                St::BgSubtle,
-                St::RoundedMd,
-                St::PxSm,
-                St::PySm,
-                St::MtSm,
-            ])
-            .append([
-                el(El::Span).st([St::TextMuted, St::TextXs]).text("$"),
-                Code::inline(example.run_command).build(),
-                CopyButton::new(example.run_command).build(),
-            ]),
-    ]);
+    content = content.children([el(El::Div)
+        .st([
+            St::DisplayFlex,
+            St::ItemsCenter,
+            St::GapSm,
+            St::BgSubtle,
+            St::RoundedMd,
+            St::PxSm,
+            St::PySm,
+            St::MtSm,
+        ])
+        .append([
+            el(El::Span).st([St::TextMuted, St::TextXs]).text("$"),
+            Code::inline(example.run_command).build(),
+            CopyButton::new(example.run_command).build(),
+        ])]);
 
     // External link if available
     if let Some(url_fn) = example.external_url {
-        content = content.children([
-            el(El::A)
-                .attr("href", url_fn())
-                .st([St::TextSm, St::TextAccent, St::NoDecoration, St::CursorPointer])
-                .hover([St::TextDefault])
-                .text("View live \u{2192}"),
-        ]);
+        content = content.children([el(El::A)
+            .attr("href", url_fn())
+            .st([
+                St::TextSm,
+                St::TextAccent,
+                St::NoDecoration,
+                St::CursorPointer,
+            ])
+            .hover([St::TextDefault])
+            .text("View live \u{2192}")]);
     }
 
     Card::new()

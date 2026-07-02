@@ -94,8 +94,16 @@ impl Stepper {
                     el(El::Span)
                         .st([
                             St::TextXs,
-                            if i <= self.current { St::TextDefault } else { St::TextMuted },
-                            if i == self.current { St::FontMedium } else { St::FontNormal },
+                            if i <= self.current {
+                                St::TextDefault
+                            } else {
+                                St::TextMuted
+                            },
+                            if i == self.current {
+                                St::FontMedium
+                            } else {
+                                St::FontNormal
+                            },
                         ])
                         .text(label),
                 ]);
@@ -149,10 +157,7 @@ mod tests {
 
     #[test]
     fn test_stepper_labels() {
-        let stepper = Stepper::new()
-            .step("A")
-            .step("B")
-            .step("C");
+        let stepper = Stepper::new().step("A").step("B").step("C");
         assert_eq!(stepper.steps[0].as_ref(), "A");
         assert_eq!(stepper.steps[2].as_ref(), "C");
     }

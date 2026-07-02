@@ -86,10 +86,18 @@ impl Tooltip {
     /// Get position-specific inline style.
     fn position_style(&self) -> &'static str {
         match self.position {
-            TooltipPosition::Top => "bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:4px",
-            TooltipPosition::Bottom => "top:100%;left:50%;transform:translateX(-50%);margin-top:4px",
-            TooltipPosition::Left => "right:100%;top:50%;transform:translateY(-50%);margin-right:4px",
-            TooltipPosition::Right => "left:100%;top:50%;transform:translateY(-50%);margin-left:4px",
+            TooltipPosition::Top => {
+                "bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:4px"
+            }
+            TooltipPosition::Bottom => {
+                "top:100%;left:50%;transform:translateX(-50%);margin-top:4px"
+            }
+            TooltipPosition::Left => {
+                "right:100%;top:50%;transform:translateY(-50%);margin-right:4px"
+            }
+            TooltipPosition::Right => {
+                "left:100%;top:50%;transform:translateY(-50%);margin-left:4px"
+            }
         }
     }
 
@@ -105,8 +113,11 @@ impl Tooltip {
             .attr("data-tip", "")
             .text(&self.text);
 
-        let mut container = el(El::Div)
-            .st([St::PositionRelative, St::DisplayInlineFlex, St::HoverShowChild]);
+        let mut container = el(El::Div).st([
+            St::PositionRelative,
+            St::DisplayInlineFlex,
+            St::HoverShowChild,
+        ]);
 
         if let Some(ref extra) = self.extra_class {
             container = container.class(extra.as_ref());

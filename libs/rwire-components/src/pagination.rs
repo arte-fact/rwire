@@ -71,14 +71,26 @@ impl Pagination {
 
     /// Compute style tokens for the pagination list.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::DisplayFlex, St::ItemsCenter, St::GapSm, St::ListStyleNone, St::M0, St::P0]
+        vec![
+            St::DisplayFlex,
+            St::ItemsCenter,
+            St::GapSm,
+            St::ListStyleNone,
+            St::M0,
+            St::P0,
+        ]
     }
 
     /// Build a page button with common tokens.
     fn build_page_button(text: &str, is_active: bool, is_disabled: bool) -> ElementBuilder {
         let mut tokens = vec![
-            St::BgTransparent, St::BorderDefault, St::RoundedMd,
-            St::TextSm, St::TextHigh, St::CursorPointer, St::TransitionAll,
+            St::BgTransparent,
+            St::BorderDefault,
+            St::RoundedMd,
+            St::TextSm,
+            St::TextHigh,
+            St::CursorPointer,
+            St::TransitionAll,
         ];
 
         if is_active {
@@ -86,10 +98,7 @@ impl Pagination {
         }
 
         tokens.extend([St::PySm, St::PxSp3]);
-        let mut button = el(El::Button)
-            .st(tokens)
-            .hover([St::BgHover])
-            .text(text);
+        let mut button = el(El::Button).st(tokens).hover([St::BgHover]).text(text);
 
         if is_disabled {
             button = button.bool_attr(At::Disabled);
@@ -113,9 +122,7 @@ impl Pagination {
         let prev_btn = Self::build_page_button("Previous", false, !has_prev)
             .at_str(At::AriaLabel, "Previous page");
 
-        list = list.append([
-            el(El::Li).append([prev_btn])
-        ]);
+        list = list.append([el(El::Li).append([prev_btn])]);
 
         // Page numbers (simplified: show current, first, last, and neighbors)
         let current = self.current_page;
@@ -124,50 +131,42 @@ impl Pagination {
         if total > 0 {
             // Always show page 1
             if current > 2 {
-                let page_btn = Self::build_page_button("1", false, false)
-                    .at_str(At::AriaLabel, "Page 1");
-                list = list.append([
-                    el(El::Li).append([page_btn])
-                ]);
+                let page_btn =
+                    Self::build_page_button("1", false, false).at_str(At::AriaLabel, "Page 1");
+                list = list.append([el(El::Li).append([page_btn])]);
 
                 if current > 3 {
-                    list = list.append([
-                        el(El::Li).append([
-                            el(El::Span)
-                                .st([St::TextLow, St::PSm])
-                                .text("...")
-                        ])
-                    ]);
+                    list = list
+                        .append([el(El::Li)
+                            .append([el(El::Span).st([St::TextLow, St::PSm]).text("...")])]);
                 }
             }
 
             // Show current page and neighbors
             for page in 1..=total {
-                if (page == current || (page >= current.saturating_sub(1) && page <= current + 1)) && page > 1 && page < total {
+                if (page == current || (page >= current.saturating_sub(1) && page <= current + 1))
+                    && page > 1
+                    && page < total
+                {
                     let is_current = page == current;
-                    let mut page_btn = Self::build_page_button(&page.to_string(), is_current, false)
-                        .at_str(At::AriaLabel, &format!("Page {}", page));
+                    let mut page_btn =
+                        Self::build_page_button(&page.to_string(), is_current, false)
+                            .at_str(At::AriaLabel, &format!("Page {}", page));
 
                     if is_current {
                         page_btn = page_btn.attr("aria-current", "page");
                     }
 
-                    list = list.append([
-                        el(El::Li).append([page_btn])
-                    ]);
+                    list = list.append([el(El::Li).append([page_btn])]);
                 }
             }
 
             // Always show last page
             if total > 1 && current < total - 1 {
                 if current < total - 2 {
-                    list = list.append([
-                        el(El::Li).append([
-                            el(El::Span)
-                                .st([St::TextLow, St::PSm])
-                                .text("...")
-                        ])
-                    ]);
+                    list = list
+                        .append([el(El::Li)
+                            .append([el(El::Span).st([St::TextLow, St::PSm]).text("...")])]);
                 }
 
                 let is_current = current == total;
@@ -178,20 +177,16 @@ impl Pagination {
                     page_btn = page_btn.attr("aria-current", "page");
                 }
 
-                list = list.append([
-                    el(El::Li).append([page_btn])
-                ]);
+                list = list.append([el(El::Li).append([page_btn])]);
             }
         }
 
         // Next button
         let has_next = self.current_page < self.total_pages;
-        let next_btn = Self::build_page_button("Next", false, !has_next)
-            .at_str(At::AriaLabel, "Next page");
+        let next_btn =
+            Self::build_page_button("Next", false, !has_next).at_str(At::AriaLabel, "Next page");
 
-        list = list.append([
-            el(El::Li).append([next_btn])
-        ]);
+        list = list.append([el(El::Li).append([next_btn])]);
 
         nav.append([list])
     }
@@ -223,11 +218,8 @@ mod tests {
 
     #[test]
     fn test_pagination_with_pages() {
-        let pagination = Pagination::new()
-            .current_page(3)
-            .total_pages(10);
+        let pagination = Pagination::new().current_page(3).total_pages(10);
         assert_eq!(pagination.current_page, 3);
         assert_eq!(pagination.total_pages, 10);
     }
-
 }

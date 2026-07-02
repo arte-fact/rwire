@@ -101,7 +101,12 @@ impl Accordion {
 
     /// Compute style tokens for the accordion container.
     pub fn compute_tokens() -> Vec<St> {
-        vec![St::DisplayFlex, St::FlexCol, St::BorderSubtle, St::RoundedMd]
+        vec![
+            St::DisplayFlex,
+            St::FlexCol,
+            St::BorderSubtle,
+            St::RoundedMd,
+        ]
     }
 
     /// Compute style tokens for the trigger button.

@@ -88,33 +88,24 @@ impl EmptyState {
         }
 
         if let Some(icon) = self.icon {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextMuted, St::MbSm])
-                    .append([icon]),
-            ]);
+            container =
+                container.append([el(El::Div).st([St::TextMuted, St::MbSm]).append([icon])]);
         }
 
         if let Some(title) = self.title {
-            container = container.append([
-                el(El::P)
-                    .st([St::TextLg, St::FontSemibold, St::TextDefault, St::M0])
-                    .text(&title),
-            ]);
+            container = container.append([el(El::P)
+                .st([St::TextLg, St::FontSemibold, St::TextDefault, St::M0])
+                .text(&title)]);
         }
 
         if let Some(description) = self.description {
-            container = container.append([
-                el(El::P)
-                    .st([St::TextSm, St::TextMuted, St::MaxWProse])
-                    .text(&description),
-            ]);
+            container = container.append([el(El::P)
+                .st([St::TextSm, St::TextMuted, St::MaxWProse])
+                .text(&description)]);
         }
 
         if let Some(action) = self.action {
-            container = container.append([
-                el(El::Div).st([St::MtSm]).append([action]),
-            ]);
+            container = container.append([el(El::Div).st([St::MtSm]).append([action])]);
         }
 
         container
@@ -150,6 +141,9 @@ mod tests {
             .title("No items")
             .description("Add some items to get started.");
         assert_eq!(es.title.as_deref(), Some("No items"));
-        assert_eq!(es.description.as_deref(), Some("Add some items to get started."));
+        assert_eq!(
+            es.description.as_deref(),
+            Some("Add some items to get started.")
+        );
     }
 }

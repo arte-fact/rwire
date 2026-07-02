@@ -29,10 +29,7 @@ pub struct NavItem {
 
 impl NavItem {
     /// Create a new navigation item.
-    pub fn new(
-        label: impl Into<Cow<'static, str>>,
-        href: impl Into<Cow<'static, str>>,
-    ) -> Self {
+    pub fn new(label: impl Into<Cow<'static, str>>, href: impl Into<Cow<'static, str>>) -> Self {
         Self {
             label: label.into(),
             href: href.into(),

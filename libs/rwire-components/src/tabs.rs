@@ -96,9 +96,15 @@ impl Tabs {
             let is_active = idx == self.active_index;
             let panel_id = format!("tabpanel-{idx}");
             let mut button_tokens = vec![
-                St::BgTransparent, St::BorderNone, St::TextSm, St::FontMedium,
-                St::CursorPointer, St::TransitionAll,
-                St::PySp3, St::PxMd, St::MbNeg2px,
+                St::BgTransparent,
+                St::BorderNone,
+                St::TextSm,
+                St::FontMedium,
+                St::CursorPointer,
+                St::TransitionAll,
+                St::PySp3,
+                St::PxMd,
+                St::MbNeg2px,
             ];
 
             if is_active {
@@ -112,7 +118,10 @@ impl Tabs {
             let mut button = el(El::Button)
                 .st(button_tokens)
                 .at(At::Role, Av::RoleTab)
-                .at(At::AriaSelected, if is_active { Av::True } else { Av::False })
+                .at(
+                    At::AriaSelected,
+                    if is_active { Av::True } else { Av::False },
+                )
                 .at_str(At::AriaControls, &panel_id)
                 .text(&tab.label);
 

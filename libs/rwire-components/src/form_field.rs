@@ -103,9 +103,7 @@ impl FormField {
                 .text(&label_text);
 
             if self.required {
-                label = label.append([
-                    el(El::Span).st([St::TextError]).text(" *")
-                ]);
+                label = label.append([el(El::Span).st([St::TextError]).text(" *")]);
             }
 
             container = container.append([label]);
@@ -120,20 +118,16 @@ impl FormField {
 
         // Add help text if provided
         if let Some(help_text) = self.help {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextXs, St::TextMedium])
-                    .text(&help_text)
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextXs, St::TextMedium])
+                .text(&help_text)]);
         }
 
         // Add error message if provided
         if let Some(error_text) = self.error {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextXs, St::TextError])
-                    .text(&error_text)
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextXs, St::TextError])
+                .text(&error_text)]);
         }
 
         container
@@ -161,5 +155,4 @@ mod tests {
         assert!(tokens.contains(&St::FlexCol));
         assert!(tokens.contains(&St::GapSm));
     }
-
 }

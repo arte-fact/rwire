@@ -26,7 +26,12 @@ pub fn solid() -> ThemeStyle {
 
 /// Sharp corners, heavy borders, high contrast.
 pub fn brutalist() -> ThemeStyle {
-    ThemeStyle::new("brutalist", "Brutalist", brutalist_color_css, brutalist_q_css)
+    ThemeStyle::new(
+        "brutalist",
+        "Brutalist",
+        brutalist_color_css,
+        brutalist_q_css,
+    )
 }
 
 /// Near-zero borders, large spacing, text hierarchy.
@@ -94,13 +99,13 @@ impl IntoStyle for Style {
 
 fn solid_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
     if is_dark {
-        css_var(css, "v", &rp.accent[7]);   // primary (brighter for dark bg)
-        css_var(css, "w", &rp.white);       // on-primary
-        css_var(css, "x", &rp.accent[6]);   // primary-hover
+        css_var(css, "v", &rp.accent[7]); // primary (brighter for dark bg)
+        css_var(css, "w", &rp.white); // on-primary
+        css_var(css, "x", &rp.accent[6]); // primary-hover
     } else {
-        css_var(css, "v", &rp.accent[8]);   // primary
-        css_var(css, "w", &rp.white);       // on-primary
-        css_var(css, "x", &rp.accent[9]);   // primary-hover
+        css_var(css, "v", &rp.accent[8]); // primary
+        css_var(css, "w", &rp.white); // on-primary
+        css_var(css, "x", &rp.accent[9]); // primary-hover
     }
 }
 
@@ -173,7 +178,9 @@ fn glass_color_css(css: &mut String, rp: &ResolvedPalette, _is_dark: bool) {
 
 fn glass_q_css(css: &mut String, is_dark: bool) {
     css.push_str("--Qd:none;--Qgw:none;");
-    css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:rgba(255,255,255,0.1);--Qbs:solid;");
+    css.push_str(
+        "--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:rgba(255,255,255,0.1);--Qbs:solid;",
+    );
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
     if is_dark {
         css.push_str("--Qbf:blur(12px);--Qso:0.75;--Qgr:none;");
@@ -210,7 +217,10 @@ mod tests {
     fn test_solid_style() {
         let theme = Theme::dark().style(solid());
         let css = generate_theme_css(&theme);
-        assert!(css.contains("--Qd:var(--Z1)"), "Solid should have shadow Q-var");
+        assert!(
+            css.contains("--Qd:var(--Z1)"),
+            "Solid should have shadow Q-var"
+        );
         assert!(css.contains("--Qt:150ms"), "Solid transition");
     }
 
@@ -248,7 +258,10 @@ mod tests {
     fn test_neon_style() {
         let theme = Theme::dark().style(neon());
         let css = generate_theme_css(&theme);
-        assert!(css.contains("--Qts:0 0 8px currentColor"), "Neon text shadow");
+        assert!(
+            css.contains("--Qts:0 0 8px currentColor"),
+            "Neon text shadow"
+        );
     }
 
     #[test]
@@ -263,8 +276,16 @@ mod tests {
             let style = style_fn();
             let theme = Theme::dark().style(style);
             let css = generate_theme_css(&theme);
-            assert!(css.starts_with(":root{"), "Style {} should produce valid CSS", style.id());
-            assert!(css.contains("--Qd:"), "Style {} missing Q-var --Qd", style.id());
+            assert!(
+                css.starts_with(":root{"),
+                "Style {} should produce valid CSS",
+                style.id()
+            );
+            assert!(
+                css.contains("--Qd:"),
+                "Style {} missing Q-var --Qd",
+                style.id()
+            );
         }
     }
 }

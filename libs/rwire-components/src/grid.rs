@@ -145,9 +145,7 @@ mod tests {
 
     #[test]
     fn test_grid_fixed_tokens() {
-        let grid = Grid::new()
-            .columns(GridColumns::Fixed3)
-            .gap(Gap::Lg);
+        let grid = Grid::new().columns(GridColumns::Fixed3).gap(Gap::Lg);
         let tokens = grid.compute_tokens();
         assert!(tokens.contains(&St::DisplayGrid));
         assert!(tokens.contains(&St::GridCols3));

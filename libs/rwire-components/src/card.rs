@@ -125,8 +125,12 @@ impl Card {
 
         // Theme-aware hooks for Glass/Neon support
         tokens.extend([
-            St::BackdropTheme, St::OpacityTheme, St::BorderCTheme,
-            St::GlowTheme, St::TextShadowTheme, St::TransTheme,
+            St::BackdropTheme,
+            St::OpacityTheme,
+            St::BorderCTheme,
+            St::GlowTheme,
+            St::TextShadowTheme,
+            St::TransTheme,
         ]);
 
         tokens
@@ -183,5 +187,4 @@ mod tests {
         assert!(tokens.contains(&St::ShadowLg));
         assert!(!tokens.contains(&St::BorderSubtle));
     }
-
 }

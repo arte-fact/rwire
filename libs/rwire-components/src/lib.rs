@@ -72,7 +72,10 @@ mod blockquote;
 mod breadcrumb;
 mod button;
 mod card;
+pub mod catalog;
+mod chat_scroll;
 mod checkbox;
+mod chip;
 mod code;
 mod container;
 mod copy_button;
@@ -112,7 +115,6 @@ mod theme_toggle;
 mod timeline;
 mod toast;
 mod tooltip;
-pub mod catalog;
 pub mod utils;
 
 pub use accordion::{Accordion, AccordionItem};
@@ -120,12 +122,14 @@ pub use alert::{Alert, AlertIntent};
 pub use app_shell::AppShell;
 pub use avatar::{Avatar, AvatarSize};
 pub use avatar_group::AvatarGroup;
-pub use badge::{Badge, BadgeIntent};
+pub use badge::{Badge, BadgeFill, BadgeIntent, BadgeShape};
 pub use blockquote::Blockquote;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonIntent, ButtonSize};
 pub use card::{Card, CardPadding, CardShadow};
+pub use chat_scroll::ChatScroll;
 pub use checkbox::Checkbox;
+pub use chip::Chip;
 pub use code::{Code, CodeMode};
 pub use container::{Container, ContainerSize};
 pub use copy_button::CopyButton;
@@ -167,6 +171,6 @@ pub use toast::{Toast, ToastContainer, ToastIntent};
 pub use tooltip::{Tooltip, TooltipPosition};
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
-    unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL,
-    Z_MODAL_BACKDROP, Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
+    unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL, Z_MODAL_BACKDROP,
+    Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
 };

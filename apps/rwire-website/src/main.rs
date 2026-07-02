@@ -265,12 +265,10 @@ fn section_hero() -> ElementBuilder {
             Stack::row()
                 .gap(Gap::Md)
                 .justify(StackJustify::Center)
-                .children([
-                    el(El::A)
-                        .attr("href", &get_started_url)
-                        .st([St::NoDecoration])
-                        .append([Button::primary("Get Started \u{2192}").build()]),
-                ])
+                .children([el(El::A)
+                    .attr("href", &get_started_url)
+                    .st([St::NoDecoration])
+                    .append([Button::primary("Get Started \u{2192}").build()])])
                 .build(),
         ])
 }
@@ -292,12 +290,7 @@ fn section_stats() -> ElementBuilder {
             .shadow(CardShadow::None)
             .child(
                 el(El::Div)
-                    .st([
-                        St::DisplayGrid,
-                        St::GridCols2,
-                        St::GapLg,
-                        St::TextCenter,
-                    ])
+                    .st([St::DisplayGrid, St::GridCols2, St::GapLg, St::TextCenter])
                     .md([St::GridCols4])
                     .append(
                         stats
@@ -307,9 +300,7 @@ fn section_stats() -> ElementBuilder {
                                     el(El::Div)
                                         .st([St::Text3xl, St::FontBold, St::TextAccent])
                                         .text(value),
-                                    el(El::Div)
-                                        .st([St::TextSm, St::TextMuted])
-                                        .text(label),
+                                    el(El::Div).st([St::TextSm, St::TextMuted]).text(label),
                                 ])
                             })
                             .collect::<Vec<_>>(),
@@ -367,7 +358,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .text("A complete app in 20 lines"),
             el(El::P)
                 .st([St::TextMuted, St::TextCenter, St::MbLg])
-                .text("Define state, write handlers, attach renderers. The macros handle the rest."),
+                .text(
+                    "Define state, write handlers, attach renderers. The macros handle the rest.",
+                ),
             // Two-column layout: code + annotations
             el(El::Div)
                 .st([St::DisplayFlex, St::FlexCol, St::GapLg])
@@ -459,13 +452,9 @@ fn section_features() -> ElementBuilder {
                                     Stack::column()
                                         .gap(Gap::Sm)
                                         .children([
-                                            el(El::Div)
-                                                .st([St::TextAccent])
-                                                .append([icon(*ico)]),
+                                            el(El::Div).st([St::TextAccent]).append([icon(*ico)]),
                                             el(El::Div).st([St::FontSemibold]).text(title),
-                                            el(El::P)
-                                                .st([St::TextSm, St::TextMuted])
-                                                .text(desc),
+                                            el(El::P).st([St::TextSm, St::TextMuted]).text(desc),
                                         ])
                                         .build(),
                                 )
@@ -490,36 +479,23 @@ fn section_comparison() -> ElementBuilder {
                 .text("Architecture and ballpark sizes; competitor figures are approximate."),
             el(El::Div).st([St::OverflowXAuto]).append([Table::new()
                 .headers(["", "rwire", "LiveView", "Blazor", "htmx"])
-                .row(
-                    TableRow::new()
-                        .cells(["Client runtime", "~17KB", "30KB", "200KB", "14KB"]),
-                )
-                .row(
-                    TableRow::new()
-                        .cells(["Wire format", "Binary", "JSON", "JSON", "HTML"]),
-                )
-                .row(
-                    TableRow::new().cells([
-                        "Update cost",
-                        "~30 bytes",
-                        "25 bytes",
-                        "100+ bytes",
-                        "100+ bytes",
-                    ]),
-                )
-                .row(
-                    TableRow::new().cells([
-                        "Memory/conn",
-                        "2\u{2013}5KB",
-                        "5\u{2013}50KB",
-                        "250KB",
-                        "N/A",
-                    ]),
-                )
-                .row(
-                    TableRow::new()
-                        .cells(["Language", "Rust", "Elixir", "C#", "Any"]),
-                )
+                .row(TableRow::new().cells(["Client runtime", "~17KB", "30KB", "200KB", "14KB"]))
+                .row(TableRow::new().cells(["Wire format", "Binary", "JSON", "JSON", "HTML"]))
+                .row(TableRow::new().cells([
+                    "Update cost",
+                    "~30 bytes",
+                    "25 bytes",
+                    "100+ bytes",
+                    "100+ bytes",
+                ]))
+                .row(TableRow::new().cells([
+                    "Memory/conn",
+                    "2\u{2013}5KB",
+                    "5\u{2013}50KB",
+                    "250KB",
+                    "N/A",
+                ]))
+                .row(TableRow::new().cells(["Language", "Rust", "Elixir", "C#", "Any"]))
                 .striped(true)
                 .build()]),
         ])])

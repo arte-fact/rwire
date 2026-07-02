@@ -32,10 +32,35 @@ pub enum BadgeIntent {
     Error,
 }
 
+/// Badge corner shape. `Pill` is the classic rounded status badge; `Square` is the sharp
+/// outlined chip terminal-styled apps want (born from a real app working around the fixed
+/// pill: "the Badge component can't go square").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BadgeShape {
+    /// Fully rounded (the classic pill)
+    #[default]
+    Pill,
+    /// Sharp corners
+    Square,
+}
+
+/// Badge fill. `Solid` is the tinted background; `Outline` is a transparent badge with an
+/// intent-colored border and text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BadgeFill {
+    /// Tinted background (the default)
+    #[default]
+    Solid,
+    /// Transparent with an intent-colored border
+    Outline,
+}
+
 /// Badge builder.
 #[derive(Clone, Debug, Default)]
 pub struct Badge {
     intent: BadgeIntent,
+    shape: BadgeShape,
+    fill: BadgeFill,
     text: Option<Cow<'static, str>>,
     extra_class: Option<Cow<'static, str>>,
 }
@@ -50,6 +75,18 @@ impl Badge {
     /// Set the badge intent.
     pub fn intent(mut self, intent: BadgeIntent) -> Self {
         self.intent = intent;
+        self
+    }
+
+    /// Set the corner shape (pill by default).
+    pub fn shape(mut self, shape: BadgeShape) -> Self {
+        self.shape = shape;
+        self
+    }
+
+    /// Set the fill (solid by default).
+    pub fn fill(mut self, fill: BadgeFill) -> Self {
+        self.fill = fill;
         self
     }
 
@@ -98,29 +135,60 @@ impl Badge {
             St::PxSm,
             St::TextXs,
             St::FontMedium,
-            St::RoundedFull,
         ];
 
-        match self.intent {
-            BadgeIntent::Default => {
-                tokens.push(St::BgEmphasis);
-                tokens.push(St::TextHigh);
-            }
-            BadgeIntent::Primary => {
-                tokens.push(St::BgPrimarySubtle);
-                tokens.push(St::TextOnPrimarySubtle);
-            }
-            BadgeIntent::Success => {
-                tokens.push(St::BgGreen4);
-                tokens.push(St::TextGreen11);
-            }
-            BadgeIntent::Warning => {
-                tokens.push(St::BgAmber4);
-                tokens.push(St::TextAmber11);
-            }
-            BadgeIntent::Error => {
-                tokens.push(St::BgRed4);
-                tokens.push(St::TextRed11);
+        tokens.push(match self.shape {
+            BadgeShape::Pill => St::RoundedFull,
+            BadgeShape::Square => St::Rounded0,
+        });
+
+        match self.fill {
+            BadgeFill::Solid => match self.intent {
+                BadgeIntent::Default => {
+                    tokens.push(St::BgEmphasis);
+                    tokens.push(St::TextHigh);
+                }
+                BadgeIntent::Primary => {
+                    tokens.push(St::BgPrimarySubtle);
+                    tokens.push(St::TextOnPrimarySubtle);
+                }
+                BadgeIntent::Success => {
+                    tokens.push(St::BgGreen4);
+                    tokens.push(St::TextGreen11);
+                }
+                BadgeIntent::Warning => {
+                    tokens.push(St::BgAmber4);
+                    tokens.push(St::TextAmber11);
+                }
+                BadgeIntent::Error => {
+                    tokens.push(St::BgRed4);
+                    tokens.push(St::TextRed11);
+                }
+            },
+            // Outline: transparent, an intent-colored border and text. The `Border*8`
+            // tokens override only border-color, so they layer on `BorderDefault`.
+            BadgeFill::Outline => {
+                tokens.push(St::BgTransparent);
+                tokens.push(St::BorderDefault);
+                match self.intent {
+                    BadgeIntent::Default => tokens.push(St::TextMuted),
+                    BadgeIntent::Primary => {
+                        tokens.push(St::BorderAccent);
+                        tokens.push(St::TextAccent);
+                    }
+                    BadgeIntent::Success => {
+                        tokens.push(St::BorderGreen8);
+                        tokens.push(St::TextGreen11);
+                    }
+                    BadgeIntent::Warning => {
+                        tokens.push(St::BorderAmber8);
+                        tokens.push(St::TextAmber11);
+                    }
+                    BadgeIntent::Error => {
+                        tokens.push(St::BorderRed8);
+                        tokens.push(St::TextRed11);
+                    }
+                }
             }
         }
 
@@ -169,5 +237,4 @@ mod tests {
         assert!(tokens.contains(&St::BgGreen4));
         assert!(tokens.contains(&St::TextGreen11));
     }
-
 }

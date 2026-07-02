@@ -333,7 +333,7 @@ const BADGE_TEXT: &[TextProp] = &[TextProp {
     default: "Badge",
 }];
 fn badge_rich(p: &DemoParams) -> ElementBuilder {
-    use crate::{Badge, BadgeIntent};
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
     let intent = match v(p.variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -341,8 +341,18 @@ fn badge_rich(p: &DemoParams) -> ElementBuilder {
         4 => BadgeIntent::Error,
         _ => BadgeIntent::Default,
     };
+    let shape = match v(p.variants, 1) {
+        1 => BadgeShape::Square,
+        _ => BadgeShape::Pill,
+    };
+    let fill = match v(p.variants, 2) {
+        1 => BadgeFill::Outline,
+        _ => BadgeFill::Solid,
+    };
     Badge::new()
         .intent(intent)
+        .shape(shape)
+        .fill(fill)
         .text(p.texts.first().copied().unwrap_or("Badge").to_string())
         .build()
 }
@@ -1901,7 +1911,7 @@ fn text_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 }
 
 fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::{Badge, BadgeIntent};
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
     let intent = match v(variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -1909,7 +1919,55 @@ fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         4 => BadgeIntent::Error,
         _ => BadgeIntent::Default,
     };
-    Badge::new().intent(intent).text("Badge").build()
+    let shape = match v(variants, 1) {
+        1 => BadgeShape::Square,
+        _ => BadgeShape::Pill,
+    };
+    let fill = match v(variants, 2) {
+        1 => BadgeFill::Outline,
+        _ => BadgeFill::Solid,
+    };
+    Badge::new()
+        .intent(intent)
+        .shape(shape)
+        .fill(fill)
+        .text("Badge")
+        .build()
+}
+
+fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::Chip;
+    el(El::Div)
+        .st([
+            rwire::St::DisplayFlex,
+            rwire::St::GapSm,
+            rwire::St::ItemsCenter,
+        ])
+        .append([
+            Chip::new("All").active(b(bools, 0)).build(),
+            Chip::new("Running").build(),
+            Chip::new("Failed").build(),
+        ])
+}
+
+fn chat_scroll_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::ChatScroll;
+    let entries = (1..=12).map(|n| {
+        el(El::Div)
+            .st([rwire::St::TextSm, rwire::St::PySm])
+            .text(&format!(
+                "message {n} — the newest stays pinned at the bottom"
+            ))
+    });
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "10rem"))
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol])
+        .append([ChatScroll::new(
+            el(El::Div)
+                .st([rwire::St::DisplayFlex, rwire::St::FlexCol])
+                .append(entries),
+        )
+        .build()])
 }
 
 fn tag_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
@@ -2820,34 +2878,68 @@ const TEXT_VARIANTS: &[VariantAxis] = &[
     },
 ];
 
-const BADGE_VARIANTS: &[VariantAxis] = &[VariantAxis {
-    name: "intent",
-    display_name: "Intent",
-    rust_type: "BadgeIntent",
-    values: &[
-        VariantValue {
-            label: "Default",
-            rust_expr: "BadgeIntent::Default",
-        },
-        VariantValue {
-            label: "Primary",
-            rust_expr: "BadgeIntent::Primary",
-        },
-        VariantValue {
-            label: "Success",
-            rust_expr: "BadgeIntent::Success",
-        },
-        VariantValue {
-            label: "Warning",
-            rust_expr: "BadgeIntent::Warning",
-        },
-        VariantValue {
-            label: "Error",
-            rust_expr: "BadgeIntent::Error",
-        },
-    ],
-    default_index: 0,
-}];
+const BADGE_VARIANTS: &[VariantAxis] = &[
+    VariantAxis {
+        name: "intent",
+        display_name: "Intent",
+        rust_type: "BadgeIntent",
+        values: &[
+            VariantValue {
+                label: "Default",
+                rust_expr: "BadgeIntent::Default",
+            },
+            VariantValue {
+                label: "Primary",
+                rust_expr: "BadgeIntent::Primary",
+            },
+            VariantValue {
+                label: "Success",
+                rust_expr: "BadgeIntent::Success",
+            },
+            VariantValue {
+                label: "Warning",
+                rust_expr: "BadgeIntent::Warning",
+            },
+            VariantValue {
+                label: "Error",
+                rust_expr: "BadgeIntent::Error",
+            },
+        ],
+        default_index: 0,
+    },
+    VariantAxis {
+        name: "shape",
+        display_name: "Shape",
+        rust_type: "BadgeShape",
+        default_index: 0,
+        values: &[
+            VariantValue {
+                label: "Pill",
+                rust_expr: "BadgeShape::Pill",
+            },
+            VariantValue {
+                label: "Square",
+                rust_expr: "BadgeShape::Square",
+            },
+        ],
+    },
+    VariantAxis {
+        name: "fill",
+        display_name: "Fill",
+        rust_type: "BadgeFill",
+        default_index: 0,
+        values: &[
+            VariantValue {
+                label: "Solid",
+                rust_expr: "BadgeFill::Solid",
+            },
+            VariantValue {
+                label: "Outline",
+                rust_expr: "BadgeFill::Outline",
+            },
+        ],
+    },
+];
 
 const TAG_VARIANTS: &[VariantAxis] = &[VariantAxis {
     name: "intent",
@@ -3309,6 +3401,16 @@ const BOOL_OPEN: &[BoolProp] = &[BoolProp {
 
 const ENTRIES: &[ComponentEntry] = &[
     // --- Layout (order 1xx) ---
+    ComponentEntry {
+        name: "ChatScroll",
+        slug: "chat-scroll",
+        description: "Bottom-pinned autoscroll for chat logs and live feeds — pure CSS, no JS.",
+        category: Category::Layout,
+        order: 103,
+        variants: &[],
+        bool_props: &[],
+        build_demo: chat_scroll_demo,
+    },
     ComponentEntry {
         name: "Stack",
         slug: "stack",
@@ -3880,6 +3982,20 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: &[],
         bool_props: &[],
         build_demo: tabs_demo,
+    },
+    ComponentEntry {
+        name: "Chip",
+        slug: "chip",
+        description: "Selectable chip for filters, view toggles, and inline pickers.",
+        category: Category::Navigation,
+        order: 504,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "active",
+            description: "The chip is the current selection",
+            default: true,
+        }],
+        build_demo: chip_demo,
     },
     ComponentEntry {
         name: "Pagination",
