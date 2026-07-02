@@ -12,7 +12,7 @@
 //!
 //! # Available Components
 //!
-//! - **Button**: Primary, Secondary, Ghost, Destructive buttons
+//! - **Button**: Primary, Secondary, Ghost, Outline, Destructive buttons (Xs–Lg sizes)
 //! - **Input**: Text, password, email, number inputs
 //! - **Textarea**: Multi-line text input
 //! - **Label**: Form labels
@@ -21,7 +21,7 @@
 //! - **Switch**: Toggle switch input
 //! - **Select**: Dropdown select with options
 //! - **FormField**: Form field wrapper with label/help/error
-//! - **Avatar**: User avatar with image or fallback
+//! - **Avatar**: User avatar with image, fallback, or `name(…)` initials
 //! - **Progress**: Progress bar
 //! - **Spinner**: Loading spinner
 //! - **Table**: Div-based table
@@ -31,7 +31,11 @@
 //! - **Pagination**: Page navigation
 //! - **Stack**: Flexbox layout (row/column)
 //! - **Card**: Surface container with padding/shadow
-//! - **Badge**: Status indicators
+//! - **Badge**: Status indicators (pill/square shape, solid/outline fill)
+//! - **Chip**: Selectable chip for filters, view toggles, and inline pickers
+//! - **StatusDot**: Presence dot with intent colors, optional pulse and label
+//! - **Composer**: Chat message bar (Enter submits, Shift+Enter newline)
+//! - **ChatScroll**: Bottom-pinned autoscroll for chat logs and live feeds
 //!
 //! # Example
 //!

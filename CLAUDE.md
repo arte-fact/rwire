@@ -58,7 +58,7 @@ rwire/
 │   │       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
 │   │       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
-│   ├── rwire-components/    # UI component library (50 components)
+│   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
 │   └── rwire-themes/        # Predefined styles and palettes
 ├── apps/
