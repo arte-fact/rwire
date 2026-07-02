@@ -642,6 +642,10 @@ define_token_enum! {
         MaxW80rem = 0x277 => "max-width:80rem",
         MaxH90vh = 0x278 => "max-height:90vh",
         MaxW60rem = 0x279 => "max-width:60rem",
+        /// Bottom auto margin: anchors a lone flex child to the far edge without breaking the
+        /// container's scrollability (unlike `justify-content`, an auto margin collapses to 0
+        /// once content overflows).
+        MbAuto = 0x27A => "margin-bottom:auto",
 
         // Padding/Margin extended (0x280-0x285)
         PxSp3 = 0x280 => "padding-inline:var(--S3)",
