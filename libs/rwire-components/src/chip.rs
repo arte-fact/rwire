@@ -2,7 +2,8 @@
 //!
 //! A selectable chip for filters, view toggles, and inline tab pickers — the middle ground
 //! between a `Button` (an action) and `Tabs` (a full navigation bar with content panes).
-//! Accent-filled when active; muted with a hover lift otherwise.
+//! Accent-filled when active; muted with a hover lift otherwise. Corners follow the
+//! theme's radius scale (square under `RadiusScale::None`).
 //!
 //! # Example
 //!
@@ -61,7 +62,7 @@ impl Chip {
             St::TextXs,
             St::PxSm,
             St::PyXs,
-            St::Rounded0,
+            St::RoundedMd,
             St::BorderDefault,
             St::CursorPointer,
         ];

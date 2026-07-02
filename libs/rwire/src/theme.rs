@@ -106,6 +106,18 @@ impl ThemeStyle {
         Self::new("soft", "Soft", soft_color_css, soft_q_css)
     }
 
+    /// Built-in Flat style — the terminal aesthetic.
+    ///
+    /// Soft's hairline borders and shadow-free surfaces, plus a **monospace UI font** for the
+    /// whole app (`--Qft`). Pair with [`RadiusScale::None`] for sharp corners:
+    ///
+    /// ```ignore
+    /// Theme::dark().style(ThemeStyle::flat()).radius(RadiusScale::None)
+    /// ```
+    pub fn flat() -> Self {
+        Self::new("flat", "Flat", soft_color_css, flat_q_css)
+    }
+
     /// Get the style identifier string.
     pub fn id(&self) -> &'static str {
         self.id
@@ -496,7 +508,7 @@ impl ResolvedPalette {
 pub fn generate_base_css() -> &'static str {
     "html{scroll-behavior:smooth}\
      *,*::before,*::after{box-sizing:border-box}\
-     body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;\
+     body{margin:0;font-family:var(--Qft,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif);\
      line-height:var(--X3);color:var(--k);background:var(--a)}\
      button,input,select,textarea{font:inherit}\
      table{border-collapse:collapse}\
@@ -684,6 +696,12 @@ fn soft_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
     }
 }
 
+fn flat_q_css(css: &mut String, is_dark: bool) {
+    soft_q_css(css, is_dark);
+    // The whole UI runs on the mono stack (the base CSS reads `--Qft` for `body`).
+    css.push_str("--Qft:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;");
+}
+
 fn soft_q_css(css: &mut String, _is_dark: bool) {
     css.push_str("--Qd:none;--Qgw:none;");
     css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
@@ -695,6 +713,18 @@ fn soft_q_css(css: &mut String, _is_dark: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flat_style_sets_the_mono_ui_font() {
+        let theme = Theme::dark().style(ThemeStyle::flat());
+        let css = generate_theme_css(&theme);
+        assert!(css.contains("--Qft:ui-monospace"), "mono UI font var");
+        assert!(
+            css.contains("--Qd:none"),
+            "keeps soft's shadow-free surfaces"
+        );
+        assert!(generate_base_css().contains("font-family:var(--Qft,"));
+    }
 
     #[test]
     fn test_theme_defaults() {
@@ -734,7 +764,7 @@ mod tests {
     #[test]
     fn test_base_css_size() {
         let css = generate_base_css();
-        assert!(css.len() < 600, "Base CSS too large: {} bytes", css.len());
+        assert!(css.len() < 640, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]
