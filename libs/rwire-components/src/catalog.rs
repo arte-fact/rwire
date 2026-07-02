@@ -1980,6 +1980,17 @@ fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     dot.build()
 }
 
+fn composer_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::Composer;
+    let mut composer = Composer::new()
+        .placeholder("Message the team…")
+        .compact(b(bools, 0));
+    if !b(bools, 0) {
+        composer = composer.hint("⏎ send · ⇧⏎ newline");
+    }
+    composer.build()
+}
+
 fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Chip;
     el(El::Div)
@@ -3736,6 +3747,20 @@ const ENTRIES: &[ComponentEntry] = &[
             default: false,
         }],
         build_demo: label_demo,
+    },
+    ComponentEntry {
+        name: "Composer",
+        slug: "composer",
+        description: "Chat message bar: auto-growing field, Enter submits, Shift+Enter newline.",
+        category: Category::Forms,
+        order: 211,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "compact",
+            description: "Single-row form factor (inline composers)",
+            default: false,
+        }],
+        build_demo: composer_demo,
     },
     ComponentEntry {
         name: "FormField",
