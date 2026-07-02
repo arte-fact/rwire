@@ -48,6 +48,8 @@ pub enum ButtonIntent {
 /// Button size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonSize {
+    /// Extra small: 24px height — dense chrome (toolbars, inline forms, list rows)
+    Xs,
     /// Small: 28px height
     Sm,
     /// Medium: 36px height (default)
@@ -179,6 +181,7 @@ impl Button {
     /// Icon edge length (px), scaled to the button size.
     fn icon_px(&self) -> u32 {
         match self.size {
+            ButtonSize::Xs => 12,
             ButtonSize::Sm => 12,
             ButtonSize::Md => 14,
             ButtonSize::Lg => 16,
@@ -215,7 +218,7 @@ impl Button {
         }
 
         match self.size {
-            ButtonSize::Sm => {
+            ButtonSize::Xs | ButtonSize::Sm => {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextXs, St::GapXs]);
             }
@@ -274,6 +277,7 @@ impl Button {
     /// Compute size-specific style tokens.
     fn size_tokens(&self) -> Vec<St> {
         match self.size {
+            ButtonSize::Xs => vec![St::H1_5rem, St::Py0, St::PxSm],
             ButtonSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSp3],
             ButtonSize::Md => vec![St::H2_25rem, St::Py0, St::PxMd],
             ButtonSize::Lg => vec![St::H2_75rem, St::Py0, St::PxLg],
