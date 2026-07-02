@@ -1689,6 +1689,12 @@ impl ConnectionState {
                 .or_insert_with(|| r.create_default_state());
         }
 
+        // Drop the render-hash dedup cache across a view swap: hashes exist only to skip
+        // re-sending unchanged content, and after a swap the client's DOM for any reused
+        // region id is not guaranteed to match what the hash claims was last sent (a lost
+        // or partially-applied update would otherwise be pinned stale forever).
+        self.synced_hashes.clear();
+
         // Prune the previous view's regions (every synced region descended from a
         // CurrentRoute region) so the new view's regions render fresh, not against
         // stale ids.

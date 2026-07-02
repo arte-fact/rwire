@@ -641,6 +641,7 @@ define_token_enum! {
         MaxW64rem = 0x276 => "max-width:64rem",
         MaxW80rem = 0x277 => "max-width:80rem",
         MaxH90vh = 0x278 => "max-height:90vh",
+        MaxW60rem = 0x279 => "max-width:60rem",
 
         // Padding/Margin extended (0x280-0x285)
         PxSp3 = 0x280 => "padding-inline:var(--S3)",

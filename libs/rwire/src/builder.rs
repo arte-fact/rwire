@@ -2343,6 +2343,7 @@ pub fn build_synced_update_with_known_symbols(
     let mut has_updates = false;
     let mut rendered_cache: HashMap<u32, ElementBuilder> = HashMap::new();
 
+    let trace = std::env::var_os("RWIRE_TRACE").is_some();
     for se in synced {
         // Track the highest synced ID to know where nested ones start
         if se.id >= synced_counter {
@@ -2352,12 +2353,21 @@ pub fn build_synced_update_with_known_symbols(
         // Layer 1: Skip elements bound to a different state type
         if let Some(changed_id) = changed_state_type_id {
             if se.state_type_id != changed_id {
+                if trace {
+                    eprintln!("[rwire-trace] se={} skip: state-type", se.id);
+                }
                 continue;
             }
         }
 
         // Skip elements that don't need updating (bitmask check)
         if !se.deps.needs_update(changes) {
+            if trace {
+                eprintln!(
+                    "[rwire-trace] se={} skip: deps mask={:#x} always={} changes={:?}",
+                    se.id, se.deps.mask, se.deps.always, changes
+                );
+            }
             continue;
         }
 
@@ -2368,9 +2378,15 @@ pub fn build_synced_update_with_known_symbols(
                 if let Some(ref mut hashes) = prev_hashes {
                     let hash = rendered.content_hash();
                     if hashes.get(&se.id) == Some(&hash) {
+                        if trace {
+                            eprintln!("[rwire-trace] se={} skip: hash unchanged", se.id);
+                        }
                         continue; // Output unchanged, skip emission
                     }
                     hashes.insert(se.id, hash);
+                }
+                if trace {
+                    eprintln!("[rwire-trace] se={} RENDER", se.id);
                 }
 
                 collect_symbols_recursive_with_known(
