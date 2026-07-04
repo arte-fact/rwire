@@ -1,6 +1,9 @@
 //! Breadcrumb component.
 //!
-//! Navigation breadcrumb trail.
+//! Navigation breadcrumb trail. Crumbs are **client-routed by default** (they carry the
+//! router's `data-route` marker, like `Link::route`): a breadcrumb is in-app navigation by
+//! definition, and a raw anchor in a wire-connected app means a full page reload that drops
+//! the session. Opt out with [`Breadcrumb::external_links`] for genuinely external trails.
 //!
 //! # Example
 //!
@@ -43,6 +46,7 @@ impl BreadcrumbItem {
 #[derive(Clone, Debug, Default)]
 pub struct Breadcrumb {
     items: Vec<BreadcrumbItem>,
+    external: bool,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -69,6 +73,13 @@ impl Breadcrumb {
         self
     }
 
+    /// Render crumbs as plain anchors (full navigation) instead of client-routed links —
+    /// for the rare trail that leaves the app.
+    pub fn external_links(mut self) -> Self {
+        self.external = true;
+        self
+    }
+
     /// Compute style tokens for the breadcrumb list.
     pub fn compute_tokens(&self) -> Vec<St> {
         vec![
@@ -91,6 +102,7 @@ impl Breadcrumb {
 
         let mut ol = el(El::Ul).st(self.compute_tokens());
 
+        let external = self.external;
         let total = self.items.len();
         for (idx, item) in self.items.into_iter().enumerate() {
             let is_last = idx == total - 1;
@@ -108,11 +120,16 @@ impl Breadcrumb {
             // If link is provided and not last item, render as anchor
             if let Some(link_url) = item.link {
                 if !is_last {
-                    li = li.append([el(El::A)
+                    let mut anchor = el(El::A)
                         .st([St::TextAccent, St::NoDecoration])
                         .hover([St::Underline])
                         .at_str(At::Href, &link_url)
-                        .text(&item.label)]);
+                        .text(&item.label);
+                    if !external {
+                        // The router's interception marker — same contract as `Link::route`.
+                        anchor = anchor.attr("data-route", "");
+                    }
+                    li = li.append([anchor]);
                 } else {
                     li = li.append([el(El::Span).st([St::TextMedium]).text(&item.label)]);
                 }
@@ -157,5 +174,13 @@ mod tests {
             .item("Products", Some("/products"))
             .item("Laptop", None::<&str>);
         assert_eq!(bc.items.len(), 3);
+    }
+
+    #[test]
+    fn test_breadcrumb_is_client_routed_by_default() {
+        // In-app trails must never full-reload a wire session; external is the opt-out.
+        let bc = Breadcrumb::new();
+        assert!(!bc.external);
+        assert!(Breadcrumb::new().external_links().external);
     }
 }

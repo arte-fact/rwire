@@ -1,21 +1,25 @@
 //! Progress component.
 //!
-//! Progress bar for showing completion state.
+//! Progress bar for showing completion state. Corners follow the theme's radius scale
+//! (`RoundedSm`, not a hardcoded pill) — a flat/sharp theme gets a square bar without
+//! per-element overrides, the same lesson Badge learned with its `Square` shape.
 //!
 //! # Example
 //!
 //! ```ignore
-//! use rwire_components::Progress;
+//! use rwire_components::{Progress, ProgressSize};
 //!
 //! Progress::new()
 //!     .value(65)
 //!     .max(100)
 //!     .build()
 //!
+//! // A hairline meter for dense surfaces (cards, list rows):
 //! Progress::new()
 //!     .value(3)
 //!     .max(5)
-//!     .label("Step 3 of 5")
+//!     .size(ProgressSize::Sm)
+//!     .label("3 of 5 tasks done")
 //!     .build()
 //! ```
 
@@ -24,11 +28,23 @@ use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder, Style};
 use std::borrow::Cow;
 
+/// Progress bar thickness. `Sm` is the hairline meter dense surfaces want (a card's
+/// tasks-done line); `Md` is the classic standalone bar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProgressSize {
+    /// The classic 0.5rem bar.
+    #[default]
+    Md,
+    /// A 0.25rem hairline meter.
+    Sm,
+}
+
 /// Progress bar builder.
 #[derive(Clone, Debug)]
 pub struct Progress {
     value: u32,
     max: u32,
+    size: ProgressSize,
     label: Option<Cow<'static, str>>,
     extra_class: Option<Cow<'static, str>>,
 }
@@ -38,6 +54,7 @@ impl Default for Progress {
         Self {
             value: 0,
             max: 100,
+            size: ProgressSize::default(),
             label: None,
             extra_class: None,
         }
@@ -63,6 +80,12 @@ impl Progress {
         self
     }
 
+    /// Set the bar thickness.
+    pub fn size(mut self, size: ProgressSize) -> Self {
+        self.size = size;
+        self
+    }
+
     /// Set aria-label.
     pub fn label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
         self.label = Some(label.into());
@@ -78,9 +101,11 @@ impl Progress {
     /// Compute style tokens for the progress container.
     ///
     /// `WFull` makes the bar span its container — without it the track is auto-width and
-    /// collapses to nothing in a shrink-to-fit (e.g. flex-centered) context.
+    /// collapses to nothing in a shrink-to-fit (e.g. flex-centered) context. `RoundedSm`
+    /// (not `RoundedFull`) so the corners follow the theme's radius scale: a bar is not a
+    /// "circular thing", and a flat theme must be able to square it.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::WFull, St::BgMuted, St::RoundedFull, St::OverflowHidden]
+        vec![St::WFull, St::BgMuted, St::RoundedSm, St::OverflowHidden]
     }
 
     /// Build the progress bar into an ElementBuilder.
@@ -93,7 +118,10 @@ impl Progress {
         };
 
         let mut tokens = self.compute_tokens();
-        tokens.push(St::H05rem);
+        tokens.push(match self.size {
+            ProgressSize::Md => St::H05rem,
+            ProgressSize::Sm => St::H025rem,
+        });
         let mut container = el(El::Div)
             .st(tokens)
             .at(At::Role, Av::RoleProgressbar)
@@ -118,7 +146,7 @@ impl Progress {
             .st([
                 St::HFull,
                 St::BgPrimary,
-                St::RoundedFull,
+                St::RoundedSm,
                 St::TransitionAll,
                 St::MinW05rem,
             ])
@@ -137,16 +165,27 @@ mod tests {
         let progress = Progress::new();
         assert_eq!(progress.value, 0);
         assert_eq!(progress.max, 100);
+        assert_eq!(progress.size, ProgressSize::Md);
         assert!(progress.label.is_none());
     }
 
     #[test]
-    fn test_progress_tokens() {
+    fn test_progress_tokens_follow_the_radius_scale() {
         let progress = Progress::new();
         let tokens = progress.compute_tokens();
         assert!(tokens.contains(&St::BgMuted));
-        assert!(tokens.contains(&St::RoundedFull));
+        assert!(
+            tokens.contains(&St::RoundedSm),
+            "corners must ride the theme's radius scale (flat themes square the bar)"
+        );
+        assert!(!tokens.contains(&St::RoundedFull));
         assert!(tokens.contains(&St::OverflowHidden));
+    }
+
+    #[test]
+    fn test_progress_hairline_size() {
+        let progress = Progress::new().size(ProgressSize::Sm);
+        assert_eq!(progress.size, ProgressSize::Sm);
     }
 
     #[test]

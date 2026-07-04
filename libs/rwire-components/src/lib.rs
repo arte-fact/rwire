@@ -156,7 +156,7 @@ pub use list::{List, ListItem};
 pub use modal::{Modal, ModalSize};
 pub use nav_menu::{NavItem, NavMenu};
 pub use pagination::Pagination;
-pub use progress::Progress;
+pub use progress::{Progress, ProgressSize};
 pub use radio::Radio;
 pub use select::{Select, SelectOption};
 pub use skeleton::{Skeleton, SkeletonShape};

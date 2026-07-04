@@ -915,6 +915,8 @@ define_token_enum! {
         FieldSizingContent = 0x347 => "field-sizing:content",
         BgGreen9 = 0x348 => "background:var(--P9)",
         BgAmber9 = 0x349 => "background:var(--M9)",
+        /// Hairline bar height (Progress `Sm` — dense card/list meters).
+        H025rem = 0x34A => "height:0.25rem",
     }
 }
 

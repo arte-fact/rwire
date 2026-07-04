@@ -2220,13 +2220,21 @@ fn spinner_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     Spinner::new().size(size).label("Loading...").build()
 }
 
-fn progress_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::Progress;
-    Progress::new()
-        .value(65)
-        .max(100)
-        .label("Upload progress")
-        .build()
+fn progress_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{Progress, ProgressSize};
+    match v(variants, 0) {
+        1 => Progress::new()
+            .value(3)
+            .max(5)
+            .size(ProgressSize::Sm)
+            .label("3 of 5 tasks done")
+            .build(),
+        _ => Progress::new()
+            .value(65)
+            .max(100)
+            .label("Upload progress")
+            .build(),
+    }
 }
 
 fn skeleton_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
@@ -3083,6 +3091,23 @@ const AVATAR_SIZE: &[VariantAxis] = &[VariantAxis {
         },
     ],
     default_index: 1,
+}];
+
+const PROGRESS_SIZE: &[VariantAxis] = &[VariantAxis {
+    name: "size",
+    display_name: "Size",
+    rust_type: "ProgressSize",
+    values: &[
+        VariantValue {
+            label: "Md",
+            rust_expr: "ProgressSize::Md",
+        },
+        VariantValue {
+            label: "Sm (hairline)",
+            rust_expr: "ProgressSize::Sm",
+        },
+    ],
+    default_index: 0,
 }];
 
 const SPINNER_SIZE: &[VariantAxis] = &[VariantAxis {
@@ -3995,7 +4020,7 @@ const ENTRIES: &[ComponentEntry] = &[
         description: "Progress bars showing task completion.",
         category: Category::Feedback,
         order: 403,
-        variants: &[],
+        variants: PROGRESS_SIZE,
         bool_props: &[],
         build_demo: progress_demo,
     },

@@ -158,7 +158,8 @@ announce as experimental 0.1 with remaining items stated as known limitations.
 - **Acceptance:** A reorder of a list with focused inputs preserves each item's focus,
   caret, and scroll; covered by a morph test (`tests/morph_test.mjs`) and a wire
   round-trip test.
-- **Effort:** days — the hardest item here; budget accordingly.
+- **Effort:** days — the hardest item here; budget accordingly. This is runtime surgery
+  under the P2 policy (harness case first); it also serves as the P2 revisit checkpoint.
 
 ### T2 — WebSocket Origin validation 🔴 announce-blocker (cheap)
 - **Status:** `[ ]`
@@ -224,18 +225,38 @@ announce as experimental 0.1 with remaining items stated as known limitations.
   LiveView challenger.
 - **Effort:** ~half a day.
 
-### P2 — Runtime contributor guide
+### P2 — Runtime maintenance policy + contributor guide
 - **Status:** `[ ]`
 - **Location:** `RUNTIME_JS` in `capsule_gen.rs` (~13KB hand-minified string).
-- **Problem:** The most safety-critical file is a wall for contributors, and it keeps
-  growing (morph, reconnect, PWA, desync self-heal). The round-trip tests de-risk
-  changes but don't explain them.
-- **Fix:** Short doc: runtime structure (opcode loop, morph, event send path), naming
-  conventions, how to modify safely (edit → `wire_roundtrip` + `morph_test.mjs` →
-  size check). Decide explicitly whether/when to move to a readable source + minify
-  build step — deferring is fine, silently drifting is not.
-- **Acceptance:** Doc exists and is linked from CONTRIBUTING (R5).
-- **Effort:** ~half a day.
+- **Decision (2026-07-02):** the runtime **stays a hand-minified, Rust-embedded string
+  by design**. A TypeScript source + esbuild/minify pipeline was considered and
+  rejected: it would break the pure-Rust stack (`cargo build` is the entire toolchain),
+  pull in an npm supply chain, and require vendored-artifact + CI drift-check machinery
+  that must itself be maintained — real costs against a framework whose thesis is
+  escaping the JS ecosystem.
+- **Rationale:** the runtime is firmware, not a codebase — a small fixed-instruction
+  interpreter (~300 dense lines) with write-once stability; framework evolution happens
+  server-side (a new opcode is one `else if` branch). The maintenance workforce is
+  agents + the test harness, not drive-by human contributors (the SQLite model: core is
+  closed, quality comes from tests). The string already carries structural comments
+  (`// --- DOM morphing ---`, null-guard notes) — minified, not obfuscated.
+- **Policy (the mitigations that make the decision safe):**
+  1. **Correctness gate:** any runtime change lands with a case in the Node harness
+     (`tests/wire_roundtrip.mjs` / `morph_test.mjs`). Grow per-opcode coverage toward
+     complete — the harness, not tooling, is what catches the typo'd DOM property in a
+     rarely-hit branch.
+  2. **Size gate:** the capsule-size tripwire in CI (R2) replaces the discipline that
+     currently lives only in the author's head.
+  3. **Knowledge:** write the runtime-structure doc — opcode loop, morph (`me`/`mk`),
+     event send path (`se`/`sep`), conventions (`__hk` binding keys, ref array `r`,
+     null-guard style), and the modify-safely loop (edit → harness → size check).
+     Linked from CONTRIBUTING (R5).
+- **Revisit trigger:** re-open only if runtime surgery becomes routinely painful — e.g.
+  a post-T1 retro finding the keyed-diffing work was materially slowed by the format.
+  Until then the decision stands; don't re-litigate it per-review.
+- **Acceptance:** doc exists; CONTRIBUTING states the policy; harness coverage of the
+  opcode surface is documented (and gaps listed).
+- **Effort:** ~half a day (doc + policy wording; coverage growth is ongoing).
 
 ### P3 — Launch framing
 - **Status:** `[ ]`
