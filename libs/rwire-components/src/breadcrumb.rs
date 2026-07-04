@@ -107,7 +107,15 @@ impl Breadcrumb {
         for (idx, item) in self.items.into_iter().enumerate() {
             let is_last = idx == total - 1;
 
-            let mut li = el(El::Li).st([St::DisplayFlex, St::ItemsCenter, St::TextSm]);
+            // Compact on small screens: crumbs above the direct parent collapse, so a phone
+            // shows parent › current (the full trail is one tap up) instead of crumb soup.
+            let mut li = if idx + 2 < total {
+                el(El::Li)
+                    .st([St::DisplayNone, St::ItemsCenter, St::TextSm])
+                    .md([St::DisplayFlex])
+            } else {
+                el(El::Li).st([St::DisplayFlex, St::ItemsCenter, St::TextSm])
+            };
 
             if !is_last {
                 li = li.after([St::ContentSlash, St::MxSp2, St::TextMuted]);
