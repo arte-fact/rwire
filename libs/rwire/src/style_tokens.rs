@@ -917,6 +917,8 @@ define_token_enum! {
         BgAmber9 = 0x349 => "background:var(--M9)",
         /// Hairline bar height (Progress `Sm` — dense card/list meters).
         H025rem = 0x34A => "height:0.25rem",
+        /// A warning-toned hairline border (needs-attention panels).
+        BorderWarning = 0x34B => "border:1px solid var(--p)",
     }
 }
 
