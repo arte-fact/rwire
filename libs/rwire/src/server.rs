@@ -617,6 +617,7 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
 pub struct ServerBuilder {
     addr: SocketAddr,
     persist_interval: Duration,
+    base_path: Option<String>,
 }
 
 /// Server with root element configured, ready to run.
@@ -626,6 +627,7 @@ pub struct ServerWithRoot<F> {
     root: F,
     shared: Option<Arc<SharedServerState>>,
     capsule_config: Option<CapsuleConfig>,
+    base_path: Option<String>,
     route_handler: Option<HandlerFn>,
     router: Option<crate::router::Router>,
     theme_provider: Option<ThemeProvider>,
@@ -639,6 +641,7 @@ impl Server {
         Ok(ServerBuilder {
             addr: addr.parse()?,
             persist_interval: Duration::from_millis(100),
+            base_path: None,
         })
     }
 }
@@ -650,6 +653,15 @@ impl ServerBuilder {
     /// Configure persist interval (default 100ms).
     pub fn persist_interval(mut self, interval: Duration) -> Self {
         self.persist_interval = interval;
+        self
+    }
+
+    /// Mount the whole app under a URL prefix (e.g. `/preview/<id>`), set right alongside the bind
+    /// address so a deployment reads both from its environment in one place. Applied to the capsule
+    /// last (at [`run`](ServerWithRoot::run)), so it survives a later `.capsule_config(...)`; an
+    /// empty prefix is a no-op. See [`CapsuleConfig::base_path`](crate::CapsuleConfig::base_path).
+    pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
+        self.base_path = Some(prefix.into());
         self
     }
 
@@ -668,12 +680,30 @@ impl ServerBuilder {
             root: f,
             shared: None,
             capsule_config: None,
+            base_path: self.base_path,
             route_handler: None,
             router: None,
             theme_provider: None,
             auth: None,
             config: ServerConfig::default(),
         }
+    }
+}
+
+/// Fold a builder-level `base_path` into the capsule config as the final step before capsule
+/// generation. Applied last so it wins regardless of where `.base_path(...)` sat relative to
+/// `.capsule_config(...)`; an empty/`"/"`-only prefix is dropped (a true no-op that leaves the
+/// basic capsule intact), and a base with no prior config forces a default styled capsule so the
+/// `const BASE` line is still emitted.
+fn apply_base_path(
+    config: Option<CapsuleConfig>,
+    base_path: Option<String>,
+) -> Option<CapsuleConfig> {
+    let base_path = base_path.filter(|prefix| !prefix.trim().trim_end_matches('/').is_empty());
+    match (config, base_path) {
+        (Some(config), Some(base)) => Some(config.base_path(base)),
+        (None, Some(base)) => Some(CapsuleConfig::default().base_path(base)),
+        (config, None) => config,
     }
 }
 
@@ -736,12 +766,12 @@ where
     }
 
     /// Mount the whole app under a URL prefix (e.g. `/preview/<id>`) — see
-    /// [`CapsuleConfig::base_path`](crate::CapsuleConfig::base_path). A convenience that ensures a
-    /// capsule config exists and sets its base path, so the app is reachable behind a same-origin
-    /// reverse proxy (which strips the prefix) with no server-side path changes.
+    /// [`CapsuleConfig::base_path`](crate::CapsuleConfig::base_path). Reachable behind a same-origin
+    /// reverse proxy (which strips the prefix) with no server-side path changes. Applied to the
+    /// capsule **last** at [`run`](Self::run), so chain order doesn't matter — setting it before or
+    /// after `.capsule_config(...)` both work, and it can't be silently clobbered. Empty = no-op.
     pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
-        let config = self.capsule_config.take().unwrap_or_default();
-        self.capsule_config = Some(config.base_path(prefix));
+        self.base_path = Some(prefix.into());
         self
     }
 
@@ -900,9 +930,13 @@ where
         // Resolve initial theme if provider is set
         let initial_theme = self.theme_provider.as_ref().map(|p| p.init());
 
+        // Fold a builder-level base_path into the capsule config as the final step, so it wins
+        // regardless of chain order and works with or without a prior `.capsule_config(...)`.
+        let capsule_config = apply_base_path(self.capsule_config, self.base_path);
+
         // Generate capsule - styled if config provided, basic otherwise.
         // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
-        let (capsule, pwa_assets) = if let Some(config) = self.capsule_config {
+        let (capsule, pwa_assets) = if let Some(config) = capsule_config {
             // If theme provider is set, override config theme with initial theme
             let config = if let Some(ref theme) = initial_theme {
                 config.theme(theme.clone())
@@ -2441,6 +2475,65 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_base_path_folds_a_prefix_and_drops_empty() {
+        // A prefix with no prior config forces a default (styled) capsule carrying the base.
+        assert_eq!(
+            apply_base_path(None, Some("/preview/x".to_owned()))
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+        // A prefix merges into an existing config.
+        assert_eq!(
+            apply_base_path(Some(CapsuleConfig::new()), Some("/preview/x".to_owned()))
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+        // Empty / "/"-only / whitespace prefixes are a no-op — no config is conjured.
+        assert!(apply_base_path(None, Some(String::new())).is_none());
+        assert!(apply_base_path(None, Some("/".to_owned())).is_none());
+        assert!(apply_base_path(None, Some("   ".to_owned())).is_none());
+        // No prefix leaves the config untouched (present or absent).
+        assert!(apply_base_path(None, None).is_none());
+        assert!(apply_base_path(Some(CapsuleConfig::new()), None).is_some());
+    }
+
+    #[test]
+    fn base_path_is_order_independent_on_the_builder() {
+        use crate::builder::el;
+        use crate::protocol::El;
+
+        // Set base_path BEFORE .root()/.capsule_config() — via ServerBuilder::base_path (alongside
+        // bind). The base rides through as its own field, untouched by the later capsule_config.
+        let before = Server::bind("127.0.0.1:0")
+            .unwrap()
+            .base_path("/preview/x")
+            .root(|| el(El::Div))
+            .capsule_config(CapsuleConfig::new());
+        assert_eq!(
+            apply_base_path(before.capsule_config, before.base_path)
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+
+        // Set base_path AFTER .capsule_config() — via ServerWithRoot::base_path. This is the order
+        // the old immediate-merge silently clobbered; now both land the same prefix.
+        let after = Server::bind("127.0.0.1:0")
+            .unwrap()
+            .root(|| el(El::Div))
+            .capsule_config(CapsuleConfig::new())
+            .base_path("/preview/x");
+        assert_eq!(
+            apply_base_path(after.capsule_config, after.base_path)
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+    }
 
     #[test]
     fn session_cache_is_bounded() {
