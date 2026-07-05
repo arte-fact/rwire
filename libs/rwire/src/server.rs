@@ -735,6 +735,16 @@ where
         self
     }
 
+    /// Mount the whole app under a URL prefix (e.g. `/preview/<id>`) — see
+    /// [`CapsuleConfig::base_path`](crate::CapsuleConfig::base_path). A convenience that ensures a
+    /// capsule config exists and sets its base path, so the app is reachable behind a same-origin
+    /// reverse proxy (which strips the prefix) with no server-side path changes.
+    pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
+        let config = self.capsule_config.take().unwrap_or_default();
+        self.capsule_config = Some(config.base_path(prefix));
+        self
+    }
+
     /// Configure connection limits and timeouts (admission control).
     ///
     /// Sets the total/per-IP connection caps enforced before each WebSocket
@@ -1184,6 +1194,58 @@ fn request_line(request: &str) -> (&str, &str) {
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
+/// Proxy a matched request to a local upstream port (P2), streaming both directions until either
+/// side closes. `head` is the client's already-drained request head; its first line is rewritten to
+/// strip `prefix` so the upstream sees a root-relative path. A WebSocket upgrade needs no special
+/// handling — once the head is forwarded, frames are just bytes the pump copies each way.
+async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &str) {
+    let mut upstream = match TcpStream::connect(("127.0.0.1", port)).await {
+        Ok(upstream) => upstream,
+        Err(_) => {
+            let _ = crate::health::serve_unavailable(stream, "preview_unreachable").await;
+            return;
+        }
+    };
+    let rewritten = rewrite_proxy_head(&head, prefix);
+    if upstream.write_all(&rewritten).await.is_err() {
+        return;
+    }
+    let _ = upstream.flush().await;
+
+    // Pump both directions concurrently; the first to reach EOF (upstream closing after an HTTP
+    // response, or either side closing a WebSocket) ends the exchange. The inner scope drops both
+    // copy futures — releasing their borrows on `stream` — before the final flush.
+    {
+        let mut client_read = stream.clone();
+        let mut upstream_write = upstream.clone();
+        let to_upstream = futures::io::copy(&mut client_read, &mut upstream_write);
+        let to_client = futures::io::copy(&mut upstream, &mut stream);
+        futures::pin_mut!(to_upstream, to_client);
+        let _ = futures::future::select(to_upstream, to_client).await;
+    }
+    let _ = stream.flush().await;
+}
+
+/// Rewrite a proxied request's first line to strip the `prefix` path segment, so the upstream app
+/// sees a root-relative path (`/preview/<id>/foo` → `/foo`; the bare prefix → `/`). All other bytes
+/// (headers, any body already read) are preserved verbatim; a malformed head is passed through.
+fn rewrite_proxy_head(head: &[u8], prefix: &str) -> Vec<u8> {
+    let Some(eol) = head.windows(2).position(|w| w == b"\r\n") else {
+        return head.to_vec();
+    };
+    let line = String::from_utf8_lossy(&head[..eol]);
+    let mut parts = line.splitn(3, ' ');
+    let (Some(method), Some(path), Some(version)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return head.to_vec();
+    };
+    let stripped = path.strip_prefix(prefix).unwrap_or(path);
+    let new_path = if stripped.is_empty() { "/" } else { stripped };
+    let mut out = format!("{method} {new_path} {version}").into_bytes();
+    out.extend_from_slice(&head[eol..]);
+    out
+}
+
 /// Return the body that follows the header terminator, if present.
 fn request_body(request: &str) -> &str {
     request.split_once("\r\n\r\n").map_or("", |(_, body)| body)
@@ -1367,6 +1429,19 @@ async fn handle_client<F>(
             return;
         }
         // Valid session: fall through to normal capsule/WebSocket handling.
+    }
+
+    // Reverse-proxy gate (after auth, so previews inherit the gate): a matched path forwards to a
+    // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw bytes.
+    if let Some(resolver) = config.proxy.as_ref() {
+        let (_, path) = request_line(&peek_str);
+        if let Some((port, prefix)) = resolver.resolve(path) {
+            let mut head = vec![0u8; n];
+            if stream.read_exact(&mut head).await.is_ok() {
+                serve_proxy(stream, head, port, &prefix).await;
+            }
+            return;
+        }
     }
 
     // Extract the session ID from the cookie, but only trust it if it has the
@@ -2301,13 +2376,35 @@ where
 
 #[cfg(test)]
 mod auth_tests {
-    use super::{request_body, request_line, url_decode, AuthGate};
+    use super::{request_body, request_line, rewrite_proxy_head, url_decode, AuthGate};
 
     #[test]
     fn url_decode_handles_plus_and_percent() {
         assert_eq!(url_decode("hello"), "hello");
         assert_eq!(url_decode("a+b"), "a b");
         assert_eq!(url_decode("p%40ss%2Fword"), "p@ss/word");
+    }
+
+    #[test]
+    fn proxy_head_strips_the_prefix_and_preserves_the_rest() {
+        let head = b"GET /preview/ws-abc/dash?x=1 HTTP/1.1\r\nHost: h\r\n\r\n";
+        let out = rewrite_proxy_head(head, "/preview/ws-abc");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "GET /dash?x=1 HTTP/1.1\r\nHost: h\r\n\r\n"
+        );
+        // The bare mount point becomes root.
+        let bare = b"GET /preview/ws-abc HTTP/1.1\r\n\r\n";
+        assert!(
+            String::from_utf8(rewrite_proxy_head(bare, "/preview/ws-abc"))
+                .unwrap()
+                .starts_with("GET / HTTP/1.1")
+        );
+        // A WebSocket upgrade line is rewritten the same way (headers untouched → still upgrades).
+        let ws = b"GET /preview/ws-abc/ HTTP/1.1\r\nUpgrade: websocket\r\n\r\n";
+        let got = String::from_utf8(rewrite_proxy_head(ws, "/preview/ws-abc")).unwrap();
+        assert!(got.starts_with("GET / HTTP/1.1"));
+        assert!(got.contains("Upgrade: websocket"));
     }
 
     #[test]

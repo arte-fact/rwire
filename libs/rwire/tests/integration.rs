@@ -1,10 +1,13 @@
 //! Integration tests for the rwire server.
 
 use async_std::io::ReadExt;
-use async_std::net::TcpStream;
+use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
-use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, MemoryState, Server, State, StorageType};
+use rwire::{
+    el, El, ElementBuilder, Ev, HandlerSpec, MemoryState, ProxyResolver, Server, ServerConfig,
+    State, StorageType,
+};
 use std::time::Duration;
 
 /// Read a full HTTP response by parsing Content-Length and reading until complete.
@@ -160,6 +163,83 @@ async fn test_capsule_ships_empty_name_maps() {
 
     drop(stream);
     server_task.cancel().await;
+}
+
+/// A minimal upstream that echoes the request path it received, so a proxy test can assert the
+/// prefix was stripped. Responds `Connection: close` so the reader sees EOF.
+async fn spawn_echo_upstream(addr: &'static str) -> task::JoinHandle<()> {
+    let listener = TcpListener::bind(addr).await.unwrap();
+    task::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
+            let mut buf = [0u8; 1024];
+            let n = sock.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let path = req
+                .lines()
+                .next()
+                .and_then(|l| l.split(' ').nth(1))
+                .unwrap_or("?")
+                .to_string();
+            let body = format!("UPSTREAM saw {path}");
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.flush().await;
+        }
+    })
+}
+
+/// The reverse proxy forwards a matched path to the upstream with its prefix stripped, and leaves
+/// unmatched paths to the app itself — the same-origin preview mechanism (claw's P2 CD flow).
+#[async_std::test]
+async fn proxy_forwards_matched_paths_and_strips_prefix() {
+    let upstream = spawn_echo_upstream("127.0.0.1:19010").await;
+    let server = task::spawn(async {
+        let _ = Server::bind("127.0.0.1:19011")
+            .unwrap()
+            .root(build_simple)
+            .config(ServerConfig::new().proxy(ProxyResolver::new(|path| {
+                path.starts_with("/preview/x")
+                    .then(|| (19010u16, "/preview/x".to_string()))
+            })))
+            .run()
+            .await;
+    });
+    task::sleep(Duration::from_millis(150)).await;
+
+    // A proxied path reaches the upstream with `/preview/x` stripped off.
+    let mut proxied = TcpStream::connect("127.0.0.1:19011").await.unwrap();
+    proxied
+        .write_all(b"GET /preview/x/dash?y=1 HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .unwrap();
+    let proxied_resp = read_full_http_response(&mut proxied).await;
+    assert!(
+        proxied_resp.contains("UPSTREAM saw /dash?y=1"),
+        "proxy must strip the prefix and forward: {proxied_resp}"
+    );
+
+    // A non-matching path is served by the app itself, not proxied.
+    let mut direct = TcpStream::connect("127.0.0.1:19011").await.unwrap();
+    direct
+        .write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .unwrap();
+    let direct_resp = read_full_http_response(&mut direct).await;
+    assert!(
+        direct_resp.contains("<!DOCTYPE html>") && !direct_resp.contains("UPSTREAM"),
+        "unmatched paths bypass the proxy: {direct_resp}"
+    );
+
+    drop(proxied);
+    drop(direct);
+    upstream.cancel().await;
+    server.cancel().await;
 }
 
 /// Test that counter app capsule has correct elements

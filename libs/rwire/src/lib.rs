@@ -106,7 +106,7 @@ pub use persist::{PersistError, PersistRegistry, PersistableType, SqliteStore};
 pub use rusqlite;
 
 // Config exports
-pub use config::ServerConfig;
+pub use config::{ProxyResolver, ServerConfig};
 
 // Registry exports
 pub use pwa::{Pwa, PwaDisplay};

@@ -104,10 +104,10 @@ else if(o===O.R){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;r[
 else if(o===O.DB){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let ms=(d[i++]<<8)|d[i++];let tm;r[f].__hk='d'+t+'_'+h;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
 else if(o===O.RP){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].__hk='p'+t+'_'+h+'_'+prm.join(',');r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>sep(h,t,f,prm,e,r[f]),e,r[f])})}
 else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
-else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
-else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
-else if(o===O.RUI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.pushState(null,'',u)}
-else if(o===O.RRI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.replaceState(null,'',u)}
+else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',bj(s[k]))}
+else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',bj(s[k]))}
+else if(o===O.RUI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.pushState(null,'',bj(u))}
+else if(o===O.RRI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.replaceState(null,'',bj(u))}
 else if(o===O.SS){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
 else if(o===O.SU){let[f,fl]=rv(d,i);i+=fl;let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
 else if(o===O.SP){let[f,fl]=rv(d,i);i+=fl;let p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
@@ -133,14 +133,16 @@ function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=d
 if('scrollRestoration' in history)history.scrollRestoration='manual';
 let rc=0,rn=false,op=false,ot;
 function ov(show,off){let o=document.getElementById('__rwov');if(!o){o=document.createElement('div');o.id='__rwov';o.style.cssText='position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);font-family:inherit';o.innerHTML='<div style="background:var(--a,#fff);color:var(--k,#111);border:1px solid var(--c,rgba(128,128,128,.3));border-radius:.5rem;padding:1.1rem 1.4rem;text-align:center;max-width:18rem"><div id="__rwovm" style="font-weight:600;margin-bottom:.7rem"></div><button id="__rwovr" style="font:inherit;cursor:pointer;border:1px solid var(--c,rgba(128,128,128,.4));background:var(--r,rgba(128,128,128,.12));color:inherit;border-radius:.375rem;padding:.35rem .85rem">Retry</button></div>';document.body.appendChild(o);o.querySelector('#__rwovr').onclick=()=>{rc=0;connect()}}o.querySelector('#__rwovm').textContent=off?'You’re offline':'Reconnecting…';o.style.display=show?'flex':'none'}
+function bx(p){return BASE&&p.slice(0,BASE.length)===BASE?(p.slice(BASE.length)||'/'):p}
+function bj(u){return BASE+u}
 function connect(){
-w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
+w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+BASE);
 w.binaryType='arraybuffer';
 w.onopen=()=>{
 clearTimeout(ot);ov(false);
 if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
 rn=false;rc=0;op=true;
-if(location.pathname!=='/')w.send('R'+location.pathname);
+if(bx(location.pathname)!=='/')w.send('R'+bx(location.pathname));
 if(location.hash)sh(location.hash)};
 w.onmessage=e=>x(new Uint8Array(e.data));
 w.onclose=()=>{rn=true;clearTimeout(ot);ot=setTimeout(()=>ov(true,!navigator.onLine),600);if(op&&rc>=2)fetch('/ready',{cache:'no-store'}).then(()=>location.reload()).catch(()=>{});setTimeout(connect,Math.min(1000*Math.pow(2,rc++),30000))};
@@ -149,9 +151,9 @@ connect();
 addEventListener('online',()=>{if(w.readyState>1){rc=0;connect()}});
 addEventListener('offline',()=>{if(rn)ov(true,true)});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&w.readyState>1){rc=0;connect()}});
-document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){if(w&&w.readyState===1){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}/* socket not open (reconnecting): fall through to a normal full navigation instead of a dead click */}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
+document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){if(w&&w.readyState===1){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',bj(h));w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}/* socket not open (reconnecting): fall through to a normal full navigation instead of a dead click */}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.target.matches&&e.target.matches('[data-enter-submit]')){e.preventDefault();let f=e.target.closest('form');if(f)f.requestSubmit()}});
-window.addEventListener('popstate',()=>{w.send('R'+location.pathname);if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
+window.addEventListener('popstate',()=>{w.send('R'+bx(location.pathname));if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
 
 /// Client actions JS (~250 bytes): targets (bool toggle) and selectors (exclusive enum).
 ///
@@ -179,6 +181,7 @@ pub fn generate_capsule() -> String {
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
 <script>
 const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
+const BASE='';
 {BIND_JS}
 {RUNTIME_JS}
 </script>
@@ -344,6 +347,11 @@ pub struct CapsuleConfig {
     pub fonts: Vec<FontFace>,
     /// Optional PWA configuration (manifest, service worker, icons, head tags).
     pub(crate) pwa: Option<crate::pwa::Pwa>,
+    /// URL prefix this app is mounted under (e.g. `/preview/<id>`), or empty for the root. When
+    /// set, the client runtime prefixes its WebSocket URL and history entries with it while still
+    /// speaking root-relative routes to the server — so a reverse proxy can strip the prefix and
+    /// the app needs no server-side path changes. PWA install is suppressed under a prefix.
+    pub(crate) base_path: String,
 }
 
 impl CapsuleConfig {
@@ -365,6 +373,24 @@ impl CapsuleConfig {
     /// Set the theme.
     pub fn theme(mut self, theme: Theme) -> Self {
         self.theme = theme;
+        self
+    }
+
+    /// Mount this app under a URL prefix (e.g. `/preview/<id>`). Empty means the root (default).
+    /// The client runtime prefixes its WebSocket URL and browser-history entries with it, while
+    /// still sending root-relative routes to the server — so a same-origin reverse proxy strips the
+    /// prefix and the server needs no path awareness. A leading `/` is ensured; a trailing `/` is
+    /// trimmed.
+    pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
+        let raw = prefix.into();
+        let trimmed = raw.trim().trim_end_matches('/');
+        self.base_path = if trimmed.is_empty() {
+            String::new()
+        } else if trimmed.starts_with('/') {
+            trimmed.to_owned()
+        } else {
+            format!("/{trimmed}")
+        };
         self
     }
 
@@ -533,12 +559,20 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
         ""
     };
 
-    // PWA head tags (title, theme-color, manifest link, icons, SW registration).
-    let pwa_head = config
-        .pwa
-        .as_ref()
-        .map(|p| p.head(&config.theme))
-        .unwrap_or_default();
+    // PWA head tags (title, theme-color, manifest link, icons, SW registration) — suppressed under
+    // a base path: those URLs are root-absolute (`/sw.js`, `/manifest.webmanifest`, `/pwa/*`) and a
+    // mounted preview needn't be installable, so we simply don't advertise them.
+    let pwa_head = if config.base_path.is_empty() {
+        config
+            .pwa
+            .as_ref()
+            .map(|p| p.head(&config.theme))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let base_js = base_path_js(&config.base_path);
 
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{pwa_head}
@@ -546,12 +580,24 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
 <div id="rw"></div>
 <script>
 const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
+{base_js}
 {client_actions_js}
 {BIND_JS}
 {RUNTIME_JS}
 </script>
 </body></html>"#
     )
+}
+
+/// The `const BASE=…` line the client runtime reads to prefix its WebSocket URL and history while
+/// speaking root-relative routes to the server. Only `[A-Za-z0-9._/-]` survive, so the injected
+/// literal can't break out of its quotes; anything else yields the safe empty base.
+fn base_path_js(base_path: &str) -> String {
+    let safe = base_path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'));
+    let value = if safe { base_path } else { "" };
+    format!("const BASE='{value}';")
 }
 
 #[cfg(test)]
@@ -564,6 +610,44 @@ mod tests {
         let config = CapsuleConfig::new();
         assert_eq!(config.theme.mode, ThemeMode::Light);
         assert!(config.theme.palette_ref().is_none());
+    }
+
+    #[test]
+    fn base_path_is_normalized_and_injected() {
+        // Leading slash ensured, trailing trimmed.
+        assert_eq!(
+            CapsuleConfig::new().base_path("preview/x/").base_path,
+            "/preview/x"
+        );
+        assert_eq!(
+            CapsuleConfig::new().base_path("/preview/x").base_path,
+            "/preview/x"
+        );
+        assert_eq!(CapsuleConfig::new().base_path("").base_path, "");
+
+        // The default (no base) injects an empty BASE; a mount injects the prefix and drops PWA.
+        let plain = generate_styled_capsule(&CapsuleConfig::dark(), ".c1{}");
+        assert!(plain.contains("const BASE='';"));
+        let mounted = generate_styled_capsule(
+            &CapsuleConfig::dark()
+                .pwa(crate::pwa::Pwa::new("x"))
+                .base_path("/preview/ws-abc"),
+            ".c1{}",
+        );
+        assert!(mounted.contains("const BASE='/preview/ws-abc';"));
+        assert!(
+            !mounted.contains("manifest.webmanifest"),
+            "PWA head must be suppressed under a base path"
+        );
+        // The client runtime prefixes its socket URL and reads BASE back out.
+        assert!(mounted.contains("location.host+BASE"));
+    }
+
+    #[test]
+    fn base_path_js_rejects_unsafe_characters() {
+        assert_eq!(base_path_js("/preview/ws-1"), "const BASE='/preview/ws-1';");
+        // A quote/injection attempt collapses to the empty base.
+        assert_eq!(base_path_js("/x';evil//"), "const BASE='';");
     }
 
     #[test]
