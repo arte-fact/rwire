@@ -52,10 +52,10 @@ with the release track — nothing in it blocks 0.1.
 | 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 5 |
 | 3 — Technical gaps | 6 | 2 |
-| 4 — Positioning & launch | 3 | 1 |
+| 4 — Positioning & launch | 3 | 3 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 2 |
-| **All** | **28** | **16** |
+| **All** | **28** | **18** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -275,7 +275,13 @@ with the release track — nothing in it blocks 0.1.
 ## Phase 4 — Positioning & launch
 
 ### P1 — Public comparison page
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `05-advanced/comparison.md`: the
+  honest version — current numbers (13KB/4.7KB gz runtime, ~17KB capsule),
+  the four genuine differentiators, an explicit trade-offs section (latency
+  model, memory/scaling, no SSR, young ecosystem), and the WASM-framework
+  contrast. The internal study got a staleness note (its 1.5KB figure
+  predates lazy delivery); unverifiable multipliers were dropped rather than
+  repeated.
 - **Location:** `docs/comparative-study.md` exists; not public-facing.
 - **Problem:** "Why this over Phoenix LiveView / Blazor Server / htmx / Leptos?" is
   every reader's first question.
@@ -306,7 +312,11 @@ with the release track — nothing in it blocks 0.1.
   rwire-runtime repo's own docs; CONTRIBUTING links out).
 
 ### P3 — Launch framing
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). README gains a **Status & scope**
+  section ahead of Quick Start: experimental 0.x with the versioning policy,
+  the self-hosted/internal/personal niche stated as the design target, and
+  the three structural trade-offs before the feature list, linking the
+  comparison page.
 - **Fix:** Announce as **experimental 0.1**, aimed at self-hosted tools, dashboards,
   internal and personal software. State known limitations up front (T3–T6, latency
   model, scale ceiling) — the AUDIT_ROADMAP/this-file style of public honesty *is*

@@ -24,7 +24,23 @@ Traditional web frameworks ship large JavaScript bundles to the browser. rwire i
 - **No client-side state management**: All state lives on the server
 - **Rust everywhere**: Write UI logic in Rust with full type safety
 - **Binary protocol**: Compact opcodes minimize bandwidth
-- **Reactive updates**: Only changed elements re-render
+- **Reactive updates**: Only changed elements re-render; keyed diffing preserves input state across reorders
+
+## Status & scope
+
+rwire is **experimental (0.x)**: breaking changes are normal (semver-minor,
+changelogged) and the wire protocol is deliberately unstable — the runtime
+ships from the same binary, so there is never a compatibility matrix.
+
+It is built for **self-hosted software, dashboards, internal tools, and
+personal apps** — anywhere the server is close and the audience is bounded.
+Know the trade-offs before the features: every non-cosmetic interaction is a
+WebSocket round-trip, server memory scales with open connections (single
+process, no horizontal-scaling story yet), and there is no SSR — crawlers and
+no-JS clients see a blank page. If those hurt your use case, a different
+architecture will serve you better; see
+[How rwire Compares](apps/rwire-docs/docs/05-advanced/comparison.md) for an
+honest look at the design space.
 
 ## Quick Start
 
