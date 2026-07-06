@@ -13,6 +13,17 @@ before any announcement because they're the first things a skeptical evaluator w
 Extended 2026-07-06 with the runtime-extraction decision (Phase 5, supersedes P2) and
 the content & editing feature track (Phase 6).
 
+**Status notes (2026-07-06):**
+- The repo is **already public** at `github.com/arte-fact/rwire` (the claw rwire-app
+  template tracks it as a git dep). Phase 2 hygiene — R1 LICENSE above all — is
+  therefore *overdue*, not preparatory. crates.io name availability (R3) still
+  unverified.
+- claw-rwire's Platform II roadmap now formally **adopts** F7 (`Chat` family, P4a),
+  F2 (`FileTree`/`FileExplorer`, P5c), and optionally F1 (`StreamedContent`, P4c
+  logs) — no hand-rolls. That makes **Phase 5 → F1 → F7 the hot path**: claw's
+  Platform II blocks on it.
+- First F7 brick shipped: `El::Details`/`El::Summary` (commit `6260436`).
+
 **Suggested sequence:** Phase 1 (housekeeping) → Phase 2 (mechanics) → Phase 5 (runtime
 extraction) → T1 + T2 → announce as experimental 0.1 with remaining items stated as
 known limitations. Phase 6 (features) starts after the extraction and can interleave
@@ -477,9 +488,9 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
   required methods (`key`/`author`/`body`), defaulted extras (`time`/`tag`/`detail`/
   `groups_with`), and a chrome-free `row()` escape hatch for system lines and
   interactive gate rows. Collapsible details use native `<details>`/`<summary>`
-  (new `El::Details`/`El::Summary` — replaces claw's server-round-trip toggles;
-  zero-latency, free a11y). Full draft with the claw adoption sketch:
-  `docs/chat-component-design.md`.
+  (`El::Details`/`El::Summary` — shipped `6260436` — replaces claw's
+  server-round-trip toggles; zero-latency, free a11y). Full draft with the claw
+  adoption sketch: `docs/chat-component-design.md`.
 - **Fix direction — composable parts under one `Chat` family** (usable whole or à la
   carte):
   - **Shell:** transcript over a pinned composer that reserves its own height (never
