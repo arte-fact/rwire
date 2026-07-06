@@ -197,7 +197,7 @@ fn render_room(room: &Room) -> ElementBuilder {
         room.typing_at > 0 && now_secs().saturating_sub(room.typing_at) < TYPING_WINDOW_SECS;
     ChatTranscript::new()
         .items_plain(room.messages.iter())
-        .writing(typing.then(|| Cow::Borrowed("someone is typing…")))
+        .writing(typing.then_some(Cow::Borrowed("someone is typing…")))
         .empty_state(
             el(El::Div)
                 .st([St::TextCenter, St::TextMuted, St::PLg])
