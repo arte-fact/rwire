@@ -388,8 +388,9 @@ Don't refactor:
   assistant app; other agents commit rwire changes from there). Do breaking changes,
   then fix consumers using compiler errors as guidance — and run the claw-rwire
   smoke-check from "Before Committing" so it doesn't rot silently.
-- No need for formal deprecation warnings or versioning (pre-release; see
-  RELEASE_ROADMAP.md R4 for the post-publish policy).
+- Versioning: 0.x semver discipline once published — breaking changes bump the
+  minor and get a CHANGELOG.md entry; the wire protocol is explicitly unstable
+  (no compat matrix: the runtime ships from the same binary).
 
 ### Test Coverage
 

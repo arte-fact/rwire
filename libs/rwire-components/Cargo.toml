@@ -1,7 +1,12 @@
 [package]
 name = "rwire-components"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+license.workspace = true
+repository.workspace = true
+description = "UI component library for rwire: layout, forms, chat, navigation, feedback"
+keywords = ["web", "ui", "components", "websocket"]
+categories = ["web-programming", "gui"]
 
 [dependencies]
-rwire = { path = "../rwire" }
+rwire = { path = "../rwire", version = "0.1.0" }

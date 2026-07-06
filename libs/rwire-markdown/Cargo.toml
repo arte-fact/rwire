@@ -1,8 +1,13 @@
 [package]
 name = "rwire-markdown"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+license.workspace = true
+repository.workspace = true
+description = "Markdown rendering to rwire element trees, with table-driven code highlighting"
+keywords = ["web", "markdown", "ui"]
+categories = ["web-programming"]
 
 [dependencies]
-rwire = { path = "../rwire" }
+rwire = { path = "../rwire", version = "0.1.0" }
 pulldown-cmark = "0.12"

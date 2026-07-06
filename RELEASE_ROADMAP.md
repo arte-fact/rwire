@@ -50,12 +50,12 @@ with the release track — nothing in it blocks 0.1.
 | Phase | Total | Done |
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 3 |
-| 2 — Release mechanics | 5 | 2 |
+| 2 — Release mechanics | 5 | 5 |
 | 3 — Technical gaps | 6 | 2 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 2 |
-| **All** | **28** | **13** |
+| **All** | **28** | **16** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -137,7 +137,14 @@ with the release track — nothing in it blocks 0.1.
   whole-capsule budget can join later.
 
 ### R3 — Crate metadata + publishability
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). **All five names are FREE on crates.io**
+  (checked via API). `[workspace.package]` inheritance (version, license,
+  repository) + per-crate description/keywords/categories; path deps carry
+  `version = "0.1.0"`; rwire packages the runtime artifact + root README
+  (verified via `cargo package --list`). `rwire-macros` passes a full
+  `publish --dry-run`; the dependent crates package cleanly but can only
+  fully verify once their deps are on the registry — publish order:
+  macros → rwire → components/themes/markdown.
 - **Location:** `libs/*/Cargo.toml` (all currently bare: no description/license/repo).
 - **Problem:** `cargo publish` fails without metadata; path deps need `version =`
   fields; crates.io name availability for `rwire` (and `rwire-*`) is unverified —
@@ -150,7 +157,10 @@ with the release track — nothing in it blocks 0.1.
 - **Effort:** ~half a day.
 
 ### R4 — CHANGELOG + versioning policy
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). CHANGELOG.md (0.1.0 unreleased,
+  feature summary) with the policy up top: 0.x semver discipline, breaking →
+  minor bump + changelog entry, protocol explicitly unstable (no compat
+  matrix by construction). CLAUDE.md deprecation section aligned.
 - **Problem:** CLAUDE.md declares "experimental phase; breaking changes allowed; no
   versioning" — fine private, unworkable once strangers depend on the crates.
 - **Fix:** Add `CHANGELOG.md` (start at 0.1.0). Policy: 0.x semver discipline —
@@ -161,7 +171,10 @@ with the release track — nothing in it blocks 0.1.
 - **Effort:** ~1h.
 
 ### R5 — Community files
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). CONTRIBUTING.md (build/test incl. the
+  Node harness caveat, runtime workflow + drift gate, code rules, dual-license
+  contribution clause) + bug/feature issue templates. CoC deferred until
+  there's a community to conduct.
 - **Fix:** `CONTRIBUTING.md` (build/test instructions incl. the Node harness, code
   rules distilled from CLAUDE.md, the runtime-modification pointer from P2), issue
   templates, optionally a Code of Conduct.
