@@ -53,9 +53,9 @@ with the release track — nothing in it blocks 0.1.
 | 2 — Release mechanics | 5 | 1 |
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
-| 5 — Runtime extraction | 3 | 1 |
+| 5 — Runtime extraction | 3 | 2 |
 | 6 — Content & editing | 8 | 0 |
-| **All** | **28** | **3** |
+| **All** | **28** | **4** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -325,7 +325,17 @@ path is Node-free under both layouts.
 - **Effort:** ~2–4 days (the port is mechanical; the tests are the real work).
 
 ### RT2 — Embed the built artifact
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `RUNTIME_JS` is now
+  `include_str!("../assets/runtime.min.js")`; the ~150-line hand-minified
+  string plus `CLIENT_ACTIONS_JS`/`BIND_JS` are deleted, the capsule templates
+  slimmed (maps live in the bundle; client actions unconditional), and
+  `CapsuleConfig.has_client_actions` removed. `npm run sync` is the only write
+  path; the wire harness now targets the vendored artifact by default (local
+  staleness gate on any machine with node; CI drift-diff lands with R2).
+  Verified end-to-end: full-stack E2E (`runtime/e2e/counter.mjs`) drives the
+  shipped artifact over a real WebSocket against a live server — clicks
+  round-trip and patch the DOM. 711 workspace tests green; CLAUDE.md updated
+  (element recipe is now a one-line enum edit; runtime workflow documented).
 - **Location:** `capsule_gen.rs` (string constant → `include_str!`), new checked-in
   `libs/rwire/assets/runtime.min.js`.
 - **Fix direction:** embed via `include_str!` so the asset ships in the crate package
