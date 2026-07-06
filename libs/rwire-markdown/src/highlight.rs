@@ -48,6 +48,8 @@ impl LangSpec {
             "bash" | "sh" | "shell" | "zsh" => Some(BASH),
             "sql" => Some(SQL),
             "toml" => Some(TOML),
+            "js" | "javascript" | "jsx" | "ts" | "typescript" | "tsx" | "mjs" => Some(JS),
+            "css" => Some(CSS),
             "yaml" | "yml" => Some(YAML),
             _ => None,
         }
@@ -74,6 +76,39 @@ const RUST: LangSpec = LangSpec {
     block_comment: Some(("/*", "*/")),
     string_delims: &['"'],
     case_insensitive: false,
+};
+
+/// One spec covers JS and TS: TS keywords are harmless extras in JS code.
+const JS: LangSpec = LangSpec {
+    keywords: &[
+        "abstract", "any", "as", "async", "await", "boolean", "break", "case", "catch", "class",
+        "const", "continue", "debugger", "declare", "default", "delete", "do", "else", "enum",
+        "export", "extends", "false", "finally", "for", "function", "if", "implements", "import",
+        "in", "infer", "instanceof", "interface", "is", "keyof", "let", "namespace", "never",
+        "new", "null", "number", "of", "readonly", "return", "static", "string", "super",
+        "switch", "this", "throw", "true", "try", "type", "typeof", "undefined", "unknown",
+        "var", "void", "while", "with", "yield",
+    ],
+    line_comment: Some("//"),
+    block_comment: Some(("/*", "*/")),
+    string_delims: &['"', '\'', '`'],
+    case_insensitive: false,
+};
+
+/// Approximate: CSS has no reserved words, so at-rule/value words act as the
+/// keyword set; comments, strings, and numbers carry most of the coloring.
+/// (HTML is deliberately unsupported — tag structure needs a markup lexer,
+/// not a token lexer; it falls back to raw text.)
+const CSS: LangSpec = LangSpec {
+    keywords: &[
+        "media", "supports", "keyframes", "import", "charset", "font", "root", "hover", "focus",
+        "active", "inherit", "initial", "unset", "auto", "none", "important", "solid", "flex",
+        "grid", "block", "absolute", "relative", "fixed", "sticky",
+    ],
+    line_comment: None,
+    block_comment: Some(("/*", "*/")),
+    string_delims: &['"', '\''],
+    case_insensitive: true,
 };
 
 const JSON: LangSpec = LangSpec {
@@ -306,6 +341,16 @@ mod tests {
     fn unknown_language_is_none() {
         assert!(highlight("whatever", "brainfuck").is_none());
         assert!(highlight("x", "").is_none());
+    }
+
+    #[test]
+    fn js_ts_and_css_highlight() {
+        let tokens = assert_roundtrip("const x = await f(`hi ${y}`); // done", "ts");
+        assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Keyword)));
+        assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::Comment)));
+        let css = assert_roundtrip("/* note */ .a { color: red !important; }", "css");
+        assert!(css.iter().any(|t| matches!(t.kind, TokenKind::Comment)));
+        assert!(highlight("<div>", "html").is_none(), "html stays raw");
     }
 
     #[test]
