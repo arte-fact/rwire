@@ -583,7 +583,17 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 - **Effort:** ~3–4 days.
 
 ### F8 — Dogfood integration: docs, website, examples, design system
-- **Status:** `[ ]`
+- **Status:** `[~]` Chat side done (2026-07-06): **`examples/chat`** — a fully
+  functional multi-tab chatroom, the first public demo of `#[storage(shared)]`
+  broadcast (nickname join; hidden-field identity; typing indicator via the
+  new `Composer::on_draft`; room capped at 100, non-persistent). Live-verified
+  by `runtime/e2e/chat.mjs`: two sandboxed clients over real WebSockets — the
+  typing indicator and messages cross connections. Docs: StreamedContent +
+  Chat family sections in data-display.md. Deliberate trim: the chatroom has
+  no load-older sentinel (single-state renderers can't window shared data
+  per-user; the sentinel's live exercise belongs to per-connection-state apps
+  — the editor example / claw). Remaining: editor example + docs FileTree +
+  website embeds — blocked on F2–F6.
 - **Fix direction:**
   - **Docs site:** sidebar becomes a `FileTree` over `docs/`; long pages stream via
     F1; code blocks colored via F4.

@@ -10,6 +10,7 @@ members = [
     "apps/rwire-docs",
     "apps/rwire-design-system",
     "apps/rwire-examples",
+    "examples/chat",
     "examples/counter",
     "examples/todolist",
     "examples/todo-combined",

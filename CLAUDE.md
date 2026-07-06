@@ -69,6 +69,7 @@ rwire/
 │   ├── rwire-design-system/ # Component showcase
 │   └── rwire-examples/      # Examples gallery
 └── examples/
+    ├── chat/                # Multi-tab chatroom: shared state + Chat family (E2E: runtime/e2e/chat.mjs)
     ├── counter/             # Simple counter app
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef dynamic binding

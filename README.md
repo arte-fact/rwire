@@ -219,6 +219,7 @@ rwire/
 │   ├── rwire-design-system/ # Component catalog / showcase
 │   └── rwire-examples/      # Examples gallery
 └── examples/
+    ├── chat/                # Multi-tab chatroom on shared state (ChatItem + broadcast)
     ├── counter/             # Simple counter
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef + JSON file persistence

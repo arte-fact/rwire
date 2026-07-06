@@ -41,6 +41,8 @@ pub struct Composer {
     on_submit: Option<HandlerSpec>,
     compact: bool,
     max_height: Option<Cow<'static, str>>,
+    hidden_fields: Vec<(Cow<'static, str>, Cow<'static, str>)>,
+    on_draft: Option<HandlerSpec>,
 }
 
 impl Composer {
@@ -88,6 +90,24 @@ impl Composer {
     }
 
     /// Single-row form factor (field beside the send button, no card chrome).
+    /// Ride a hidden input along with the submission (e.g. the sender's name
+    /// in a chatroom) — form payloads collect every named field.
+    pub fn hidden_field(
+        mut self,
+        name: impl Into<Cow<'static, str>>,
+        value: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        self.hidden_fields.push((name.into(), value.into()));
+        self
+    }
+
+    /// Fire `handler` (debounced) while the user is composing — the hook for
+    /// typing/writing indicators.
+    pub fn on_draft(mut self, handler: HandlerSpec) -> Self {
+        self.on_draft = Some(handler);
+        self
+    }
+
     pub fn compact(mut self, compact: bool) -> Self {
         self.compact = compact;
         self
@@ -118,6 +138,9 @@ impl Composer {
                 rwire::style::Style::new()
                     .set("max-height", self.max_height.as_deref().unwrap_or("40vh")),
             );
+        if let Some(h) = self.on_draft.clone() {
+            field = field.on_debounced(Ev::Input, h, 400);
+        }
         if let Some(ref id) = self.id {
             field = field.id(id.as_ref());
         }
@@ -156,6 +179,12 @@ impl Composer {
         let mut form = el(El::Form);
         if let Some(handler) = self.on_submit.clone() {
             form = form.on(Ev::Submit, handler);
+        }
+        for (name, value) in &self.hidden_fields {
+            form = form.append([el(El::Input)
+                .at(At::Type, Av::Hidden)
+                .at_str(At::Name, name.as_ref())
+                .at_str(At::Value, value.as_ref())]);
         }
         if self.compact {
             return form
