@@ -8,10 +8,11 @@ import * as OP from "./opcodes.ts";
 import { st, E, V, P, Y, AT, AV, SE, A, type RwEl } from "./state.ts";
 import { rv } from "./varint.ts";
 import { sa } from "./sanitize.ts";
-import { se, sep, snd } from "./events.ts";
+import { sep } from "./events.ts";
 import { fm } from "./morph.ts";
 import { BL, xi } from "./bind.ts";
 import { fl2, fb2, sl2, sb2, uf2, us2 } from "./actions.ts";
+import { bind } from "./delegate.ts";
 
 export function x(d: Uint8Array): void {
   const r: RwEl[] = [];
@@ -182,10 +183,7 @@ export function x(d: Uint8Array): void {
         const [h, hl] = rv(d, i);
         i += hl;
         r[f].__hk = "r" + t + "_" + h;
-        r[f].addEventListener(V[t] || "click", (e) => {
-          e.preventDefault();
-          snd(() => se(h, t, f, e, r[f]), e, r[f]);
-        });
+        bind(r[f], V[t] || "click", { h, t, f });
       } else if (o === OP.BIND_DEBOUNCED) {
         const [f, fl] = rv(d, i);
         i += fl;
@@ -193,13 +191,8 @@ export function x(d: Uint8Array): void {
         const [h, hl] = rv(d, i);
         i += hl;
         const ms = (d[i++] << 8) | d[i++];
-        let tm: ReturnType<typeof setTimeout>;
         r[f].__hk = "d" + t + "_" + h;
-        r[f].addEventListener(V[t] || "click", (e) => {
-          e.preventDefault();
-          clearTimeout(tm);
-          tm = setTimeout(() => se(h, t, f, e, r[f]), ms);
-        });
+        bind(r[f], V[t] || "click", { h, t, f, ms });
       } else if (o === OP.BIND_REMOTE_PARAM) {
         const [f, fl] = rv(d, i);
         i += fl;
@@ -210,10 +203,7 @@ export function x(d: Uint8Array): void {
           prm = d.slice(i, i + pl);
         i += pl;
         r[f].__hk = "p" + t + "_" + h + "_" + prm.join(",");
-        r[f].addEventListener(V[t] || "click", (e) => {
-          e.preventDefault();
-          snd(() => sep(h, t, f, prm, e, r[f]), e, r[f]);
-        });
+        bind(r[f], V[t] || "click", { h, t, f, prm });
       } else if (o === OP.INLINE_LOCAL || o === OP.DEF_HANDLER) {
         i = xi(d, i - 1);
       } else if (o === OP.ROUTE_PUSH) {

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { x } from "../src/executor.ts";
 import { st, E, V, P, Y, AT, AV, SE, resetSession } from "../src/state.ts";
 import { fl2, sl2, resetActions } from "../src/actions.ts";
+import { resetDelegation } from "../src/delegate.ts";
 import { rv, wv } from "../src/varint.ts";
 import { makeDom, type MockEl } from "./dom.ts";
 
@@ -45,6 +46,7 @@ beforeEach(() => {
   (globalThis as any).history = { pushState() {}, replaceState() {} };
   (globalThis as any).IntersectionObserver = MockIO;
   MockIO.instances = [];
+  resetDelegation();
   sent = [];
   closed = 0;
   st.w = { send: (m: Uint8Array) => sent.push(m), close: () => closed++ } as any;
@@ -310,7 +312,7 @@ test("CLEAR_CHILDREN stages a morph; BATCH_END flushes it (content replaced, nod
 
 // --- bindings ---
 
-test("BIND_REMOTE sets __hk, listens, and a click sends the event", () => {
+test("BIND_REMOTE sets __hk and a click dispatches through the document", () => {
   const t = doc.createElement("button");
   t.id = "b";
   run(syms("b"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(9)]);
@@ -320,9 +322,21 @@ test("BIND_REMOTE sets __hk, listens, and a click sends the event", () => {
   assert.equal(sent[0][0], 0);
 });
 
-test("BIND_LOCAL and BIND_REMOTE_PARAM register listeners; RP carries params", () => {
+test("delegation bubbles: a child click fires the parent's binding once", () => {
+  const parent = doc.createElement("div");
+  parent.id = "row";
+  const child = doc.createElement("span");
+  parent.appendChild(child);
+  doc.body.appendChild(parent);
+  run(syms("row"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(5)]);
+  child.fire("click", { target: child });
+  assert.equal(sent.length, 1, "parent binding fired from child target");
+});
+
+test("BIND_LOCAL and BIND_REMOTE_PARAM both fire via delegation; RP carries params", () => {
   const a = doc.createElement("button");
   a.id = "l";
+  doc.body.appendChild(a);
   run(
     syms("l"),
     [0x01, ...vint(0x80)],
@@ -330,17 +344,18 @@ test("BIND_LOCAL and BIND_REMOTE_PARAM register listeners; RP carries params", (
     [0x34, 0, 1, ...vint(4), 2, 7, 7],
   );
   assert.equal(a.__hk, "p1_4_7,7");
-  assert.equal(a.listeners["click"]?.length, 2);
+  assert.equal(a.__b?.["click"]?.length, 2, "two binding records");
   a.fire("click");
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 2, "both bindings fire through the dispatcher");
   assert.equal(sent[1][0], 0x80, "param variant marker");
 });
 
-test("BIND_DEBOUNCED sets a d-prefixed __hk and defers the send", () => {
+test("BIND_DEBOUNCED stores ms in the record and defers the send", () => {
   const t = doc.createElement("input");
   t.id = "d";
   run(syms("d"), [0x01, ...vint(0x80)], [0x33, 0, 1, ...vint(2), 0, 50]);
   assert.equal(t.__hk, "d1_2");
+  assert.equal(t.__b?.["click"]?.[0]?.ms, 50);
   t.fire("click");
   assert.equal(sent.length, 0, "debounced: nothing sent synchronously");
 });

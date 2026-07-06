@@ -10,6 +10,13 @@ round-trip tests, docs site, live dogfooding). What's missing is almost entirely
 *packaging* (Phase 2, mechanical) plus two adopter-facing gaps (T1, T2) that should land
 before any announcement because they're the first things a skeptical evaluator will test.
 
+**2026-07-06: COMPLETE — 28/28.** Every phase closed: workspace consolidation,
+release mechanics, all six technical gaps (including the two announce
+blockers, SSR-lite, and event delegation), positioning, the runtime
+extraction, and the full content/chat/editor feature track with three live
+E2E harnesses. What remains is human: push, publish (macros → rwire →
+components/themes/markdown), announce.
+
 Extended 2026-07-06 with the runtime-extraction decision (Phase 5, supersedes P2) and
 the content & editing feature track (Phase 6).
 
@@ -51,11 +58,11 @@ with the release track — nothing in it blocks 0.1.
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 5 |
-| 3 — Technical gaps | 6 | 5 |
+| 3 — Technical gaps | 6 | 6 |
 | 4 — Positioning & launch | 3 | 3 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 8 |
-| **All** | **28** | **27** |
+| **All** | **28** | **28** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -235,7 +242,18 @@ with the release track — nothing in it blocks 0.1.
 - **Effort:** ~half a day.
 
 ### T3 — Event delegation for large lists
-- **Status:** `[ ]` (post-launch OK; document as limitation)
+- **Status:** `[x]` Done (2026-07-06). Pure runtime refactor — the wire format
+  is untouched. Remote/local/debounced/param bindings now store small records
+  on the element (`__b`) instead of listener closures; ONE document-level
+  dispatcher per event type walks target → root, preserving bubbling and
+  multi-binding semantics (capture phase for non-bubbling focus/blur). A
+  10k-row list costs 10k records + one listener. Morphs sync `__b` from the
+  shadow, so reused nodes always carry the LATEST binding — the fresh-handler
+  guarantee is now by construction, not by node-swapping. Client actions,
+  sentinels, and resize handles keep direct listeners (rare; two aren't DOM
+  events). Verified: 62 runtime tests (bubbling, multi-binding, debounce
+  records) and ALL THREE live E2Es — every click, submit, and input in
+  counter/chat/editor now flows through delegated dispatch.
 - **Problem:** One listener per bound element; large lists get heavy on bind and on
   morph re-bind.
 - **Fix direction:** delegate per event type at a container/document level, resolve the

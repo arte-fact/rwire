@@ -30,6 +30,7 @@ export function me(a: Node, b: Node): void {
   }
   ae.__hk = be.__hk;
   ae.__k = be.__k;
+  ae.__b = be.__b;
   // Nested region: its own update owns it (guard non-string id so the morph
   // never throws and freezes the stream).
   if (typeof ae.id === "string" && ae.id.indexOf("__synced_") === 0) return;

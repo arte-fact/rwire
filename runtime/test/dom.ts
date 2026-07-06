@@ -62,7 +62,8 @@ export interface MockDoc {
   createElementNS(ns: string, t: string): MockEl;
   createTextNode(v: string): MockText;
   getElementById(id: string): MockEl | null;
-  addEventListener(): void;
+  addEventListener(t: string, fn: (e: unknown) => void, capture?: boolean): void;
+  listeners: Record<string, ((e: unknown) => void)[]>;
   _byId: Map<string, MockEl>;
 }
 
@@ -199,6 +200,8 @@ export function makeDom(): { document: MockDoc } {
       fire(type, e = {}) {
         const ev = { type, preventDefault() {}, target: node, ...e };
         for (const fn of node.listeners[type] || []) fn(ev);
+        // Bubble to the document-level delegated dispatchers.
+        for (const fn of doc.listeners[type] || []) fn(ev);
       },
       focus() {
         doc.activeElement = node;
@@ -244,7 +247,10 @@ export function makeDom(): { document: MockDoc } {
     },
     createTextNode: (v) => txt(v),
     getElementById: (id) => byId.get(id) || null,
-    addEventListener() {},
+    listeners: {},
+    addEventListener(t, fn) {
+      (doc.listeners[t] || (doc.listeners[t] = [])).push(fn);
+    },
     _byId: byId,
   };
   return { document: doc };

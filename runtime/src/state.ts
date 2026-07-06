@@ -10,6 +10,8 @@ export type RwEl = HTMLElement & {
   __t?: ReturnType<typeof setTimeout>;
   /** Morph key (SET_KEY): sibling-local identity for keyed reordering. */
   __k?: number;
+  /** Delegated bindings by event type (see delegate.ts). */
+  __b?: Record<string, import("./delegate.ts").Binding[]>;
 };
 
 export interface PendingMorph {

@@ -62,7 +62,7 @@ if (!document.body.textContent.includes("Sample workspace"))
 
 // 2. Switch to Edit.
 const editChip = find(
-  (n) => n.textContent === "Edit" && (n.listeners?.click || []).length,
+  (n) => n.textContent === "Edit" && (n.__b?.click?.length || (n.listeners?.click || []).length),
 );
 if (!editChip) fail("Edit chip missing");
 editChip.fire("click", { target: editChip });
