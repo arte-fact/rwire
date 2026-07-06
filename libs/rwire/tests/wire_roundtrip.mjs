@@ -22,9 +22,11 @@ function rawConst(name) {
   return m[1];
 }
 
-// The full client script, assembled exactly as generate_styled_capsule does.
+// The full client script, assembled exactly as generate_styled_capsule does
+// (incl. the injected globals: empty name maps + the BASE mount path).
 const CLIENT_JS =
   "const E={},V={},P={},Y={},AT={},AV={},SE={};\n" +
+  "const BASE='';\n" +
   rawConst("CLIENT_ACTIONS_JS") +
   "\n" +
   rawConst("BIND_JS") +
