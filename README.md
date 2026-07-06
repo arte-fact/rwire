@@ -274,12 +274,12 @@ A common subset (see the `Ev` enum for the full list):
 - [x] ItemRef for dynamic list binding
 - [x] Style token system + reactive theming (palettes, dark/light, style presets)
 - [x] Component library (55 components)
+- [x] Keyed children (`.key()` — list reorders move nodes, preserving input/focus state)
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics
 
 ### Planned
-- [ ] Keyed children (virtual DOM-like diffing)
 - [ ] Event delegation for large lists
 - [ ] Database persistence adapters
 - [ ] Authentication middleware

@@ -11,9 +11,9 @@ use super::opcodes::{
     CLEAR_CHILDREN, COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
     ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL,
-    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
-    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
-    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_KEY, SET_TEXT, SET_TEXT_INT,
+    SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO,
+    STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 use crate::style_tokens::StyleKey;
@@ -353,6 +353,14 @@ impl OpcodeBuffer {
         write_varint(&mut self.buf, handler_idx);
         self.buf.put_u8(param_bytes.len() as u8);
         self.buf.put_slice(param_bytes);
+        self
+    }
+
+    /// Set a morph key (`__k`) on an element. Format: [SET_KEY, ref_varint, key_varint]
+    pub fn set_key(&mut self, ref_idx: u32, key: u32) -> &mut Self {
+        self.buf.put_u8(SET_KEY);
+        write_varint(&mut self.buf, ref_idx);
+        write_varint(&mut self.buf, key);
         self
     }
 

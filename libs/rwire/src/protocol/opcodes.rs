@@ -231,6 +231,13 @@ pub const SET_TEXT_WORDS: u8 = 0x13;
 /// More compact than symbol table for dynamic numeric values.
 pub const SET_TEXT_INT: u8 = 0x15;
 
+/// Set a morph key on an element. Format: [SET_KEY, ref_varint, key_varint]
+/// The client stores it as a `__k` expando (never a DOM attribute): sibling-
+/// local identity for keyed morphing, so id-less list items reorder by
+/// identity instead of positionally. Keys come from `ElementBuilder::key`
+/// (strings FNV-1a hashed, integers used directly).
+pub const SET_KEY: u8 = 0x16;
+
 /// End of batch marker
 pub const BATCH_END: u8 = 0xFF;
 

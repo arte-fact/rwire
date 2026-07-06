@@ -34,6 +34,7 @@ export interface MockEl {
   readonly attributes: { name: string; value: string }[];
   readonly firstChild: MockNode | null;
   readonly nextSibling: MockNode | null;
+  readonly isConnected: boolean;
   listeners: Record<string, ((e: unknown) => void)[]>;
   setAttribute(n: string, v: string): void;
   getAttribute(n: string): string | null;
@@ -158,6 +159,11 @@ export function makeDom(): { document: MockDoc } {
       },
       get nextSibling() {
         return siblingOf(node);
+      },
+      get isConnected() {
+        let n: MockEl | null = node;
+        while (n.parentNode) n = n.parentNode;
+        return n === doc.body || n === doc.head;
       },
       listeners: {},
       setAttribute(n, v) {

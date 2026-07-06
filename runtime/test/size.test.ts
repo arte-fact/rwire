@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
-const MAX_RAW = 13_100;
-const MAX_GZIP = 4_900;
+const MAX_RAW = 13_400;
+const MAX_GZIP = 5_000;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

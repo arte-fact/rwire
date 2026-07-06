@@ -281,6 +281,48 @@ pub fn el(el_type: El) -> ElementBuilder {
 ///
 /// This trait allows renderers to be stored and invoked without knowing
 /// the concrete state type at compile time.
+/// A stable per-sibling identity for keyed morphing (see [`ElementBuilder::key`]).
+/// Strings hash with FNV-1a (32-bit); integers use their value (folded to 32
+/// bits) — distinct ids stay distinct.
+pub trait ElementKey {
+    fn key_code(&self) -> u32;
+}
+
+fn fnv1a32(bytes: &[u8]) -> u32 {
+    let mut h: u32 = 0x811C_9DC5;
+    for &b in bytes {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+impl ElementKey for &str {
+    fn key_code(&self) -> u32 {
+        fnv1a32(self.as_bytes())
+    }
+}
+impl ElementKey for String {
+    fn key_code(&self) -> u32 {
+        fnv1a32(self.as_bytes())
+    }
+}
+impl ElementKey for u32 {
+    fn key_code(&self) -> u32 {
+        *self
+    }
+}
+impl ElementKey for u64 {
+    fn key_code(&self) -> u32 {
+        (*self ^ (*self >> 32)) as u32
+    }
+}
+impl ElementKey for usize {
+    fn key_code(&self) -> u32 {
+        (*self as u64).key_code()
+    }
+}
+
 pub trait SyncedRenderer: Send + Sync {
     /// Render with the given state, returning a new ElementBuilder.
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder>;
@@ -413,6 +455,8 @@ pub struct ElementBuilder {
     /// Binary-encoded typed attributes (At/Av enums)
     typed_attrs: Vec<TypedAttr>,
     events: Vec<(Ev, HandlerSpec)>,
+    /// Morph key (`__k`): sibling-local identity for keyed reordering.
+    key: Option<u32>,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
     /// Binary-encoded style utility tokens (compact 1-byte each)
@@ -447,6 +491,7 @@ impl ElementBuilder {
             attrs: Vec::new(),
             typed_attrs: Vec::new(),
             events: Vec::new(),
+            key: None,
             children: Vec::new(),
             synced: None,
             style_utils: Vec::new(),
@@ -517,6 +562,7 @@ impl ElementBuilder {
             attrs: Vec::new(),
             typed_attrs: Vec::new(),
             events: Vec::new(),
+            key: None,
             children: Vec::new(),
             synced: Some(synced),
             style_utils: Vec::new(),
@@ -1188,6 +1234,23 @@ impl ElementBuilder {
         crate::item_ref::ItemRef::<()>::new(next as usize).encode(&mut param_bytes);
         let handler_with_params = handler.with_param_bytes(param_bytes);
         self.events.push((Ev::Visible, handler_with_params));
+        self
+    }
+
+    /// Give this element a stable identity among its siblings, so list
+    /// reorders morph by identity instead of positionally — the moved DOM
+    /// nodes (with their input values, scroll, and focus) travel with their
+    /// items. Strings hash (FNV-1a, 32-bit); integers are used directly. Use
+    /// your domain id (`todo.id`, message id), NOT the list index — an index
+    /// is exactly the positional identity keying exists to replace.
+    ///
+    /// ```ignore
+    /// state.items.iter_with_ref().map(|(item_ref, item)| {
+    ///     el(El::Li).key(item.id).text(&item.text)
+    /// })
+    /// ```
+    pub fn key<K: ElementKey>(mut self, key: K) -> Self {
+        self.key = Some(key.key_code());
         self
     }
 
@@ -1914,6 +1977,10 @@ impl BuildContext {
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
+        // Morph key for keyed reordering
+        if let Some(k) = el.key {
+            self.buf.set_key(ref_idx, k);
+        }
         // Bind events
         for (ev, handler_spec) in &el.events {
             if let Some(handler) = &handler_spec.remote_handler {
@@ -2055,6 +2122,10 @@ impl BuildContext {
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
+        // Morph key for keyed reordering
+        if let Some(k) = el.key {
+            self.buf.set_key(ref_idx, k);
+        }
         // Bind events
         for (ev, handler_spec) in &el.events {
             if let Some(handler) = &handler_spec.remote_handler {
@@ -2690,6 +2761,11 @@ fn emit_update_element(
                 }
             }
         }
+    }
+
+    // Morph key for keyed reordering
+    if let Some(k) = el.key {
+        buf.set_key(ref_idx, k);
     }
 
     // Emit style tokens (binary-encoded styles)

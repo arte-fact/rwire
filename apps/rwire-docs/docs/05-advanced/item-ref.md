@@ -90,3 +90,23 @@ Compare this to the JSON-in-data-attribute approach (`data-id="some-uuid"`), whi
 ## Type Safety
 
 `ItemRef<T>` is generic over the collection item type. Attempting to use an `ItemRef<TodoItem>` with a `Vec<User>` is a compile-time error. This prevents a class of bugs where the wrong collection is indexed at runtime.
+
+
+## Keyed lists
+
+`ItemRef` identity is positional — fine for stable lists, but a *reorder* would
+morph content across nodes (input values and focus staying at the old
+positions). Give reorderable items a stable identity with `.key()` (your domain
+id, never the index): the morph then moves the DOM nodes with their items.
+
+```rust
+state.items.iter_with_ref().map(|(item_ref, item)| {
+    el(El::Li)
+        .key(item.id)
+        .on_ref(Ev::Click, toggle_item(), item_ref)
+        .append([render_item(item)])
+})
+```
+
+Strings hash (FNV-1a); integers are used directly. Keys must be unique among
+siblings. Elements with a DOM `id` are already keyed by it.

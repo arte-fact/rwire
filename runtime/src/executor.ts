@@ -107,6 +107,12 @@ export function x(d: Uint8Array): void {
         i += l;
         const n = (v >>> 1) ^ -(v & 1); // zigzag
         r[f].textContent = n.toString();
+      } else if (o === OP.SET_KEY) {
+        const [f, fl] = rv(d, i);
+        i += fl;
+        const [k, l] = rv(d, i);
+        i += l;
+        r[f].__k = k;
       } else if (o === OP.SET_CLASS) {
         const [f, fl] = rv(d, i);
         i += fl;
@@ -437,8 +443,8 @@ export function x(d: Uint8Array): void {
         ob.observe(sel);
       } else if (o === OP.BATCH_END) {
         fm();
-        if (ai) {
-          const ne = document.getElementById(ai) as RwEl | null;
+        if (ae) {
+          const ne = (ai ? document.getElementById(ai) : ae.isConnected ? ae : null) as RwEl | null;
           if (ne) {
             if (
               av !== null &&

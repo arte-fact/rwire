@@ -51,11 +51,11 @@ with the release track — nothing in it blocks 0.1.
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 2 |
-| 3 — Technical gaps | 6 | 1 |
+| 3 — Technical gaps | 6 | 2 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 2 |
-| **All** | **28** | **12** |
+| **All** | **28** | **13** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -173,7 +173,20 @@ with the release track — nothing in it blocks 0.1.
 ## Phase 3 — Technical gaps (adopter-facing)
 
 ### T1 — Keyed list diffing 🔴 announce-blocker
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `ElementBuilder::key()` (strings FNV-1a
+  hashed, integers direct → u32; the roadmap's original "key from ItemRef"
+  idea was wrong — ItemRef is positional identity, exactly what keying must
+  replace) → new `SET_KEY` opcode (0x16) → client `__k` expando. `mk()` matches
+  id → key → positional, with positional matching barred from consuming keyed
+  nodes; `me()` syncs `__k`. Bonus fix: BATCH_END focus restore now falls back
+  to the surviving node *object* when the focused element has no id (browsers
+  blur nodes moved by insertBefore — reorders would otherwise drop focus).
+  Runtime 13,137 B min (budget deliberately raised to 13.4KB for T1). Tests:
+  keyed reorder preserves node objects + input values, removal+insert inside a
+  reorder, positional/keyed isolation, `__k` sync, SET_KEY decode, selection
+  restore on id-less elements, encoder bytes, FNV vectors, and a keyed-list
+  wire fixture through the shipped artifact. Docs: item-ref.md keyed-lists
+  section; README roadmap updated.
 - **Location:** runtime `me`/`mk` morph (`capsule_gen.rs`); already top of README roadmap.
 - **Problem:** Morph reuses nodes by id, else positionally. List *reorders* shuffle
   focus/caret/scroll state across items. Dynamic lists are the bread and butter of real

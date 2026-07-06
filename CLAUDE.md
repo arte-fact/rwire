@@ -90,6 +90,7 @@ Single-byte opcodes followed by arguments. Strings are interned in a symbol tabl
 | SET_TEXT | 0x11 | `[ref, sym]` | Set textContent |
 | SET_ATTR | 0x12 | `[ref, attr, val]` | setAttribute |
 | SET_DATA | 0x14 | `[ref, key, val]` | dataset[key]=val |
+| SET_KEY | 0x16 | `[ref, key]` | Morph key (`__k`) for keyed list reordering |
 | APPEND | 0x20 | `[parent, child]` | appendChild |
 | BIND_LOCAL | 0x30 | `[ref, ev, handler]` | addEventListener (local) |
 | BIND_REMOTE | 0x31 | `[ref, ev, handler]` | Server round-trip event |

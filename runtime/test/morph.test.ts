@@ -151,3 +151,74 @@ test("fm flushes a staged morph exactly once", () => {
   assert.equal(st.pm, null);
   fm(); // no-op
 });
+
+test("keyed reorder moves id-less nodes by identity (values travel)", () => {
+  const live = div();
+  const shadow = div();
+  const mkInput = (k: number, v: string) => {
+    const e = doc.createElement("input") as any;
+    e.__k = k;
+    e.value = v;
+    return e;
+  };
+  const a = mkInput(1, "alpha"),
+    b = mkInput(2, "beta"),
+    c = mkInput(3, "gamma");
+  for (const e of [a, b, c]) live.appendChild(e);
+  // shadow: reordered [3, 1, 2], fresh nodes with empty values
+  for (const k of [3, 1, 2]) shadow.appendChild(mkInput(k, ""));
+  mk(live as any, shadow as any);
+  const ks = live.children.map((e: any) => e.__k);
+  assert.deepEqual(ks, [3, 1, 2], "order follows keys");
+  assert.equal(live.children[0], c, "same node object moved");
+  assert.equal(live.children[1], a);
+  assert.equal(live.children[2], b);
+  assert.deepEqual(
+    live.children.map((e: any) => e.value),
+    ["gamma", "alpha", "beta"],
+    "uncontrolled input values travel with their items",
+  );
+});
+
+test("keyed removal and insertion inside a reorder", () => {
+  const live = div();
+  const shadow = div();
+  const item = (k: number) => {
+    const e = doc.createElement("li") as any;
+    e.__k = k;
+    e.textContent = "k" + k;
+    return e;
+  };
+  for (const k of [1, 2, 3]) live.appendChild(item(k));
+  const kept2 = live.children[1];
+  for (const k of [4, 3, 2]) shadow.appendChild(item(k));
+  mk(live as any, shadow as any);
+  assert.deepEqual(
+    live.children.map((e: any) => e.__k),
+    [4, 3, 2],
+  );
+  assert.equal(live.children[2], kept2, "surviving keyed node reused");
+});
+
+test("positional matching never consumes a keyed node", () => {
+  const live = div();
+  const keyed = doc.createElement("p") as any;
+  keyed.__k = 9;
+  keyed.textContent = "keyed";
+  live.appendChild(keyed);
+  const shadow = div();
+  const plain = doc.createElement("p");
+  plain.textContent = "plain";
+  shadow.appendChild(plain);
+  mk(live as any, shadow as any);
+  assert.equal(live.children[0], plain, "unkeyed shadow gets a fresh node");
+  assert.equal((live.children[0] as any).__k, undefined);
+});
+
+test("me syncs __k alongside __hk", () => {
+  const a = div() as any,
+    b = div() as any;
+  b.__k = 42;
+  me(a, b);
+  assert.equal(a.__k, 42);
+});

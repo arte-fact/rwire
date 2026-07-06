@@ -29,6 +29,7 @@ export function me(a: Node, b: Node): void {
     if (!be.hasAttribute(n)) ae.removeAttribute(n);
   }
   ae.__hk = be.__hk;
+  ae.__k = be.__k;
   // Nested region: its own update owns it (guard non-string id so the morph
   // never throws and freezes the stream).
   if (typeof ae.id === "string" && ae.id.indexOf("__synced_") === 0) return;
@@ -39,17 +40,26 @@ export function me(a: Node, b: Node): void {
  * id-less same-type nodes; a changed __hk disqualifies reuse. */
 export function mk(a: Element, b: Element): void {
   const byId: Record<string, Element> = {};
+  const byKey: Record<number, Element> = {};
   for (let c = a.firstChild; c; c = c.nextSibling)
-    if (c.nodeType === 1 && (c as Element).id) byId[(c as Element).id] = c as Element;
+    if (c.nodeType === 1) {
+      if ((c as Element).id) byId[(c as Element).id] = c as Element;
+      else if ((c as RwEl).__k !== undefined) byKey[(c as RwEl).__k!] = c as Element;
+    }
   let cur = a.firstChild;
   for (let bc = b.firstChild; bc; ) {
     const nb = bc.nextSibling;
     let m: Node | null = null;
     if (bc.nodeType === 1 && (bc as Element).id) {
       if (byId[(bc as Element).id]) m = byId[(bc as Element).id];
+    } else if (bc.nodeType === 1 && (bc as RwEl).__k !== undefined) {
+      // Keyed: match by sibling-local identity, so reorders move nodes
+      // (with their input/scroll/focus state) instead of morphing across.
+      if (byKey[(bc as RwEl).__k!]) m = byKey[(bc as RwEl).__k!];
     } else if (
       cur &&
-      !(cur.nodeType === 1 && (cur as Element).id) &&
+      !(cur.nodeType === 1 &&
+        ((cur as Element).id || (cur as RwEl).__k !== undefined)) &&
       cur.nodeType === bc.nodeType &&
       (cur.nodeType !== 1 ||
         (cur as Element).tagName === (bc as Element).tagName)

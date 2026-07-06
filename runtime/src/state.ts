@@ -8,6 +8,8 @@
 export type RwEl = HTMLElement & {
   __hk?: string;
   __t?: ReturnType<typeof setTimeout>;
+  /** Morph key (SET_KEY): sibling-local identity for keyed reordering. */
+  __k?: number;
 };
 
 export interface PendingMorph {

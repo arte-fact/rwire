@@ -143,6 +143,16 @@ fn streamed_sentinel() -> ElementBuilder {
     root.append([el(El::Div).on_visible(load_more, 3)])
 }
 
+/// A keyed list (T1): id-less items carrying SET_KEY morph identities —
+/// string keys hash, integer keys pass through.
+fn keyed_list() -> ElementBuilder {
+    let mut ul = el(El::Ul).st([St::DisplayFlex, St::FlexCol]);
+    for (id, label) in [(11u64, "first"), (7, "second"), (42, "third")] {
+        ul = ul.append([el(El::Li).key(id).text(label)]);
+    }
+    ul.append([el(El::Li).key("string-keyed").text("last")])
+}
+
 /// State that varies a synced region's rendered content across re-renders.
 #[derive(rwire::State, Default)]
 #[storage(memory)]
@@ -250,6 +260,7 @@ fn wire_streams_parse_cleanly() {
         ("long_style", emit_initial(&long_style())),
         ("card_list", emit_initial(&card_list())),
         ("streamed_sentinel", emit_initial(&streamed_sentinel())),
+        ("keyed_list", emit_initial(&keyed_list())),
         ("large_tree", emit_initial(&large_tree())),
         // Incremental re-renders (SYMBOLS_EXTEND + lazy dedup) across changing content.
         ("update_v0_v1", emit_updates(&[0, 1])),

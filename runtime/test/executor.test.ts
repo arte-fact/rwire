@@ -523,3 +523,27 @@ test("BATCH_END restores focus context without throwing", () => {
   const errs = withErrors(() => run(syms("q"), [0x01, ...vint(0x80)]));
   assert.deepEqual(errs, []);
 });
+
+// --- keyed morphing (T1) ---
+
+test("SET_KEY stores the __k expando", () => {
+  const t = doc.createElement("li");
+  t.id = "kk";
+  run(syms("kk"), [0x01, ...vint(0x80)], [0x16, 0, ...vint(300)]);
+  assert.equal(t.__k, 300);
+});
+
+test("BATCH_END restores selection on an id-less surviving element", () => {
+  const input = doc.createElement("input");
+  doc.body.appendChild(input);
+  input.value = "abc";
+  doc.activeElement = input;
+  let restored: [number, number] | null = null;
+  input.setSelectionRange = (a: number, b: number) => {
+    restored = [a, b];
+  };
+  (input as any).selectionStart = 1;
+  (input as any).selectionEnd = 2;
+  run([]);
+  assert.deepEqual(restored, [1, 2], "selection restored via the node object");
+});

@@ -52,6 +52,7 @@ export const SYMBOLS_EXTEND = 0xf1;
 export const WORD_TABLE = 0xf2;
 export const SET_TEXT_WORDS = 0x13;
 export const SET_TEXT_INT = 0x15;
+export const SET_KEY = 0x16;
 export const BATCH_END = 0xff;
 export const SYMBOL_SESSION_START = 0x80;
 export const EV_CLICK = 0x01;
