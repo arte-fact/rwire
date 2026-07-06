@@ -1284,6 +1284,54 @@ fn request_body(request: &str) -> &str {
 }
 
 /// Extract Cookie header value from HTTP request.
+/// Case-insensitive single-header lookup in a raw request head.
+fn header_value(request: &str, name: &str) -> Option<String> {
+    for line in request.lines().skip(1) {
+        if let Some((n, v)) = line.split_once(':') {
+            if n.trim().eq_ignore_ascii_case(name) {
+                return Some(v.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Host[:port] equality with default ports (80/443) stripped, case-insensitive.
+fn host_eq(a: &str, b: &str) -> bool {
+    let norm = |h: &str| {
+        let h = h.trim().to_ascii_lowercase();
+        h.trim_end_matches(":443")
+            .trim_end_matches(":80")
+            .to_string()
+    };
+    !a.trim().is_empty() && norm(a) == norm(b)
+}
+
+/// Whether a WebSocket handshake's `Origin` may connect (T2, CSWSH defense).
+///
+/// Same-origin (the Origin's host[:port] matching the request `Host`) always
+/// passes; anything else must be in `allowed` (full origin strings). Requests
+/// WITHOUT an Origin header are not routed here — non-browser clients don't
+/// send one, and browsers always do.
+fn origin_allowed(origin: &str, host: Option<&str>, allowed: &[String]) -> bool {
+    let origin = origin.trim().trim_end_matches('/');
+    if allowed
+        .iter()
+        .any(|a| a.trim_end_matches('/').eq_ignore_ascii_case(origin))
+    {
+        return true;
+    }
+    let origin_lc = origin.to_ascii_lowercase();
+    let origin_host = origin_lc
+        .strip_prefix("https://")
+        .or_else(|| origin_lc.strip_prefix("http://"))
+        .unwrap_or("");
+    match host {
+        Some(h) => host_eq(origin_host, h),
+        None => false,
+    }
+}
+
 fn extract_cookie_from_request(request: &str) -> Option<String> {
     for line in request.lines() {
         if line.len() >= 7 && line[..7].eq_ignore_ascii_case("cookie:") {
@@ -1497,6 +1545,21 @@ async fn handle_client<F>(
 
     // Check if this is a WebSocket upgrade request
     if capsule::is_websocket_upgrade(&peek_str) {
+        // Origin gate (CSWSH defense): a browser handshake carries an Origin
+        // header; reject it unless same-origin with the request Host or in the
+        // configured allowlist. Origin-less (non-browser) handshakes pass.
+        if let Some(origin) = header_value(&peek_str, "origin") {
+            let host = header_value(&peek_str, "host");
+            if !origin_allowed(&origin, host.as_deref(), &config.allowed_origins) {
+                println!(
+                    "[{}] WebSocket rejected: cross_origin ({})",
+                    peer_addr, origin
+                );
+                metrics.connections_rejected.inc();
+                let _ = crate::health::serve_forbidden(stream, "cross_origin").await;
+                return;
+            }
+        }
         // Admission control: enforce total and per-IP connection caps before
         // spawning the (long-lived, stateful) WebSocket session. Rejected clients
         // get a 503 instead of an upgrade.
@@ -2892,6 +2955,73 @@ mod tests {
         ));
         assert!(!super::forwarded_https(
             "GET / HTTP/1.1\r\nX-Forwarded-Proto: http\r\n\r\n"
+        ));
+    }
+
+    #[test]
+    fn origin_gate_same_origin_passes() {
+        assert!(origin_allowed(
+            "http://localhost:9000",
+            Some("localhost:9000"),
+            &[]
+        ));
+        assert!(origin_allowed(
+            "https://app.example.com",
+            Some("app.example.com"),
+            &[]
+        ));
+        // default ports normalize
+        assert!(origin_allowed(
+            "https://app.example.com",
+            Some("app.example.com:443"),
+            &[]
+        ));
+        assert!(origin_allowed(
+            "HTTP://LOCALHOST:9000",
+            Some("localhost:9000"),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn origin_gate_cross_origin_rejected() {
+        assert!(!origin_allowed(
+            "http://evil.example",
+            Some("localhost:9000"),
+            &[]
+        ));
+        // same host, different explicit port = different origin
+        assert!(!origin_allowed(
+            "http://localhost:3000",
+            Some("localhost:9000"),
+            &[]
+        ));
+        assert!(!origin_allowed("null", Some("localhost:9000"), &[]));
+        assert!(!origin_allowed(
+            "chrome-extension://abc",
+            Some("localhost:9000"),
+            &[]
+        ));
+        assert!(!origin_allowed("http://localhost:9000", None, &[]));
+    }
+
+    #[test]
+    fn origin_gate_allowlist_passes_cross_origin() {
+        let allowed = vec!["https://embed.example.com".to_string()];
+        assert!(origin_allowed(
+            "https://embed.example.com",
+            Some("api.other.com"),
+            &allowed
+        ));
+        assert!(origin_allowed(
+            "https://embed.example.com/",
+            Some("api.other.com"),
+            &allowed
+        ));
+        assert!(!origin_allowed(
+            "https://evil.example.com",
+            Some("api.other.com"),
+            &allowed
         ));
     }
 

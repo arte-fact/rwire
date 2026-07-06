@@ -427,3 +427,61 @@ async fn test_content_length() {
     drop(stream);
     server_task.cancel().await;
 }
+
+/// T2: a browser cross-origin WebSocket handshake is refused with 403; the
+/// same-origin one (and a configured extra origin) upgrade normally.
+#[async_std::test]
+async fn test_websocket_origin_gate() {
+    use rwire::ServerConfig;
+    let server_task = task::spawn(async {
+        let _ = Server::bind("127.0.0.1:19021")
+            .unwrap()
+            .root(build_simple)
+            .config(ServerConfig::new().allow_origin("https://embed.example.com"))
+            .run()
+            .await;
+    });
+    task::sleep(Duration::from_millis(100)).await;
+
+    async fn handshake(origin: Option<&str>) -> String {
+        let mut stream = TcpStream::connect("127.0.0.1:19021").await.unwrap();
+        let origin_line = origin
+            .map(|o| format!("Origin: {o}\r\n"))
+            .unwrap_or_default();
+        let request = format!(
+            "GET / HTTP/1.1\r\nHost: 127.0.0.1:19021\r\n{origin_line}Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut response = vec![0u8; 1024];
+        let n = stream.read(&mut response).await.unwrap();
+        String::from_utf8_lossy(&response[..n]).to_string()
+    }
+
+    // Cross-origin: refused before the upgrade.
+    let r = handshake(Some("http://evil.example")).await;
+    assert!(r.contains("403 Forbidden"), "expected 403, got: {r}");
+    assert!(r.contains("cross_origin"), "expected reason, got: {r}");
+
+    // Same-origin: upgrades.
+    let r = handshake(Some("http://127.0.0.1:19021")).await;
+    assert!(
+        r.contains("101 Switching Protocols"),
+        "expected 101, got: {r}"
+    );
+
+    // Allowlisted extra origin: upgrades.
+    let r = handshake(Some("https://embed.example.com")).await;
+    assert!(
+        r.contains("101 Switching Protocols"),
+        "expected 101, got: {r}"
+    );
+
+    // No Origin header (non-browser client): upgrades.
+    let r = handshake(None).await;
+    assert!(
+        r.contains("101 Switching Protocols"),
+        "expected 101, got: {r}"
+    );
+
+    server_task.cancel().await;
+}

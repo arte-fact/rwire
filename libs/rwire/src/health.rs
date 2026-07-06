@@ -230,6 +230,25 @@ pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> 
 }
 
 /// Serve a 503 Service Unavailable response for admission control.
+/// Reject a request with `403 Forbidden` and a JSON reason (e.g. a
+/// cross-origin WebSocket handshake).
+pub async fn serve_forbidden(mut stream: TcpStream, reason: &str) -> io::Result<()> {
+    let body = format!(r#"{{"error":"forbidden","reason":"{}"}}"#, reason);
+    let http_response = format!(
+        "HTTP/1.1 403 Forbidden\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        body.len(),
+        body
+    );
+    stream.write_all(http_response.as_bytes()).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 pub async fn serve_unavailable(mut stream: TcpStream, reason: &str) -> io::Result<()> {
     let body = format!(r#"{{"error":"service_unavailable","reason":"{}"}}"#, reason);
 

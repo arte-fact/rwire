@@ -51,11 +51,11 @@ with the release track — nothing in it blocks 0.1.
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 2 |
-| 3 — Technical gaps | 6 | 0 |
+| 3 — Technical gaps | 6 | 1 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 1 |
-| **All** | **28** | **10** |
+| **All** | **28** | **11** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -190,7 +190,13 @@ with the release track — nothing in it blocks 0.1.
   exactly what this surgery needs — land Phase 5 first.
 
 ### T2 — WebSocket Origin validation 🔴 announce-blocker (cheap)
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). Origin gate in the WS upgrade path,
+  before admission: same-origin with the request `Host` (default ports
+  normalized, case-insensitive) always passes; extras via
+  `ServerConfig::allow_origin(...)`; mismatches get 403 + metrics tick before
+  the upgrade; origin-less (non-browser) handshakes pass. Unit tests on the
+  matcher + a live integration test covering 403 / same-origin 101 /
+  allowlisted 101 / no-Origin 101. Documented in `05-advanced/config.md`.
 - **Location:** WS upgrade path in `server.rs` (no `Origin` check exists — verified).
 - **Problem:** `SameSite=Strict` already keeps session cookies off cross-site
   handshakes, so practical risk is low, but an explicit Origin allowlist is table

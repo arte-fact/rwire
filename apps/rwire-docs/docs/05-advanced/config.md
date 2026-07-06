@@ -65,6 +65,30 @@ fn handle_route(state: &mut AppState, ctx: &EventContext) {
 
 Registers a `Router` that drives the `outlet()` runtime for URL pattern matching. See the [Router](/docs/05-advanced/router) page for the two navigation models.
 
+### WebSocket origin validation
+
+Browser WebSocket handshakes carry an `Origin` header; the server rejects any
+that isn't same-origin with the request `Host` (403, before the upgrade) — the
+standard cross-site WebSocket hijacking defense. Non-browser clients without an
+`Origin` header are unaffected.
+
+For a legitimate cross-origin setup (a page on another domain connecting to
+this app), allow that page's origin explicitly:
+
+```rust
+use rwire::ServerConfig;
+
+Server::bind("0.0.0.0:9000")?
+    .root(root)
+    .config(ServerConfig::new().allow_origin("https://embed.example.com"))
+    .run()
+    .await
+```
+
+Same-origin comparison normalizes default ports (80/443) and is
+case-insensitive; behind a reverse proxy it compares against the forwarded
+`Host`, which matches the page origin in a standard same-origin deployment.
+
 ## Capsule Configuration
 
 ```rust

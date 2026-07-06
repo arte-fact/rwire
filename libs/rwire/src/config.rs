@@ -53,6 +53,14 @@ pub struct ServerConfig {
     /// Maximum memory per connection state in bytes. Default: 1MB
     pub state_memory_limit: usize,
 
+    /// Extra origins allowed to open WebSocket connections, as full origin
+    /// strings (e.g. `https://app.example.com`). Same-origin requests (the
+    /// `Origin` header's host matching the request `Host`) are always allowed,
+    /// and non-browser clients without an `Origin` header are not blocked —
+    /// this list is for legitimate cross-origin setups (a page on another
+    /// domain embedding this app). Default: empty.
+    pub allowed_origins: Vec<String>,
+
     /// Force the `Secure` attribute on the session cookie regardless of the
     /// request scheme. Default: false.
     ///
@@ -75,6 +83,7 @@ impl Default for ServerConfig {
             max_connections_per_ip: 100,
             idle_timeout: Duration::from_secs(300),
             state_memory_limit: 1024 * 1024, // 1MB
+            allowed_origins: Vec::new(),
             secure_cookies: false,
             proxy: None,
         }
@@ -100,6 +109,14 @@ impl ServerConfig {
     }
 
     /// Set the idle timeout duration.
+    /// Allow an extra cross-origin `Origin` to open WebSocket connections
+    /// (full origin string, e.g. `https://app.example.com`). Same-origin
+    /// connections are always allowed; call repeatedly for several origins.
+    pub fn allow_origin(mut self, origin: impl Into<String>) -> Self {
+        self.allowed_origins.push(origin.into());
+        self
+    }
+
     pub fn idle_timeout(mut self, timeout: Duration) -> Self {
         self.idle_timeout = timeout;
         self
