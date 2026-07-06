@@ -12,6 +12,7 @@ members = [
     "apps/rwire-examples",
     "examples/chat",
     "examples/counter",
+    "examples/editor",
     "examples/todolist",
     "examples/todo-combined",
     "examples/fine-grained",

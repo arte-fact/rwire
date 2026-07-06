@@ -29,6 +29,7 @@ export const BIND_SELECT = 0x4c;
 export const BIND_TIMED_TOGGLE = 0x4d;
 export const AUTO_TOGGLE = 0x4e;
 export const BIND_SENTINEL = 0x4f;
+export const BIND_RESIZE = 0x50;
 export const FORM_SET_VALIDATION = 0x60;
 export const FORM_SHOW_ERROR = 0x61;
 export const FORM_CLEAR_ERROR = 0x62;

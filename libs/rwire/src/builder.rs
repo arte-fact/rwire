@@ -457,6 +457,8 @@ pub struct ElementBuilder {
     events: Vec<(Ev, HandlerSpec)>,
     /// Morph key (`__k`): sibling-local identity for keyed reordering.
     key: Option<u32>,
+    /// This element is a drag handle resizing its previous sibling (BIND_RESIZE).
+    resize_handle: bool,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
     /// Binary-encoded style utility tokens (compact 1-byte each)
@@ -492,6 +494,7 @@ impl ElementBuilder {
             typed_attrs: Vec::new(),
             events: Vec::new(),
             key: None,
+            resize_handle: false,
             children: Vec::new(),
             synced: None,
             style_utils: Vec::new(),
@@ -563,6 +566,7 @@ impl ElementBuilder {
             typed_attrs: Vec::new(),
             events: Vec::new(),
             key: None,
+            resize_handle: false,
             children: Vec::new(),
             synced: Some(synced),
             style_utils: Vec::new(),
@@ -1251,6 +1255,13 @@ impl ElementBuilder {
     /// ```
     pub fn key<K: ElementKey>(mut self, key: K) -> Self {
         self.key = Some(key.key_code());
+        self
+    }
+
+    /// Make this element a pointer-drag resize handle for its **previous
+    /// sibling** (horizontal, client-side only). The SplitPane primitive.
+    pub fn resize_handle(mut self) -> Self {
+        self.resize_handle = true;
         self
     }
 
@@ -1981,6 +1992,9 @@ impl BuildContext {
         if let Some(k) = el.key {
             self.buf.set_key(ref_idx, k);
         }
+        if el.resize_handle {
+            self.buf.bind_resize(ref_idx);
+        }
         // Bind events
         for (ev, handler_spec) in &el.events {
             if let Some(handler) = &handler_spec.remote_handler {
@@ -2125,6 +2139,9 @@ impl BuildContext {
         // Morph key for keyed reordering
         if let Some(k) = el.key {
             self.buf.set_key(ref_idx, k);
+        }
+        if el.resize_handle {
+            self.buf.bind_resize(ref_idx);
         }
         // Bind events
         for (ev, handler_spec) in &el.events {
@@ -2766,6 +2783,9 @@ fn emit_update_element(
     // Morph key for keyed reordering
     if let Some(k) = el.key {
         buf.set_key(ref_idx, k);
+    }
+    if el.resize_handle {
+        buf.bind_resize(ref_idx);
     }
 
     // Emit style tokens (binary-encoded styles)

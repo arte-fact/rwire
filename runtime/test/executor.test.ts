@@ -547,3 +547,25 @@ test("BATCH_END restores selection on an id-less surviving element", () => {
   run([]);
   assert.deepEqual(restored, [1, 2], "selection restored via the node object");
 });
+
+test("BIND_RESIZE drags the previous sibling's width", () => {
+  const pane = doc.createElement("div");
+  (pane as any).getBoundingClientRect = () => ({ width: 300 });
+  const handle = doc.createElement("div");
+  handle.id = "rz";
+  const wrap = doc.createElement("div");
+  wrap.appendChild(pane);
+  wrap.appendChild(handle);
+  (handle as any).previousElementSibling = pane;
+  const winListeners: Record<string, ((e: unknown) => void)[]> = {};
+  (globalThis as any).addEventListener = (t: string, fn: (e: unknown) => void) => {
+    (winListeners[t] || (winListeners[t] = [])).push(fn);
+  };
+  (globalThis as any).removeEventListener = () => {};
+  run(syms("rz"), [0x01, ...vint(0x80)], [0x50, ...vint(0)]);
+  assert.equal(handle.__hk, "z");
+  handle.fire("pointerdown", { clientX: 100 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 180 });
+  assert.equal(pane.style.width, "380px", "width follows the drag delta");
+  assert.equal(pane.style.flex, "0 0 auto");
+});

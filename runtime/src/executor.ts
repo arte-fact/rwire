@@ -441,6 +441,31 @@ export function x(d: Uint8Array): void {
           { rootMargin: "100%" },
         );
         ob.observe(sel);
+      } else if (o === OP.BIND_RESIZE) {
+        // Pointer-drag resize handle: dragging resizes the PREVIOUS element
+        // sibling's width (client-side only; min 8rem). Adjacency pairing
+        // keeps the wire format to a single ref.
+        const [f, fl] = rv(d, i);
+        i += fl;
+        const h = r[f];
+        h.__hk = "z";
+        h.addEventListener("pointerdown", (e) => {
+          const tgt = h.previousElementSibling as HTMLElement | null;
+          if (!tgt) return;
+          e.preventDefault();
+          const sx = (e as PointerEvent).clientX,
+            sw = tgt.getBoundingClientRect().width;
+          const mv = (ev: PointerEvent) => {
+            tgt.style.width = Math.max(128, sw + ev.clientX - sx) + "px";
+            tgt.style.flex = "0 0 auto";
+          };
+          const up = () => {
+            removeEventListener("pointermove", mv as EventListener);
+            removeEventListener("pointerup", up);
+          };
+          addEventListener("pointermove", mv as EventListener);
+          addEventListener("pointerup", up);
+        });
       } else if (o === OP.BATCH_END) {
         fm();
         if (ae) {

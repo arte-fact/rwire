@@ -118,6 +118,13 @@ pub const AUTO_TOGGLE: u8 = 0x4E;
 /// structurally. Format: [BIND_SENTINEL, ref_varint, handler_varint, param_len, ...params]
 pub const BIND_SENTINEL: u8 = 0x4F;
 
+/// Bind a horizontal resize handle: pointer-dragging the element resizes its
+/// **previous element sibling** (width in px, min 8rem) — entirely
+/// client-side, the SplitPane primitive. Pairing by adjacency avoids
+/// cross-element ref plumbing at emit time.
+/// Format: [BIND_RESIZE, ref_varint]
+pub const BIND_RESIZE: u8 = 0x50;
+
 // ============================================================================
 // Form Operations
 // ============================================================================

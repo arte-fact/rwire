@@ -2070,6 +2070,108 @@ fn chat_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
             .build()])
 }
 
+fn tree_view_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{TreeNode, TreeView};
+    use rwire::St;
+    let label = |t: &str| el(El::Span).st([St::TextSm]).text(t);
+    TreeView::new()
+        .roots(vec![
+            TreeNode::branch(
+                "src",
+                label("src"),
+                vec![
+                    TreeNode::leaf("main", label("main.rs")).selected(b(bools, 0)),
+                    TreeNode::leaf("lib", label("lib.rs")),
+                ],
+            )
+            .expanded(true),
+            TreeNode::leaf("readme", label("README.md")),
+        ])
+        .build()
+}
+
+fn file_tree_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{FileTree, FsEntry};
+    let entries = vec![
+        FsEntry {
+            rel: "src".into(),
+            name: "src".into(),
+            is_dir: true,
+            depth: 0,
+        },
+        FsEntry {
+            rel: "src/main.rs".into(),
+            name: "main.rs".into(),
+            is_dir: false,
+            depth: 1,
+        },
+        FsEntry {
+            rel: "README.md".into(),
+            name: "README.md".into(),
+            is_dir: false,
+            depth: 0,
+        },
+    ];
+    FileTree::new(&entries)
+        .selected(b(bools, 0).then_some(1))
+        .expand_all()
+        .build()
+}
+
+fn split_pane_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::SplitPane;
+    use rwire::St;
+    let pane = |t: &str| {
+        el(El::Div)
+            .st([
+                St::BgSurface,
+                St::PMd,
+                St::RoundedMd,
+                St::TextSm,
+                St::TextMuted,
+            ])
+            .text(t)
+    };
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "10rem"))
+        .st([St::DisplayFlex])
+        .append([
+            SplitPane::new(pane("left pane"), pane("drag the divider ⇢"))
+                .initial("10rem")
+                .build(),
+        ])
+}
+
+fn code_editor_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::CodeEditor;
+    let dirty = b(bools, 0);
+    let content = "fn main() {\n    println!(\"hello\");\n}";
+    let flags = [false, dirty, false];
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "12rem"))
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol])
+        .append([CodeEditor::new("demo-editor", content)
+            .dirty_lines(&flags)
+            .build()])
+}
+
+fn document_view_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Chip, DocumentView};
+    use rwire::St;
+    DocumentView::new(
+        "src/main.rs",
+        el(El::P)
+            .st([St::TextSm, St::TextMuted])
+            .text("Rendered document body — markdown, highlighted code, or an editor."),
+    )
+    .action(
+        Chip::new(if b(bools, 0) { "View" } else { "Edit" })
+            .active(b(bools, 0))
+            .build(),
+    )
+    .build()
+}
+
 fn streamed_content_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Spinner, SpinnerSize};
     // Static rendition of the streamed region: delivered chunks, plus the
@@ -4219,6 +4321,74 @@ const ENTRIES: &[ComponentEntry] = &[
             default: true,
         }],
         build_demo: streamed_content_demo,
+    },
+    ComponentEntry {
+        name: "TreeView",
+        slug: "tree-view",
+        description:
+            "Generic collapsible tree: native details/summary branches, selectable leaves.",
+        category: Category::Navigation,
+        order: 505,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "selected",
+            description: "Highlight a leaf as the current selection",
+            default: true,
+        }],
+        build_demo: tree_view_demo,
+    },
+    ComponentEntry {
+        name: "FileTree",
+        slug: "file-tree",
+        description:
+            "TreeView specialized for filesystem snapshots: icons, selection, sandboxed source.",
+        category: Category::Navigation,
+        order: 506,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "selected",
+            description: "Highlight the selected file",
+            default: true,
+        }],
+        build_demo: file_tree_demo,
+    },
+    ComponentEntry {
+        name: "SplitPane",
+        slug: "split-pane",
+        description: "Two panes with a pointer-drag divider (client-side resize primitive).",
+        category: Category::Layout,
+        order: 120,
+        variants: &[],
+        bool_props: &[],
+        build_demo: split_pane_demo,
+    },
+    ComponentEntry {
+        name: "CodeEditor",
+        slug: "code-editor",
+        description: "Textarea editor with line-number gutter, dirty marks, and a gated save bar.",
+        category: Category::Forms,
+        order: 230,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "dirty",
+            description: "Mark a line dirty",
+            default: true,
+        }],
+        build_demo: code_editor_demo,
+    },
+    ComponentEntry {
+        name: "DocumentView",
+        slug: "document-view",
+        description: "View/edit shell: title + actions header over a scrolling document body.",
+        category: Category::DataDisplay,
+        order: 317,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "editing",
+            description: "Show the toggle in its editing state",
+            default: false,
+        }],
+        build_demo: document_view_demo,
     },
     ComponentEntry {
         name: "ChatEntry",

@@ -909,6 +909,7 @@ define_token_enum! {
         // Dynamic viewport heights — mobile-safe alternative to the `vh` Screen tokens,
         // which over/undershoot when the browser chrome shows/hides.
         HDvh = 0x344 => "height:100dvh",
+        CursorColResize = 0x34C => "cursor:col-resize",
         MinHDvh = 0x345 => "min-height:100dvh",
         MaxHDvh = 0x346 => "max-height:100dvh",
         /// Auto-grow a textarea/input to its content (pair with a max-height cap).

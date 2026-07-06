@@ -54,8 +54,8 @@ with the release track — nothing in it blocks 0.1.
 | 3 — Technical gaps | 6 | 2 |
 | 4 — Positioning & launch | 3 | 3 |
 | 5 — Runtime extraction | 3 | 3 |
-| 6 — Content & editing | 8 | 2 |
-| **All** | **28** | **18** |
+| 6 — Content & editing | 8 | 7 |
+| **All** | **28** | **23** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -490,7 +490,16 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
   real work).
 
 ### F2 — File explorer component (sandboxed FS source, from claw-rwire)
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `FsSnapshot` (canonicalized root, skips
+  hidden + symlinks; `resolve()` is the tested security boundary — `..`,
+  absolute, and symlink escapes refused, new-file creation inside allowed),
+  generic `TreeView` (native `<details>` branches — zero per-node server
+  state), `FileTree` specialization (icons, index-param selection,
+  expand-to-selection), and `SplitPane` on the new `BIND_RESIZE` runtime
+  primitive (drag resizes the previous sibling — adjacency pairing keeps the
+  wire to one ref). A separate `FileExplorer` wrapper proved unnecessary: the
+  composition is three lines in the example; recorded here instead of
+  shipping a hollow abstraction.
 - **Provenance:** claw-rwire's `ui/files.rs` — a working but imperfect two-pane
   manager (breadcrumb header, inline create prompt, entry rows with hover/active
   states, rename/delete, editor pane); treat it as the requirements list, not the
@@ -514,7 +523,10 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 - **Effort:** ~2–3 days.
 
 ### F3 — Document view/edit shell (edit optional)
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `DocumentView` (title + actions header
+  over a scrolling body; `editor_body()` hands scroll ownership to the
+  editor) with a Chip mode toggle in the example; view mode renders markdown
+  (`Markdown`) or highlighted code (`highlight_code`).
 - **Fix direction:** `DocumentView` component: **view** = rendered markdown /
   highlighted code (F4); **edit** = optional mode behind a toggle — a plain
   `<textarea>` plus gutter column, document state server-owned (baseline + working
@@ -537,7 +549,12 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 - **Effort:** ~1–2 days.
 
 ### F5 — Editor gutter: line numbers + scroll sync
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06) — and the planned runtime primitives
+  **dissolved**: with `field-sizing: content` the textarea is exactly as tall
+  as its text, so gutter and field share one scrolling container in normal
+  flow — no scroll-sync opcode, no local line-count helper. Line numbers and
+  dirty marks re-render on the debounced input round-trip (matched
+  line-height, mono font).
 - **Fix direction:** gutter rendered server-side from the working copy; a small runtime
   helper recomputes line count locally on input (count newlines → patch gutter) for
   zero-latency numbering, server reconciles on the debounced event. A generic
@@ -548,7 +565,12 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 - **Effort:** ~1–2 days (requires Phase 5).
 
 ### F6 — Dirty-line tracking + gated save
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). Pure server-side as designed: per-line
+  diff of working copy vs baseline on each debounced input → gutter dots +
+  document dirty flag gating the Save button; save needs **no payload** (the
+  server owns the working copy), checks mtime, and refuses to clobber
+  external changes. Content diff, not keystrokes: hand-reverting a line
+  clears its mark.
 - **Fix direction:** pure server-side — the flagship demo that the architecture
   handles "rich editor feel" with zero new runtime surface. On each debounced input:
   diff working copy vs baseline → per-line dirty set → gutter marks (St class per
@@ -628,8 +650,13 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
   Chat family sections in data-display.md. Deliberate trim: the chatroom has
   no load-older sentinel (single-state renderers can't window shared data
   per-user; the sentinel's live exercise belongs to per-connection-state apps
-  — the editor example / claw). Remaining: editor example + docs FileTree +
-  website embeds — blocked on F2–F6.
+  — the editor example / claw). Editor side done (2026-07-06):
+  **`examples/editor`** — fully functional explorer + view/edit (resizable
+  split, markdown/code views, dirty marks, mtime-guarded save), live-verified
+  by `runtime/e2e/editor.mjs` (browse → edit → dirty → **save hits the
+  disk**). 5 new catalog entries (TreeView, FileTree, SplitPane, CodeEditor,
+  DocumentView). Remaining (polish, small): docs-site sidebar → FileTree;
+  website demo embeds.
 - **Fix direction:**
   - **Docs site:** sidebar becomes a `FileTree` over `docs/`; long pages stream via
     F1; code blocks colored via F4.

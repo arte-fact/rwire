@@ -70,6 +70,7 @@ rwire/
 │   └── rwire-examples/      # Examples gallery
 └── examples/
     ├── chat/                # Multi-tab chatroom: shared state + Chat family (E2E: runtime/e2e/chat.mjs)
+    ├── editor/              # File explorer + editor: FsSnapshot sandbox, dirty diff, gated save (E2E: runtime/e2e/editor.mjs)
     ├── counter/             # Simple counter app
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef dynamic binding
