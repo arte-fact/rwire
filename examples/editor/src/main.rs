@@ -141,7 +141,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "editor on http://127.0.0.1:9008 — {} entries under sample/",
         snapshot().entries.len()
     );
-    Server::bind("127.0.0.1:9008")?
+    Server::bind("0.0.0.0:9008")?
         .root(app)
         .capsule_config(CapsuleConfig::new())
         .theme(app_theme())

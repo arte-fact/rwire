@@ -389,71 +389,45 @@ fn strip_section_prefix(name: &str) -> String {
 }
 
 fn build_sidebar(site: &DocSite, active_path: &str) -> ElementBuilder {
-    let mut nav = el(El::Nav).st([
-        St::DisplayFlex,
-        St::FlexCol,
-        St::GapMd,
-        St::PxSm,
-        St::TextSm,
-    ]);
+    // The generic TreeView (F8 dogfood): each section is a collapsible native
+    // <details> branch, expanded when it holds the active page; leaves carry
+    // the router Links so navigation stays a data-route interception.
+    use rwire_components::{TreeNode, TreeView};
 
+    let mut roots = Vec::new();
     for (section_name, page_paths) in site.sections() {
-        let title = el(El::Div)
+        let title = el(El::Span)
             .st([
                 St::TextXsMuted,
                 St::FontSemibold,
                 St::TextUppercase,
                 St::TrackingWider,
-                St::PxSm,
-                St::PySm,
             ])
             .text(&strip_section_prefix(section_name));
 
-        let mut link_list = el(El::Div).st([St::DisplayFlex, St::FlexCol]);
-
+        let mut leaves = Vec::new();
         for page_path in page_paths {
             if let Some(page) = site.page(page_path) {
                 let is_active = active_path == page_path;
-
-                let tokens = if is_active {
-                    vec![
-                        St::DisplayBlock,
-                        St::PxSm,
-                        St::PySm,
-                        St::RoundedSm,
-                        St::NoDecoration,
-                        St::BgAccentSubtle,
-                        St::TextAccent12,
-                        St::FontMedium,
-                        St::CursorPointer,
-                    ]
+                let link = Link::to(page_path, &page.title).st(if is_active {
+                    vec![St::NoDecoration, St::TextAccent12, St::FontMedium]
                 } else {
-                    vec![
-                        St::DisplayBlock,
-                        St::PxSm,
-                        St::PySm,
-                        St::RoundedSm,
-                        St::NoDecoration,
-                        St::TextDefault,
-                        St::CursorPointer,
-                        St::TransitionColors,
-                    ]
-                };
-
-                let mut link = Link::to(page_path, &page.title).st(tokens);
-
-                if !is_active {
-                    link = link.hover([St::BgHover]);
-                }
-
-                link_list = link_list.append([link]);
+                    vec![St::NoDecoration, St::TextDefault]
+                });
+                leaves.push(
+                    TreeNode::leaf(page_path.trim_start_matches('/').to_string(), link)
+                        .selected(is_active),
+                );
             }
         }
-
-        nav = nav.append([el(El::Div).append([title, link_list])]);
+        roots.push(
+            TreeNode::branch(strip_section_prefix(section_name), title, leaves).expanded(true),
+        );
     }
 
-    nav
+    el(El::Nav)
+        .st([St::DisplayFlex, St::FlexCol, St::PxSm, St::TextSm])
+        .append([TreeView::new().roots(roots).build()])
 }
 
 // ============================================================================

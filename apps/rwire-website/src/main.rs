@@ -213,6 +213,7 @@ fn build_landing_page() -> ElementBuilder {
         section_stats(),
         section_code_example(),
         section_features(),
+        section_surfaces(),
         section_comparison(),
         section_cta(),
     ])
@@ -413,7 +414,7 @@ fn section_features() -> ElementBuilder {
         (
             Icon::Shield,
             "Fully Typed",
-            "State, handlers, renderers, components \u{2014} all Rust. Catch errors at compile time.",
+            "State, handlers, renderers, components, even list keys \u{2014} all Rust. Reorders morph by identity and keep input focus.",
         ),
         (
             Icon::Cpu,
@@ -422,8 +423,8 @@ fn section_features() -> ElementBuilder {
         ),
         (
             Icon::Palette,
-            "700+ Style Tokens",
-            "CSS encoded as 1\u{2013}2 byte varint codes. Semantic theming with light/dark mode.",
+            "Batteries: 65+ Components",
+            "Chat surfaces with seamless history, file trees, a code editor with dirty tracking, streamed content \u{2014} typed, themed, catalogued.",
         ),
         (
             Icon::Leaf,
@@ -466,6 +467,96 @@ fn section_features() -> ElementBuilder {
 }
 
 // -- Section 5: Comparison Table ----------------------------------------------
+
+// -- Section: built-in surfaces (F8) -------------------------------------------
+// Not screenshots: these are the actual components, rendered by the framework
+// this page runs on.
+fn section_surfaces() -> ElementBuilder {
+    use rwire_components::{ChatAuthor, ChatEntry, CodeEditor, TypingIndicator};
+
+    let chat_demo = el(El::Div)
+        .st([
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapMd,
+            St::BgSurface,
+            St::PMd,
+            St::RoundedMd,
+        ])
+        .append([
+            ChatEntry::new(
+                ChatAuthor::user("you"),
+                el(El::P).st([St::TextSm]).text("Ship the release?"),
+            )
+            .key("w1")
+            .time("14:31")
+            .build(),
+            ChatEntry::new(
+                ChatAuthor::agent("agent"),
+                el(El::P)
+                    .st([St::TextSm])
+                    .text("Checks are green \u{2014} shipping."),
+            )
+            .key("w2")
+            .time("14:32")
+            .build(),
+            TypingIndicator::new()
+                .label("agent is typing\u{2026}")
+                .build(),
+        ]);
+
+    let editor_demo = el(El::Div)
+        .st([
+            St::BgSurface,
+            St::PMd,
+            St::RoundedMd,
+            St::DisplayFlex,
+            St::FlexCol,
+        ])
+        .style(rwire::style::Style::new().set("max-height", "14rem"))
+        .append([CodeEditor::new(
+            "www-editor",
+            "fn main() {\n    let ui = el(El::Div);\n    println!(\"no build step\");\n}",
+        )
+        .dirty_lines(&[false, true, false, false])
+        .build()]);
+
+    let card = |title: &str, sub: &str, body: ElementBuilder| {
+        el(El::Div)
+            .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::MinW0])
+            .append([
+                el(El::H3).st([St::TextLg, St::FontSemibold]).text(title),
+                el(El::P).st([St::TextSm, St::TextMuted]).text(sub),
+                body,
+            ])
+    };
+
+    el(El::Div).st([St::Py3xl, St::PxLg, St::BgSubtle]).append([el(El::Div)
+        .st([St::MxAuto, St::MaxW56rem])
+        .append([
+            el(El::H2)
+                .st([St::Text2xl, St::FontSemibold, St::TextCenter, St::MbSm])
+                .text("Application surfaces, built in"),
+            el(El::P)
+                .st([St::TextSm, St::TextMuted, St::TextCenter, St::MbLg])
+                .text("These aren't screenshots \u{2014} they're the real components, rendered by the framework this page runs on. Try `cargo run -p chat` and `-p editor` for the live versions."),
+            el(El::Div)
+                .st([St::DisplayGrid, St::GridCols1, St::GapLg])
+                .md([St::GridCols2])
+                .append([
+                    card(
+                        "Chat",
+                        "ChatItem trait, seamless history via scroll sentinels, typing indicators, shared-state broadcast.",
+                        chat_demo,
+                    ),
+                    card(
+                        "Editor",
+                        "File tree over a sandboxed root, dirty-line tracking, a save button that only lights up when it should.",
+                        editor_demo,
+                    ),
+                ]),
+        ])])
+}
 
 fn section_comparison() -> ElementBuilder {
     el(El::Div)

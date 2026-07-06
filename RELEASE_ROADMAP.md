@@ -54,8 +54,8 @@ with the release track — nothing in it blocks 0.1.
 | 3 — Technical gaps | 6 | 2 |
 | 4 — Positioning & launch | 3 | 3 |
 | 5 — Runtime extraction | 3 | 3 |
-| 6 — Content & editing | 8 | 7 |
-| **All** | **28** | **23** |
+| 6 — Content & editing | 8 | 8 |
+| **All** | **28** | **24** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -641,7 +641,7 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 - **Effort:** ~3–4 days.
 
 ### F8 — Dogfood integration: docs, website, examples, design system
-- **Status:** `[~]` Chat side done (2026-07-06): **`examples/chat`** — a fully
+- **Status:** `[x]` Done (2026-07-06). Chat side: **`examples/chat`** — a fully
   functional multi-tab chatroom, the first public demo of `#[storage(shared)]`
   broadcast (nickname join; hidden-field identity; typing indicator via the
   new `Composer::on_draft`; room capped at 100, non-persistent). Live-verified
@@ -655,8 +655,12 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
   split, markdown/code views, dirty marks, mtime-guarded save), live-verified
   by `runtime/e2e/editor.mjs` (browse → edit → dirty → **save hits the
   disk**). 5 new catalog entries (TreeView, FileTree, SplitPane, CodeEditor,
-  DocumentView). Remaining (polish, small): docs-site sidebar → FileTree;
-  website demo embeds.
+  DocumentView). Polish landed 2026-07-06: the docs-site sidebar renders
+  through the generic `TreeView` (collapsible native-details sections,
+  live-verified: 10 branches / 78 routed links), and the website gains a
+  "built-in surfaces" section rendering REAL `ChatEntry`/`TypingIndicator`/
+  `CodeEditor` components — not screenshots — plus a refreshed feature grid
+  (keyed diffing, 65+ components). **F8 complete.**
 - **Fix direction:**
   - **Docs site:** sidebar becomes a `FileTree` over `docs/`; long pages stream via
     F1; code blocks colored via F4.
