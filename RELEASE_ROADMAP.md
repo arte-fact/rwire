@@ -338,22 +338,40 @@ Drafted 2026-07-06; refine per-item before implementation.
 
 **Design principle:** server-first, per the architecture. Highlighting, diffing, and
 document state live on the server; the runtime gains only *small generic primitives*
-(scroll sentinel, scroll-sync, local line count) — never feature-specific logic. That
-keeps the runtime small and makes every primitive reusable.
+(scroll sentinel, scroll-sync, local line count, pointer-drag) — never
+feature-specific logic. That keeps the runtime small and makes every primitive
+reusable.
 
-**Provenance:** the file explorer (F2) and chat (F7) are extractions of surfaces
-claw-rwire already built and battle-tested (`src/ui/files.rs`; `src/ui/chat.rs` +
-`ui/thread.rs`) — the same upstream-promotion pattern that produced `ChatScroll`.
-Design against claw-rwire's codebase **and its roadmap** (P4a: one unified `Thread`
-component with windowed history and "↑ load older"; P5c: a read-only per-branch file
-tree). Each component lands with a claw-rwire migration that deletes the local
-implementation — the framework gains a proven component, the app gets simpler, and the
+**Provenance & bar:** the file explorer (F2) and chat (F7) originate in claw-rwire's
+needs (`src/ui/files.rs`; `src/ui/chat.rs` + `ui/thread.rs`) — the same
+upstream-promotion pattern that produced `ChatScroll`. But the existing surfaces are
+**imperfect drafts, not specs**: mine them for requirements and encoded lessons (the
+pinned-composer layout, the justify-on-scroll-container regression), don't replicate
+their flaws. Design each component fresh to a **first-class bar** — where the draft
+and good UX disagree, UX wins (e.g. seamless history scroll replacing the drafted
+load-older button). Design against claw-rwire's roadmap too (P4a: one unified `Thread`
+component; P5c: a read-only per-branch file tree). Each component lands with a
+claw-rwire migration that deletes the local implementation — the framework gains a
+component, claw-rwire gets a strictly better surface than it drafted, and the
 migration pressure-tests genericity.
+
+**Component architecture (atomic, decided 2026-07-06):** chat and the explorer/editor
+are **macro components** composed from the library — reuse before creation; macros
+live in `rwire-components` beside the atoms (split into a separate crate only if the
+module caps demand it). Every **new** component gets a design-system catalog entry (F8).
+
+| Layer | Chat (F7) | Explorer/editor (F2/F3/F5/F6) |
+|---|---|---|
+| Reused | `ChatScroll` + `Composer` (both shipped), `Avatar`, `Chip`/`Tag`/`Badge`, `Alert`, `StatusDot`, `Skeleton`, `EmptyState`, `Divider`, `Text`, `Stack`, rwire-markdown | `Breadcrumb`, `Input`, `DropdownMenu`, `Modal`, `Code`, `CopyButton`, `Tabs`/`Chip`, `Toast`, `Skeleton`, `EmptyState`, `Tooltip`, `Grid`/`Stack`, `rwire::icons` |
+| New atoms | `TypingIndicator` (animated writing dots) | `Gutter` (line numbers + per-line marks) |
+| New molecules | `ChatEntry` (avatar/icon slot · author · time · phase tag · accent rail · body slot · collapsible detail) | `TreeView`/`TreeItem` (generic collapsible tree: client-action expand/collapse, selection, per-node slots), `SplitPane` (resizable panes via the pointer-drag primitive) |
+| New organisms | `ChatTranscript` (windowed entries, seamless history, day dividers, empty state), `StreamedContent` (F1, shared with editor track) | `FileTree` (`TreeView` × file icons/kinds/actions), `CodeEditor` (textarea + `Gutter` + scroll-sync + dirty marks; supersedes claw's `md_editor`) |
+| Macro | `Chat` (transcript + composer + error slot + writing state) | `DocumentView` (view/edit shell), `FileExplorer` (`SplitPane`: `FileTree` beside `DocumentView`, breadcrumb, actions) |
 
 **Ordering:** F4 is independent and small — do first. F2 → F3 → F5 → F6 build on each
 other; F1 is independent of F2/F3 and a **prerequisite of F7** (seamless history
 scroll). F8 integrates continuously and finishes last. All runtime-touching items
-(F1, F5) require Phase 5 done.
+(F1, F5, and F2's `SplitPane` drag) require Phase 5 done.
 
 ### F1 — Content streaming / infinite scroll for large content
 - **Status:** `[ ]`
@@ -374,18 +392,23 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 
 ### F2 — File explorer component (sandboxed FS source, from claw-rwire)
 - **Status:** `[ ]`
-- **Provenance:** claw-rwire's `ui/files.rs` — a working two-pane manager (breadcrumb
-  header, inline create prompt, entry rows with hover/active states, rename/delete,
-  editor pane). Its roadmap (P5c) adds a second consumer: a **read-only** file tree of
-  a selected branch on the project page. Both modes are therefore requirements, not
+- **Provenance:** claw-rwire's `ui/files.rs` — a working but imperfect two-pane
+  manager (breadcrumb header, inline create prompt, entry rows with hover/active
+  states, rename/delete, editor pane); treat it as the requirements list, not the
+  spec. Its roadmap (P5c) adds a second consumer: a **read-only** file tree of a
+  selected branch on the project page. Both modes are therefore requirements, not
   speculation.
 - **Fix direction:** server-side directory tree over a configured root. **Path safety
   is the security item**: canonicalize, reject `..` and symlink escapes, tested. Two
   modes: **read-only** (docs site, branch trees) and **managed** (create/rename/delete
   via handler hooks the app provides — the component renders affordances only when
-  hooks are present). Breadcrumb header; expand/collapse via client-action Targets
-  (zero-latency); selection → document view (F3). Markdown via rwire-markdown, code via
-  the highlighter, binary → info row. No runtime work.
+  hooks are present). Composition per the architecture table: generic `TreeView`
+  molecule (client-action expand/collapse, selection, per-node slots) specialized into
+  `FileTree` (icons/kinds/action slots), inside a **resizable `SplitPane`** (decided
+  2026-07-06: resizable from v1 — needs the pointer-drag runtime primitive, local-only
+  with an optional debounced remote event to persist the split). `Breadcrumb` header;
+  selection → `DocumentView` (F3). Markdown via rwire-markdown, code via the
+  highlighter, binary → info row.
 - **Acceptance:** explorer over a sample tree in the examples app; traversal-escape
   attempts rejected with test coverage; large directories paginate or lazy-expand;
   claw-rwire migrates `ui/files.rs` onto it, deleting the local browser scaffolding.
@@ -441,12 +464,14 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 
 ### F7 — Generic Chat component (from claw-rwire)
 - **Status:** `[ ]`
-- **Provenance:** extraction of claw-rwire's chat surface (`ui/chat.rs` — transcript
-  over pinned composer, error banner, `sending_row`, collapsible transcript items) and
-  the shared thread widgets (`ui/thread.rs` — authored entry: author rail + phase tag +
-  time header, markdown body, `ChatScroll`). claw-rwire's own roadmap **P4a** wants
-  exactly this: one `Thread` component unifying concierge chat, agent threads, and the
-  task Thread tab, with windowed history. Build that component *here*; P4a adopts it.
+- **Provenance:** claw-rwire's chat surface (`ui/chat.rs` — transcript over pinned
+  composer, error banner, `sending_row`, collapsible transcript items) and the shared
+  thread widgets (`ui/thread.rs` — authored entry: author rail + phase tag + time
+  header, markdown body, `ChatScroll`) supply the **requirements — as imperfect
+  drafts, not a spec to replicate**. claw-rwire's own roadmap **P4a** wants exactly
+  this: one `Thread` component unifying concierge chat, agent threads, and the task
+  Thread tab, with windowed history. Build the first-class version *here*; P4a adopts
+  it and gets a better surface than it drafted.
 - **Fix direction — composable parts under one `Chat` family** (usable whole or à la
   carte):
   - **Shell:** transcript over a pinned composer that reserves its own height (never
@@ -458,9 +483,10 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
   - **Writing state:** pending/sending row (claw's `sending_row`) and a **streaming
     entry** variant — the server appends into the entry's synced region as content
     arrives; zero client logic, it's just reactive updates.
-  - **Composer panel:** auto-growing textarea, Enter-to-send + click, disabled-while-
-    sending gate, error-banner slot, leading/trailing action slots (attachments etc.
-    come later without API breakage).
+  - **Composer panel:** the shipped `Composer` component (auto-grow, Enter-submit /
+    Shift+Enter newline via the existing `data-enter-submit` runtime behavior, pill +
+    compact forms) — extended with a disabled-while-sending gate and leading/trailing
+    action slots (attachments etc. come later without API breakage).
   - **History:** windowed — render the last N turns; older turns arrive via **seamless
     infinite scroll** (F1's sentinel in reverse, one page in flight). claw-rwire's P4a
     drafts an explicit "↑ load older" button — the component supersedes it: with the
@@ -490,8 +516,10 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
     `examples/editor` — file/code explorer + editor: browse a sandboxed tree, view
     with coloration, edit with line numbers and dirty marks, gated save — wired
     end-to-end.
-  - **Design system:** catalog entries for `FileTree`, `StreamedContent`,
-    `DocumentView`, `Chat`.
+  - **Design system:** a catalog entry for **every new component** in the
+    architecture table: `TypingIndicator`, `ChatEntry`, `ChatTranscript`, `Chat`,
+    `StreamedContent`, `TreeView`, `SplitPane`, `Gutter`, `FileTree`, `CodeEditor`,
+    `DocumentView`, `FileExplorer`.
 - **Acceptance:** all four apps exercise the features; README + docs updated
   (component counts, feature list, this roadmap's status).
 - **Effort:** ~2–4 days spread across the track.
