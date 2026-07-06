@@ -472,6 +472,14 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
   this: one `Thread` component unifying concierge chat, agent threads, and the task
   Thread tab, with windowed history. Build the first-class version *here*; P4a adopts
   it and gets a better surface than it drafted.
+- **Customization contract:** app-specific content (claw's tool cards, memory lines,
+  review gates, streaming turns) renders through the **`ChatItem` trait** — three
+  required methods (`key`/`author`/`body`), defaulted extras (`time`/`tag`/`detail`/
+  `groups_with`), and a chrome-free `row()` escape hatch for system lines and
+  interactive gate rows. Collapsible details use native `<details>`/`<summary>`
+  (new `El::Details`/`El::Summary` — replaces claw's server-round-trip toggles;
+  zero-latency, free a11y). Full draft with the claw adoption sketch:
+  `docs/chat-component-design.md`.
 - **Fix direction — composable parts under one `Chat` family** (usable whole or à la
   carte):
   - **Shell:** transcript over a pinned composer that reserves its own height (never
