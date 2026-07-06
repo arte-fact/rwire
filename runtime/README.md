@@ -42,7 +42,7 @@ RWIRE_RUNTIME=$PWD/dist/runtime.min.js cargo test -p rwire --test wire_roundtrip
 
 | Module | Contents (original names kept) |
 |---|---|
-| `opcodes.ts` | `OP` byte table — mirrors `protocol/opcodes.rs`; becomes generated in RT3 |
+| `opcodes.ts` | GENERATED from `protocol/opcodes.rs` by `build.mjs` — do not edit |
 | `state.ts` | shared mutable state `st` (symbols, word table, socket, composites, morph staging) + name maps `E/V/P/Y/AT/AV/SE`, `A` seed |
 | `varint.ts` | `rv`/`wv` — mirrors `protocol/varint.rs` |
 | `sanitize.ts` | `sa` — refuses `on*` attrs and `javascript:` URLs |

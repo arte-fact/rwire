@@ -53,9 +53,9 @@ with the release track — nothing in it blocks 0.1.
 | 2 — Release mechanics | 5 | 1 |
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
-| 5 — Runtime extraction | 3 | 2 |
+| 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 0 |
-| **All** | **28** | **4** |
+| **All** | **28** | **5** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -349,7 +349,13 @@ path is Node-free under both layouts.
 - **Effort:** ~half a day.
 
 ### RT3 — Opcode constants: single source of truth
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `build.mjs` regenerates
+  `runtime/src/opcodes.ts` from `protocol/opcodes.rs` on every build (the two
+  WASM-reserved opcodes joined the Rust registry so it is complete). Switched
+  from an `OP` object to individual exported consts — esbuild inlines them, so
+  the artifact SHRANK to 12,614 B min / 4,512 B gz (~370 B under the
+  hand-minified original); size budget tightened to match. CI drift-diff (R2)
+  covers both the artifact and the generated file.
 - **Problem:** the opcode table exists twice — Rust (`protocol/opcodes.rs`, source of
   truth) and the TS `O` map. In-repo the risk is a stale build, not repo drift, but
   the duplication should still be generated, not maintained by hand.

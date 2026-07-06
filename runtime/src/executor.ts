@@ -4,7 +4,7 @@
 // becomes a detached no-op, never an aborted update) and the exact
 // PARSE ERROR / Unknown opcode console formats the wire harness greps for.
 
-import { OP } from "./opcodes.ts";
+import * as OP from "./opcodes.ts";
 import { st, E, V, P, Y, AT, AV, SE, A, type RwEl } from "./state.ts";
 import { rv } from "./varint.ts";
 import { sa } from "./sanitize.ts";
@@ -29,7 +29,7 @@ export function x(d: Uint8Array): void {
       const _p = i,
         o = d[i++];
       _oc++;
-      if (o === OP.S) {
+      if (o === OP.SYMBOLS) {
         let [n, l] = rv(d, i);
         i += l;
         st.sc = 0x80;
@@ -39,7 +39,7 @@ export function x(d: Uint8Array): void {
           st.s[st.sc++] = new TextDecoder().decode(d.slice(i, i + sl));
           i += sl;
         }
-      } else if (o === OP.SE) {
+      } else if (o === OP.SYMBOLS_EXTEND) {
         let [n, l] = rv(d, i);
         i += l;
         const [si, sl] = rv(d, i);
@@ -51,7 +51,7 @@ export function x(d: Uint8Array): void {
           st.s[st.sc++] = new TextDecoder().decode(d.slice(i, i + sl2c));
           i += sl2c;
         }
-      } else if (o === OP.WT) {
+      } else if (o === OP.WORD_TABLE) {
         let n = d[i++];
         st.wt = [];
         while (n--) {
@@ -60,26 +60,26 @@ export function x(d: Uint8Array): void {
           st.wt.push(new TextDecoder().decode(d.slice(i, i + l)));
           i += l;
         }
-      } else if (o === OP.G) {
+      } else if (o === OP.GET_BY_ID) {
         const [k, l] = rv(d, i);
         i += l;
         // null-guard: a missing target must not throw and abort the rest of the update
         const el = document.getElementById(st.s[k]);
         r.push((el || document.createElement("div")) as RwEl);
-      } else if (o === OP.C) {
+      } else if (o === OP.CREATE) {
         const t = d[i++];
         r.push(
           (SE[t]
             ? document.createElementNS("http://www.w3.org/2000/svg", E[t] || "svg")
             : document.createElement(E[t] || "div")) as RwEl,
         );
-      } else if (o === OP.CS) {
+      } else if (o === OP.CREATE_SYNCED) {
         const [id, l] = rv(d, i);
         i += l;
         const e = document.createElement("span");
         e.id = "__synced_" + id;
         r.push(e as RwEl);
-      } else if (o === OP.GS) {
+      } else if (o === OP.GET_SYNCED) {
         const [id, l] = rv(d, i);
         i += l;
         // null-guard: ops on a pruned/missing region become detached no-ops instead of aborting the update
@@ -87,33 +87,33 @@ export function x(d: Uint8Array): void {
           (document.getElementById("__synced_" + id) ||
             document.createElement("span")) as RwEl,
         );
-      } else if (o === OP.T) {
+      } else if (o === OP.SET_TEXT) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [k, l] = rv(d, i);
         i += l;
         r[f].textContent = st.s[k] || "";
-      } else if (o === OP.TW) {
+      } else if (o === OP.SET_TEXT_WORDS) {
         const [f, fl] = rv(d, i);
         i += fl;
         let n = d[i++];
         const ws: string[] = [];
         while (n--) ws.push(st.wt[d[i++]] || "");
         r[f].textContent = ws.join(" ");
-      } else if (o === OP.TI) {
+      } else if (o === OP.SET_TEXT_INT) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [v, l] = rv(d, i);
         i += l;
         const n = (v >>> 1) ^ -(v & 1); // zigzag
         r[f].textContent = n.toString();
-      } else if (o === OP.L) {
+      } else if (o === OP.SET_CLASS) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [k, l] = rv(d, i);
         i += l;
         r[f].className = st.s[k] || "";
-      } else if (o === OP.A) {
+      } else if (o === OP.SET_ATTR) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [ak, al] = rv(d, i);
@@ -122,25 +122,25 @@ export function x(d: Uint8Array): void {
         i += vl;
         const an = A[ak] || st.s[ak] || "data";
         sa(r[f], an, st.s[vk] || "");
-      } else if (o === OP.AE) {
+      } else if (o === OP.SET_ATTR_ENUM) {
         const [f, fl] = rv(d, i);
         i += fl;
         const k = d[i++],
           v = d[i++];
         r[f].setAttribute(AT[k] || "data", AV[v] || "");
-      } else if (o === OP.AB) {
+      } else if (o === OP.SET_ATTR_BOOL) {
         const [f, fl] = rv(d, i);
         i += fl;
         const k = d[i++];
         r[f].setAttribute(AT[k] || "data", "");
-      } else if (o === OP.AK) {
+      } else if (o === OP.SET_ATTR_KEY_SYM) {
         const [f, fl] = rv(d, i);
         i += fl;
         const k = d[i++],
           [v, l] = rv(d, i);
         i += l;
         sa(r[f], AT[k] || "data", st.s[v] || "");
-      } else if (o === OP.D) {
+      } else if (o === OP.SET_DATA) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [kk, kl] = rv(d, i);
@@ -148,13 +148,13 @@ export function x(d: Uint8Array): void {
         const [vk, vl] = rv(d, i);
         i += vl;
         r[f].dataset[st.s[kk] || ""] = st.s[vk] || "";
-      } else if (o === OP.P) {
+      } else if (o === OP.APPEND) {
         const [p, pl] = rv(d, i);
         i += pl;
         const [c, cl] = rv(d, i);
         i += cl;
         (p < 0xffff ? r[p] : (document.body as RwEl)).appendChild(r[c]);
-      } else if (o === OP.CC) {
+      } else if (o === OP.CLEAR_CHILDREN) {
         const [f, fl] = rv(d, i);
         i += fl;
         fm();
@@ -162,14 +162,14 @@ export function x(d: Uint8Array): void {
         const shd = document.createElement(lv.tagName || "DIV");
         st.pm = { live: lv, shadow: shd };
         r[f] = shd as RwEl;
-      } else if (o === OP.B) {
+      } else if (o === OP.BIND_LOCAL) {
         const [f, fl] = rv(d, i);
         i += fl;
         const t = d[i++];
         const [h, hl] = rv(d, i);
         i += hl;
         BL(f, t, h, r);
-      } else if (o === OP.R) {
+      } else if (o === OP.BIND_REMOTE) {
         const [f, fl] = rv(d, i);
         i += fl;
         const t = d[i++];
@@ -180,7 +180,7 @@ export function x(d: Uint8Array): void {
           e.preventDefault();
           snd(() => se(h, t, f, e, r[f]), e, r[f]);
         });
-      } else if (o === OP.DB) {
+      } else if (o === OP.BIND_DEBOUNCED) {
         const [f, fl] = rv(d, i);
         i += fl;
         const t = d[i++];
@@ -194,7 +194,7 @@ export function x(d: Uint8Array): void {
           clearTimeout(tm);
           tm = setTimeout(() => se(h, t, f, e, r[f]), ms);
         });
-      } else if (o === OP.RP) {
+      } else if (o === OP.BIND_REMOTE_PARAM) {
         const [f, fl] = rv(d, i);
         i += fl;
         const t = d[i++];
@@ -208,47 +208,47 @@ export function x(d: Uint8Array): void {
           e.preventDefault();
           snd(() => sep(h, t, f, prm, e, r[f]), e, r[f]);
         });
-      } else if (o === OP.IL || o === OP.DH) {
+      } else if (o === OP.INLINE_LOCAL || o === OP.DEF_HANDLER) {
         i = xi(d, i - 1);
-      } else if (o === OP.RU) {
+      } else if (o === OP.ROUTE_PUSH) {
         const [k, l] = rv(d, i);
         i += l;
         history.pushState(null, "", st.s[k]);
-      } else if (o === OP.RR) {
+      } else if (o === OP.ROUTE_REPLACE) {
         const [k, l] = rv(d, i);
         i += l;
         history.replaceState(null, "", st.s[k]);
-      } else if (o === OP.RUI) {
+      } else if (o === OP.ROUTE_PUSH_INLINE) {
         const [sl, ll] = rv(d, i);
         i += ll;
         const u = new TextDecoder().decode(d.slice(i, i + sl));
         i += sl;
         history.pushState(null, "", u);
-      } else if (o === OP.RRI) {
+      } else if (o === OP.ROUTE_REPLACE_INLINE) {
         const [sl, ll] = rv(d, i);
         i += ll;
         const u = new TextDecoder().decode(d.slice(i, i + sl));
         i += sl;
         history.replaceState(null, "", u);
-      } else if (o === OP.SS) {
+      } else if (o === OP.STYLE_SET) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [k, l] = rv(d, i);
         i += l;
         r[f].style.cssText = st.s[k] || "";
-      } else if (o === OP.SU) {
+      } else if (o === OP.STYLE_UTIL) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [u, l] = rv(d, i);
         i += l;
         r[f].classList.add("u" + u);
-      } else if (o === OP.SP) {
+      } else if (o === OP.STYLE_PROP) {
         const [f, fl] = rv(d, i);
         i += fl;
         const p = d[i++],
           v = d[i++];
         (r[f].style as any)[P[p]] = Y[v];
-      } else if (o === OP.SM) {
+      } else if (o === OP.STYLE_MULTI) {
         const [f, fl] = rv(d, i);
         i += fl;
         let n = d[i++];
@@ -257,7 +257,7 @@ export function x(d: Uint8Array): void {
           i += l;
           r[f].classList.add("u" + u);
         }
-      } else if (o === OP.CT) {
+      } else if (o === OP.COMPOSITE_TABLE) {
         let [n, l] = rv(d, i);
         i += l;
         while (n--) {
@@ -270,7 +270,7 @@ export function x(d: Uint8Array): void {
           }
           st.K[id] = "c" + id;
         }
-      } else if (o === OP.SD) {
+      } else if (o === OP.STYLE_DEF) {
         let [n, l] = rv(d, i);
         i += l;
         if (!st.DS) {
@@ -288,7 +288,7 @@ export function x(d: Uint8Array): void {
             st.DS.textContent += rule;
           }
         }
-      } else if (o === OP.MD) {
+      } else if (o === OP.MAP_DEF) {
         let [n, nl] = rv(d, i);
         i += nl;
         while (n--) {
@@ -306,13 +306,13 @@ export function x(d: Uint8Array): void {
               c
             ] = nm;
         }
-      } else if (o === OP.SC) {
+      } else if (o === OP.STYLE_COMPOSITE) {
         const [f, fl] = rv(d, i);
         i += fl;
         const [id, l] = rv(d, i);
         i += l;
         r[f].classList.add(st.K[id] || "c" + id);
-      } else if (o === OP.PD) {
+      } else if (o === OP.STYLE_PSEUDO) {
         const [f, fl] = rv(d, i);
         i += fl;
         const pc = d[i++];
@@ -322,7 +322,7 @@ export function x(d: Uint8Array): void {
           i += l;
           r[f].classList.add("h" + pc + "u" + u);
         }
-      } else if (o === OP.BP) {
+      } else if (o === OP.STYLE_BREAKPOINT) {
         const [f, fl] = rv(d, i);
         i += fl;
         const bp = d[i++];
@@ -332,10 +332,10 @@ export function x(d: Uint8Array): void {
           i += l;
           r[f].classList.add("b" + bp + "u" + u);
         }
-      } else if (o === OP.IT) {
+      } else if (o === OP.INIT_TARGET) {
         fl2[d[i]] = !!d[i + 1];
         i += 2;
-      } else if (o === OP.BT) {
+      } else if (o === OP.BIND_TARGET) {
         const [f, l] = rv(d, i);
         i += l;
         const ti = d[i++];
@@ -344,7 +344,7 @@ export function x(d: Uint8Array): void {
         const inv = d[i++];
         (fb2[ti] || (fb2[ti] = [])).push({ e: r[f], s: stc, n: !!inv });
         uf2(ti);
-      } else if (o === OP.TG) {
+      } else if (o === OP.BIND_TOGGLE) {
         const [f, l] = rv(d, i);
         i += l;
         const t = d[i++],
@@ -354,10 +354,10 @@ export function x(d: Uint8Array): void {
           fl2[ti] = !fl2[ti];
           uf2(ti);
         });
-      } else if (o === OP.IS) {
+      } else if (o === OP.INIT_SELECTOR) {
         sl2[d[i]] = d[i + 1];
         i += 2;
-      } else if (o === OP.BS) {
+      } else if (o === OP.BIND_SELECTOR) {
         const [f, l] = rv(d, i);
         i += l;
         const si = d[i++],
@@ -366,7 +366,7 @@ export function x(d: Uint8Array): void {
         i += sl;
         (sb2[si] || (sb2[si] = [])).push({ e: r[f], v: mv, s: stc });
         us2(si);
-      } else if (o === OP.SS2) {
+      } else if (o === OP.BIND_SELECT) {
         const [f, l] = rv(d, i);
         i += l;
         const t = d[i++],
@@ -377,7 +377,7 @@ export function x(d: Uint8Array): void {
           sl2[si] = sv;
           us2(si);
         });
-      } else if (o === OP.TT) {
+      } else if (o === OP.BIND_TIMED_TOGGLE) {
         const [f, l] = rv(d, i);
         i += l;
         const t = d[i++],
@@ -394,14 +394,14 @@ export function x(d: Uint8Array): void {
             uf2(ti);
           }, ms);
         });
-      } else if (o === OP.AT2) {
+      } else if (o === OP.AUTO_TOGGLE) {
         const ti = d[i++],
           ms = (d[i++] << 8) | d[i++];
         setTimeout(() => {
           fl2[ti] = !fl2[ti];
           uf2(ti);
         }, ms);
-      } else if (o === OP.E) {
+      } else if (o === OP.BATCH_END) {
         fm();
         if (ai) {
           const ne = document.getElementById(ai) as RwEl | null;

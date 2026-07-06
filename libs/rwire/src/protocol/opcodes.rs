@@ -70,6 +70,16 @@ pub const BIND_DEBOUNCED: u8 = 0x33;
 /// The param_bytes are sent back with the event, enabling item-specific handlers.
 pub const BIND_REMOTE_PARAM: u8 = 0x34;
 
+/// Reserved for WASM builds: inline-local handler. Never emitted by this
+/// server; the JS runtime skips it (stubbed `xi`). Registered here so the
+/// generated runtime opcode table (`runtime/src/opcodes.ts`) has a single
+/// source of truth.
+pub const INLINE_LOCAL: u8 = 0x40;
+
+/// Reserved for WASM builds: handler definition. Never emitted; see
+/// [`INLINE_LOCAL`].
+pub const DEF_HANDLER: u8 = 0x42;
+
 // ============================================================================
 // Client Actions (Targets & Selectors)
 // ============================================================================
