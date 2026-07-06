@@ -119,7 +119,10 @@ async fn test_server_accepts_http() {
     assert!(response_str.contains("<!DOCTYPE html>"));
 
     // Name maps ship empty; entries are delivered lazily over the wire via MAP_DEF.
-    assert!(response_str.contains("__rwx"), "runtime artifact must be embedded");
+    assert!(
+        response_str.contains("__rwx"),
+        "runtime artifact must be embedded"
+    );
 
     drop(stream);
     server_task.cancel().await;
@@ -151,7 +154,10 @@ async fn test_capsule_ships_empty_name_maps() {
     let response_str = read_full_http_response(&mut stream).await;
 
     // Maps ship empty; no element names are inlined into the capsule.
-    assert!(response_str.contains("__rwx"), "runtime artifact must be embedded");
+    assert!(
+        response_str.contains("__rwx"),
+        "runtime artifact must be embedded"
+    );
     assert!(
         !response_str.contains("0:'div'"),
         "names must not be inlined into the capsule"
@@ -260,7 +266,10 @@ async fn test_counter_capsule() {
     let response_str = read_full_http_response(&mut stream).await;
 
     // Element/event names are delivered lazily over the wire (MAP_DEF), not inlined.
-    assert!(response_str.contains("__rwx"), "runtime artifact must be embedded");
+    assert!(
+        response_str.contains("__rwx"),
+        "runtime artifact must be embedded"
+    );
     assert!(!response_str.contains("0:'div'"));
     assert!(!response_str.contains("1:'click'"));
 

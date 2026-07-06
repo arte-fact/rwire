@@ -543,7 +543,10 @@ mod tests {
         assert!(capsule.contains("<div id=\"rw\""));
 
         // Name maps ship empty (entries delivered lazily via MAP_DEF).
-        assert!(capsule.contains("__rwx"), "runtime artifact must be embedded");
+        assert!(
+            capsule.contains("__rwx"),
+            "runtime artifact must be embedded"
+        );
     }
 
     #[test]
@@ -580,7 +583,10 @@ mod tests {
         // empty rather than inlining every entry. A token reached only through a plain helper
         // can never be missing: its name arrives the first time its code is referenced.
         let capsule = generate_capsule();
-        assert!(capsule.contains("__rwx"), "runtime artifact must be embedded");
+        assert!(
+            capsule.contains("__rwx"),
+            "runtime artifact must be embedded"
+        );
         assert!(!capsule.contains("0:'div'"), "names must not be inlined");
     }
 
@@ -706,8 +712,13 @@ mod tests {
         let capsule = generate_styled_capsule(&config, &css);
         assert!(capsule.contains("__rwx"), "executor hook missing");
         assert!(capsule.contains("__rwov"), "reconnect overlay missing");
-        assert!(capsule.contains("PARSE ERROR at pos="), "executor error path missing");
-        assert!(capsule.contains("__synced_"), "synced-region addressing missing");
+        assert!(
+            capsule.contains("PARSE ERROR at pos="),
+            "executor error path missing"
+        );
+        assert!(
+            capsule.contains("__synced_"),
+            "synced-region addressing missing"
+        );
     }
-
 }
