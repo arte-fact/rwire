@@ -22,16 +22,25 @@ function rawConst(name) {
   return m[1];
 }
 
-// The full client script, assembled exactly as generate_styled_capsule does
-// (incl. the injected globals: empty name maps + the BASE mount path).
-const CLIENT_JS =
-  "const E={},V={},P={},Y={},AT={},AV={},SE={};\n" +
-  "const BASE='';\n" +
-  rawConst("CLIENT_ACTIONS_JS") +
-  "\n" +
-  rawConst("BIND_JS") +
-  "\n" +
-  rawConst("RUNTIME_JS");
+// Two runtime sources, same fixtures and assertions:
+// - default: the shipped string constants, assembled exactly as
+//   generate_styled_capsule does (incl. the injected globals: empty name maps
+//   + the BASE mount path);
+// - RWIRE_RUNTIME=<path>: a built bundle (runtime/dist/runtime.min.js), which
+//   carries its own maps/state and exposes x() as globalThis.__rwx. The Rust
+//   test wrapper inherits the env, so
+//   `RWIRE_RUNTIME=... cargo test --test wire_roundtrip` drives the artifact
+//   through the real fixture set.
+const ARTIFACT = process.env.RWIRE_RUNTIME;
+const CLIENT_JS = ARTIFACT
+  ? readFileSync(ARTIFACT, "utf8")
+  : "const E={},V={},P={},Y={},AT={},AV={},SE={};\n" +
+    "const BASE='';\n" +
+    rawConst("CLIENT_ACTIONS_JS") +
+    "\n" +
+    rawConst("BIND_JS") +
+    "\n" +
+    rawConst("RUNTIME_JS");
 
 // --- lenient DOM mock: operations must not throw, so x() can walk the whole
 // stream; a desync then shows up as an unknown opcode / out-of-range read, not as
@@ -137,19 +146,31 @@ function buildRuntime() {
     log: noop, warn: noop,
   };
 
-  // Expose `x` and the post-parse state for assertions.
-  const factory = new Function(
+  // Expose `x` (and, in string mode, the post-parse state) for assertions.
+  // Artifact mode shadows `globalThis` with a fresh object so the bundle's
+  // `globalThis.__rwx = x` hook lands per-run and injects `BASE` (the bundle
+  // expects it from the capsule; string mode declares its own `const BASE`).
+  const params = [
     "document", "window", "addEventListener", "removeEventListener",
     "history", "location", "navigator", "WebSocket", "MutationObserver", "console",
     "setTimeout", "clearTimeout", "scrollTo",
-    `${CLIENT_JS}\n;return { x, state: () => ({ symbols: s, sc, E, V, AT, AV }) };`
-  );
+  ];
+  const factory = ARTIFACT
+    ? new Function(
+        ...params, "globalThis", "BASE",
+        `${CLIENT_JS}\n;return { x: globalThis.__rwx, state: () => null };`
+      )
+    : new Function(
+        ...params,
+        `${CLIENT_JS}\n;return { x, state: () => ({ symbols: s, sc, E, V, AT, AV }) };`
+      );
 
   const win = { addEventListener: noop, removeEventListener: noop };
   const mod = factory(
     document, win, noop, noop,
     historyStub, locationStub, navigatorStub, wsStub, MO, captureConsole,
-    (fn) => 0, noop, noop
+    (fn) => 0, noop, noop,
+    ...(ARTIFACT ? [{}, ""] : [])
   );
   return { x: mod.x, state: mod.state, errors, document };
 }

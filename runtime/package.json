@@ -1,0 +1,17 @@
+{
+  "name": "rwire-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The rwire browser runtime: binary DOM-opcode executor, morph, and event glue. TypeScript source for the minified artifact embedded in the rwire crate.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && node --test test/*.test.ts",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}
