@@ -110,6 +110,14 @@ pub const BIND_TIMED_TOGGLE: u8 = 0x4D;
 /// Format: [AUTO_TOGGLE, target_idx, ms_hi, ms_lo]
 pub const AUTO_TOGGLE: u8 = 0x4E;
 
+/// Bind a one-shot visibility sentinel: an IntersectionObserver fires a remote
+/// `Ev::Visible` event (with the param bytes, like BIND_REMOTE_PARAM) when the
+/// element nears the viewport, then disconnects. The server's response renders
+/// a fresh sentinel with new params — its binding key changes, so the morph
+/// swaps in the new node with a live observer. One-request-in-flight falls out
+/// structurally. Format: [BIND_SENTINEL, ref_varint, handler_varint, param_len, ...params]
+pub const BIND_SENTINEL: u8 = 0x4F;
+
 // ============================================================================
 // Form Operations
 // ============================================================================
@@ -312,6 +320,9 @@ define_token_enum! {
         Focus = 0x0B => "focus",
         Blur = 0x0C => "blur",
         Scroll = 0x0D => "scroll",
+        /// Synthetic: fired by the scroll-sentinel primitive (BIND_SENTINEL)
+        /// when the element nears the viewport; never bound as a DOM listener.
+        Visible = 0x0E => "visible",
     }
 }
 

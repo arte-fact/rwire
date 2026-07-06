@@ -7,8 +7,8 @@ use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
     APPEND, AUTO_TOGGLE, BATCH_END, BIND_DEBOUNCED, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM,
-    BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
-    COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
+    BIND_SELECT, BIND_SELECTOR, BIND_SENTINEL, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE,
+    CLEAR_CHILDREN, COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
     ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL,
     SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
@@ -327,6 +327,32 @@ impl OpcodeBuffer {
         self.buf.put_u8(param_bytes.len() as u8);
         self.buf.put_slice(param_bytes);
         self.referenced_names.insert((NAME_EVENT, event_type));
+        self
+    }
+
+    /// Bind a one-shot visibility sentinel (see [`BIND_SENTINEL`]).
+    ///
+    /// No event-type byte: the event is always `Ev::Visible`, implied by the
+    /// opcode. The param bytes come back with the fired event (chunk index),
+    /// and changing them re-keys the binding so morphs replace the node.
+    ///
+    /// Format: [BIND_SENTINEL, ref_varint, handler_varint, param_len, ...param_bytes]
+    pub fn bind_sentinel(
+        &mut self,
+        ref_idx: u32,
+        handler_idx: u32,
+        param_bytes: &[u8],
+    ) -> &mut Self {
+        assert!(
+            param_bytes.len() <= 255,
+            "bind_sentinel: param_bytes too large ({} bytes, max 255)",
+            param_bytes.len()
+        );
+        self.buf.put_u8(BIND_SENTINEL);
+        write_varint(&mut self.buf, ref_idx);
+        write_varint(&mut self.buf, handler_idx);
+        self.buf.put_u8(param_bytes.len() as u8);
+        self.buf.put_slice(param_bytes);
         self
     }
 

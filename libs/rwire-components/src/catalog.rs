@@ -1991,6 +1991,33 @@ fn composer_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     composer.build()
 }
 
+fn streamed_content_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Spinner, SpinnerSize};
+    // Static rendition of the streamed region: delivered chunks, plus the
+    // sentinel spinner row while more content remains. The live component arms
+    // a one-shot visibility sentinel (BIND_SENTINEL) on that row instead.
+    use rwire::St;
+    let loading = b(bools, 0);
+    let mut root = el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0]);
+    for i in 0..3 {
+        root = root.append([el(El::Div)
+            .st([St::BgSurface, St::PMd, St::RoundedMd])
+            .append([el(El::P).st([St::TextSm, St::TextMuted]).text(
+                format!(
+                    "Chunk {} — delivered when the sentinel neared the viewport.",
+                    i + 1
+                )
+                .as_str(),
+            )])]);
+    }
+    if loading {
+        root = root.append([el(El::Div)
+            .st([St::DisplayFlex, St::JustifyCenter, St::PMd])
+            .append([Spinner::new().size(SpinnerSize::Sm).build()])]);
+    }
+    root
+}
+
 fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Chip;
     el(El::Div)
@@ -4098,6 +4125,21 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: &[],
         bool_props: &[],
         build_demo: tabs_demo,
+    },
+    ComponentEntry {
+        name: "StreamedContent",
+        slug: "streamed-content",
+        description:
+            "Progressive content delivery: chunks stream in as a sentinel nears the viewport.",
+        category: Category::DataDisplay,
+        order: 313,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "loading",
+            description: "More chunks remain; the sentinel spinner row is visible",
+            default: true,
+        }],
+        build_demo: streamed_content_demo,
     },
     ComponentEntry {
         name: "Chip",

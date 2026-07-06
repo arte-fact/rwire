@@ -93,6 +93,7 @@ Single-byte opcodes followed by arguments. Strings are interned in a symbol tabl
 | BIND_REMOTE | 0x31 | `[ref, ev, handler]` | Server round-trip event |
 | BIND_DEBOUNCED | 0x33 | `[ref, ev, handler, ms_hi, ms_lo]` | Debounced event |
 | BIND_REMOTE_PARAM | 0x34 | `[ref, ev, handler, len, params...]` | Event with item params |
+| BIND_SENTINEL | 0x4F | `[ref, handler, len, params...]` | One-shot visibility sentinel (infinite scroll) |
 | STYLE_DEF | 0x87 | `[count, (rule_len, rule)...]` | Lazy CSS rule delivery |
 | MAP_DEF | 0x88 | `[count, (kind, code, len, name)...]` | Lazy name-map delivery |
 | BATCH_END | 0xFF | | End of message |

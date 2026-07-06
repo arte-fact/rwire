@@ -1173,6 +1173,24 @@ impl ElementBuilder {
         self
     }
 
+    /// Bind a one-shot visibility sentinel to this element (infinite scroll /
+    /// content streaming). When the element nears the viewport, `handler`
+    /// fires once with `next` as its param — read it via `ctx.item_index()`
+    /// and ignore stale values. Each render must pass the new `next`, which
+    /// re-keys the binding so the morph installs a fresh observer; one
+    /// request in flight is therefore structural, not a convention.
+    ///
+    /// ```ignore
+    /// el(El::Div).on_visible(load_more(), state.delivered as u32)
+    /// ```
+    pub fn on_visible(mut self, handler: HandlerSpec, next: u32) -> Self {
+        let mut param_bytes = Vec::new();
+        crate::item_ref::ItemRef::<()>::new(next as usize).encode(&mut param_bytes);
+        let handler_with_params = handler.with_param_bytes(param_bytes);
+        self.events.push((Ev::Visible, handler_with_params));
+        self
+    }
+
     /// Append child elements to this element.
     pub fn append<I>(mut self, children: I) -> Self
     where
@@ -1901,7 +1919,11 @@ impl BuildContext {
             if let Some(handler) = &handler_spec.remote_handler {
                 let handler_idx = self.register_remote_handler(handler_spec, handler);
 
-                if let Some(param_bytes) = &handler_spec.param_bytes {
+                if *ev == Ev::Visible {
+                    let empty = Vec::new();
+                    let params = handler_spec.param_bytes.as_ref().unwrap_or(&empty);
+                    self.buf.bind_sentinel(ref_idx, handler_idx, params);
+                } else if let Some(param_bytes) = &handler_spec.param_bytes {
                     self.buf
                         .bind_remote_param(ref_idx, ev.as_u8(), handler_idx, param_bytes);
                 } else if handler_spec.debounce_ms > 0 {
@@ -2038,7 +2060,11 @@ impl BuildContext {
             if let Some(handler) = &handler_spec.remote_handler {
                 let handler_idx = self.register_remote_handler(handler_spec, handler);
 
-                if let Some(param_bytes) = &handler_spec.param_bytes {
+                if *ev == Ev::Visible {
+                    let empty = Vec::new();
+                    let params = handler_spec.param_bytes.as_ref().unwrap_or(&empty);
+                    self.buf.bind_sentinel(ref_idx, handler_idx, params);
+                } else if let Some(param_bytes) = &handler_spec.param_bytes {
                     self.buf
                         .bind_remote_param(ref_idx, ev.as_u8(), handler_idx, param_bytes);
                 } else if handler_spec.debounce_ms > 0 {
@@ -2704,7 +2730,11 @@ fn emit_update_element(
 
             // Use BIND_REMOTE_PARAM if we have param bytes,
             // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
-            if let Some(param_bytes) = &spec.param_bytes {
+            if *ev == Ev::Visible {
+                let empty = Vec::new();
+                let params = spec.param_bytes.as_ref().unwrap_or(&empty);
+                buf.bind_sentinel(ref_idx, handler_id, params);
+            } else if let Some(param_bytes) = &spec.param_bytes {
                 buf.bind_remote_param(ref_idx, ev.as_u8(), handler_id, param_bytes);
             } else if spec.debounce_ms > 0 {
                 buf.bind_debounced(ref_idx, ev.as_u8(), handler_id, spec.debounce_ms);

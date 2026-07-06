@@ -54,8 +54,8 @@ with the release track — nothing in it blocks 0.1.
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
-| 6 — Content & editing | 8 | 0 |
-| **All** | **28** | **6** |
+| 6 — Content & editing | 8 | 1 |
+| **All** | **28** | **7** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -411,7 +411,17 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 (F1, F5, and F2's `SplitPane` drag) require Phase 5 done.
 
 ### F1 — Content streaming / infinite scroll for large content
-- **Status:** `[ ]`
+- **Status:** `[x]` Core done (2026-07-06). `BIND_SENTINEL` (0x4F): one-shot
+  IntersectionObserver (rootMargin preloads a viewport ahead) firing the
+  handler with its params, then disconnecting; the params (next-chunk index,
+  read via `ctx.item_index()`) key the binding, so each render arms a fresh
+  observer — **one request in flight is structural**, and stale fires are
+  detectable server-side. `ElementBuilder::on_visible(handler, next)`;
+  `Ev::Visible`; `StreamedContent` component (stable-id chunk wrapping →
+  morph reuses delivered chunks; spinner sentinel row) + design-system
+  catalog entry. Covered by runtime unit tests, a Rust→JS round-trip fixture,
+  and component tests. The "multi-MB file loads progressively" live exercise
+  lands with the F8 examples (editor/chat), which consume this.
 - **Problem:** a large file or page rendered as one synced update is one giant frame —
   slow first paint, big morph. Needs progressive delivery.
 - **Fix direction:** a **scroll-sentinel primitive** in the runtime: new bind opcode

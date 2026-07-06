@@ -401,6 +401,40 @@ export function x(d: Uint8Array): void {
           fl2[ti] = !fl2[ti];
           uf2(ti);
         }, ms);
+      } else if (o === OP.BIND_SENTINEL) {
+        // One-shot visibility sentinel: fires the handler (with its params)
+        // when the element nears the viewport, then disconnects. The server's
+        // next render re-keys the binding (params change), so the morph swaps
+        // in a fresh node with a live observer — one request in flight is
+        // structural. rootMargin preloads a viewport ahead of the fold.
+        const [f, fl] = rv(d, i);
+        i += fl;
+        const [h, hl] = rv(d, i);
+        i += hl;
+        const pl = d[i++],
+          prm = d.slice(i, i + pl);
+        i += pl;
+        r[f].__hk = "v" + h + "_" + prm.join(",");
+        const sel = r[f];
+        const ob = new IntersectionObserver(
+          (es) => {
+            for (const en of es)
+              if (en.isIntersecting) {
+                ob.disconnect();
+                sep(
+                  h,
+                  OP.EV_VISIBLE,
+                  f,
+                  prm,
+                  { type: "visible", preventDefault() {} } as unknown as Event,
+                  sel,
+                );
+                break;
+              }
+          },
+          { rootMargin: "100%" },
+        );
+        ob.observe(sel);
       } else if (o === OP.BATCH_END) {
         fm();
         if (ai) {

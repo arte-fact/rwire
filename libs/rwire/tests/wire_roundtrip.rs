@@ -128,8 +128,24 @@ fn card_list() -> ElementBuilder {
     list
 }
 
+/// A streamed-content page: rendered chunks + a one-shot visibility sentinel
+/// (BIND_SENTINEL, the F1 infinite-scroll primitive) carrying the next-chunk
+/// index as its param.
+fn streamed_sentinel() -> ElementBuilder {
+    fn noop(_s: &mut CardState) {}
+    let load_more =
+        rwire::HandlerSpec::from_fn_with_changes::<CardState>(noop, rwire::ChangeSet::all())
+            .with_handler_id(rwire::stable_handler_id("wire_roundtrip", "load_more"));
+    let mut root = el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd]);
+    for i in 0..3 {
+        root = root.append([el(El::P).text(format!("chunk {i}").as_str())]);
+    }
+    root.append([el(El::Div).on_visible(load_more, 3)])
+}
+
 /// State that varies a synced region's rendered content across re-renders.
-#[derive(Default)]
+#[derive(rwire::State, Default)]
+#[storage(memory)]
 struct CardState {
     variant: u8,
 }
@@ -233,6 +249,7 @@ fn wire_streams_parse_cleanly() {
         ("new_tokens", emit_initial(&new_tokens())),
         ("long_style", emit_initial(&long_style())),
         ("card_list", emit_initial(&card_list())),
+        ("streamed_sentinel", emit_initial(&streamed_sentinel())),
         ("large_tree", emit_initial(&large_tree())),
         // Incremental re-renders (SYMBOLS_EXTEND + lazy dedup) across changing content.
         ("update_v0_v1", emit_updates(&[0, 1])),

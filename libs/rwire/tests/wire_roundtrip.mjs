@@ -119,6 +119,7 @@ function buildRuntime() {
   const locationStub = { protocol: "http:", host: "localhost", pathname: "/", hash: "" };
   const navigatorStub = { onLine: true, serviceWorker: undefined, clipboard: { writeText: noop } };
   class MO { observe() {} disconnect() {} }
+  class IO { observe() {} disconnect() {} }
 
   const errors = [];
   const captureConsole = {
@@ -131,7 +132,8 @@ function buildRuntime() {
   // as the capsule would.
   const factory = new Function(
     "document", "window", "addEventListener", "removeEventListener",
-    "history", "location", "navigator", "WebSocket", "MutationObserver", "console",
+    "history", "location", "navigator", "WebSocket", "MutationObserver",
+    "IntersectionObserver", "console",
     "setTimeout", "clearTimeout", "scrollTo", "globalThis", "BASE",
     `${CLIENT_JS}\n;return { x: globalThis.__rwx };`
   );
@@ -139,7 +141,7 @@ function buildRuntime() {
   const win = { addEventListener: noop, removeEventListener: noop };
   const mod = factory(
     document, win, noop, noop,
-    historyStub, locationStub, navigatorStub, wsStub, MO, captureConsole,
+    historyStub, locationStub, navigatorStub, wsStub, MO, IO, captureConsole,
     (fn) => 0, noop, noop,
     {}, ""
   );

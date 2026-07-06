@@ -5,12 +5,35 @@ import assert from "node:assert/strict";
 import { x } from "../src/executor.ts";
 import { st, E, V, P, Y, AT, AV, SE, resetSession } from "../src/state.ts";
 import { fl2, sl2, resetActions } from "../src/actions.ts";
-import { wv } from "../src/varint.ts";
+import { rv, wv } from "../src/varint.ts";
 import { makeDom, type MockEl } from "./dom.ts";
 
 let doc: ReturnType<typeof makeDom>["document"];
 let sent: Uint8Array[];
 let closed: number;
+
+// IntersectionObserver mock: captures instances; trigger() delivers entries.
+class MockIO {
+  static instances: MockIO[] = [];
+  targets: unknown[] = [];
+  disconnected = false;
+  cb: (es: { isIntersecting: boolean }[]) => void;
+  options: unknown;
+  constructor(cb: (es: { isIntersecting: boolean }[]) => void, options: unknown) {
+    this.cb = cb;
+    this.options = options;
+    MockIO.instances.push(this);
+  }
+  observe(t: unknown) {
+    this.targets.push(t);
+  }
+  disconnect() {
+    this.disconnected = true;
+  }
+  trigger(isIntersecting: boolean) {
+    if (!this.disconnected) this.cb([{ isIntersecting }]);
+  }
+}
 
 const clearMap = (m: Record<number, unknown>) => {
   for (const k of Object.keys(m)) delete m[k as unknown as number];
@@ -20,6 +43,8 @@ beforeEach(() => {
   doc = makeDom().document;
   (globalThis as any).document = doc;
   (globalThis as any).history = { pushState() {}, replaceState() {} };
+  (globalThis as any).IntersectionObserver = MockIO;
+  MockIO.instances = [];
   sent = [];
   closed = 0;
   st.w = { send: (m: Uint8Array) => sent.push(m), close: () => closed++ } as any;
@@ -427,6 +452,48 @@ test("BIND_TIMED_TOGGLE sets true immediately (revert is timer-based)", () => {
 test("AUTO_TOGGLE consumes its bytes and schedules the flip", () => {
   const errs = withErrors(() => run([0x4e, 1, 0, 5]));
   assert.deepEqual(errs, []);
+});
+
+// --- scroll sentinel ---
+
+test("BIND_SENTINEL observes, fires once with params, then disconnects", () => {
+  const s = doc.createElement("div");
+  s.id = "sent";
+  run(syms("sent"), [0x01, ...vint(0x80)], [0x4f, ...vint(0), ...vint(9), 1, 3]);
+  assert.equal(s.__hk, "v9_3");
+  assert.equal(MockIO.instances.length, 1);
+  const ob = MockIO.instances[0];
+  assert.equal(ob.targets[0], s);
+  assert.match(String((ob.options as any).rootMargin), /%/);
+
+  ob.trigger(false); // not intersecting: nothing
+  assert.equal(sent.length, 0);
+
+  ob.trigger(true);
+  assert.equal(sent.length, 1);
+  assert.ok(ob.disconnected, "one-shot: disconnected after fire");
+  const m = sent[0];
+  assert.equal(m[0], 0x80, "param-variant marker");
+  let i = 1;
+  const [h, hl] = rv(m, i);
+  i += hl;
+  assert.equal(h, 9);
+  assert.equal(m[i++], 0x0e, "Ev::Visible byte");
+  assert.equal(m[i++], 0, "ref");
+  assert.equal(m[i++], 1, "param length");
+  assert.equal(m[i++], 3, "next-chunk param");
+
+  ob.trigger(true); // after disconnect: no double fire
+  assert.equal(sent.length, 1);
+});
+
+test("BIND_SENTINEL with empty params still fires and keys the binding", () => {
+  const s = doc.createElement("div");
+  s.id = "s0";
+  run(syms("s0"), [0x01, ...vint(0x80)], [0x4f, ...vint(0), ...vint(2), 0]);
+  assert.equal(s.__hk, "v2_");
+  MockIO.instances[0].trigger(true);
+  assert.equal(sent.length, 1);
 });
 
 // --- error paths + batch end ---
