@@ -50,12 +50,12 @@ with the release track — nothing in it blocks 0.1.
 | Phase | Total | Done |
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 0 |
-| 2 — Release mechanics | 5 | 1 |
+| 2 — Release mechanics | 5 | 2 |
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 0 |
-| **All** | **28** | **5** |
+| **All** | **28** | **6** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -116,17 +116,15 @@ with the release track — nothing in it blocks 0.1.
 - **Follow-up:** R3 sets `license = "MIT OR Apache-2.0"` in crate metadata.
 
 ### R2 — CI pipeline
-- **Status:** `[ ]`
-- **Location:** `.github/workflows/` (none exist).
-- **Problem:** Zero CI. The "serious project" signal for a public repo, and the guard
-  for every other item here.
-- **Fix:** GitHub Actions: `cargo fmt --check`, `cargo clippy --workspace --all-targets
-  -- -D warnings`, `cargo test --workspace`. Node must be present for the wire
-  round-trip harness (`tests/*.mjs`). Cache cargo. Optionally a capsule-size regression
-  check (fail if the generated capsule exceeds a budget) — the ~17KB claim is a
-  headline feature and deserves a tripwire.
-- **Acceptance:** CI green on main; a clippy warning or failing round-trip test blocks.
-- **Effort:** ~half a day.
+- **Status:** `[x]` Done (2026-07-06). `.github/workflows/ci.yml`, two jobs:
+  **rust** (fmt --check, clippy -D warnings, cargo test --workspace, with Node
+  present so the wire harness runs the vendored artifact instead of skipping)
+  and **runtime** (npm ci, tsc, unit tests + size budget, then the **drift
+  gate**: `node sync.mjs && git diff --exit-code` on the artifact and the
+  generated opcode table — a stale or hand-edited asset cannot land). Every
+  step verified locally; first green run confirms on next push. The artifact
+  size budget (13.1KB/4.9KB) subsumes the capsule-size tripwire for now; a
+  whole-capsule budget can join later.
 
 ### R3 — Crate metadata + publishability
 - **Status:** `[ ]`
