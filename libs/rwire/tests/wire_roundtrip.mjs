@@ -1,9 +1,15 @@
-// Wire round-trip harness: runs the REAL runtime opcode parser `x()` (extracted
-// verbatim from capsule_gen.rs) over byte streams emitted by the Rust encoder, to
-// catch wire desyncs (the parser walking off the rails on a length/symbol field).
+// Wire round-trip harness: runs the REAL runtime opcode parser `x()` (the
+// built bundle the capsule embeds) over byte streams emitted by the Rust
+// encoder, to catch wire desyncs (the parser walking off the rails on a
+// length/symbol field).
 //
 // A desync surfaces as a console PARSE ERROR / "Unknown opcode" inside x(); a clean
 // stream parses every opcode and ends at BATCH_END (0xFF) consuming all bytes.
+//
+// Runtime source: the vendored artifact libs/rwire/assets/runtime.min.js —
+// exactly what ships — so `cargo test --test wire_roundtrip` doubles as the
+// local staleness gate. Override with RWIRE_RUNTIME=<path> (the Rust wrapper
+// inherits env) to drive a fresh runtime/dist build before syncing.
 //
 // Usage:
 //   node tests/wire_roundtrip.mjs <fixture-dir>   # parse every *.bin, exit 1 on any error
@@ -13,34 +19,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(join(here, "../src/capsule_gen.rs"), "utf8");
-
-// Pull a `const NAME: &str = r#"..."#;` raw-string body out of the Rust source.
-function rawConst(name) {
-  const m = src.match(new RegExp(`const ${name}: &str = r#"([\\s\\S]*?)"#;`));
-  if (!m) throw new Error(`const ${name} not found`);
-  return m[1];
-}
-
-// Two runtime sources, same fixtures and assertions:
-// - default: the shipped string constants, assembled exactly as
-//   generate_styled_capsule does (incl. the injected globals: empty name maps
-//   + the BASE mount path);
-// - RWIRE_RUNTIME=<path>: a built bundle (runtime/dist/runtime.min.js), which
-//   carries its own maps/state and exposes x() as globalThis.__rwx. The Rust
-//   test wrapper inherits the env, so
-//   `RWIRE_RUNTIME=... cargo test --test wire_roundtrip` drives the artifact
-//   through the real fixture set.
-const ARTIFACT = process.env.RWIRE_RUNTIME;
-const CLIENT_JS = ARTIFACT
-  ? readFileSync(ARTIFACT, "utf8")
-  : "const E={},V={},P={},Y={},AT={},AV={},SE={};\n" +
-    "const BASE='';\n" +
-    rawConst("CLIENT_ACTIONS_JS") +
-    "\n" +
-    rawConst("BIND_JS") +
-    "\n" +
-    rawConst("RUNTIME_JS");
+const ARTIFACT = process.env.RWIRE_RUNTIME || join(here, "../assets/runtime.min.js");
+const CLIENT_JS = readFileSync(ARTIFACT, "utf8");
 
 // --- lenient DOM mock: operations must not throw, so x() can walk the whole
 // stream; a desync then shows up as an unknown opcode / out-of-range read, not as
@@ -146,33 +126,24 @@ function buildRuntime() {
     log: noop, warn: noop,
   };
 
-  // Expose `x` (and, in string mode, the post-parse state) for assertions.
-  // Artifact mode shadows `globalThis` with a fresh object so the bundle's
-  // `globalThis.__rwx = x` hook lands per-run and injects `BASE` (the bundle
-  // expects it from the capsule; string mode declares its own `const BASE`).
-  const params = [
+  // The bundle's `globalThis.__rwx = x` hook exposes the executor; shadowing
+  // `globalThis` with a fresh object isolates it per run. `BASE` is injected
+  // as the capsule would.
+  const factory = new Function(
     "document", "window", "addEventListener", "removeEventListener",
     "history", "location", "navigator", "WebSocket", "MutationObserver", "console",
-    "setTimeout", "clearTimeout", "scrollTo",
-  ];
-  const factory = ARTIFACT
-    ? new Function(
-        ...params, "globalThis", "BASE",
-        `${CLIENT_JS}\n;return { x: globalThis.__rwx, state: () => null };`
-      )
-    : new Function(
-        ...params,
-        `${CLIENT_JS}\n;return { x, state: () => ({ symbols: s, sc, E, V, AT, AV }) };`
-      );
+    "setTimeout", "clearTimeout", "scrollTo", "globalThis", "BASE",
+    `${CLIENT_JS}\n;return { x: globalThis.__rwx };`
+  );
 
   const win = { addEventListener: noop, removeEventListener: noop };
   const mod = factory(
     document, win, noop, noop,
     historyStub, locationStub, navigatorStub, wsStub, MO, captureConsole,
     (fn) => 0, noop, noop,
-    ...(ARTIFACT ? [{}, ""] : [])
+    {}, ""
   );
-  return { x: mod.x, state: mod.state, errors, document };
+  return { x: mod.x, errors, document };
 }
 
 // Parse one byte stream; returns { ok, errors }.

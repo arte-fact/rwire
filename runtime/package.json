@@ -8,7 +8,8 @@
   "scripts": {
     "build": "node build.mjs",
     "test": "node build.mjs && node --test test/*.test.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "sync": "node sync.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

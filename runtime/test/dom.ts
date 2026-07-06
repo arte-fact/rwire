@@ -47,6 +47,8 @@ export interface MockEl {
   focus(): void;
   setSelectionRange(a: number, b: number): void;
   closest(sel: string): MockEl | null;
+  querySelector(sel: string): MockEl | null;
+  querySelectorAll(sel: string): MockEl[];
   scrollIntoView(opts?: unknown): void;
   sheet?: { cssRules: string[]; insertRule(r: string, i: number): void };
 }
@@ -116,6 +118,21 @@ export function makeDom(): { document: MockDoc } {
         if (String(v) !== "") node.appendChild(txt(String(v)));
       },
       value: "",
+      // Minimal innerHTML: materialize an id="…"-bearing child per occurrence
+      // so the runtime's overlay markup is queryable. Not a real parser.
+      get innerHTML() {
+        return (this as any)._html || "";
+      },
+      set innerHTML(v: string) {
+        (this as any)._html = v;
+        for (const c of _nodes) c.parentNode = null;
+        _nodes.length = 0;
+        for (const m of String(v).matchAll(/id="([^"]+)"/g)) {
+          const c = el("div");
+          c.id = m[1];
+          node.appendChild(c);
+        }
+      },
       style: {},
       dataset: {},
       classList: {
@@ -182,6 +199,21 @@ export function makeDom(): { document: MockDoc } {
       },
       setSelectionRange() {},
       closest: () => null,
+      // #id selectors only — enough for the runtime's overlay lookups.
+      querySelector(sel) {
+        if (!sel.startsWith("#")) return null;
+        const id = sel.slice(1);
+        const walk = (e: MockEl): MockEl | null => {
+          if (e.id === id) return e;
+          for (const c of e.children) {
+            const hit = walk(c);
+            if (hit) return hit;
+          }
+          return null;
+        };
+        return walk(node);
+      },
+      querySelectorAll: () => [],
       scrollIntoView() {},
     };
     if (node.tagName === "STYLE") {

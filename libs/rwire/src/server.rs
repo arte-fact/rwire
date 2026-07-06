@@ -947,11 +947,9 @@ where
             // The capsule's static CSS only needs composite classes + globals;
             // utility/pseudo/breakpoint rules (.u/.h/.b) are delivered lazily over
             // the wire (STYLE_DEF), and the small u8 enum maps are shipped whole.
-            // So only the composite table and client-action flag feed the config.
+            // So only the composite table feeds the config (client actions ride inside the bundle).
             let composite_css = ctx.composite_table().generate_css();
-            let config = config
-                .has_client_actions(ctx.has_client_actions())
-                .with_composite_css(composite_css);
+            let config = config.with_composite_css(composite_css);
 
             // Generate CSS and embed in capsule HTML <style> tag.
             let css = capsule_gen::generate_capsule_css(&config);

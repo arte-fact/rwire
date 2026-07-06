@@ -32,7 +32,7 @@ rwire/
 │   ├── rwire/               # Core framework library
 │   │   ├── builder.rs       # Fluent el() API, BuildContext, lazy CSS/name-map prefixes
 │   │   ├── capsule.rs       # HTTP serving for capsule HTML
-│   │   ├── capsule_gen.rs   # JS runtime generation; lazy CSS + name-map delivery
+│   │   ├── capsule_gen.rs   # Capsule HTML; embeds the built runtime artifact (assets/runtime.min.js)
 │   │   ├── config.rs        # Server configuration (bind address, max connections)
 │   │   ├── form.rs          # Form builder and validation rules
 │   │   ├── health.rs        # Health check endpoints (/health, /ready)
@@ -61,6 +61,7 @@ rwire/
 │   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
 │   └── rwire-themes/        # Predefined styles and palettes
+├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
@@ -104,29 +105,31 @@ connection references each, deduped per connection (`ConnectionState.sent_maps` 
 
 ## Key Patterns
 
-### Adding a New Element Type
+### Adding a New Element or Event Type
 
-1. Add constant in `protocol/opcodes.rs`:
-   ```rust
-   pub const EL_TEXTAREA: u8 = 0x08;
-   ```
-2. Add variant to `El` enum and `as_u8()` match
-3. Add to `ELEMENT_MAPPINGS` in `capsule_gen.rs`:
-   ```rust
-   (8, "textarea"),
-   ```
+One edit: add the variant to the `El` (or `Ev`) enum in `protocol/opcodes.rs`:
 
-### Adding a New Event Type
+```rust
+Details = 0x32 => "details",
+```
 
-1. Add constant in `protocol/opcodes.rs`:
-   ```rust
-   pub const EV_SCROLL: u8 = 0x0D;
-   ```
-2. Add variant to `Ev` enum and `as_u8()` match
-3. Add to `EVENT_MAPPINGS` in `capsule_gen.rs`:
-   ```rust
-   (13, "scroll"),
-   ```
+`define_token_enum!` generates the mappings; the browser learns the name lazily
+over the wire (`MAP_DEF`). No JS or capsule changes needed.
+
+### Changing the JS Runtime
+
+The runtime is TypeScript at `runtime/` (see `runtime/README.md`); the capsule
+embeds the built artifact `libs/rwire/assets/runtime.min.js` via `include_str!`.
+
+```bash
+cd runtime
+npm test        # build + unit tests (every opcode branch) + size budget
+npm run sync    # the ONLY write path for libs/rwire/assets/runtime.min.js
+```
+
+Commit source and artifact together. `cargo test --test wire_roundtrip` drives
+the vendored artifact through Rust-encoded fixtures (needs node; skips without).
+Manual full-stack check: `cargo run -p counter` + `node runtime/e2e/counter.mjs`.
 
 ### Creating Components
 

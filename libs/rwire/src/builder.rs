@@ -2116,11 +2116,6 @@ impl BuildContext {
         self.symbol_map.clone()
     }
 
-    /// Whether any client actions (targets or selectors) are used.
-    pub fn has_client_actions(&self) -> bool {
-        self.has_client_actions
-    }
-
     /// Snapshot the target/selector index assignments made during this render.
     ///
     /// Synced updates re-render regions with a free `emit_update_element` that has

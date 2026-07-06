@@ -98,6 +98,45 @@ test("mk removes live extras and inserts shadow additions", () => {
   );
 });
 
+test("mk interleaves insertions among kept id-matched nodes", () => {
+  const live = div();
+  const a = div("a"),
+    b = div("b");
+  live.appendChild(a);
+  live.appendChild(b);
+  const shadow = div();
+  for (const id of ["a", "x", "b", "y"]) shadow.appendChild(div(id));
+  mk(live as any, shadow as any);
+  assert.deepEqual(
+    live.children.map((c: MockEl) => c.id),
+    ["a", "x", "b", "y"],
+  );
+  assert.equal(live.children[0], a, "a reused");
+  assert.equal(live.children[2], b, "b reused");
+});
+
+test("mk empties the live node when the shadow is empty", () => {
+  const live = div();
+  live.appendChild(div("d"));
+  mk(live as any, div() as any);
+  assert.equal(live.children.length, 0);
+});
+
+test("an unchanged __hk keeps the live node (listener preserved)", () => {
+  const live = div();
+  const btn = doc.createElement("button");
+  btn.id = "k";
+  btn.__hk = "p1_5_3,4";
+  live.appendChild(btn);
+  const shadow = div();
+  const btn2 = doc.createElement("button");
+  btn2.id = "k";
+  btn2.__hk = "p1_5_3,4";
+  shadow.appendChild(btn2);
+  mk(live as any, shadow as any);
+  assert.equal(live.children[0], btn, "same node object kept");
+});
+
 test("fm flushes a staged morph exactly once", () => {
   const live = div();
   live.appendChild(div("old"));

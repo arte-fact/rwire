@@ -10,9 +10,13 @@ the hand-minified `RUNTIME_JS` string in `libs/rwire/src/capsule_gen.rs`
 ```bash
 npm install        # devDependencies: esbuild, typescript
 npm run check      # tsc --noEmit (strict)
-npm run build      # dist/runtime.js (readable) + dist/runtime.min.js (embedded)
+npm run build      # dist/runtime.js (readable) + dist/runtime.min.js
 npm test           # build + node:test unit suite (every opcode branch) + size budget
+npm run sync       # build + copy into libs/rwire/assets/runtime.min.js (the ONLY write path)
 ```
+
+Full-stack sanity (manual): `cargo run -p counter`, then `node e2e/counter.mjs` —
+boots the shipped artifact over a real WebSocket and asserts live round-trips.
 
 Cross-validation against the Rust encoder (the real fixture set):
 
