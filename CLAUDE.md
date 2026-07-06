@@ -63,6 +63,7 @@ rwire/
 │   └── rwire-themes/        # Predefined styles and palettes
 ├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
+│   ├── llama-modnitor/      # LLM launcher + hardware monitor (real-world app; runtime data gitignored)
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
 │   ├── rwire-design-system/ # Component showcase
@@ -334,6 +335,9 @@ cargo test --workspace
 
 # Format code (if rustfmt is configured)
 cargo fmt --all
+
+# After breaking framework changes: the out-of-tree consumer must still build
+[ -d ../claw-rwire ] && cargo check --manifest-path ../claw-rwire/Cargo.toml
 ```
 
 **Goal: Zero warnings.** All clippy warnings should be fixed, not suppressed.
@@ -377,8 +381,13 @@ Don't refactor:
 ### Deprecation Process
 
 - We are in an experimental phase; breaking changes are allowed.
-- The only consumers are internal examples. Do breaking changes, then update examples using compiler errors as guidance.
-- No need for formal deprecation warnings or versioning.
+- Consumers: the in-workspace apps/examples (covered by `cargo test --workspace`,
+  including `apps/llama-modnitor`) and the out-of-tree **`../claw-rwire`** (personal
+  assistant app; other agents commit rwire changes from there). Do breaking changes,
+  then fix consumers using compiler errors as guidance — and run the claw-rwire
+  smoke-check from "Before Committing" so it doesn't rot silently.
+- No need for formal deprecation warnings or versioning (pre-release; see
+  RELEASE_ROADMAP.md R4 for the post-publish policy).
 
 ### Test Coverage
 

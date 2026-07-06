@@ -6,6 +6,7 @@ members = [
     "libs/rwire-markdown",
     "libs/rwire-themes",
     "apps/rwire-website",
+    "apps/llama-modnitor",
     "apps/rwire-docs",
     "apps/rwire-design-system",
     "apps/rwire-examples",

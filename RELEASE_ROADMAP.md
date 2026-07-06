@@ -49,13 +49,13 @@ with the release track — nothing in it blocks 0.1.
 
 | Phase | Total | Done |
 |-------|-------|------|
-| 1 — Workspace & consumers | 3 | 0 |
+| 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 2 |
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 1 |
-| **All** | **28** | **7** |
+| **All** | **28** | **10** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -64,7 +64,13 @@ with the release track — nothing in it blocks 0.1.
 ## Phase 1 — Workspace & consumers
 
 ### W1 — Migrate llama-modnitor-rwire into the workspace
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). Working tree copied to
+  `apps/llama-modnitor/` (original sibling repo left untouched as backup —
+  including its 2-commit history and some uncommitted in-flight edits that
+  were carried over as-is); path deps rebased, Cargo.lock dropped, workspace
+  member added. Public-repo hygiene: `.env`, `profiles/` (local model paths),
+  and `output.log` are on disk but gitignored; `.env.example` is tracked.
+  Workspace now 739 tests, 0 warnings, app builds and tests in-tree.
 - **Location:** `../llama-modnitor-rwire` → `apps/llama-modnitor/`
 - **Problem:** Out-of-tree consumers compile rwire against a foreign workspace: nothing
   in rwire's checks builds them, so breaking framework changes rot them silently. Cargo
@@ -85,7 +91,9 @@ with the release track — nothing in it blocks 0.1.
 - **Effort:** ~1h.
 
 ### W2 — Consumer smoke-check for out-of-tree apps
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). CLAUDE.md "Before Committing" now ends
+  with `[ -d ../claw-rwire ] && cargo check --manifest-path ../claw-rwire/Cargo.toml`.
+  Verified live: claw-rwire builds against current rwire (post-F1).
 - **Location:** `CLAUDE.md` "Before Committing"; optionally a `check-consumers.sh`.
 - **Problem:** claw-rwire (staying out-of-tree per W1) can still rot silently.
 - **Fix:** Add to the pre-commit checklist:
@@ -96,7 +104,9 @@ with the release track — nothing in it blocks 0.1.
 - **Effort:** minutes.
 
 ### W3 — Update stale consumer claim in CLAUDE.md
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). Deprecation Process names the real
+  consumers (in-workspace apps incl. llama-modnitor; out-of-tree claw-rwire)
+  and points at the W2 smoke-check; structure tree updated.
 - **Location:** `CLAUDE.md` Deprecation Process: "The only consumers are internal examples."
 - **Problem:** False since claw-rwire and llama-modnitor-rwire exist; agents doing
   breaking changes plan migrations from this line.

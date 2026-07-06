@@ -21,3 +21,8 @@
 .worktrees/
 .security-key
 logs/security/
+
+# llama-modnitor runtime data (public repo: profiles hold local model paths)
+apps/llama-modnitor/.env
+apps/llama-modnitor/profiles/
+apps/llama-modnitor/output.log
