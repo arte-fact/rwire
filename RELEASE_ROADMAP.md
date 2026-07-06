@@ -53,9 +53,9 @@ with the release track — nothing in it blocks 0.1.
 | 2 — Release mechanics | 5 | 1 |
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
-| 5 — Runtime extraction | 3 | 0 |
+| 5 — Runtime extraction | 3 | 1 |
 | 6 — Content & editing | 8 | 0 |
-| **All** | **28** | **2** |
+| **All** | **28** | **3** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -300,7 +300,13 @@ path is Node-free under both layouts.
 **Sequencing:** RT1 → RT2 → RT3 land before T1 and before any Phase 6 runtime work.
 
 ### RT1 — Create the `runtime/` TypeScript package
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06, commit `cd6cdb1`). 14 strict-TS modules,
+  behavior-identical port; 49 node:test unit tests (every opcode branch) + size
+  budget; artifact 12,986 B min / 4,769 B gz — parity with the hand-minified
+  original. Wire harness gained `RWIRE_RUNTIME=<artifact>` mode; the real
+  fixture set passes against the built bundle. Bonus finds: node was absent on
+  the dev machine so the roundtrip harness had been silently skipping (now
+  installed, `367019d` fixed the stale-BASE harness rot it hid).
 - **Location:** new top-level `runtime/` (source, tests, esbuild config); source is
   today's `RUNTIME_JS` (`capsule_gen.rs:35`).
 - **Fix direction:** de-minify into typed TS modules mirroring the existing structure —
