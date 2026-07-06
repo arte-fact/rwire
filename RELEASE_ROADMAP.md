@@ -54,8 +54,8 @@ with the release track — nothing in it blocks 0.1.
 | 3 — Technical gaps | 6 | 1 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 3 |
-| 6 — Content & editing | 8 | 1 |
-| **All** | **28** | **11** |
+| 6 — Content & editing | 8 | 2 |
+| **All** | **28** | **12** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -526,7 +526,16 @@ scroll). F8 integrates continuously and finishes last. All runtime-touching item
 - **Effort:** ~2–3 days.
 
 ### F7 — Generic Chat component (from claw-rwire)
-- **Status:** `[ ]`
+- **Status:** `[x]` Core done (2026-07-06). Shipped: the `ChatItem` trait
+  (3 required methods, defaulted chrome, `row()` escape hatch, `streaming()`
+  as a trait method — see the design doc's implementation notes) +
+  `TypingIndicator` (rw-pulse dots), `ChatEntry` (à la carte and
+  `from_item`; native `<details>` disclosure via new `At::Open`),
+  `ChatTranscript` (seamless history via the F1 sentinel at the top,
+  grouping, writing row, empty state), `Chat` (pinned scroller over a
+  height-reserving composer) — with 4 design-system catalog entries and
+  trait-exercising tests. Remaining: `examples/chat` + docs page (F8);
+  claw-rwire P4a adoption happens on claw's side.
 - **Provenance:** claw-rwire's chat surface (`ui/chat.rs` — transcript over pinned
   composer, error banner, `sending_row`, collapsible transcript items) and the shared
   thread widgets (`ui/thread.rs` — authored entry: author rail + phase tag + time

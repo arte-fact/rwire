@@ -1991,6 +1991,85 @@ fn composer_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     composer.build()
 }
 
+fn typing_indicator_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::TypingIndicator;
+    let mut t = TypingIndicator::new();
+    if b(bools, 0) {
+        t = t.label("claw is typing…");
+    }
+    t.build()
+}
+
+fn chat_entry_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{ChatAuthor, ChatDetail, ChatEntry, ChatTag};
+    use rwire::St;
+    ChatEntry::new(
+        ChatAuthor::agent("claw"),
+        el(El::P)
+            .st([St::TextSm])
+            .text("Ran the checks — everything is green."),
+    )
+    .key("demo-entry")
+    .time("14:32")
+    .tag(ChatTag::muted("bash"))
+    .detail(ChatDetail::closed(
+        "result · 3 lines",
+        el(El::Pre)
+            .st([St::TextXs, St::BgCode, St::PSm, St::RoundedSm])
+            .text("cargo test --workspace\n743 passed, 0 failed"),
+    ))
+    .grouped(b(bools, 0))
+    .build()
+}
+
+fn chat_transcript_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{ChatAuthor, ChatEntry};
+    use rwire::St;
+    let mut rows = vec![
+        el(El::Div)
+            .st([St::TextCenter, St::TextMuted, St::TextXs])
+            .text("· older messages condensed into memory ·"),
+        ChatEntry::new(
+            ChatAuthor::user("you"),
+            el(El::P).st([St::TextSm]).text("Ship it?"),
+        )
+        .key("d1")
+        .time("14:30")
+        .build(),
+        ChatEntry::new(
+            ChatAuthor::agent("claw"),
+            el(El::P)
+                .st([St::TextSm])
+                .text("Checks are green — shipping."),
+        )
+        .key("d2")
+        .time("14:31")
+        .build(),
+    ];
+    if b(bools, 0) {
+        rows.push(
+            crate::TypingIndicator::new()
+                .label("claw is typing…")
+                .build(),
+        );
+    }
+    el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0])
+        .append(rows)
+}
+
+fn chat_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Chat, Composer};
+    use rwire::St;
+    let transcript = chat_transcript_demo(&[], bools);
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "20rem"))
+        .st([St::DisplayFlex, St::FlexCol])
+        .append([Chat::new(transcript)
+            .composer(Composer::new().placeholder("Message claw…").build())
+            .build()])
+}
+
 fn streamed_content_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{Spinner, SpinnerSize};
     // Static rendition of the streamed region: delivered chunks, plus the
@@ -4140,6 +4219,64 @@ const ENTRIES: &[ComponentEntry] = &[
             default: true,
         }],
         build_demo: streamed_content_demo,
+    },
+    ComponentEntry {
+        name: "ChatEntry",
+        slug: "chat-entry",
+        description:
+            "One authored transcript entry: rail, header, body, native details disclosure.",
+        category: Category::DataDisplay,
+        order: 314,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "grouped",
+            description: "Suppress the header (consecutive same-author entries)",
+            default: false,
+        }],
+        build_demo: chat_entry_demo,
+    },
+    ComponentEntry {
+        name: "ChatTranscript",
+        slug: "chat-transcript",
+        description: "Windowed chat entries with seamless history and a writing-state row.",
+        category: Category::DataDisplay,
+        order: 315,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "writing",
+            description: "Show the typing-indicator row",
+            default: true,
+        }],
+        build_demo: chat_transcript_demo,
+    },
+    ComponentEntry {
+        name: "Chat",
+        slug: "chat",
+        description:
+            "The full chat surface: pinned scroller over a composer that reserves its height.",
+        category: Category::DataDisplay,
+        order: 316,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "writing",
+            description: "Show the typing-indicator row",
+            default: true,
+        }],
+        build_demo: chat_demo,
+    },
+    ComponentEntry {
+        name: "TypingIndicator",
+        slug: "typing-indicator",
+        description: "Pulsing writing cue with an optional label.",
+        category: Category::Feedback,
+        order: 415,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "label",
+            description: "Show the author label after the dots",
+            default: true,
+        }],
+        build_demo: typing_indicator_demo,
     },
     ComponentEntry {
         name: "Chip",

@@ -77,7 +77,11 @@ mod breadcrumb;
 mod button;
 mod card;
 pub mod catalog;
+mod chat;
+mod chat_entry;
+mod chat_item;
 mod chat_scroll;
+mod chat_transcript;
 mod checkbox;
 mod chip;
 mod code;
@@ -122,6 +126,7 @@ mod theme_toggle;
 mod timeline;
 mod toast;
 mod tooltip;
+mod typing_indicator;
 pub mod utils;
 
 pub use accordion::{Accordion, AccordionItem};
@@ -134,7 +139,11 @@ pub use blockquote::Blockquote;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonIntent, ButtonSize};
 pub use card::{Card, CardPadding, CardShadow};
+pub use chat::Chat;
+pub use chat_entry::ChatEntry;
+pub use chat_item::{ChatAuthor, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatTag};
 pub use chat_scroll::ChatScroll;
+pub use chat_transcript::ChatTranscript;
 pub use checkbox::Checkbox;
 pub use chip::Chip;
 pub use code::{Code, CodeMode};
@@ -179,6 +188,7 @@ pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize};
 pub use timeline::{Timeline, TimelineItem};
 pub use toast::{Toast, ToastContainer, ToastIntent};
 pub use tooltip::{Tooltip, TooltipPosition};
+pub use typing_indicator::TypingIndicator;
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
     unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL, Z_MODAL_BACKDROP,

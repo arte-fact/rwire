@@ -163,6 +163,22 @@ impl ChatItem for TranscriptItem {
 chrome-free muted lines, and a gate row whose approve/reject buttons bind via
 `ctx.item_ref`.
 
+## Implementation notes (2026-07-06, shipped)
+
+Two deviations from the draft above, made during implementation:
+
+- **`streaming` is a trait method, not a ctx field.** The app knows which item
+  is live; `fn streaming(&self) -> bool` avoids an order-dependent
+  `streaming_key` builder setter. `ChatItemCtx` carries only `item_ref`.
+- **Alignment mode deferred**: v1 renders thread-style (start-aligned with
+  intent-toned rails — claw's proven layout). A chat-style end-aligned mode
+  can join `ChatTranscript` later without breaking the trait.
+
+Shipped as `ChatItem`/`ChatAuthor`/`ChatTag`/`ChatDetail`/`ChatItemCtx` +
+`TypingIndicator`, `ChatEntry` (à la carte and `from_item`), `ChatTranscript`
+(seamless history via the F1 sentinel, writing row, empty state, grouping),
+`Chat` (scroller over height-reserving composer) — all with catalog entries.
+
 ## Open questions (settle during F7 implementation)
 
 - **Alignment mode**: chat-style (user entries end-aligned) vs thread-style (all

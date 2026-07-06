@@ -91,6 +91,7 @@ define_token_enum! {
         D = 0x47 => "d",
         Width = 0x48 => "width",
         Height = 0x49 => "height",
+        Open = 0x4A => "open",
     }
 }
 
