@@ -24,7 +24,7 @@ use crate::{ChatEntry, Spinner, SpinnerSize, TypingIndicator};
 pub struct ChatTranscript {
     rows: Vec<ElementBuilder>,
     older: Option<(HandlerSpec, u32)>,
-    writing: Option<Option<Cow<'static, str>>>,
+    writing: Option<Cow<'static, str>>,
     empty: Option<ElementBuilder>,
 }
 
@@ -80,10 +80,12 @@ impl ChatTranscript {
         self
     }
 
-    /// Show the writing-state row (someone/something is producing a turn),
-    /// with an optional label ("claw is typing…").
+    /// The writing-state row (someone/something is producing a turn): `Some(label)` shows a
+    /// `TypingIndicator` carrying that label ("claw is typing…"); `None` hides it. This makes the
+    /// idiomatic `.writing(sending.then(|| "…".into()))` show the row *only* while a turn is in
+    /// flight — passing `None` no longer renders a stray unlabeled indicator.
     pub fn writing(mut self, label: Option<Cow<'static, str>>) -> Self {
-        self.writing = Some(label);
+        self.writing = label;
         self
     }
 
@@ -111,11 +113,7 @@ impl ChatTranscript {
         }
         column.extend(self.rows);
         if let Some(label) = self.writing {
-            let mut t = TypingIndicator::new();
-            if let Some(label) = label {
-                t = t.label(label);
-            }
-            column.push(t.build());
+            column.push(TypingIndicator::new().label(label).build());
         }
         el(El::Div)
             .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0])
@@ -276,6 +274,18 @@ mod tests {
             complete.children().len(),
             5,
             "no sentinel when history exhausted"
+        );
+
+        // `writing(None)` hides the row, so `.writing(sending.then(...))` shows it only while
+        // sending (regression: `None` used to render a stray unlabeled indicator).
+        let not_writing = ChatTranscript::new()
+            .items_plain(items().iter())
+            .writing(None)
+            .build();
+        assert_eq!(
+            not_writing.children().len(),
+            5,
+            "writing(None) adds no typing row"
         );
     }
 }
