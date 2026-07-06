@@ -26,6 +26,7 @@ pub struct ChatTranscript {
     older: Option<(HandlerSpec, u32)>,
     writing: Option<Cow<'static, str>>,
     empty: Option<ElementBuilder>,
+    live_tail: Option<ElementBuilder>,
 }
 
 impl ChatTranscript {
@@ -95,6 +96,16 @@ impl ChatTranscript {
         self
     }
 
+    /// A caller-owned region rendered below the history and the writing row, inside the same
+    /// scroller. Its purpose is a **live-streaming tail**: give it its own `#[renderer]` (a keyed
+    /// synced region) and each token repaints only the tail, never the windowed history above —
+    /// so a streaming surface keeps the transcript component without paying a full re-render per
+    /// token. `None` renders nothing; the region is expected to self-hide when idle.
+    pub fn live_tail(mut self, region: ElementBuilder) -> Self {
+        self.live_tail = Some(region);
+        self
+    }
+
     /// Build the inner column (wrap in `ChatScroll` — or use [`Chat`](crate::Chat)).
     pub fn build(self) -> ElementBuilder {
         let mut column: Vec<ElementBuilder> = Vec::new();
@@ -114,6 +125,9 @@ impl ChatTranscript {
         column.extend(self.rows);
         if let Some(label) = self.writing {
             column.push(TypingIndicator::new().label(label).build());
+        }
+        if let Some(tail) = self.live_tail {
+            column.push(tail);
         }
         el(El::Div)
             .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0])
@@ -287,5 +301,22 @@ mod tests {
             5,
             "writing(None) adds no typing row"
         );
+    }
+
+    #[test]
+    fn live_tail_is_appended_below_the_history() {
+        // A streaming surface hands its own live #[renderer] as the tail; it sits last (visually
+        // bottom, newest) so token repaints never touch the windowed history above.
+        let built = ChatTranscript::new()
+            .items_plain(items().iter())
+            .live_tail(el(El::Div).id("live").text("streaming…"))
+            .build();
+        let rows = built.children();
+        assert_eq!(rows.len(), 6, "5 items + the live tail");
+        assert_eq!(rows.last().unwrap().text_content(), Some("streaming…"));
+
+        // No tail set → nothing added.
+        let bare = ChatTranscript::new().items_plain(items().iter()).build();
+        assert_eq!(bare.children().len(), 5, "no live_tail adds no row");
     }
 }
