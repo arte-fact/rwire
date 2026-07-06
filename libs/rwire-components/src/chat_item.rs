@@ -157,6 +157,14 @@ pub trait ChatItem {
         None
     }
 
+    /// Optional trailing header element (a status chip, a running dot) pushed to the right edge.
+    fn trailing(&self, _ctx: &ChatItemCtx<Self>) -> Option<ElementBuilder>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
     /// Optional collapsible detail below the body.
     fn detail(&self, _ctx: &ChatItemCtx<Self>) -> Option<ChatDetail>
     where

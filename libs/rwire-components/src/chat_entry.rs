@@ -24,6 +24,7 @@ pub struct ChatEntry {
     author: ChatAuthor,
     time: Option<Cow<'static, str>>,
     tag: Option<ChatTag>,
+    trailing: Option<ElementBuilder>,
     body: ElementBuilder,
     detail: Option<ChatDetail>,
     grouped: bool,
@@ -38,6 +39,7 @@ impl ChatEntry {
             author,
             time: None,
             tag: None,
+            trailing: None,
             body,
             detail: None,
             grouped: false,
@@ -54,6 +56,7 @@ impl ChatEntry {
         entry.key = Some(Cow::Owned(item.key().into_owned()));
         entry.time = item.time().map(|t| Cow::Owned(t.into_owned()));
         entry.tag = item.tag();
+        entry.trailing = item.trailing(ctx);
         entry.detail = item.detail(ctx);
         entry.grouped = grouped;
         entry.streaming = item.streaming();
@@ -75,6 +78,13 @@ impl ChatEntry {
     /// Status/phase tag beside the author.
     pub fn tag(mut self, tag: ChatTag) -> Self {
         self.tag = Some(tag);
+        self
+    }
+
+    /// A trailing header element pushed to the right edge — a status chip, a running dot, an
+    /// action. A spacer separates it from the author·tag·time cluster.
+    pub fn trailing(mut self, trailing: ElementBuilder) -> Self {
+        self.trailing = Some(trailing);
         self
     }
 
@@ -144,6 +154,11 @@ impl ChatEntry {
                         .text(time.as_ref()),
                 );
             }
+            if let Some(trailing) = self.trailing {
+                // A spacer pushes the trailing element (status chip / running dot) to the right.
+                header.push(el(El::Span).st([St::Flex1]));
+                header.push(trailing);
+            }
             column.push(
                 el(El::Div)
                     .st([St::DisplayFlex, St::ItemsCenter, St::GapSm])
@@ -202,5 +217,40 @@ impl ChatEntry {
             root = root.id(format!("ce-{key}").as_str());
         }
         root.append(row)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The header row is the first child of the entry's content block (rail, [avatar], block).
+    fn header_texts(entry: &ElementBuilder) -> Vec<&str> {
+        let block = entry.children().last().unwrap();
+        block.children()[0]
+            .children()
+            .iter()
+            .filter_map(|child| child.text_content())
+            .collect()
+    }
+
+    #[test]
+    fn trailing_renders_at_the_header_right() {
+        let entry = ChatEntry::new(ChatAuthor::agent("claw"), el(El::P).text("hi"))
+            .time("12:00")
+            .trailing(el(El::Span).text("✓ pass"))
+            .build();
+        let texts = header_texts(&entry);
+        assert!(texts.contains(&"claw"));
+        assert!(
+            texts.contains(&"✓ pass"),
+            "trailing shows in the header: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn no_trailing_by_default() {
+        let entry = ChatEntry::new(ChatAuthor::agent("claw"), el(El::P).text("hi")).build();
+        assert_eq!(header_texts(&entry), vec!["claw"]);
     }
 }
