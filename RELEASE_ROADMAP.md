@@ -50,12 +50,12 @@ with the release track — nothing in it blocks 0.1.
 | Phase | Total | Done |
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 0 |
-| 2 — Release mechanics | 5 | 0 |
+| 2 — Release mechanics | 5 | 1 |
 | 3 — Technical gaps | 6 | 0 |
 | 4 — Positioning & launch | 3 | 1 |
 | 5 — Runtime extraction | 3 | 0 |
 | 6 — Content & editing | 8 | 0 |
-| **All** | **28** | **1** |
+| **All** | **28** | **2** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -109,12 +109,11 @@ with the release track — nothing in it blocks 0.1.
 ## Phase 2 — Release mechanics (mechanical, days total)
 
 ### R1 — LICENSE file
-- **Status:** `[ ]`
-- **Problem:** README declares MIT; no `LICENSE` file exists. Blocks legal reuse and
-  `cargo publish`.
-- **Fix:** Add `LICENSE` (MIT) at root; consider dual MIT/Apache-2.0 (Rust convention).
-- **Acceptance:** File exists; `license` field in crate metadata matches (R3).
-- **Effort:** minutes.
+- **Status:** `[x]` Done (2026-07-06). Dual **MIT OR Apache-2.0** (Rust convention,
+  user-decided): `LICENSE-MIT` + `LICENSE-APACHE` at root; README license section
+  updated with the standard dual-license + contribution blurb.
+- **Problem was:** the repo is public with README declaring MIT and no license file.
+- **Follow-up:** R3 sets `license = "MIT OR Apache-2.0"` in crate metadata.
 
 ### R2 — CI pipeline
 - **Status:** `[ ]`
@@ -257,11 +256,11 @@ with the release track — nothing in it blocks 0.1.
   - **v2 (2026-07-06):** the trigger fired early — the Phase 6 feature track (content
     streaming, editor gutter/scroll-sync, dirty tracking) plus T1 (keyed diffing) make
     the runtime an actively-developed codebase, which invalidates the firmware premise.
-    New decision: extract to a separate TypeScript repo (`../rwire-runtime`) that
-    releases a minified artifact rwire vendors. This keeps what v1 was actually
-    protecting — the rwire repo stays 100% Rust, `cargo build` stays Node-free for all
-    consumers, no npm supply chain enters this repo — while gaining typed, unit-tested,
-    fearless runtime development.
+    New decision: extract to a TypeScript package that builds a minified artifact
+    rwire embeds (placement revised the same day from a sibling repo to in-repo
+    `runtime/` — rationale in Phase 5). This keeps what v1 was actually protecting —
+    `cargo build` stays Node-free for all consumers — while gaining typed,
+    unit-tested, fearless runtime development.
 - **Carried over into Phase 5 unchanged:** the three v1 gates — harness-first changes
   (RT1), capsule-size tripwire (R2/RT1), written-down structure & conventions (now the
   rwire-runtime repo's own docs; CONTRIBUTING links out).
@@ -278,65 +277,72 @@ with the release track — nothing in it blocks 0.1.
 
 ---
 
-## Phase 5 — Runtime extraction (`../rwire-runtime`)
+## Phase 5 — Runtime extraction (in-repo `runtime/`)
 
 Supersedes P2 v1 (see P2 for the decision history). The runtime moves from a
-hand-minified string in `capsule_gen.rs` to a sibling **TypeScript repo** that releases
-a minified artifact; rwire vendors the artifact. What this preserves: the rwire repo
-stays 100% Rust, `cargo build` needs no Node anywhere (including crates.io consumers),
-and there is still **no protocol version skew** — the server ships its own vendored
-runtime, so encoder and decoder always travel together. What this gains: typed modules,
+hand-minified string in `capsule_gen.rs` to a **TypeScript package at `runtime/` in
+this repo**; the built, minified artifact is checked in and embedded. Invariants
+preserved: `cargo build` and the published crates need no Node (artifact vendored via
+`include_str!`), and there is **no protocol version skew** — the server ships its own
+runtime, so encoder and decoder always travel together. Gains: typed modules,
 per-function unit tests, machine minification, fearless surgery for T1 and Phase 6.
+
+**Placement revision (2026-07-06, user call):** originally drafted as a sibling repo
+(`../rwire-runtime`); revised to in-repo. The wire protocol is the tightest coupling
+in the system — the Rust encoder and JS decoder are two halves of one component, and
+a repo split makes every protocol change a two-repo dance (runtime release → vendor
+bump) managed by contract machinery. In-repo, an opcode + its decoder + its harness
+case land in **one atomic commit**, and artifact drift is caught by CI rebuilding from
+source in the same tree. The sibling repo's supposed npm quarantine was illusory:
+Node is already a dev dependency here (the `.mjs` harness), and the Rust build/publish
+path is Node-free under both layouts.
 
 **Sequencing:** RT1 → RT2 → RT3 land before T1 and before any Phase 6 runtime work.
 
-### RT1 — Create the rwire-runtime TypeScript repo
+### RT1 — Create the `runtime/` TypeScript package
 - **Status:** `[ ]`
-- **Location:** new sibling repo `../rwire-runtime`; source is today's `RUNTIME_JS`
-  (`capsule_gen.rs:35`).
+- **Location:** new top-level `runtime/` (source, tests, esbuild config); source is
+  today's `RUNTIME_JS` (`capsule_gen.rs:35`).
 - **Fix direction:** de-minify into typed TS modules mirroring the existing structure —
   opcode executor (`x`), morph (`me`/`mk`), event send (`se`/`sep`/`gp`), client
   actions, router glue, reconnect/PWA. Unit tests per module (`node:test` or vitest);
   esbuild bundle + minify with mangling (safe: the one-letter globals are internal to
-  the capsule; nothing on the wire depends on JS identifier names). In-repo size-budget
-  test (fail above budget). Release = versioned `runtime.min.js` with a version header.
-  The artifact stays **fully static**: dynamic config (`BASE`, theme CSS) is already
-  injected by the capsule outside the runtime constant — keep config flowing through
-  injected globals, never through artifact templating.
+  the capsule; nothing on the wire depends on JS identifier names). Size-budget test
+  (fail above budget). The artifact stays **fully static**: dynamic config (`BASE`,
+  theme CSS) is already injected by the capsule outside the runtime constant — keep
+  config flowing through injected globals, never through artifact templating.
 - **Port strategy:** module-by-module de-minification with rwire's existing Node
   harness (`wire_roundtrip.mjs`, `morph_test.mjs`) run against every intermediate
   build — behavior-identical (DOM-identical output), not byte-identical, is the bar.
-- **Acceptance:** minified artifact passes rwire's full harness unchanged; unit tests
+- **Acceptance:** built artifact passes rwire's full harness unchanged; unit tests
   cover every opcode branch; minified+gzipped size within tolerance of today's ~13KB.
 - **Effort:** ~2–4 days (the port is mechanical; the tests are the real work).
 
-### RT2 — Vendor the artifact into rwire
+### RT2 — Embed the built artifact
 - **Status:** `[ ]`
-- **Location:** `capsule_gen.rs` (string constant → `include_str!`), new
+- **Location:** `capsule_gen.rs` (string constant → `include_str!`), new checked-in
   `libs/rwire/assets/runtime.min.js`.
 - **Fix direction:** embed via `include_str!` so the asset ships in the crate package
-  (crates.io consumers stay Node-free). `RUNTIME_VERSION` const surfaced in rwire and
-  stamped in the artifact header. Sync procedure: a small script (or documented agent
-  workflow) copies the released artifact in and bumps the version in one commit. rwire
-  CI keeps running the round-trip harness **against the vendored file** — that is the
-  drift gate; a stale or hand-edited artifact fails there.
-- **Acceptance:** `cargo build`/`cargo publish --dry-run` need no Node; harness targets
-  the vendored artifact; versions visible in both repos; CLAUDE.md's description of
-  `capsule_gen.rs` updated.
+  (crates.io consumers stay Node-free). A regen script (`runtime/` build → asset copy)
+  is the only write path. CI: rebuild the artifact from source and fail on
+  `git diff` (drift gate — a stale or hand-edited artifact can't land), then run the
+  round-trip harness **against the checked-in file**.
+- **Acceptance:** `cargo build`/`cargo publish --dry-run` need no Node; harness
+  targets the vendored artifact; CI catches a hand-edited or stale artifact;
+  CLAUDE.md's description of `capsule_gen.rs` updated.
 - **Effort:** ~half a day.
 
-### RT3 — Opcode contract between the repos
+### RT3 — Opcode constants: single source of truth
 - **Status:** `[ ]`
 - **Problem:** the opcode table exists twice — Rust (`protocol/opcodes.rs`, source of
-  truth) and the TS `O` map — and with two repos that duplication becomes silent
-  cross-repo drift.
-- **Fix direction:** emit a machine-readable opcode manifest (JSON) from the Rust
-  constants (a tiny generator or a test that writes/validates it), checked into rwire;
-  rwire-runtime vendors a copy and its CI validates the TS constants against it. The
-  round-trip harness remains the end-to-end gate; the manifest catches drift at the
-  repo that moved first.
-- **Acceptance:** changing an opcode in either repo without the other fails CI on
-  whichever side is behind.
+  truth) and the TS `O` map. In-repo the risk is a stale build, not repo drift, but
+  the duplication should still be generated, not maintained by hand.
+- **Fix direction:** the regen script (RT2) first emits `runtime/src/opcodes.ts` from
+  the Rust constants (tiny generator bin or test), then builds. The TS map is
+  generated code, never hand-edited; the round-trip harness remains the end-to-end
+  gate.
+- **Acceptance:** adding an opcode in Rust and running the regen script is the whole
+  workflow; a hand-edited `opcodes.ts` is overwritten/flagged by CI.
 - **Effort:** ~half a day.
 
 ---
