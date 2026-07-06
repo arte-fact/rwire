@@ -139,6 +139,19 @@ CapsuleConfig::new()
     .font(FontFace::google("JetBrains Mono", &[400]))
 ```
 
+### Static first paint (SSR)
+
+```rust
+.capsule_config(CapsuleConfig::new().ssr(true))
+```
+
+With `ssr(true)`, the capsule ships the root tree rendered at its **default
+state** (synced regions included), plus exactly the utility CSS those classes
+need — so crawlers and no-JS clients see real content, and humans get a paint
+before the WebSocket connects. The live render replaces it on the first
+frame. Current limitation: every path serves the root's static paint (routed
+views render after connect).
+
 ## Health Check Endpoints
 
 rwire provides built-in HTTP health check endpoints:

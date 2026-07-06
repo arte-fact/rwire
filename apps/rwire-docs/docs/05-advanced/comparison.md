@@ -55,8 +55,10 @@ server-driven framework:
   it isn't. Typing into bound inputs is debounced, not free.
 - **Server memory scales with open connections**, and it's a single process.
   There is no horizontal-scaling story yet beyond sticky sessions.
-- **No SSR / static first paint yet.** Crawlers and no-JS clients see a blank
-  page. Weak for content sites, fine for apps behind a login.
+- **First paint is default-state.** `ssr(true)` gives crawlers and no-JS
+  clients real HTML (the root at its default state, with its CSS), but live,
+  per-route content still needs the socket. Fine for apps; content sites
+  should weigh it.
 - **Young ecosystem.** LiveView has a decade of production hardening and a
   large community; rwire has a security audit, a strong test harness, and a
   handful of real apps. The API is 0.x and moves.

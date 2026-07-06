@@ -734,6 +734,40 @@ impl ElementBuilder {
         out
     }
 
+    /// Collect every utility/pseudo/breakpoint style key this tree references
+    /// (descending into synced regions at their default state), so a statically
+    /// rendered page (SSR) can inline exactly the CSS its classes need.
+    pub fn static_style_rules(&self) -> std::collections::BTreeSet<StyleKey> {
+        let mut keys = std::collections::BTreeSet::new();
+        self.collect_static_style_rules(&mut keys);
+        keys
+    }
+
+    fn collect_static_style_rules(&self, keys: &mut std::collections::BTreeSet<StyleKey>) {
+        for &u in &self.style_utils {
+            keys.insert(StyleKey::Util(u));
+        }
+        for (pc, codes) in &self.pseudo_groups {
+            for &u in codes {
+                keys.insert(StyleKey::Pseudo(*pc, u));
+            }
+        }
+        for (bp, codes) in &self.breakpoint_groups {
+            for &u in codes {
+                keys.insert(StyleKey::Breakpoint(*bp, u));
+            }
+        }
+        if let Some(renderer) = &self.synced {
+            let state = renderer.create_default_state();
+            if let Some(tree) = renderer.render_with_state(state.as_ref()) {
+                tree.collect_static_style_rules(keys);
+            }
+        }
+        for child in &self.children {
+            child.collect_static_style_rules(keys);
+        }
+    }
+
     fn write_static_html(&self, out: &mut String) {
         let tag = self.el_type.name();
         out.push('<');
@@ -801,6 +835,14 @@ impl ElementBuilder {
 
         if let Some(text) = &self.text {
             push_text_escaped(out, text);
+        }
+        // Synced region: render its default-state content so crawlers and the
+        // pre-WebSocket paint see real markup (the live render replaces it).
+        if let Some(renderer) = &self.synced {
+            let state = renderer.create_default_state();
+            if let Some(tree) = renderer.render_with_state(state.as_ref()) {
+                tree.write_static_html(out);
+            }
         }
         for child in &self.children {
             child.write_static_html(out);

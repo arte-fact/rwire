@@ -183,6 +183,12 @@ pub struct CapsuleConfig {
     pub theme: Theme,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
     pub(crate) composite_css: String,
+    /// Render the root tree (default state) into the capsule for a static
+    /// first paint — crawlers and no-JS clients see real HTML; the live render
+    /// replaces it when the WebSocket delivers the first frame.
+    pub(crate) ssr: bool,
+    /// The pre-rendered HTML (filled by the server at startup when `ssr`).
+    pub(crate) ssr_html: String,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
     /// Optional PWA configuration (manifest, service worker, icons, head tags).
@@ -231,6 +237,14 @@ impl CapsuleConfig {
         } else {
             format!("/{trimmed}")
         };
+        self
+    }
+
+    /// Enable a static first paint: the capsule ships the root tree rendered
+    /// at its default state (plus the CSS its classes need). The live render
+    /// replaces it on the first WebSocket frame.
+    pub fn ssr(mut self, ssr: bool) -> Self {
+        self.ssr = ssr;
         self
     }
 
@@ -400,11 +414,12 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
     };
 
     let base_js = base_path_js(&config.base_path);
+    let ssr_html = &config.ssr_html;
 
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{pwa_head}
 <style>{css}</style></head><body>
-<div id="rw"></div>
+<div id="rw">{ssr_html}</div>
 <script>
 {base_js}
 {RUNTIME_JS}
@@ -698,6 +713,15 @@ mod tests {
             css.contains("--S6:"),
             "Composite CSS var(--S6) should cause --S6 to be included in :root"
         );
+    }
+
+    #[test]
+    fn test_ssr_html_embedded_in_mount_div() {
+        let mut config = CapsuleConfig::new().ssr(true);
+        config.ssr_html = "<h1>Static paint</h1>".to_string();
+        let css = generate_capsule_css(&config);
+        let capsule = generate_styled_capsule(&config, &css);
+        assert!(capsule.contains(r#"<div id="rw"><h1>Static paint</h1></div>"#));
     }
 
     #[test]

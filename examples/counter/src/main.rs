@@ -26,7 +26,7 @@ fn app_theme() -> Theme {
 async fn main() -> Result<(), Box<dyn Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(app)
-        .capsule_config(CapsuleConfig::new())
+        .capsule_config(CapsuleConfig::new().ssr(true))
         .theme(app_theme())
         .run()
         .await

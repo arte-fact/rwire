@@ -949,10 +949,25 @@ where
             // the wire (STYLE_DEF), and the small u8 enum maps are shipped whole.
             // So only the composite table feeds the config (client actions ride inside the bundle).
             let composite_css = ctx.composite_table().generate_css();
-            let config = config.with_composite_css(composite_css);
+            let mut config = config.with_composite_css(composite_css);
+
+            // Static first paint (SSR): render the root at default state into
+            // the capsule, and inline exactly the utility CSS its classes
+            // reference (they'd otherwise arrive lazily, after first paint).
+            let mut ssr_css = String::new();
+            if config.ssr {
+                config.ssr_html = root_element.to_static_html();
+                for key in root_element.static_style_rules() {
+                    if let Some(rule) = key.to_css_rule() {
+                        ssr_css.push_str(&rule);
+                        ssr_css.push('\n');
+                    }
+                }
+            }
 
             // Generate CSS and embed in capsule HTML <style> tag.
-            let css = capsule_gen::generate_capsule_css(&config);
+            let mut css = capsule_gen::generate_capsule_css(&config);
+            css.push_str(&ssr_css);
             let capsule = capsule_gen::generate_styled_capsule(&config, &css);
 
             // PWA: version the service-worker cache by the capsule's hash so a new
@@ -2330,7 +2345,8 @@ where
 
                     if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned() {
                         // Create EventContext from payload and param_bytes
-                        let ctx = EventContext::new_with_params(event.payload, event.param_bytes);
+                        let ctx = EventContext::new_with_params(event.payload, event.param_bytes)
+                            .with_session(conn_state.session_id.clone());
                         let state_type_id = handler.state_type_id();
 
                         // Execute the handler against its state (shared cache or memory)

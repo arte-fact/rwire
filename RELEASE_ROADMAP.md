@@ -51,11 +51,11 @@ with the release track — nothing in it blocks 0.1.
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 5 |
-| 3 — Technical gaps | 6 | 3 |
+| 3 — Technical gaps | 6 | 5 |
 | 4 — Positioning & launch | 3 | 3 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 8 |
-| **All** | **28** | **25** |
+| **All** | **28** | **27** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -243,7 +243,15 @@ with the release track — nothing in it blocks 0.1.
 - **Acceptance:** A 1k-row list binds O(1) listeners per event type; behavior identical.
 
 ### T4 — SSR / static first paint
-- **Status:** `[ ]` (post-launch OK; document as limitation)
+- **Status:** `[x]` Done (2026-07-06). `CapsuleConfig::ssr(true)`: the server
+  renders the root tree at default state into the capsule's mount div —
+  including synced regions (rendered with their default state) — and inlines
+  exactly the utility CSS those classes reference (they'd otherwise arrive
+  lazily, after first paint). The runtime drops the static paint on the first
+  WebSocket frame. Live-verified on the counter example: `curl` with no JS
+  returns real content (">0<"), and the live E2E still passes (the swap
+  works). Known limitation, documented: every path serves the root's static
+  paint — per-route SSR is future work.
 - **Problem:** First render requires WS connect; crawlers and no-JS see a blank page.
   Weak for content sites — ironically including the rwire docs site itself.
 - **Fix direction:** server renders initial HTML into the capsule (the builder tree is
@@ -253,7 +261,14 @@ with the release track — nothing in it blocks 0.1.
   crawlable.
 
 ### T5 — Auth middleware
-- **Status:** `[ ]` (post-launch OK; document as limitation)
+- **Status:** `[x]` Done (2026-07-06), scoped by its own anti-speculation
+  rule: the existing single-credential gate IS claw's real need today, so T5
+  became (1) documenting it properly (`05-advanced/auth.md`: the gate, token
+  cookie semantics, logout, dev_session) and (2) closing the identity gap the
+  chatroom actually hit — **`ctx.session_id()`**: the connection's session id
+  threaded into handler context, so shared-state handlers can key per-user
+  data (presence, membership, authorization maps). Roles/multi-user stores
+  stay app concerns until a real consumer demands them.
 - **Problem:** Current auth is a single user/password gate. Real apps need sessions
   with identity, login flows, and per-handler authorization.
 - **Fix direction:** grow from claw-rwire's real needs (it has `auth.rs`) rather than

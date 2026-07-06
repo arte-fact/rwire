@@ -54,7 +54,15 @@ export function connect(): void {
     if (bx(location.pathname) !== "/") w.send("R" + bx(location.pathname));
     if (location.hash) sh(location.hash);
   };
-  w.onmessage = (e) => x(new Uint8Array(e.data as ArrayBuffer));
+  let first = true;
+  w.onmessage = (e) => {
+    if (first) {
+      first = false;
+      // Drop the static first paint (SSR) — the live render replaces it.
+      document.getElementById("rw")?.remove();
+    }
+    x(new Uint8Array(e.data as ArrayBuffer));
+  };
   w.onclose = () => {
     rn = true;
     clearTimeout(ot);

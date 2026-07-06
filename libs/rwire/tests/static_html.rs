@@ -105,3 +105,32 @@ fn attribute_order_is_class_then_string_then_typed() {
         "<input class=\"field\" name=\"password\" type=\"password\">"
     );
 }
+
+#[test]
+fn synced_regions_render_default_state_and_collect_styles() {
+    use rwire::builder::ElementBuilder;
+    use rwire::style_tokens::StyleKey;
+    use rwire::{renderer, State};
+
+    #[derive(State, Default)]
+    #[storage(memory)]
+    struct S {
+        n: i32,
+    }
+
+    #[renderer]
+    fn count(state: &S) -> ElementBuilder {
+        el(El::Span).st([St::TextSm]).text(&state.n.to_string())
+    }
+
+    let tree = el(El::Div).st([St::PMd]).append([count()]);
+    let html = tree.to_static_html();
+    assert!(html.contains(">0<"), "default state rendered: {html}");
+
+    let rules = tree.static_style_rules();
+    assert!(rules.contains(&StyleKey::Util(St::PMd as u16)));
+    assert!(
+        rules.contains(&StyleKey::Util(St::TextSm as u16)),
+        "styles inside the synced region are collected"
+    );
+}

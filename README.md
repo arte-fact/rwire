@@ -36,8 +36,9 @@ It is built for **self-hosted software, dashboards, internal tools, and
 personal apps** — anywhere the server is close and the audience is bounded.
 Know the trade-offs before the features: every non-cosmetic interaction is a
 WebSocket round-trip, server memory scales with open connections (single
-process, no horizontal-scaling story yet), and there is no SSR — crawlers and
-no-JS clients see a blank page. If those hurt your use case, a different
+process, no horizontal-scaling story yet — partition, don't pool), and the
+static first paint (`ssr(true)`) shows default-state content until the
+socket connects. If those hurt your use case, a different
 architecture will serve you better; see
 [How rwire Compares](apps/rwire-docs/docs/05-advanced/comparison.md) for an
 honest look at the design space, and
@@ -297,12 +298,12 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics
+- [x] Static first paint (SSR-lite: default-state HTML + its CSS in the capsule)
 
 ### Planned
 - [ ] Event delegation for large lists
 - [ ] Database persistence adapters
 - [ ] Authentication middleware
-- [ ] SSR support
 
 ## License
 

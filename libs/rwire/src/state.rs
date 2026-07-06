@@ -256,6 +256,9 @@ pub struct EventContext {
     /// A client navigation the handler requested via `navigate`/`replace_route`,
     /// flushed to this connection after the handler's synced update.
     navigation: Cell<Option<Navigation>>,
+    /// The connection's session id — app-level identity for shared-state
+    /// handlers (presence, membership, per-user authorization).
+    session: Option<String>,
 }
 
 /// A server-initiated client navigation requested from a handler.
@@ -272,6 +275,7 @@ impl EventContext {
             parsed: OnceLock::new(),
             param_bytes: Vec::new(),
             navigation: Cell::new(None),
+            session: None,
         }
     }
 
@@ -282,6 +286,7 @@ impl EventContext {
             parsed: OnceLock::new(),
             param_bytes,
             navigation: Cell::new(None),
+            session: None,
         }
     }
 
@@ -292,6 +297,7 @@ impl EventContext {
             parsed: OnceLock::new(),
             param_bytes: Vec::new(),
             navigation: Cell::new(None),
+            session: None,
         }
     }
 
@@ -468,6 +474,19 @@ impl EventContext {
             return None;
         }
         ItemRef::decode(&self.param_bytes).map(|(r, _)| r)
+    }
+
+    /// Attach the connection's session id (done by the server at dispatch).
+    pub fn with_session(mut self, session: String) -> Self {
+        self.session = Some(session);
+        self
+    }
+
+    /// The connection's session id — stable across reconnects for the cookie
+    /// TTL. Key per-user data in `#[storage(shared)]` handlers with this
+    /// (the event itself carries no identity).
+    pub fn session_id(&self) -> Option<&str> {
+        self.session.as_deref()
     }
 
     /// Get the item index from the parameter bytes.
