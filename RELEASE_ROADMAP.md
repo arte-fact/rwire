@@ -51,11 +51,11 @@ with the release track — nothing in it blocks 0.1.
 |-------|-------|------|
 | 1 — Workspace & consumers | 3 | 3 |
 | 2 — Release mechanics | 5 | 5 |
-| 3 — Technical gaps | 6 | 2 |
+| 3 — Technical gaps | 6 | 3 |
 | 4 — Positioning & launch | 3 | 3 |
 | 5 — Runtime extraction | 3 | 3 |
 | 6 — Content & editing | 8 | 8 |
-| **All** | **28** | **24** |
+| **All** | **28** | **25** |
 
 (P2 counts as closed: superseded by Phase 5.)
 
@@ -260,7 +260,16 @@ with the release track — nothing in it blocks 0.1.
   speculating — same dogfooding loop as everything else.
 
 ### T6 — Scaling story documentation
-- **Status:** `[ ]`
+- **Status:** `[x]` Done (2026-07-06). `05-advanced/scaling.md`: the
+  connection cost model with the guard-rail table (every constant verified
+  against source: 10k/100-per-IP caps, 5-min idle + session TTL, 1MB state
+  limit, 100/s token bucket, frame/message sizes, 10k session cache),
+  reconnect/deploy semantics (no protocol skew; memory vs persisted survival),
+  the honest horizontal answer — **partition, don't pool** (shared state is
+  in-process; persisted is one SQLite per process; sticky sessions if you
+  must, with the "outgrown the niche" caveat) — and the reverse-proxy shape
+  (X-Forwarded-Proto, allow_origin, base_path, /metrics). README's Status &
+  scope links it.
 - **Problem:** Server memory scales with open connections; single-process; no
   horizontal-scaling / session-affinity guidance. Fine for the target niche
   (self-hosted, internal tools) but must be stated, not discovered.

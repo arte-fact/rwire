@@ -40,7 +40,9 @@ process, no horizontal-scaling story yet), and there is no SSR — crawlers and
 no-JS clients see a blank page. If those hurt your use case, a different
 architecture will serve you better; see
 [How rwire Compares](apps/rwire-docs/docs/05-advanced/comparison.md) for an
-honest look at the design space.
+honest look at the design space, and
+[Scaling & Deployment Model](apps/rwire-docs/docs/05-advanced/scaling.md) for
+what one process gives you and how to deploy behind a proxy.
 
 ## Quick Start
 
