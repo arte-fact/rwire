@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 rwire = { path = "../../libs/rwire" }
 rwire-components = { path = "../../libs/rwire-components" }
-rwire-markdown = { path = "../../libs/rwire-markdown" }
+rwire-editor = { path = "../../libs/rwire-editor" }
 rwire-themes = { path = "../../libs/rwire-themes" }
 async-std = { version = "1.12", features = ["attributes"] }

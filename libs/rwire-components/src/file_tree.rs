@@ -86,7 +86,10 @@ impl<'a> FileTree<'a> {
                 let mut node = TreeNode::leaf(entry.rel.clone(), Self::label(entry, is_selected))
                     .selected(is_selected);
                 if let Some(h) = &self.on_select {
-                    node = node.on_select(h.clone(), i as u32);
+                    // Encode the entry index so handlers read ctx.item_index().
+                    let mut params = Vec::new();
+                    rwire::ItemRef::<()>::new(i).encode(&mut params);
+                    node = node.on_select(h.clone().with_param_bytes(params));
                 }
                 nodes.push(node);
             }

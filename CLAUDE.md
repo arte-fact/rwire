@@ -57,6 +57,7 @@ rwire/
 │   │       ├── css.rs       # CSS custom property generation
 │   │       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
 │   │       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
+│   ├── rwire-editor/        # FileEditor kit: stateful explorer+editor (autosave, managed ops, guarded saves)
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
 │   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs

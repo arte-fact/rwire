@@ -314,7 +314,7 @@ dependencies = [
  "async-std",
  "rwire",
  "rwire-components",
- "rwire-markdown",
+ "rwire-editor",
  "rwire-themes",
 ]
 
@@ -1053,6 +1053,16 @@ dependencies = [
  "rwire-components",
  "rwire-markdown",
  "rwire-themes",
+]
+
+[[package]]
+name = "rwire-editor"
+version = "0.1.0"
+dependencies = [
+ "rwire",
+ "rwire-components",
+ "rwire-markdown",
+ "tempfile",
 ]
 
 [[package]]

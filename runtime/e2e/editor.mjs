@@ -1,8 +1,8 @@
-// Full-stack E2E (manual): the shipped artifact against a LIVE editor server.
+// Full-stack E2E (manual): the FileEditor kit against a LIVE editor server.
 // Start it first: `cargo run -p editor`, then `node e2e/editor.mjs` from
-// runtime/. Flow: select README.md in the tree → rendered view arrives →
-// Edit → textarea with gutter → type (debounced input → dirty diff → Save
-// enables) → Save → assert THE FILE ON DISK changed, then restore it.
+// runtime/. Flow: select README.md → rendered view → Edit → type → AUTOSAVE
+// flushes to disk with no clicks → toggle autosave off → type → nothing
+// persists until the Save button → click Save → disk. Restores the sample.
 import { readFileSync, writeFileSync } from "node:fs";
 import { makeDom } from "../test/dom.ts";
 
@@ -15,6 +15,7 @@ const samplePath = new URL(
   import.meta.url,
 );
 const original = readFileSync(samplePath, "utf8");
+const disk = () => readFileSync(samplePath, "utf8");
 
 const { document } = makeDom();
 const noop = () => {};
@@ -44,6 +45,7 @@ const walk = (n, out = []) => {
   return out;
 };
 const find = (pred) => walk(document.body).find(pred);
+const clickable = (n) => (n.__b?.click?.length || 0) > 0;
 const fail = (why) => {
   writeFileSync(samplePath, original);
   console.error("E2E FAIL:", why);
@@ -52,7 +54,7 @@ const fail = (why) => {
 
 await sleep(1200);
 
-// 1. Select README.md in the tree.
+// 1. Select README.md → rendered markdown view.
 const row = find((n) => n.id === "tn-README.md");
 if (!row) fail("tree row for README.md missing");
 row.fire("click", { target: row });
@@ -60,37 +62,42 @@ await sleep(600);
 if (!document.body.textContent.includes("Sample workspace"))
   fail("rendered markdown view missing");
 
-// 2. Switch to Edit.
-const editChip = find(
-  (n) => n.textContent === "Edit" && (n.__b?.click?.length || (n.listeners?.click || []).length),
-);
+// 2. Edit mode.
+const editChip = find((n) => n.textContent === "Edit" && clickable(n));
 if (!editChip) fail("Edit chip missing");
 editChip.fire("click", { target: editChip });
 await sleep(600);
 const ta = find((n) => n.tagName === "TEXTAREA");
 if (!ta) fail("editor textarea missing");
-if (!document.body.textContent.includes("2")) fail("gutter line numbers missing");
-const savedBtn = find((n) => n.tagName === "BUTTON" && n.textContent === "Saved");
-if (!savedBtn || savedBtn.getAttribute("disabled") === null)
-  fail("save button should start disabled/Saved");
+if (find((n) => n.tagName === "BUTTON" && n.textContent.includes("Save")))
+  fail("no Save button expected while autosave is on");
 
-// 3. Type: working copy diverges → dirty → Save enables.
-const stamp = `edited-by-e2e-${Date.now()}`;
+// 3. Type → autosave flushes to disk with zero clicks.
+const stamp = `autosaved-by-e2e-${Date.now()}`;
 ta.value = original + "\n" + stamp + "\n";
 ta.fire("input", { target: ta });
-await sleep(900); // 250ms debounce + round-trip + re-render
-const saveBtn = find((n) => n.tagName === "BUTTON" && n.textContent === "Save");
-if (!saveBtn) fail("Save button did not enable after edits");
-if (saveBtn.getAttribute("disabled") !== null) fail("Save button still disabled");
+await sleep(1000); // 250ms client debounce + round-trip + server flush
+if (!disk().includes(stamp)) fail("autosave did not reach the disk");
+if (!document.body.textContent.includes("saved · auto"))
+  fail("status bar missing 'saved · auto'");
 
-// 4. Save → the file on disk must contain the edit.
+// 4. Toggle autosave off → edits stay local until the Save button.
+const toggle = find((n) => n.textContent.includes("autosave") && clickable(n));
+if (!toggle) fail("autosave toggle missing");
+toggle.fire("click", { target: toggle });
+await sleep(600);
+const ta2 = find((n) => n.tagName === "TEXTAREA");
+const stamp2 = `manually-saved-${Date.now()}`;
+ta2.value = ta2.value ? ta2.value + stamp2 + "\n" : original + "\n" + stamp + "\n" + stamp2 + "\n";
+ta2.fire("input", { target: ta2 });
+await sleep(900);
+if (disk().includes(stamp2)) fail("manual mode must not auto-persist");
+const saveBtn = find((n) => n.tagName === "BUTTON" && n.textContent.includes("Save ⌘S"));
+if (!saveBtn) fail("Save button missing in manual mode");
 saveBtn.fire("click", { target: saveBtn });
 await sleep(700);
-const onDisk = readFileSync(samplePath, "utf8");
-if (!onDisk.includes(stamp)) fail("save did not reach the disk");
-const savedAgain = find((n) => n.tagName === "BUTTON" && n.textContent === "Saved");
-if (!savedAgain) fail("button did not return to Saved after saving");
+if (!disk().includes(stamp2)) fail("manual save did not reach the disk");
 
-writeFileSync(samplePath, original); // restore the sample
-console.log("E2E PASS: browse -> view -> edit -> dirty -> save hit the disk");
+writeFileSync(samplePath, original);
+console.log("E2E PASS: autosave flushed hands-free; manual mode gated on Save");
 process.exit(0);

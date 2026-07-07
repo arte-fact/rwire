@@ -1,4 +1,10 @@
-# FileEditor — consolidation design (decisions locked 2026-07-07)
+# FileEditor — consolidation design (IMPLEMENTED 2026-07-07)
+
+Shipped as `libs/rwire-editor`. Live-verified by `runtime/e2e/editor.mjs`:
+autosave flushes to disk hands-free; manual mode gates on the Save button.
+One deviation: the app default is `FileEditorState::default()` (autosave on) /
+`FileEditorState::manual()` — a state constructor, not a builder method,
+because state truth can't live in the render path.
 
 Consolidates the editor example's state machine into a **stateful component
 kit**. Visual spec (annotated mockup, states, legend):
@@ -35,7 +41,7 @@ current-line tint across gutter+code · status bar (lang · lines · changed ·
 saved) · **unsaved-changes guard on file switch** (fixes the example silently
 discarding edits) · tree folds into `Drawer` on mobile.
 
-## Plan
+## Plan (completed)
 
 Scaffold crate → port state machine + managed ops + autosave with tests →
 surface per the mock (kbd save, conflict banner, preview) → migrate

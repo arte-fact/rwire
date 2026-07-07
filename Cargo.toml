@@ -3,6 +3,7 @@ members = [
     "libs/rwire",
     "libs/rwire-macros",
     "libs/rwire-components",
+    "libs/rwire-editor",
     "libs/rwire-markdown",
     "libs/rwire-themes",
     "apps/rwire-website",

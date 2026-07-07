@@ -21,7 +21,7 @@ pub struct TreeNode {
     children: Vec<TreeNode>,
     expanded: bool,
     selected: bool,
-    on_select: Option<(HandlerSpec, u32)>,
+    on_select: Option<HandlerSpec>,
 }
 
 impl TreeNode {
@@ -65,9 +65,11 @@ impl TreeNode {
         self
     }
 
-    /// Fire `handler` with `index` (read via `ctx.item_index()`) on click.
-    pub fn on_select(mut self, handler: HandlerSpec, index: u32) -> Self {
-        self.on_select = Some((handler, index));
+    /// Fire `handler` on click. The handler is bound AS GIVEN — encode any
+    /// params (an index, an action code) before passing it; TreeView never
+    /// rewrites them.
+    pub fn on_select(mut self, handler: HandlerSpec) -> Self {
+        self.on_select = Some(handler);
         self
     }
 
@@ -88,10 +90,8 @@ impl TreeNode {
         } else {
             row = row.hover([St::BgSubtle]);
         }
-        if let Some((handler, index)) = self.on_select {
-            let mut params = Vec::new();
-            rwire::ItemRef::<()>::new(index as usize).encode(&mut params);
-            row = row.on(rwire::Ev::Click, handler.with_param_bytes(params));
+        if let Some(handler) = self.on_select {
+            row = row.on(rwire::Ev::Click, handler);
         }
         if self.children.is_empty() {
             return row.id(format!("tn-{}", self.key).as_str());
