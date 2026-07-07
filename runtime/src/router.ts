@@ -49,6 +49,26 @@ export function installRouter(): void {
       }
     }
   });
+  // Tooltip escape hatch: absolute popups clip inside overflow ancestors, so
+  // on hover we re-anchor the [data-tip] popup as position:fixed from the
+  // trigger's viewport rect (placement letter in data-tt: t/b/l/r).
+  document.addEventListener("mouseover", (e) => {
+    const c = (e.target as Element).closest?.("[data-tt]") as HTMLElement | null;
+    if (!c || !c.getBoundingClientRect) return;
+    const p = c.querySelector("[data-tip]") as HTMLElement | null;
+    if (!p) return;
+    const r = c.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const m: Record<string, [number, number, string]> = {
+      t: [cx, r.top - 6, "-50%,-100%"],
+      b: [cx, r.bottom + 6, "-50%,0"],
+      l: [r.left - 6, cy, "-100%,-50%"],
+      r: [r.right + 6, cy, "0,-50%"],
+    };
+    const [x, y, tr] = m[c.getAttribute("data-tt")!] || m.b;
+    p.setAttribute("style", "position:fixed;left:" + x + "px;top:" + y + "px;transform:translate(" + tr + ")");
+  });
+
   window.addEventListener("popstate", () => {
     st.w!.send("R" + bx(location.pathname));
     if (location.hash) sh(location.hash);

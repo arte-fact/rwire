@@ -70,6 +70,33 @@ impl<'a> FileEditor<'a> {
         self.icon_button(icon, tip, action, index, false)
     }
 
+    /// Row action on the solid-accent selected row: light icon, translucent
+    /// hover — readable on the emphasis background.
+    fn row_action(&self, icon: icons::Icon, tip: &str, action: Action, i: usize) -> ElementBuilder {
+        let btn = el(El::Button)
+            .at_str(rwire::At::AriaLabel, tip)
+            .st([
+                St::DisplayFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::H1_25rem,
+                St::RoundedSm,
+                St::BorderNone,
+                St::CursorPointer,
+                St::FlexShrink0,
+                St::TextOnEmphasis,
+                St::BgTransparent,
+            ])
+            .hover([St::BgAccentHover])
+            .style(Style::new().width("1.25rem").set("padding", "0"))
+            .on(Ev::Click, self.act(action, Some(i as u32)))
+            .append([icons::icon_sized(icon, 12)]);
+        Tooltip::new(tip.to_string())
+            .position(rwire_components::TooltipPosition::Bottom)
+            .child(btn)
+            .build()
+    }
+
     fn icon_button(
         &self,
         icon: icons::Icon,
@@ -123,7 +150,11 @@ impl<'a> FileEditor<'a> {
                 St::Flex1,
             ])
             .append([
-                el(El::Span).st([St::TextMuted]).append([glyph]),
+                if selected {
+                    el(El::Span).append([glyph])
+                } else {
+                    el(El::Span).st([St::TextMuted]).append([glyph])
+                },
                 el(El::Span)
                     .st(if selected {
                         [St::TextSm, St::FontMedium]
@@ -248,18 +279,8 @@ impl<'a> FileEditor<'a> {
                 let mut label = Self::tree_label(entry, selected, dirty);
                 if selected && self.managed {
                     label = label.append([
-                        self.icon_action(
-                            icons::Icon::Edit,
-                            "Rename",
-                            Action::RenameStart,
-                            Some(i as u32),
-                        ),
-                        self.icon_action(
-                            icons::Icon::Trash,
-                            "Delete",
-                            Action::Delete,
-                            Some(i as u32),
-                        ),
+                        self.row_action(icons::Icon::Edit, "Rename", Action::RenameStart, i),
+                        self.row_action(icons::Icon::Trash, "Delete", Action::Delete, i),
                     ]);
                 }
                 nodes.push(

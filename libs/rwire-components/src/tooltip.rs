@@ -113,6 +113,12 @@ impl Tooltip {
             .attr("data-tip", "")
             .text(&self.text);
 
+        let placement = match self.position {
+            TooltipPosition::Top => "t",
+            TooltipPosition::Bottom => "b",
+            TooltipPosition::Left => "l",
+            TooltipPosition::Right => "r",
+        };
         let mut container = el(El::Div)
             .st([
                 St::PositionRelative,
@@ -121,7 +127,10 @@ impl Tooltip {
             ])
             // Lift the anchor while hovered so the popup paints above later
             // siblings (rows, toolbars) that would otherwise stack over it.
-            .hover([St::Z50]);
+            .hover([St::Z50])
+            // The runtime re-anchors the popup as position:fixed on hover so
+            // overflow:auto ancestors (panes, scrollers) can't clip it.
+            .attr("data-tt", placement);
 
         if let Some(ref extra) = self.extra_class {
             container = container.class(extra.as_ref());
