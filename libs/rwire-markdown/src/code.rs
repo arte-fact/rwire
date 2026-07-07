@@ -68,35 +68,6 @@ fn highlight_span(token: &Token) -> ElementBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_for_known_unknown_and_no_language() {
-        // All three paths must build without panicking.
-        let _ = highlight_code("fn main() {}", Some("rust"));
-        let _ = highlight_code("+[->+]", Some("brainfuck"));
-        let _ = highlight_code("plain", None);
-    }
-
-    #[test]
-    fn highlight_span_maps_each_kind() {
-        for kind in [
-            TokenKind::Keyword,
-            TokenKind::Str,
-            TokenKind::Number,
-            TokenKind::Comment,
-            TokenKind::Plain,
-        ] {
-            let _ = highlight_span(&Token {
-                kind,
-                text: "x".to_string(),
-            });
-        }
-    }
-}
-
 /// Highlight `code` into one `ElementBuilder` per line (bare spans, no block
 /// chrome) — for gutter-aligned code views like `rwire-editor`'s read-only
 /// mode, where each line must be its own row. Unknown languages yield plain
@@ -141,4 +112,33 @@ pub fn highlight_lines(code: &str, lang: Option<&str>) -> Vec<ElementBuilder> {
         .into_iter()
         .map(|spans| el(El::Div).st([St::WhitespacePre, St::MinW0]).append(spans))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_for_known_unknown_and_no_language() {
+        // All three paths must build without panicking.
+        let _ = highlight_code("fn main() {}", Some("rust"));
+        let _ = highlight_code("+[->+]", Some("brainfuck"));
+        let _ = highlight_code("plain", None);
+    }
+
+    #[test]
+    fn highlight_span_maps_each_kind() {
+        for kind in [
+            TokenKind::Keyword,
+            TokenKind::Str,
+            TokenKind::Number,
+            TokenKind::Comment,
+            TokenKind::Plain,
+        ] {
+            let _ = highlight_span(&Token {
+                kind,
+                text: "x".to_string(),
+            });
+        }
+    }
 }
