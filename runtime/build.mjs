@@ -58,6 +58,14 @@ writeFileSync("dist/runtime.min.js", min);
 const gz = gzipSync(Buffer.from(min)).length;
 console.log(`runtime.min.js: ${min.length} bytes (${gz} gzipped)`);
 
+// The capsule embeds the core artifact on a single line; esbuild sometimes
+// lowers "\n" strings into template literals with RAW newlines. Fail loudly.
+{
+  const out = readFileSync(new URL("dist/runtime.min.js", import.meta.url), "utf8");
+  if (out.trimEnd().includes("\n"))
+    throw new Error("runtime.min.js is not single-line — a raw newline snuck into a template literal");
+}
+
 // --- extensions: separately-built lazy modules (ESM for dynamic import) ---
 mkdirSync(new URL("dist/ext/", import.meta.url), { recursive: true });
 await build({

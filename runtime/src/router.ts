@@ -70,7 +70,7 @@ export function installRouter(): void {
         const v = f2.value;
         let ss = f2.selectionStart;
         if (ke.shiftKey) {
-          const ls = v.lastIndexOf("\n", ss - 1) + 1;
+          const ls = v.lastIndexOf(String.fromCharCode(10), ss - 1) + 1;
           let cut = 0;
           if (v[ls] === "\t") cut = 1;
           else while (cut < ins.length && v[ls + cut] === " ") cut++;
