@@ -237,6 +237,9 @@ impl<'a> FileEditor<'a> {
                     .at(At::Autocomplete, Av::Off)
                     .at_str(At::Placeholder, placeholder)
                     .at_str(At::Value, initial)
+                    // Enter submits the form (the runtime honours this); paired with the submit
+                    // button below so both keyboard and click confirm a create/rename.
+                    .attr("data-enter-submit", "")
                     .st([
                         St::Flex1,
                         St::MinW0,
@@ -247,6 +250,10 @@ impl<'a> FileEditor<'a> {
                         St::BgApp,
                     ])
                     .focus([St::BorderAccent]),
+                // The confirm is a real `type=submit` button so the form submits (carrying the
+                // `name` field) on click AND on Enter — without a submit button, a single-input
+                // form has no implicit submission, so create/rename were unreachable.
+                self.submit_button(icons::Icon::Check, "Confirm"),
                 self.icon_button_kbd(
                     icons::Icon::Close,
                     "Cancel · Esc",
@@ -256,6 +263,33 @@ impl<'a> FileEditor<'a> {
                     Some("escape"),
                 ),
             ])
+    }
+
+    /// A `type=submit` icon button that submits its enclosing form (the confirm affordance for the
+    /// create/rename name form). No click handler: the form's `Ev::Submit` handler does the work.
+    fn submit_button(&self, icon: icons::Icon, tip: &str) -> ElementBuilder {
+        let btn = el(El::Button)
+            .attr("type", "submit")
+            .at_str(rwire::At::AriaLabel, tip)
+            .st([
+                St::DisplayFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::H1_25rem,
+                St::RoundedSm,
+                St::BorderNone,
+                St::CursorPointer,
+                St::FlexShrink0,
+                St::TextMuted,
+                St::BgTransparent,
+            ])
+            .hover([St::BgSubtle, St::TextHigh])
+            .style(Style::new().width("1.25rem").set("padding", "0"))
+            .append([icons::icon_sized(icon, 12)]);
+        Tooltip::new(tip.to_string())
+            .position(rwire_components::TooltipPosition::Bottom)
+            .child(btn)
+            .build()
     }
 
     fn build_tree(&self) -> ElementBuilder {

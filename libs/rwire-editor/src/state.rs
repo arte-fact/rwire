@@ -300,8 +300,14 @@ impl FileEditorState {
         match action {
             Action::Select => {
                 let Some(i) = index else { return };
+                // Re-selecting the already-open file is a no-op. A row-action click (rename/delete)
+                // bubbles to the row's select handler; without this it would re-`open` the file and
+                // clear the pending op that just fired (and silently discard unsaved edits).
+                if self.selected == Some(i) {
+                    return;
+                }
                 // Manual-mode guard: don't silently discard unsaved lines.
-                if !self.autosave && self.dirty() && self.selected != Some(i) {
+                if !self.autosave && self.dirty() {
                     self.pending = Pending::Guard { to: i };
                     return;
                 }
