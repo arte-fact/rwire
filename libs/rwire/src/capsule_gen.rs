@@ -15,16 +15,30 @@ use crate::theme::Theme;
 /// inside the bundle, which exposes the opcode executor as `globalThis.__rwx`
 /// for the wire harness. See `runtime/README.md` for the module map and rules.
 const RUNTIME_JS: &str = include_str!("../assets/runtime.min.js");
+const EXT_VIM_JS_FOR_VERSION: &str = include_str!("../assets/ext/vim.min.js");
+
+/// Build stamp for lazy-extension URLs (`?v=`): changes whenever either
+/// artifact changes, so a rebuilt server can never be served a cached stale
+/// module. FNV-1a over both vendored artifacts.
+pub(crate) fn ext_version() -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in RUNTIME_JS.bytes().chain(EXT_VIM_JS_FOR_VERSION.bytes()) {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    format!("{h:x}")
+}
 
 /// Generate a minimal (unstyled) capsule HTML.
 ///
 /// The bundle carries its own (empty) name maps; entries arrive lazily via
 /// `MAP_DEF` (see `generate_styled_capsule`).
 pub fn generate_capsule() -> String {
+    let rwv = ext_version();
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
 <script>
-const BASE='';
+const BASE='',RWV='{rwv}';
 {RUNTIME_JS}
 </script>
 </body></html>"#
@@ -415,12 +429,14 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
 
     let base_js = base_path_js(&config.base_path);
     let ssr_html = &config.ssr_html;
+    let rwv = ext_version();
 
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{pwa_head}
 <style>{css}</style></head><body>
 <div id="rw">{ssr_html}</div>
 <script>
+const RWV='{rwv}';
 {base_js}
 {RUNTIME_JS}
 </script>

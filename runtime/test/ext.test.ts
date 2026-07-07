@@ -35,7 +35,7 @@ test("MOD_DEF imports each named module once per page", () => {
     bytes([MOD_DEF, 1, name.length], [...new TextEncoder().encode(name)], [0xff]);
   x(hint("vim"), []);
   x(hint("vim"), []); // page-level dedup even if the server re-hints
-  assert.deepEqual(imports, ["/_rw/ext/vim.js"]);
+  assert.deepEqual(imports, ["/_rw/ext/vim.js?v=0"]);
 });
 
 test("data-kbd hook yields to a vim-moded target outside insert", async () => {

@@ -1439,7 +1439,7 @@ async fn handle_client<F>(
     // while the server is at capacity.
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
-        if path == "/_rw/ext/vim.js" {
+        if path.split('?').next() == Some("/_rw/ext/vim.js") {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {

@@ -320,7 +320,8 @@ export function x(d: Uint8Array): void {
           if (!ext.has(name)) {
             ext.add(name);
             const imp = (globalThis as any).__rwImport || ((u: string) => import(u));
-            const u = BASE + "/_rw/ext/" + name + ".js";
+            const u =
+              BASE + "/_rw/ext/" + name + ".js?v=" + (typeof RWV == "undefined" ? "0" : RWV);
             imp(u)
               .then((m: any) => {
                 console.info("rw ext " + name + (m.v ? " v" + m.v : " (no version)"));

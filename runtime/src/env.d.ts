@@ -3,3 +3,4 @@
 // see base_path_js() in capsule_gen.rs — the only dynamic config the runtime
 // reads. Everything else the runtime needs lives inside the bundle.
 declare const BASE: string;
+declare const RWV: string;
