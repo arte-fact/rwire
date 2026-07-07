@@ -643,6 +643,11 @@ impl<'a> FileEditor<'a> {
                 .attr("data-vim-chip", "1")
                 .st([St::FontMono, St::TextXs, St::TextAccent, St::FontMedium])
                 .text("NORMAL")]);
+            // the vim extension owns this slot: the / search prompt
+            bar = bar.append([el(El::Span)
+                .attr("data-vim-prompt", "1")
+                .st([St::FontMono, St::TextXs, St::ItemsCenter, St::GapXs])
+                .style(Style::new().set("display", "none"))]);
         }
         bar = bar.append([el(El::Span)
             .st([

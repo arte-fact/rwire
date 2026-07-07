@@ -19,7 +19,7 @@
 
 /** Version stamp logged by the loader — bump with every engine change so a
  * stale cached/embedded module is instantly visible in the console. */
-export const v = 7;
+export const v = 8;
 
 type Mode = "normal" | "insert" | "v" | "V" | "replace";
 interface Pend {
@@ -41,6 +41,15 @@ let regLine = false;
 let lastSeek: { k: string; ch: string } | null = null;
 /** Selected register for the NEXT op: "" = unnamed, "+" = system clipboard. */
 let pendingReg = "";
+/** Dot-repeat: the last change as replayable keys (+ text typed in insert). */
+let lastChange: { keys: string[]; insert: string } | null = null;
+let rec: string[] = [];
+let insCap: { c: number } | null = null;
+let replaying = false;
+/** Set by put(): the current key sequence mutated the text. */
+let mutated = false;
+/** Search: last query for n/N/*. */
+let lastQuery = "";
 
 const pend = (el: Element): Pend => {
   let p = P.get(el);
@@ -259,6 +268,7 @@ function fire(el: TA): void {
 }
 
 function put(el: TA, text: string, caret: number): void {
+  mutated = true;
   el.value = text;
   el.setSelectionRange(caret, caret);
   fire(el);
@@ -747,6 +757,39 @@ function normalKey(doc: Document, el: TA, k: string): void {
     case "u":
       clickKbd(doc, "mod+z");
       break;
+    case "/":
+      openPrompt(doc, el);
+      break;
+    case "n":
+      doSearch(el, 1);
+      break;
+    case "N":
+      doSearch(el, -1);
+      break;
+    case "*": {
+      const r = textObject(t, p, false, "w");
+      if (r) {
+        lastQuery = t.slice(r[0], r[1]);
+        doSearch(el, 1);
+      }
+      break;
+    }
+    case ".": {
+      if (!lastChange || replaying) break;
+      replaying = true;
+      const change = lastChange;
+      for (let i = 0; i < n; i++) {
+        for (const k2 of change.keys) normalKey(doc, el, k2);
+        if (change.insert) {
+          const t2 = el.value;
+          const p2 = el.selectionStart;
+          put(el, t2.slice(0, p2) + change.insert + t2.slice(p2), p2 + change.insert.length);
+          setMode(doc, el, "normal");
+        }
+      }
+      replaying = false;
+      break;
+    }
     default: {
       const q = motion(t, p, k, n, hadCount);
       if (q >= 0) el.setSelectionRange(q, q);
@@ -873,6 +916,55 @@ function extendTo(el: TA, t: string, st: Pend, q: number, line: boolean): void {
     el.setSelectionRange(Math.min(st.anchor, q), Math.min(t.length, Math.max(st.anchor, q) + 1));
 }
 
+/** Jump to the next match (wrapping); selects it for visibility. */
+function doSearch(el: TA, dir: 1 | -1): void {
+  if (!lastQuery) return;
+  const t = el.value;
+  const p = el.selectionStart;
+  let hit = -1;
+  if (dir === 1) {
+    hit = t.indexOf(lastQuery, p + 1);
+    if (hit === -1) hit = t.indexOf(lastQuery);
+  } else {
+    hit = t.lastIndexOf(lastQuery, Math.max(0, p - 1));
+    if (hit === p) hit = -1;
+    if (hit === -1) hit = t.lastIndexOf(lastQuery);
+  }
+  if (hit !== -1) el.setSelectionRange(hit, hit + lastQuery.length);
+}
+
+/** Open the status-bar search prompt ([data-vim-prompt], morph-skipped). */
+function openPrompt(doc: Document, el: TA): void {
+  const host = doc.querySelector("[data-vim-prompt]") as HTMLElement | null;
+  if (!host) return;
+  let inp = host.querySelector("input") as HTMLInputElement | null;
+  if (!inp) {
+    inp = doc.createElement("input") as HTMLInputElement;
+    inp.setAttribute(
+      "style",
+      "font:inherit;background:transparent;border:0;border-bottom:1px solid currentColor;outline:0;color:inherit;width:9rem",
+    );
+    const slash = doc.createElement("span");
+    slash.textContent = "/";
+    host.appendChild(slash);
+    host.appendChild(inp);
+    inp.addEventListener("keydown", (e2: Event) => {
+      const k2 = (e2 as KeyboardEvent).key;
+      if (k2 !== "Enter" && k2 !== "Escape") return;
+      e2.preventDefault();
+      (host as any).style && ((host as any).style.display = "none");
+      if (k2 === "Enter" && inp!.value) {
+        lastQuery = inp!.value;
+        doSearch(el, 1);
+      }
+      if ((el as any).focus) el.focus();
+    });
+  }
+  inp.value = "";
+  if ((host as any).style) (host as any).style.display = "inline-flex";
+  if ((inp as any).focus) inp.focus();
+}
+
 const installed = new WeakSet<Document>();
 
 /** Install on a document (exported so tests and the sandboxed E2E harness can
@@ -897,6 +989,13 @@ export function i(doc: Document): void {
         if (k === "Escape") {
           e.preventDefault();
           setMode(doc, el, "normal");
+          if (insCap && !replaying) {
+            // commit the change for dot-repeat: keys + linearly-typed text
+            const ins = el.value.slice(insCap.c, el.selectionStart);
+            lastChange = { keys: rec.slice(), insert: ins };
+            rec = [];
+            insCap = null;
+          }
         }
         return; // insert mode is the ordinary editor
       }
@@ -925,8 +1024,24 @@ export function i(doc: Document): void {
       }
       if (k.length > 1 && k !== "Escape") return; // arrows etc. stay native
       e.preventDefault();
-      if (mode === "normal") normalKey(doc, el, k);
-      else visualKey(doc, el, k, mode === "V");
+      if (mode === "normal") {
+        const st = pend(el);
+        mutated = false;
+        normalKey(doc, el, k);
+        if (!replaying && k !== ".") {
+          rec.push(k);
+          const pending = !!(st.op || st.obj || st.seek || st.count);
+          if (el.getAttribute("data-vim") === "insert") {
+            // change continues into insert: snapshot for the typed-text diff
+            insCap = { c: el.selectionStart };
+          } else if (mutated && !pending) {
+            lastChange = { keys: rec.slice(), insert: "" };
+            rec = [];
+          } else if (!pending && !mutated) {
+            rec = []; // pure motion / yank: not a change
+          }
+        }
+      } else visualKey(doc, el, k, mode === "V");
     },
     true, // capture: ahead of the core data-kbd hook and delegation
   );

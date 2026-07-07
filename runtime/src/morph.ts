@@ -44,7 +44,7 @@ export function me(a: Node, b: Node): void {
   }
   // The vim mode chip's text is written by the extension; the server only
   // places the element.
-  if (ae.hasAttribute("data-vim-chip")) return;
+  if (ae.hasAttribute("data-vim-chip") || ae.hasAttribute("data-vim-prompt")) return;
   // Nested region: its own update owns it (guard non-string id so the morph
   // never throws and freezes the stream).
   if (typeof ae.id === "string" && ae.id.indexOf("__synced_") === 0) return;

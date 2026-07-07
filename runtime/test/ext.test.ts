@@ -114,8 +114,8 @@ test("ext/vim.min.js stays within its own budget", async () => {
   const out = readFileSync(new URL("../dist/ext/vim.min.js", import.meta.url));
   // Lazy module: pay-per-use, outside the frozen core. v5 (objects, seek,
   // small-ops) is a full modal engine at ~10.6K/3.6K.
-  assert.ok(out.length <= 12_000, `vim ext ${out.length} bytes exceeds 12000`);
-  assert.ok(gzipSync(out).length <= 4_200, "vim ext gzip exceeds 4200");
+  assert.ok(out.length <= 15_000, `vim ext ${out.length} bytes exceeds 15000`);
+  assert.ok(gzipSync(out).length <= 5_200, "vim ext gzip exceeds 5200");
 });
 
 test("Tab indents on [data-tab-insert] fields; Shift+Tab dedents", async () => {

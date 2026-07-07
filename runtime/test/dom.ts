@@ -226,9 +226,11 @@ export function makeDom(): { document: MockDoc } {
           attrVal = attrSel.slice(eq + 1).replace(/^"|"$/g, "");
           attrSel = attrSel.slice(0, eq);
         }
-        if (byIdSel === null && attrSel === null) return null;
+        const tagSel = /^[a-z]+$/.test(sel) ? sel.toUpperCase() : null;
+        if (byIdSel === null && attrSel === null && tagSel === null) return null;
         const walk = (e: MockEl): MockEl | null => {
           if (byIdSel !== null && e.id === byIdSel) return e;
+          if (tagSel !== null && e.tagName === tagSel && e !== node) return e;
           if (
             attrSel !== null &&
             (attrVal === null ? e.hasAttribute(attrSel) : e.getAttribute(attrSel) === attrVal)

@@ -529,3 +529,70 @@ test("R overtypes until Escape, appending past line end", () => {
   press("Escape");
   assert.equal(ta.getAttribute("data-vim"), "normal");
 });
+
+// ----------------------------------------------------------- S5 dot-repeat
+test(". repeats simple changes: x, dw, rX", () => {
+  setup("abcdef", 0);
+  press("x", ".");
+  assert.equal(ta.value, "cdef", ". repeated x");
+  setup("one two three four", 0);
+  press("d", "w", ".");
+  assert.equal(ta.value, "three four", ". repeated dw");
+  setup("aaaa", 0);
+  press("r", "Z"); // caret stays on the replaced char
+  press("l", ".");
+  assert.equal(ta.value, "ZZaa", ". repeated rZ at the new position");
+});
+
+test(". replays insert-ending changes with the typed text", () => {
+  setup("foo bar", 0);
+  press("c", "i", "w"); // change word -> insert
+  ta.value = "NEW" + ta.value; // type "NEW" at caret 0 (linear)
+  ta.setSelectionRange(3, 3);
+  press("Escape");
+  assert.equal(ta.value, "NEW bar");
+  press("w"); // to bar
+  press(".");
+  assert.equal(ta.value, "NEW NEW", ". replayed ciw + typed text");
+});
+
+test("motions and yanks do not overwrite the last change", () => {
+  setup("abc def", 0);
+  press("x"); // change: delete 'a'
+  press("w", "y", "w", "0"); // motion, yank, motion
+  press(".");
+  assert.equal(ta.value, "c def", ". still repeats x, not the yank");
+});
+
+// -------------------------------------------------------------- S6 search
+function promptHost() {
+  const host = doc.createElement("span");
+  host.setAttribute("data-vim-prompt", "1");
+  (host as any).style = { display: "none" };
+  doc.body.appendChild(host);
+  return host;
+}
+
+test("/ opens the prompt; Enter searches and selects the match", () => {
+  const host = promptHost();
+  setup("alpha beta gamma beta", 0);
+  press("/");
+  const inp = host.querySelector("input") as any;
+  assert.ok(inp, "prompt input created");
+  inp.value = "beta";
+  for (const fn of inp.listeners["keydown"] || [])
+    fn({ key: "Enter", preventDefault: () => {} });
+  assert.equal(ta.selectionStart, 6, "first match selected");
+  assert.equal(ta.selectionEnd, 10);
+  press("n");
+  assert.equal(ta.selectionStart, 17, "n wraps forward to next");
+  press("N");
+  assert.equal(ta.selectionStart, 6, "N goes back");
+});
+
+test("* seeds the search from the word under the caret", () => {
+  promptHost();
+  setup("foo bar foo baz", 1);
+  press("*");
+  assert.equal(ta.selectionStart, 8, "next foo found");
+});
