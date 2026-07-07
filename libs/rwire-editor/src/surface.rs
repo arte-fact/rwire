@@ -469,6 +469,7 @@ impl<'a> FileEditor<'a> {
                 let flags = self.state.dirty_lines();
                 CodeEditor::new("fe-field", &self.state.working)
                     .dirty_lines(&flags)
+                    .overlay(highlight_lines(&self.state.working, lang))
                     .on_edit(self.act(Action::Edit, None))
                     .build()
             }

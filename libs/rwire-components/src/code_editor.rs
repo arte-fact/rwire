@@ -20,6 +20,7 @@ pub struct CodeEditor<'a> {
     dirty_lines: &'a [bool],
     on_edit: Option<HandlerSpec>,
     save: Option<(HandlerSpec, bool)>,
+    overlay: Option<Vec<ElementBuilder>>,
 }
 
 impl<'a> CodeEditor<'a> {
@@ -31,6 +32,7 @@ impl<'a> CodeEditor<'a> {
             dirty_lines: &[],
             on_edit: None,
             save: None,
+            overlay: None,
         }
     }
 
@@ -38,6 +40,17 @@ impl<'a> CodeEditor<'a> {
     /// missing entries render clean.
     pub fn dirty_lines(mut self, dirty: &'a [bool]) -> Self {
         self.dirty_lines = dirty;
+        self
+    }
+
+    /// Syntax-colored line rows rendered UNDER a transparent-ink textarea
+    /// (e.g. `rwire_markdown::highlight_lines`). Caret, selection, undo, and
+    /// IME stay native; the runtime echoes keystrokes into the overlay as
+    /// plain text so typing is never invisible, and colors return with the
+    /// debounced round-trip. Rows must match the textarea's line grid — the
+    /// component pins line-height and min-height on each row.
+    pub fn overlay(mut self, lines: Vec<ElementBuilder>) -> Self {
+        self.overlay = Some(lines);
         self
     }
 
@@ -81,6 +94,7 @@ impl<'a> CodeEditor<'a> {
                 row.append([el(El::Span).text(&n.to_string())])
             }));
 
+        let overlay_id = format!("{}-hl", self.id);
         let mut field = el(El::Textarea)
             .id(self.id)
             .at_str(At::Name, "content")
@@ -88,12 +102,9 @@ impl<'a> CodeEditor<'a> {
             .at(At::Autocomplete, Av::Off)
             .at_str(At::Wrap, "off")
             .st([
-                St::Flex1,
-                St::MinW0,
                 St::FontMono,
                 St::TextXs,
                 St::BgTransparent,
-                St::TextDefault,
                 St::BorderNone,
                 St::OutlineNone,
                 St::ResizeNone,
@@ -105,6 +116,40 @@ impl<'a> CodeEditor<'a> {
         if let Some(handler) = self.on_edit {
             field = field.on(Ev::Input, handler);
         }
+        let code_cell = match self.overlay {
+            Some(lines) => {
+                // Transparent ink over a colored underlay: the two layers share
+                // one font grid, so glyphs align; only the caret stays inked.
+                field = field
+                    .st([
+                        St::TextTransparent,
+                        St::CaretInk,
+                        St::PositionRelative,
+                        St::WFull,
+                    ])
+                    .attr("data-echo", &overlay_id);
+                let row_metrics = Style::new()
+                    .set("line-height", "1.5")
+                    .set("min-height", "1.5em");
+                let underlay = el(El::Div)
+                    .id(&overlay_id)
+                    .at(At::AriaHidden, Av::True)
+                    .st([
+                        St::AbsoluteFill,
+                        St::FontMono,
+                        St::TextXs,
+                        St::TextDefault,
+                        St::WhitespacePre,
+                        St::PointerEventsNone,
+                    ])
+                    .style(Style::new().set("line-height", "1.5"))
+                    .append(lines.into_iter().map(|l| l.style(row_metrics.clone())));
+                el(El::Div)
+                    .st([St::Flex1, St::MinW0, St::PositionRelative])
+                    .append([underlay, field])
+            }
+            None => field.st([St::Flex1, St::MinW0, St::TextDefault]),
+        };
 
         let mut column: Vec<ElementBuilder> = Vec::new();
         if let Some((handler, dirty)) = self.save {
@@ -132,7 +177,7 @@ impl<'a> CodeEditor<'a> {
                     St::DisplayFlex,
                     St::GapSm,
                 ])
-                .append([gutter, field]),
+                .append([gutter, code_cell]),
         );
         el(El::Div)
             .st([

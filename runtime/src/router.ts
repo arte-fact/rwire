@@ -49,6 +49,18 @@ export function installRouter(): void {
       }
     }
   });
+  // Editor overlay echo: a [data-echo] field mirrors its value into the
+  // named underlay on every keystroke, so transparent-ink typing is never
+  // invisible; the server morph restores syntax colors moments later.
+  document.addEventListener("input", (e) => {
+    const t = e.target as HTMLTextAreaElement;
+    const id = t.getAttribute && t.getAttribute("data-echo");
+    if (id) {
+      const u = document.getElementById(id);
+      if (u) u.textContent = t.value;
+    }
+  });
+
   // Tooltip escape hatch: absolute popups clip inside overflow ancestors, so
   // on hover we re-anchor the [data-tip] popup as position:fixed from the
   // trigger's viewport rect (placement letter in data-tt: t/b/l/r).

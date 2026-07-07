@@ -75,6 +75,18 @@ const ta = find((n) => n.tagName === "TEXTAREA");
 if (!ta) fail("editor textarea missing");
 if (find((n) => (n.getAttribute?.("aria-label") || "").startsWith("Save") && clickable(n)))
   fail("no Save button expected while autosave is on");
+// Syntax overlay: colored underlay present; keystrokes echo instantly.
+const underlay = find((n) => n.id === "fe-field-hl");
+if (!underlay) fail("syntax overlay underlay missing");
+if (ta.getAttribute("data-echo") !== "fe-field-hl") fail("textarea missing data-echo");
+ta.value = "echo-check";
+ta.fire("input", { target: ta });
+if (underlay.textContent !== "echo-check") fail("overlay echo not instant");
+await sleep(900); // colors return with the round-trip morph
+if (!(underlay.children || []).length) fail("overlay lines not restored by morph");
+ta.value = original;
+ta.fire("input", { target: ta });
+await sleep(900);
 
 // 3. Type → autosave flushes to disk with zero clicks.
 const stamp = `autosaved-by-e2e-${Date.now()}`;

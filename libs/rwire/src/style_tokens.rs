@@ -910,6 +910,7 @@ define_token_enum! {
         // which over/undershoot when the browser chrome shows/hides.
         HDvh = 0x344 => "height:100dvh",
         CursorColResize = 0x34C => "cursor:col-resize",
+        CaretInk = 0x34D => "caret-color:var(--k)",
         MinHDvh = 0x345 => "min-height:100dvh",
         MaxHDvh = 0x346 => "max-height:100dvh",
         /// Auto-grow a textarea/input to its content (pair with a max-height cap).

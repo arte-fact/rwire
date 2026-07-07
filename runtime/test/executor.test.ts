@@ -607,3 +607,19 @@ test("data-save-key: Cmd/Ctrl+S clicks the save trigger", async () => {
   assert.ok(prevented, "browser save dialog suppressed");
   assert.equal(sent.length, 1, "save trigger's click binding fired");
 });
+
+test("data-echo mirrors field value into the overlay instantly", async () => {
+  const { installRouter } = await import("../src/router.ts");
+  (globalThis as any).window = { addEventListener: () => {} };
+  (globalThis as any).history = { pushState() {}, replaceState() {} };
+  installRouter();
+  const underlay = doc.createElement("div");
+  underlay.id = "fe-hl";
+  doc.body.appendChild(underlay);
+  const ta = doc.createElement("textarea") as any;
+  ta.setAttribute("data-echo", "fe-hl");
+  ta.value = "fn main() {}";
+  doc.body.appendChild(ta);
+  for (const fn of doc.listeners["input"] || []) fn({ target: ta });
+  assert.equal(underlay.textContent, "fn main() {}", "echoed before any round-trip");
+});
