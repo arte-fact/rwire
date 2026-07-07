@@ -9,8 +9,7 @@ use rwire::style::Style;
 use rwire::style_tokens::St;
 use rwire::{el, icons, At, Av, El, ElementBuilder, Ev, HandlerSpec};
 use rwire_components::{
-    Button, ButtonSize, Chip, CodeEditor, FsEntry, FsSnapshot, SplitPane, Switch, Tooltip,
-    TreeNode, TreeView,
+    Chip, CodeEditor, FsEntry, FsSnapshot, SplitPane, Switch, Tooltip, TreeNode, TreeView,
 };
 use rwire_markdown::{highlight_lines, Markdown};
 
@@ -127,7 +126,7 @@ impl<'a> FileEditor<'a> {
                 el(El::Span).st([St::TextMuted]).append([glyph]),
                 el(El::Span)
                     .st(if selected {
-                        [St::TextSm, St::TextHigh]
+                        [St::TextSm, St::FontMedium]
                     } else {
                         [St::TextSm, St::TextDefault]
                     })
@@ -380,16 +379,20 @@ impl<'a> FileEditor<'a> {
                 .attr("data-save-key", "1")
                 .on(Ev::Click, self.act(Action::Save, None))]);
         } else {
+            let tip = if self.state.dirty() {
+                "Save · ⌘S"
+            } else {
+                "Saved"
+            };
             bar = bar.append([el(El::Span)
                 .attr("data-save-key", "1")
-                .append([Button::primary(if self.state.dirty() {
-                    "Save ⌘S"
-                } else {
-                    "Saved"
-                })
-                .size(ButtonSize::Sm)
-                .disabled(!self.state.dirty())
-                .on_click(self.act(Action::Save, None))])]);
+                .append([self.icon_button(
+                    icons::Icon::Save,
+                    tip,
+                    Action::Save,
+                    None,
+                    self.state.dirty(),
+                )])]);
         }
         bar
     }

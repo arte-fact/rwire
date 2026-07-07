@@ -73,7 +73,7 @@ editBtn.fire("click", { target: editBtn });
 await sleep(600);
 const ta = find((n) => n.tagName === "TEXTAREA");
 if (!ta) fail("editor textarea missing");
-if (find((n) => n.tagName === "BUTTON" && n.textContent.includes("Save")))
+if (find((n) => (n.getAttribute?.("aria-label") || "").startsWith("Save") && clickable(n)))
   fail("no Save button expected while autosave is on");
 
 // 3. Type → autosave flushes to disk with zero clicks.
@@ -104,8 +104,8 @@ ta2.value = ta2.value ? ta2.value + stamp2 + "\n" : original + "\n" + stamp + "\
 ta2.fire("input", { target: ta2 });
 await sleep(900);
 if (disk().includes(stamp2)) fail("manual mode must not auto-persist");
-const saveBtn = find((n) => n.tagName === "BUTTON" && n.textContent.includes("Save ⌘S"));
-if (!saveBtn) fail("Save button missing in manual mode");
+const saveBtn = find((n) => n.getAttribute?.("aria-label") === "Save · ⌘S" && clickable(n));
+if (!saveBtn) fail("Save icon button missing in manual mode");
 saveBtn.fire("click", { target: saveBtn });
 await sleep(700);
 if (!disk().includes(stamp2)) fail("manual save did not reach the disk");
