@@ -76,9 +76,10 @@ if (!ta) fail("editor textarea missing");
 if (find((n) => (n.getAttribute?.("aria-label") || "").startsWith("Save") && clickable(n)))
   fail("no Save button expected while autosave is on");
 // Syntax overlay: colored underlay present; keystrokes echo instantly.
-const underlay = find((n) => n.id === "fe-field-hl");
+const underlay = find((n) => (n.id || "").endsWith("-hl"));
 if (!underlay) fail("syntax overlay underlay missing");
-if (ta.getAttribute("data-echo") !== "fe-field-hl") fail("textarea missing data-echo");
+if (ta.getAttribute("data-echo") !== underlay.id) fail("textarea missing data-echo");
+if (!ta.getAttribute("rows")) fail("rows fallback missing (field-sizing-less browsers)");
 ta.value = "echo-check";
 ta.fire("input", { target: ta });
 if (underlay.textContent !== "echo-check") fail("overlay echo not instant");
@@ -96,6 +97,20 @@ await sleep(1000); // 250ms client debounce + round-trip + server flush
 if (!disk().includes(stamp)) fail("autosave did not reach the disk");
 if (!document.body.textContent.includes("saved · auto"))
   fail("status bar missing 'saved · auto'");
+
+// 3b. Undo reverts the edit (and autosave flushes it); Redo restores.
+const undoBtn = find((n) => n.getAttribute?.("aria-label") === "Undo" && clickable(n));
+if (!undoBtn) fail("Undo button missing");
+undoBtn.fire("click", { target: undoBtn });
+await sleep(700);
+if (disk() !== original) fail("undo did not revert the disk");
+const redoBtn = find((n) => n.getAttribute?.("aria-label") === "Redo" && clickable(n));
+if (!redoBtn) fail("Redo button missing (or not enabled after undo)");
+redoBtn.fire("click", { target: redoBtn });
+await sleep(700);
+if (!disk().includes(stamp)) fail("redo did not restore the edit");
+// the textarea was re-keyed by undo/redo — re-find it for later steps
+if (!find((n) => n.tagName === "TEXTAREA")) fail("re-keyed textarea missing");
 
 // 4. Toggle autosave off → edits stay local until the Save button.
 const toggle = find((n) => n.textContent.includes("autosave") && clickable(n));

@@ -39,6 +39,8 @@ pub enum Action {
     DeleteConfirm = 15,
     CancelOp = 16,
     CreateDirStart = 17,
+    Undo = 18,
+    Redo = 19,
 }
 
 impl Action {
@@ -61,6 +63,8 @@ impl Action {
             15 => Self::DeleteConfirm,
             16 => Self::CancelOp,
             17 => Self::CreateDirStart,
+            18 => Self::Undo,
+            19 => Self::Redo,
             _ => return None,
         })
     }
@@ -143,6 +147,12 @@ pub struct FileEditorState {
     pub error: Option<String>,
     /// `HH:MM` of the last successful save (UTC), for the status bar.
     pub saved_at: Option<String>,
+    /// Bumped whenever the SERVER changes the working copy (open, undo, redo,
+    /// conflict reload) — keys the textarea so the morph replaces the node
+    /// and the browser adopts the new content instead of its stale value.
+    pub generation: u32,
+    undo: Vec<String>,
+    redo: Vec<String>,
     opened_mtime: Option<SystemTime>,
     scanned: bool,
 }
@@ -161,6 +171,9 @@ impl Default for FileEditorState {
             pending: Pending::None,
             error: None,
             saved_at: None,
+            generation: 0,
+            undo: Vec::new(),
+            redo: Vec::new(),
             opened_mtime: None,
             scanned: false,
         }
@@ -197,6 +210,14 @@ impl FileEditorState {
             autosave: false,
             ..Self::default()
         }
+    }
+
+    /// Whether an Undo / Redo step exists (for the toolbar affordances).
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
     }
 
     /// Unsaved lines vs the baseline (content diff, not keystrokes).
@@ -275,7 +296,14 @@ impl FileEditorState {
             }
             Action::Edit => {
                 if let Some(text) = ctx.text() {
-                    self.working = text.to_string();
+                    if text != self.working {
+                        if self.undo.len() >= 100 {
+                            self.undo.remove(0);
+                        }
+                        self.undo.push(std::mem::take(&mut self.working));
+                        self.redo.clear();
+                        self.working = text.to_string();
+                    }
                     if self.autosave && self.dirty() {
                         self.save(snap);
                     }
@@ -297,6 +325,24 @@ impl FileEditorState {
             Action::ConflictOverwrite => {
                 self.pending = Pending::None;
                 self.write_through(snap);
+            }
+            Action::Undo => {
+                if let Some(prev) = self.undo.pop() {
+                    self.redo.push(std::mem::replace(&mut self.working, prev));
+                    self.generation += 1;
+                    if self.autosave {
+                        self.save(snap);
+                    }
+                }
+            }
+            Action::Redo => {
+                if let Some(next) = self.redo.pop() {
+                    self.undo.push(std::mem::replace(&mut self.working, next));
+                    self.generation += 1;
+                    if self.autosave {
+                        self.save(snap);
+                    }
+                }
             }
             Action::CreateStart => self.pending = Pending::Create { dir: false },
             Action::CreateDirStart => self.pending = Pending::Create { dir: true },
@@ -333,6 +379,9 @@ impl FileEditorState {
         self.editing = false;
         self.preview_b64 = None;
         self.pending = Pending::None;
+        self.undo.clear();
+        self.redo.clear();
+        self.generation += 1;
         match fs::read(&path) {
             Ok(bytes) => match String::from_utf8(bytes.clone()) {
                 Ok(text) if size <= MAX_TEXT_BYTES => {
@@ -705,6 +754,28 @@ mod tests {
         ed.apply(&snap, &ctx(Action::ToggleAutosave, None));
         assert!(ed.autosave);
         assert!(!ed.dirty(), "turning autosave on flushes");
+    }
+
+    #[test]
+    fn undo_redo_roundtrip_with_autosave() {
+        let (_d, snap) = sandbox();
+        let mut ed = FileEditorState::default();
+        ed.apply(&snap, &ctx(Action::Select, Some(idx(&snap, "README.md"))));
+        let g0 = ed.generation;
+        ed.apply(&snap, &text_ctx(Action::Edit, "v1\n"));
+        ed.apply(&snap, &text_ctx(Action::Edit, "v1\nv2\n"));
+        assert!(ed.can_undo());
+        ed.apply(&snap, &ctx(Action::Undo, None));
+        assert_eq!(ed.working, "v1\n");
+        assert!(ed.generation > g0, "undo re-keys the textarea");
+        let disk = fs::read_to_string(snap.resolve("README.md").unwrap()).unwrap();
+        assert_eq!(disk, "v1\n", "autosave flushed the undo");
+        ed.apply(&snap, &ctx(Action::Redo, None));
+        assert_eq!(ed.working, "v1\nv2\n");
+        // a fresh edit clears the redo branch
+        ed.apply(&snap, &ctx(Action::Undo, None));
+        ed.apply(&snap, &text_ctx(Action::Edit, "v1\nv3\n"));
+        assert!(!ed.can_redo(), "new edit invalidates redo");
     }
 
     #[test]

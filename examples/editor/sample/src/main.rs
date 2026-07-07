@@ -4,3 +4,4 @@ fn main() {
         println!("{i}: {word}");
     }
 }
+1994

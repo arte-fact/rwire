@@ -97,6 +97,30 @@ impl<'a> FileEditor<'a> {
             .build()
     }
 
+    /// Undo/Redo affordance: interactive when a step exists, dimmed otherwise.
+    fn history_button(
+        &self,
+        icon: icons::Icon,
+        tip: &str,
+        action: Action,
+        enabled: bool,
+    ) -> ElementBuilder {
+        if enabled {
+            return self.icon_button(icon, tip, action, None, false);
+        }
+        el(El::Span)
+            .st([
+                St::DisplayFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::H1_25rem,
+                St::TextLow,
+                St::FlexShrink0,
+            ])
+            .style(Style::new().width("1.25rem").set("opacity", "0.4"))
+            .append([icons::icon_sized(icon, 12)])
+    }
+
     fn icon_button(
         &self,
         icon: icons::Icon,
@@ -375,6 +399,22 @@ impl<'a> FileEditor<'a> {
                 ))]);
         }
         bar = bar.append([el(El::Span).st([St::Flex1])]);
+        if entry.is_some() && self.state.kind == FileKind::Text && self.state.editing {
+            bar = bar.append([el(El::Span).st([St::DisplayFlex, St::GapXs]).append([
+                self.history_button(
+                    icons::Icon::RotateCcw,
+                    "Undo",
+                    Action::Undo,
+                    self.state.can_undo(),
+                ),
+                self.history_button(
+                    icons::Icon::RotateCw,
+                    "Redo",
+                    Action::Redo,
+                    self.state.can_redo(),
+                ),
+            ])]);
+        }
         if entry.is_some() && self.state.kind == FileKind::Text {
             bar = bar.append([el(El::Span).st([St::DisplayFlex, St::GapXs]).append([
                 self.icon_button(
@@ -470,7 +510,8 @@ impl<'a> FileEditor<'a> {
         match self.state.kind {
             FileKind::Text if self.state.editing => {
                 let flags = self.state.dirty_lines();
-                CodeEditor::new("fe-field", &self.state.working)
+                let field_id = format!("fe-field-{}", self.state.generation);
+                CodeEditor::new(&field_id, &self.state.working)
                     .dirty_lines(&flags)
                     .overlay(highlight_lines(&self.state.working, lang))
                     .on_edit(self.act(Action::Edit, None))

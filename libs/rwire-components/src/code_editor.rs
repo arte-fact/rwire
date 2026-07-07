@@ -95,6 +95,12 @@ impl<'a> CodeEditor<'a> {
             }));
 
         let overlay_id = format!("{}-hl", self.id);
+        // Explicit geometry so browsers without field-sizing:content behave
+        // identically: rows pins the height (+1 for the phantom line after a
+        // trailing newline), ch pins the width (exact in mono), and the CELL
+        // scrolls horizontally so textarea and underlay move together.
+        let max_cols = self.content.lines().map(str::len).max().unwrap_or(0);
+        let layer_w = format!("max(100%, {}ch)", max_cols + 2);
         let mut field = el(El::Textarea)
             .id(self.id)
             .at_str(At::Name, "content")
@@ -111,7 +117,14 @@ impl<'a> CodeEditor<'a> {
                 St::FieldSizingContent,
                 St::WhitespacePre,
             ])
-            .style(Style::new().set("line-height", "1.5").set("padding", "0"))
+            .at_str(At::Rows, &(lines + 1).to_string())
+            .style(
+                Style::new()
+                    .set("line-height", "1.5")
+                    .set("padding", "0")
+                    .set("overflow", "hidden")
+                    .set("width", &layer_w),
+            )
             .text(self.content);
         if let Some(handler) = self.on_edit {
             field = field.on(Ev::Input, handler);
@@ -143,9 +156,15 @@ impl<'a> CodeEditor<'a> {
                         St::PointerEventsNone,
                     ])
                     .style(Style::new().set("line-height", "1.5"))
+                    .style(Style::new().set("width", &layer_w))
                     .append(lines.into_iter().map(|l| l.style(row_metrics.clone())));
                 el(El::Div)
-                    .st([St::Flex1, St::MinW0, St::PositionRelative])
+                    .st([
+                        St::Flex1,
+                        St::MinW0,
+                        St::PositionRelative,
+                        St::OverflowXAuto,
+                    ])
                     .append([underlay, field])
             }
             None => field.st([St::Flex1, St::MinW0, St::TextDefault]),
