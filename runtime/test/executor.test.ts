@@ -584,3 +584,26 @@ test("BIND_RESIZE drags the previous sibling's width", () => {
   assert.equal(pane.style.width, "380px", "width follows the drag delta");
   assert.equal(pane.style.flex, "0 0 auto");
 });
+
+test("data-save-key: Cmd/Ctrl+S clicks the save trigger", async () => {
+  const { installRouter } = await import("../src/router.ts");
+  (globalThis as any).window = { addEventListener: () => {} };
+  (globalThis as any).history = { pushState() {}, replaceState() {} };
+  installRouter();
+  const btn = doc.createElement("button");
+  btn.setAttribute("data-save-key", "1");
+  doc.body.appendChild(btn);
+  run(syms("x"), [0x01, ...vint(0x80)]); // any batch; binding not needed
+  // bind a click on the trigger so the click round-trips
+  const b2 = doc.createElement("span");
+  b2.id = "sk";
+  run(syms("sk"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(3)]);
+  b2.setAttribute("data-save-key", "1");
+  doc.body.appendChild(b2);
+  btn.removeAttribute("data-save-key");
+  let prevented = false;
+  for (const fn of doc.listeners["keydown"] || [])
+    fn({ key: "s", ctrlKey: true, target: doc.body, preventDefault: () => (prevented = true) });
+  assert.ok(prevented, "browser save dialog suppressed");
+  assert.equal(sent.length, 1, "save trigger's click binding fired");
+});

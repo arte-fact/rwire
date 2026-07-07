@@ -39,6 +39,15 @@ export function installRouter(): void {
       const f = (e.target as Element).closest("form");
       if (f) f.requestSubmit();
     }
+    // Cmd/Ctrl+S clicks the page's [data-save-key] element (if any) instead
+    // of opening the browser save dialog — the save-shortcut hook.
+    if (e.key === "s" && ((e as KeyboardEvent).metaKey || (e as KeyboardEvent).ctrlKey)) {
+      const t = document.querySelector("[data-save-key]") as HTMLElement | null;
+      if (t) {
+        e.preventDefault();
+        t.click();
+      }
+    }
   });
   window.addEventListener("popstate", () => {
     st.w!.send("R" + bx(location.pathname));

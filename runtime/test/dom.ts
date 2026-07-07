@@ -48,6 +48,7 @@ export interface MockEl {
   focus(): void;
   setSelectionRange(a: number, b: number): void;
   closest(sel: string): MockEl | null;
+  click(): void;
   querySelector(sel: string): MockEl | null;
   querySelectorAll(sel: string): MockEl[];
   scrollIntoView(opts?: unknown): void;
@@ -62,6 +63,7 @@ export interface MockDoc {
   createElementNS(ns: string, t: string): MockEl;
   createTextNode(v: string): MockText;
   getElementById(id: string): MockEl | null;
+  querySelector(sel: string): MockEl | null;
   addEventListener(t: string, fn: (e: unknown) => void, capture?: boolean): void;
   listeners: Record<string, ((e: unknown) => void)[]>;
   _byId: Map<string, MockEl>;
@@ -208,12 +210,17 @@ export function makeDom(): { document: MockDoc } {
       },
       setSelectionRange() {},
       closest: () => null,
-      // #id selectors only — enough for the runtime's overlay lookups.
+      click() {
+        node.fire("click", { target: node });
+      },
+      // #id and [attr] selectors — enough for the runtime's lookups.
       querySelector(sel) {
-        if (!sel.startsWith("#")) return null;
-        const id = sel.slice(1);
+        const byIdSel = sel.startsWith("#") ? sel.slice(1) : null;
+        const attrSel = sel.startsWith("[") ? sel.slice(1, -1) : null;
+        if (byIdSel === null && attrSel === null) return null;
         const walk = (e: MockEl): MockEl | null => {
-          if (e.id === id) return e;
+          if (byIdSel !== null && e.id === byIdSel) return e;
+          if (attrSel !== null && e.hasAttribute(attrSel)) return e;
           for (const c of e.children) {
             const hit = walk(c);
             if (hit) return hit;
@@ -247,6 +254,7 @@ export function makeDom(): { document: MockDoc } {
     },
     createTextNode: (v) => txt(v),
     getElementById: (id) => byId.get(id) || null,
+    querySelector: (sel: string) => doc.body.querySelector(sel),
     listeners: {},
     addEventListener(t, fn) {
       (doc.listeners[t] || (doc.listeners[t] = [])).push(fn);
