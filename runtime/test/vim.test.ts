@@ -291,3 +291,163 @@ test("s substitutes: normal-mode chars, visual selection", () => {
   assert.equal(ta.value, " bar", "selection substituted");
   assert.equal(ta.getAttribute("data-vim"), "insert");
 });
+
+// ------------------------------------------------------------- S1 objects
+test("text objects: diw daw ciw viw", () => {
+  setup("foo bar baz", 5);
+  press("d", "i", "w");
+  assert.equal(ta.value, "foo  baz", "diw removes the word only");
+  setup("foo bar baz", 5);
+  press("d", "a", "w");
+  assert.equal(ta.value, "foo baz", "daw takes trailing space");
+  setup("foo bar baz", 5);
+  press("c", "i", "w");
+  assert.equal(ta.value, "foo  baz");
+  assert.equal(ta.getAttribute("data-vim"), "insert", "ciw enters insert");
+  press("Escape");
+  setup("foo bar baz", 5);
+  press("v", "i", "w");
+  assert.equal(ta.selectionStart, 4);
+  assert.equal(ta.selectionEnd, 7, "viw selects the word");
+});
+
+test("text objects: quotes and brackets", () => {
+  setup('say "hello there" end', 8);
+  press("c", "i", '"');
+  assert.equal(ta.value, 'say "" end', 'ci" empties the quotes');
+  press("Escape");
+  setup('say "hello there" end', 8);
+  press("d", "a", '"');
+  assert.equal(ta.value, "say  end", 'da" takes the quotes');
+  setup("f(a, g(b)) tail", 5);
+  press("d", "i", "(");
+  assert.equal(ta.value, "f() tail", "di( from inside nested");
+  setup("x = {a: 1} y", 6);
+  press("c", "a", "{");
+  assert.equal(ta.value, "x =  y", "ca{ takes the braces");
+  press("Escape");
+  setup("arr[idx] z", 5);
+  press("d", "i", "[");
+  assert.equal(ta.value, "arr[] z");
+});
+
+// ---------------------------------------------------------------- S2 seek
+test("f t F T land the caret; ; and , repeat", () => {
+  setup("abc.def.ghi", 0);
+  press("f", ".");
+  assert.equal(ta.selectionStart, 3);
+  press(";");
+  assert.equal(ta.selectionStart, 7, "; repeats forward");
+  press(",");
+  assert.equal(ta.selectionStart, 3, ", reverses");
+  setup("abc.def", 0);
+  press("t", ".");
+  assert.equal(ta.selectionStart, 2, "t stops before");
+  setup("abc.def", 6);
+  press("F", ".");
+  assert.equal(ta.selectionStart, 3);
+  setup("abc.def", 6);
+  press("T", ".");
+  assert.equal(ta.selectionStart, 4);
+});
+
+test("df and dt compose; 2fx counts", () => {
+  setup("one.two.three", 0);
+  press("d", "f", ".");
+  assert.equal(ta.value, "two.three", "df. inclusive");
+  setup("one.two.three", 0);
+  press("d", "t", ".");
+  assert.equal(ta.value, ".two.three", "dt. exclusive of target");
+  setup("a.b.c.d", 0);
+  press("2", "f", ".");
+  assert.equal(ta.selectionStart, 3, "2f. second occurrence");
+});
+
+test("W B E treat punctuation runs as one WORD", () => {
+  setup("foo.bar() baz-qux end", 0);
+  press("W");
+  assert.equal(ta.selectionStart, 10, "W jumps the whole blob");
+  press("W");
+  assert.equal(ta.selectionStart, 18);
+  press("B");
+  assert.equal(ta.selectionStart, 10);
+  setup("foo.bar baz", 0);
+  press("E");
+  assert.equal(ta.selectionStart, 6, "E end of WORD");
+});
+
+// ------------------------------------------------------------ S3 small ops
+test("r replaces chars in place; 3rx repeats the char", () => {
+  setup("hello", 0);
+  press("r", "H");
+  assert.equal(ta.value, "Hello");
+  assert.equal(ta.getAttribute("data-vim"), "normal", "r stays normal");
+  setup("hello", 0);
+  press("3", "r", "x");
+  assert.equal(ta.value, "xxxlo");
+});
+
+test("J joins lines with a single space, eating next indent", () => {
+  setup("foo\n   bar\nbaz", 1);
+  press("J");
+  assert.equal(ta.value, "foo bar\nbaz");
+  assert.equal(ta.selectionStart, 3, "caret at the join");
+  setup("a\nb\nc\nd", 0);
+  press("3", "J");
+  assert.equal(ta.value, "a b c\nd", "3J joins three lines");
+});
+
+test("~ toggles case and advances", () => {
+  setup("aBc", 0);
+  press("~", "~", "~");
+  assert.equal(ta.value, "AbC");
+});
+
+test(">> and << shift lines; visual > shifts the selection", () => {
+  setup("one\ntwo", 0);
+  press(">", ">");
+  assert.equal(ta.value, "\tone\ntwo");
+  press("<", "<");
+  assert.equal(ta.value, "one\ntwo");
+  setup("a\nb\nc", 0);
+  press("2", ">", ">");
+  assert.equal(ta.value, "\ta\n\tb\nc", "2>> shifts two lines");
+  setup("a\nb\nc", 0);
+  press("V", "j", ">");
+  assert.equal(ta.value, "\ta\n\tb\nc", "visual > shifts selected lines once");
+  assert.equal(ta.getAttribute("data-vim"), "normal", "exits visual");
+});
+
+test("% jumps between matching brackets and composes with d", () => {
+  setup("f(a, (b))x", 1);
+  press("%");
+  assert.equal(ta.selectionStart, 8, "outer close");
+  press("%");
+  assert.equal(ta.selectionStart, 1, "back to open");
+  setup("f(a, b) tail", 1);
+  press("d", "%");
+  assert.equal(ta.value, "f tail", "d% inclusive of both brackets");
+});
+
+test("{ and } move by paragraph and compose", () => {
+  setup("a\nb\n\nc\nd\n\ne", 0);
+  press("}");
+  assert.equal(ta.selectionStart, 4, "next blank line");
+  press("}");
+  assert.equal(ta.selectionStart, 9);
+  press("{");
+  assert.equal(ta.selectionStart, 4);
+  setup("a\nb\n\nc", 0);
+  press("d", "}");
+  assert.equal(ta.value, "\nc", "d} to the blank line");
+});
+
+test("Escape cancels pending operator/object/seek cleanly", () => {
+  setup("hello world", 0);
+  press("d", "Escape", "w");
+  assert.equal(ta.value, "hello world", "canceled d does not fire on w");
+  assert.equal(ta.selectionStart, 6, "w moved the caret normally");
+  press("d", "i", "Escape");
+  press("w");
+  assert.equal(ta.value, "hello world", "canceled object too");
+});
