@@ -192,7 +192,7 @@ impl<'a> FileEditor<'a> {
         }
         column.push(TreeView::new().roots(roots).build());
         el(El::Div)
-            .st([St::DisplayFlex, St::FlexCol, St::MinW0, St::PrSm])
+            .st([St::DisplayFlex, St::FlexCol, St::MinW0, St::PrSm, St::Flex1])
             .append(column)
     }
 

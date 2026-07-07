@@ -34,8 +34,16 @@ impl SplitPane {
         el(El::Div)
             .st([St::DisplayFlex, St::Flex1, St::MinH0, St::MinW0])
             .append([
+                // Panes are flex columns so their content can Flex1 to full
+                // height (a block pane would collapse to content height).
                 el(El::Div)
-                    .st([St::MinW0, St::OverflowAuto, St::FlexShrink0])
+                    .st([
+                        St::MinW0,
+                        St::OverflowAuto,
+                        St::FlexShrink0,
+                        St::DisplayFlex,
+                        St::FlexCol,
+                    ])
                     // initial width is caller data; the drag overwrites it in px
                     .style(Style::new().width(self.initial.as_ref()))
                     .append([self.left]),
@@ -51,7 +59,14 @@ impl SplitPane {
                     .style(Style::new().width("3px"))
                     .hover([St::BgAccent]),
                 el(El::Div)
-                    .st([St::Flex1, St::MinW0, St::MinH0, St::OverflowAuto])
+                    .st([
+                        St::Flex1,
+                        St::MinW0,
+                        St::MinH0,
+                        St::OverflowAuto,
+                        St::DisplayFlex,
+                        St::FlexCol,
+                    ])
                     .append([self.right]),
             ])
     }
