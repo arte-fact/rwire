@@ -64,8 +64,24 @@ wrap=off ⇒ logical lines == visual lines). Operators: `d c y` + motion,
 `x dd yy cc D C p P o O a A i I`, `u`/`Ctrl-R` via server history (clicking
 the data-kbd elements). Unnamed register (module-local). Saving stays
 ⌘S / autosave — no `:w`.
-**v1.5:** `f/t/F/T`, dot-repeat, block cursor (overlay char-cell tint).
-**Out permanently:** ex commands, macros, marks, `:%s`.
+**Out permanently:** ex commands, macros, `:%s`, plugins.
+
+## v1.5 backlog — prioritized (next session)
+
+Ranked by muscle-memory value per effort, from field use of v4:
+
+| Prio | Feature | Why / effort |
+|---|---|---|
+| **S1** | **Text objects** `iw aw` + quote pairs `i" a'` + bracket pairs `i( a( i{ i[` — for `d c y v` | The most-used vim idioms after motions (`ciw`, `vi(`); their absence reads as "vim broken". Medium: one object resolver + operator/visual integration. |
+| **S2** | `f F t T` + `;` `,` and `W B E ge` | Completes line/word navigation; composes with operators (`dt)`, `cf.`). Small-medium: a pending-char state like the `g` prefix. |
+| **S3** | Small-ops batch: `r`, `J`, `~`, `>>` `<<` (+ visual `>` `<`), `%`, `{ }` | Each trivial-to-small; indent reuses the data-tab-insert logic; `%` bracket matcher shared with S1 pairs. |
+| **S4** | System clipboard register `"+y` `"+p` (navigator.clipboard) | Bridges OS copy-paste flows (already a field pain point). Small-medium; async paste needs a then-insert. |
+| **S5** | Dot-repeat `.` | Big payoff, needs last-change recording incl. insert-session capture (input diffing between `i…Esc`). Medium-high; design sketch first. |
+| **S6** | In-file search `/ n N *` | Needs a prompt affordance WITHOUT an ex line (inline chip-row input?) — design decision before code. |
+| defer | Named registers, marks, `gv`, visual `o`, `R`, viewport motions (`zz Ctrl-D…` — page scrolls, textarea doesn't) | Real but rarer; viewport motions may stay out (no internal scroll by design). |
+
+S1+S2+S3 ≈ one focused session; S4 rides along. S5/S6 want their sketch
+reviewed before implementation.
 
 ## Decisions (locked 2026-07-07)
 
