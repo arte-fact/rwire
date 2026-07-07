@@ -451,3 +451,47 @@ test("Escape cancels pending operator/object/seek cleanly", () => {
   press("w");
   assert.equal(ta.value, "hello world", "canceled object too");
 });
+
+// ---------------------------------------------------------- S4 clipboard
+test('"+yy mirrors the yank to the system clipboard', () => {
+  let written = "";
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+    clipboard: { writeText: (s: string) => ((written = s), Promise.resolve()) },
+  } });
+  setup("copy me\nrest", 0);
+  press('"', "+", "y", "y");
+  assert.equal(written, "copy me\n", "clipboard got the line");
+  press("p");
+  assert.equal(ta.value, "copy me\ncopy me\nrest", "unnamed register still set");
+});
+
+test('"+p inserts the clipboard text asynchronously', async () => {
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+    clipboard: { readText: () => Promise.resolve("FROM-OS") },
+  } });
+  setup("ab", 0);
+  press('"', "+", "p");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(ta.value, "aFROM-OSb", "pasted after the caret char");
+});
+
+test('"+p falls back to the unnamed register when the read is blocked', async () => {
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+    clipboard: { readText: () => Promise.reject(new Error("blocked")) },
+  } });
+  setup("word x", 0);
+  press("y", "w"); // unnamed = "word "
+  press('"', "+", "p");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(ta.value, "wword ord x", "fallback pasted the unnamed register");
+});
+
+test("plain y/p never touch the clipboard", () => {
+  let touched = false;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+    clipboard: { writeText: () => ((touched = true), Promise.resolve()) },
+  } });
+  setup("abc", 0);
+  press("y", "w", "p");
+  assert.equal(touched, false);
+});

@@ -75,7 +75,7 @@ Ranked by muscle-memory value per effort, from field use of v4:
 | ~~S1~~ | **DONE 2026-07-07 (v5)** — text objects `iw aw iW aW`, quotes `i"/a" i'/a' i\`/a\``, bracket pairs `i(/a( i{/a{ i[/a[ i</a< b B` for `d c y` and visual | 22 new engine paths, object resolver shared with `%` |
 | ~~S2~~ | **DONE 2026-07-07 (v5)** — `f F t T` + `;` `,` (with counts, operator-composing: `df.` `dt.`), `W B E` | pending-char state; `ge` deferred (rarely missed) |
 | ~~S3~~ | **DONE 2026-07-07 (v5)** — `r` (+count), `J` (+count), `~`, `>>` `<<` (+counts), visual `>` `<`, `%` (motion + `d%`), `{ }` (motion + composing), Escape cancels any pending | indent shares the Tab dedent rules |
-| **S4** | System clipboard register `"+y` `"+p` (navigator.clipboard) | Bridges OS copy-paste flows (already a field pain point). Small-medium; async paste needs a then-insert. |
+| ~~S4~~ | **DONE 2026-07-07 (v6)** — `"+` register for `y`(+objects/motions/doubled/visual) and `p P` | async paste with unnamed-register fallback where readText is blocked (Firefox); plain y/p never touch the clipboard |
 | **S5** | Dot-repeat `.` | Big payoff, needs last-change recording incl. insert-session capture (input diffing between `i…Esc`). Medium-high; design sketch first. |
 | **S6** | In-file search `/ n N *` | Needs a prompt affordance WITHOUT an ex line (inline chip-row input?) — design decision before code. |
 | defer | Named registers, marks, `gv`, visual `o`, `R`, viewport motions (`zz Ctrl-D…` — page scrolls, textarea doesn't) | Real but rarer; viewport motions may stay out (no internal scroll by design). |

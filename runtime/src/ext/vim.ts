@@ -14,11 +14,12 @@
 // v5 scope: normal/insert/v/V · h j k l 0 ^ $ w b e W B E gg G { } % ·
 // f F t T ; , · counts · d c y (+motions/objects/doubling) · text objects
 // iw aw iW aW i"/a" i'/a' i`/a` and bracket pairs · x s D C p P o O a A I ·
-// r J ~ · >> << and visual > < · u/Ctrl-R via server history.
+// r J ~ · >> << and visual > < · u/Ctrl-R via server history ·
+// "+ system clipboard register for y d p P (async paste, graceful fallback).
 
 /** Version stamp logged by the loader — bump with every engine change so a
  * stale cached/embedded module is instantly visible in the console. */
-export const v = 5;
+export const v = 6;
 
 type Mode = "normal" | "insert" | "v" | "V";
 interface Pend {
@@ -26,8 +27,8 @@ interface Pend {
   op: "" | "d" | "c" | "y" | "g" | ">" | "<";
   /** Object prefix awaited after an operator or in visual: "i" | "a". */
   obj: "" | "i" | "a";
-  /** Two-key pending: f F t T (seek) or r (replace). */
-  seek: "" | "f" | "F" | "t" | "T" | "r";
+  /** Two-key pending: f F t T (seek), r (replace), or " (register). */
+  seek: "" | "f" | "F" | "t" | "T" | "r" | '"';
   anchor: number; // visual-mode anchor
   head: number; // visual-mode cursor (selection ends can't encode it in V)
 }
@@ -36,6 +37,8 @@ const P = new WeakMap<Element, Pend>();
 let reg = "";
 let regLine = false;
 let lastSeek: { k: string; ch: string } | null = null;
+/** Selected register for the NEXT op: "" = unnamed, "+" = system clipboard. */
+let pendingReg = "";
 
 const pend = (el: Element): Pend => {
   let p = P.get(el);
@@ -332,6 +335,12 @@ function lineSpan(t: string, a: number, b: number): [number, number] {
 function yank(text: string, linewise: boolean): void {
   reg = text;
   regLine = linewise;
+  if (pendingReg === "+") {
+    pendingReg = "";
+    try {
+      (navigator as any).clipboard && navigator.clipboard.writeText(text);
+    } catch (_) {}
+  }
 }
 
 /** Indent/dedent whole lines covering [a,b]; returns the new text. */
@@ -362,6 +371,28 @@ function opRange(doc: Document, el: TA, op: string, s: number, e: number): void 
   }
   put(el, t.slice(0, s) + t.slice(e), s);
   if (op === "c") setMode(doc, el, "insert");
+}
+
+/** Unnamed-register paste (p after / P before), char- and line-wise. */
+function pasteUnnamed(el: TA, t: string, p: number, before: boolean): void {
+  if (regLine) {
+    if (before) {
+      const s = lineStart(t, p);
+      put(el, t.slice(0, s) + reg + t.slice(s), s);
+    } else {
+      const e = lineEnd(t, p);
+      const at = e === t.length ? e : e + 1;
+      const ins = e === t.length ? "\n" + reg.replace(/\n$/, "") : reg;
+      put(el, t.slice(0, at) + ins + t.slice(at), at + (e === t.length ? 1 : 0));
+    }
+    return;
+  }
+  if (before) {
+    put(el, t.slice(0, p) + reg + t.slice(p), p + Math.max(0, reg.length - 1));
+    return;
+  }
+  const at = p + (t.length ? 1 : 0);
+  put(el, t.slice(0, at) + reg + t.slice(at), p + reg.length);
 }
 
 const reverseSeek = (k: string): string =>
@@ -402,6 +433,11 @@ function normalKey(doc: Document, el: TA, k: string): void {
     if (kind === "r") {
       const e = Math.min(lineEnd(t, p), p + n);
       if (e > p) put(el, t.slice(0, p) + k.repeat(e - p) + t.slice(e), Math.max(p, e - 1));
+      return;
+    }
+    if (kind === '"') {
+      // register select: only the system clipboard register is supported
+      pendingReg = k === "+" ? "+" : "";
       return;
     }
     lastSeek = { k: kind, ch: k };
@@ -592,6 +628,9 @@ function normalKey(doc: Document, el: TA, k: string): void {
     case "r":
       st.seek = "r";
       return; // keep the count for r
+    case '"':
+      st.seek = '"';
+      return;
     case "~": {
       const e = Math.min(lineEnd(t, p), p + n);
       if (e > p) {
@@ -656,29 +695,34 @@ function normalKey(doc: Document, el: TA, k: string): void {
       if (q !== -1) el.setSelectionRange(q, q);
       break;
     }
-    case "p": {
-      if (regLine) {
-        const e = lineEnd(t, p);
-        const at = e === t.length ? e : e + 1;
-        const ins = e === t.length ? "\n" + reg.replace(/\n$/, "") : reg;
-        put(el, t.slice(0, at) + ins + t.slice(at), at + (e === t.length ? 1 : 0));
-      } else
-        put(
-          el,
-          t.slice(0, p + (t.length ? 1 : 0)) + reg + t.slice(p + (t.length ? 1 : 0)),
-          p + reg.length,
-        );
-      break;
-    }
+    case "p":
     case "P": {
-      if (regLine) {
-        const s = lineStart(t, p);
-        put(el, t.slice(0, s) + reg + t.slice(s), s);
-      } else {
-        put(el, t.slice(0, p) + reg + t.slice(p), p + Math.max(0, reg.length - 1));
+      if (pendingReg === "+") {
+        pendingReg = "";
+        const before = k === "P";
+        try {
+          navigator.clipboard.readText().then(
+            (clip) => {
+              if (!clip) return;
+              const t2 = el.value;
+              const p2 = el.selectionStart;
+              const at = before ? p2 : Math.min(t2.length, p2 + (t2.length ? 1 : 0));
+              put(el, t2.slice(0, at) + clip + t2.slice(at), at + clip.length);
+            },
+            () => {
+              // clipboard read blocked (e.g. Firefox): fall back to unnamed
+              pasteUnnamed(el, el.value, el.selectionStart, before);
+            },
+          );
+        } catch (_) {
+          pasteUnnamed(el, el.value, el.selectionStart, before);
+        }
+        break;
       }
+      pasteUnnamed(el, t, p, k === "P");
       break;
     }
+
     case "u":
       clickKbd(doc, "mod+z");
       break;
@@ -701,6 +745,10 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
     st.seek = "";
     st.count = "";
     if (k === "Escape" || kind === "r") return;
+    if (kind === '"') {
+      pendingReg = k === "+" ? "+" : "";
+      return;
+    }
     lastSeek = { k: kind, ch: k };
     const q = seekPos(t, st.head, kind, k, n);
     if (q !== -1) extendTo(el, t, st, q, line);
@@ -726,6 +774,10 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
   }
   if (!line && (k === "i" || k === "a")) {
     st.obj = k;
+    return;
+  }
+  if (k === '"') {
+    st.seek = '"';
     return;
   }
 
