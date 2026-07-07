@@ -4,7 +4,8 @@
 //! resizable split, view markdown rendered and code highlighted, edit with
 //! line numbers and dirty marks, autosave (toggleable in the status bar,
 //! Cmd/Ctrl+S saves immediately), managed create/rename/delete, guarded
-//! conflicts. Edits write into the sample tree — `git diff` shows what you
+//! conflicts, and vim-mode editing (status-bar toggle; the interpreter
+//! lazy-loads as a runtime extension on first use). Edits write into the sample tree — `git diff` shows what you
 //! did; `git checkout` undoes it.
 //!
 //! The whole integration is this file: embed `FileEditorState`, render

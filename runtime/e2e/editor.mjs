@@ -34,7 +34,8 @@ factory(
   { protocol: "http:", host: "127.0.0.1:9008", pathname: "/", hash: "" },
   { onLine: true, clipboard: { writeText: noop } },
   WebSocket, MO, IO, console,
-  setTimeout, clearTimeout, noop, {}, "",
+  setTimeout, clearTimeout, noop,
+  { __rwImport: () => import(new URL("../dist/ext/vim.min.js", import.meta.url)) }, "",
   () => Promise.reject(new Error("no")),
 );
 
@@ -115,13 +116,14 @@ if (!find((n) => n.tagName === "TEXTAREA")) fail("re-keyed textarea missing");
 // 4. Toggle autosave off → edits stay local until the Save button.
 const toggle = find((n) => n.textContent.includes("autosave") && clickable(n));
 if (!toggle) fail("autosave toggle missing");
-const checkboxOn = find((n) => n.tagName === "INPUT" && n.getAttribute("type") === "checkbox");
+const checkboxOn = walk(toggle).find((n) => n.tagName === "INPUT" && n.getAttribute("type") === "checkbox");
 if (!checkboxOn || checkboxOn.getAttribute("checked") === null)
   fail("switch should render checked while autosave is on");
 checkboxOn.checked = true; // as the browser would after native rendering
 toggle.fire("click", { target: toggle });
 await sleep(600);
-const checkboxOff = find((n) => n.tagName === "INPUT" && n.getAttribute("type") === "checkbox");
+const toggle2 = find((n) => n.textContent.includes("autosave") && clickable(n));
+const checkboxOff = walk(toggle2).find((n) => n.tagName === "INPUT" && n.getAttribute("type") === "checkbox");
 if (!checkboxOff) fail("switch disappeared after toggle");
 if (checkboxOff.getAttribute("checked") !== null || checkboxOff.checked === true)
   fail("switch did not visually flip off (attr/property stale)");
@@ -139,6 +141,41 @@ for (const fn of document.listeners["keydown"] || [])
   fn({ key: "s", ctrlKey: true, target: ta2, preventDefault: () => {} });
 await sleep(700);
 if (!disk().includes(stamp2)) fail("Ctrl+S save did not reach the disk");
+
+// 4c. Vim mode: toggle on → lazy module loads → dd deletes a line through
+// the whole stack (module → synthetic input → Edit → autosave → disk) → u
+// delegates to the server undo.
+const autosaveToggle = find((n) => n.textContent.includes("autosave") && clickable(n));
+autosaveToggle.fire("click", { target: autosaveToggle }); // back on for vim writes
+await sleep(500);
+const vimToggle = find((n) => n.textContent === "vim" && (n.parentNode?.__b?.click || n.__b?.click));
+const vimClickable = walk(document.body).find(
+  (n) => clickable(n) && (n.textContent || "").startsWith("vim"),
+);
+if (!vimClickable) fail("vim toggle missing");
+vimClickable.fire("click", { target: vimClickable });
+await sleep(800); // round trip + module import
+const vta = find((n) => n.tagName === "TEXTAREA");
+if (!vta) fail("textarea missing after vim toggle");
+if (vta.getAttribute("data-vim") !== "normal") fail("data-vim entry mode missing");
+if (!find((n) => n.getAttribute?.("data-vim-chip"))) fail("vim mode chip missing");
+const before = disk();
+const press = (key, o = {}) => {
+  for (const fn of document.listeners["keydown"] || [])
+    fn({ key, target: vta, preventDefault: () => {}, ...o });
+};
+vta.setSelectionRange(0, 0);
+press("d"); press("d");
+await sleep(900);
+if (disk() === before) fail("vim dd did not reach the disk");
+if (disk().split("\n").length >= before.split("\n").length)
+  fail("vim dd did not remove a line");
+press("u");
+await sleep(900);
+if (disk() !== before) fail("vim u did not delegate to server undo");
+// leave vim + restore autosave state for the next steps
+vimClickable.fire("click", { target: vimClickable });
+await sleep(500);
 
 // 5. Code view: gutter-aligned colored lines (not the md code block).
 const rsRow = find((n) => n.id === "tn-src/main.rs");

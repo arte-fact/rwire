@@ -234,3 +234,26 @@ test("me syncs the checked property for checkbox inputs", () => {
   assert.equal(live.getAttribute("checked"), null, "attribute synced");
   assert.equal(live.checked, false, "property synced too");
 });
+
+test("me leaves client-owned vim state alone", () => {
+  const live = doc.createElement("textarea");
+  live.setAttribute("data-vim", "insert"); // user is typing
+  const shadow = doc.createElement("textarea");
+  shadow.setAttribute("data-vim", "normal"); // server's entry mode
+  me(live, shadow);
+  assert.equal(live.getAttribute("data-vim"), "insert", "mode not clobbered");
+  const fresh = doc.createElement("textarea"); // no data-vim yet
+  me(fresh, shadow);
+  assert.equal(fresh.getAttribute("data-vim"), "normal", "entry mode applies once");
+});
+
+test("me leaves the vim chip's text to the extension", () => {
+  const live = doc.createElement("span");
+  live.setAttribute("data-vim-chip", "1");
+  live.appendChild(doc.createTextNode("INSERT"));
+  const shadow = doc.createElement("span");
+  shadow.setAttribute("data-vim-chip", "1");
+  shadow.appendChild(doc.createTextNode("NORMAL"));
+  me(live, shadow);
+  assert.equal(live.textContent, "INSERT", "chip text client-owned");
+});

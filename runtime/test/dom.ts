@@ -208,7 +208,10 @@ export function makeDom(): { document: MockDoc } {
       focus() {
         doc.activeElement = node;
       },
-      setSelectionRange() {},
+      setSelectionRange(a: number, b: number) {
+        (node as any).selectionStart = a;
+        (node as any).selectionEnd = b;
+      },
       closest: () => null,
       click() {
         node.fire("click", { target: node });

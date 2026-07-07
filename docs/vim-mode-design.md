@@ -91,16 +91,18 @@ the data-kbd elements). Unnamed register (module-local). Saving stays
   harnesses; `data-kbd` yields to `[data-vim]` outside insert. M1 skeleton of
   the vim module ships mode plumbing (normal/insert/v/V transitions + chip).
   69 runtime tests + 2 Rust tests cover the loader, dedup, scoping, format.
-- [ ] **M2 — vim module** (1.25d): `ext/vim.ts` modal engine — normal/insert/
-  v/V, motions `h j k l 0 $ ^ w b e gg G` + counts, operators
-  `d c y x dd yy cc D C p P o O a A i I`, unnamed register, synthetic-input
-  dispatch, chip updates, `u`/`Ctrl-R` via data-kbd clicks.
-  *Accept:* ~45 node:test cases green (motions, operators on both visual
-  modes, counts, register round-trip, mode transitions); module size budget.
-- [ ] **M3 — kit integration** (0.5d): `FileEditorState.vim_enabled` +
-  status-bar toggle (off default), `.vim(bool)` builder default, `data-vim`
-  + `[data-vim-chip]` rendering, insert-mode passthrough.
-  *Accept:* toggle round-trips like autosave's; kit tests.
+- [x] **M2 — vim module** (done 2026-07-07): full engine as scoped —
+  5,630B/2,006gz (budget 9K/3.5K). 22 table-driven tests (motions incl.
+  punctuation word classes and counted G, operators incl. the cw≈ce quirk
+  and EOF linewise-delete newline semantics, both visual modes with an
+  explicitly tracked head — selection ends can't encode the cursor in V —
+  register round-trips, undo delegation, chip).
+- [x] **M3 — kit integration** (done 2026-07-07): `FileEditorState.vim`
+  (off default) + `Action::ToggleVim` + status-bar switch beside autosave's;
+  `CodeEditor::vim(bool)` renders the `data-vim="normal"` entry mode;
+  `.ext("vim")` hint rides the same batch. Two MORPH rules make the contract
+  hold: a present `data-vim` is never overwritten (re-renders can't yank the
+  user out of insert) and `[data-vim-chip]` children are extension-owned.
 - [ ] **M4 — proof** (0.5d): examples/editor toggle, live E2E (`dw` reaches
   disk via autosave, `i…Esc` mode cycle, `Vd` line delete, `u` reverts),
   docs-site section.

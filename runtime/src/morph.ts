@@ -21,6 +21,10 @@ export function me(a: Node, b: Node): void {
   const ba = be.attributes;
   for (let k = 0; k < ba.length; k++) {
     const n = ba[k].name;
+    // data-vim is input-method state owned by the vim extension: the server
+    // renders the entry mode once; re-renders must not yank the user out of
+    // insert/visual.
+    if (n === "data-vim" && ae.hasAttribute(n)) continue;
     if (ae.getAttribute(n) !== ba[k].value) ae.setAttribute(n, ba[k].value);
   }
   const aa = ae.attributes;
@@ -38,6 +42,9 @@ export function me(a: Node, b: Node): void {
     if (t === "checkbox" || t === "radio")
       (ae as any).checked = be.hasAttribute("checked");
   }
+  // The vim mode chip's text is written by the extension; the server only
+  // places the element.
+  if (ae.hasAttribute("data-vim-chip")) return;
   // Nested region: its own update owns it (guard non-string id so the morph
   // never throws and freezes the stream).
   if (typeof ae.id === "string" && ae.id.indexOf("__synced_") === 0) return;

@@ -41,6 +41,7 @@ pub enum Action {
     CreateDirStart = 17,
     Undo = 18,
     Redo = 19,
+    ToggleVim = 20,
 }
 
 impl Action {
@@ -65,6 +66,7 @@ impl Action {
             17 => Self::CreateDirStart,
             18 => Self::Undo,
             19 => Self::Redo,
+            20 => Self::ToggleVim,
             _ => return None,
         })
     }
@@ -138,6 +140,9 @@ pub struct FileEditorState {
     pub selected: Option<usize>,
     pub editing: bool,
     pub autosave: bool,
+    /// Vim-mode editing (the lazy `vim` runtime extension). Per-session
+    /// preference; off by default.
+    pub vim: bool,
     pub kind: FileKind,
     pub baseline: String,
     pub working: String,
@@ -164,6 +169,7 @@ impl Default for FileEditorState {
             selected: None,
             editing: false,
             autosave: true,
+            vim: false,
             kind: FileKind::Text,
             baseline: String::new(),
             working: String::new(),
@@ -310,6 +316,7 @@ impl FileEditorState {
                 }
             }
             Action::Save => self.save(snap),
+            Action::ToggleVim => self.vim = !self.vim,
             Action::ToggleAutosave => {
                 self.autosave = !self.autosave;
                 if self.autosave && self.dirty() {
@@ -776,6 +783,17 @@ mod tests {
         ed.apply(&snap, &ctx(Action::Undo, None));
         ed.apply(&snap, &text_ctx(Action::Edit, "v1\nv3\n"));
         assert!(!ed.can_redo(), "new edit invalidates redo");
+    }
+
+    #[test]
+    fn vim_toggle_is_a_session_preference() {
+        let (_d, snap) = sandbox();
+        let mut ed = FileEditorState::default();
+        assert!(!ed.vim, "off by default");
+        ed.apply(&snap, &ctx(Action::ToggleVim, None));
+        assert!(ed.vim);
+        ed.apply(&snap, &ctx(Action::ToggleVim, None));
+        assert!(!ed.vim);
     }
 
     #[test]

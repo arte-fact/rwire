@@ -559,11 +559,17 @@ impl<'a> FileEditor<'a> {
             FileKind::Text if self.state.editing => {
                 let flags = self.state.dirty_lines();
                 let field_id = format!("fe-field-{}", self.state.generation);
-                CodeEditor::new(&field_id, &self.state.working)
+                let mut editor = CodeEditor::new(&field_id, &self.state.working)
                     .dirty_lines(&flags)
                     .overlay(highlight_lines(&self.state.working, lang))
+                    .vim(self.state.vim)
                     .on_edit(self.act(Action::Edit, None))
-                    .build()
+                    .build();
+                if self.state.vim {
+                    // hint the lazy module on the same batch that renders data-vim
+                    editor = editor.ext("vim");
+                }
+                editor
             }
             FileKind::Text if lang == Some("md") => {
                 Markdown::new(self.state.working.clone()).build()
@@ -631,6 +637,24 @@ impl<'a> FileEditor<'a> {
             }
         }
         bar = bar.append([el(El::Span).st([St::Flex1])]);
+        if self.state.vim && self.state.editing && self.state.kind == FileKind::Text {
+            bar = bar.append([el(El::Span)
+                .attr("data-vim-chip", "1")
+                .st([St::FontMono, St::TextXs, St::TextAccent, St::FontMedium])
+                .text("NORMAL")]);
+        }
+        bar = bar.append([el(El::Span)
+            .st([
+                St::DisplayFlex,
+                St::ItemsCenter,
+                St::GapXs,
+                St::CursorPointer,
+            ])
+            .on(Ev::Click, self.act(Action::ToggleVim, None))
+            .append([
+                el(El::Span).text("vim"),
+                Switch::new().checked(self.state.vim).build(),
+            ])]);
         bar = bar.append([el(El::Span)
             .st([
                 St::DisplayFlex,

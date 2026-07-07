@@ -21,6 +21,7 @@ pub struct CodeEditor<'a> {
     on_edit: Option<HandlerSpec>,
     save: Option<(HandlerSpec, bool)>,
     overlay: Option<Vec<ElementBuilder>>,
+    vim: bool,
 }
 
 impl<'a> CodeEditor<'a> {
@@ -33,6 +34,7 @@ impl<'a> CodeEditor<'a> {
             on_edit: None,
             save: None,
             overlay: None,
+            vim: false,
         }
     }
 
@@ -51,6 +53,15 @@ impl<'a> CodeEditor<'a> {
     /// component pins line-height and min-height on each row.
     pub fn overlay(mut self, lines: Vec<ElementBuilder>) -> Self {
         self.overlay = Some(lines);
+        self
+    }
+
+    /// Mark the textarea for the vim runtime extension (`data-vim="normal"`
+    /// entry mode; the module owns the attribute from then on — the morph
+    /// never overwrites a present `data-vim`). Pair with `.ext("vim")` on an
+    /// ancestor so the module is hinted.
+    pub fn vim(mut self, vim: bool) -> Self {
+        self.vim = vim;
         self
     }
 
@@ -126,6 +137,9 @@ impl<'a> CodeEditor<'a> {
                     .set("width", &layer_w),
             )
             .text(self.content);
+        if self.vim {
+            field = field.attr("data-vim", "normal");
+        }
         if let Some(handler) = self.on_edit {
             field = field.on(Ev::Input, handler);
         }
