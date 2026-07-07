@@ -99,12 +99,12 @@ if (!document.body.textContent.includes("saved · auto"))
   fail("status bar missing 'saved · auto'");
 
 // 3b. Undo reverts the edit (and autosave flushes it); Redo restores.
-const undoBtn = find((n) => n.getAttribute?.("aria-label") === "Undo" && clickable(n));
+const undoBtn = find((n) => (n.getAttribute?.("aria-label") || "").startsWith("Undo") && clickable(n));
 if (!undoBtn) fail("Undo button missing");
 undoBtn.fire("click", { target: undoBtn });
 await sleep(700);
 if (disk() !== original) fail("undo did not revert the disk");
-const redoBtn = find((n) => n.getAttribute?.("aria-label") === "Redo" && clickable(n));
+const redoBtn = find((n) => (n.getAttribute?.("aria-label") || "").startsWith("Redo") && clickable(n));
 if (!redoBtn) fail("Redo button missing (or not enabled after undo)");
 redoBtn.fire("click", { target: redoBtn });
 await sleep(700);
@@ -133,9 +133,12 @@ await sleep(900);
 if (disk().includes(stamp2)) fail("manual mode must not auto-persist");
 const saveBtn = find((n) => n.getAttribute?.("aria-label") === "Save · ⌘S" && clickable(n));
 if (!saveBtn) fail("Save icon button missing in manual mode");
-saveBtn.fire("click", { target: saveBtn });
+if (saveBtn.getAttribute("data-kbd") !== "mod+s") fail("Save button missing data-kbd");
+// save via the KEYBOARD path: Ctrl+S → [data-kbd=mod+s] click → binding
+for (const fn of document.listeners["keydown"] || [])
+  fn({ key: "s", ctrlKey: true, target: ta2, preventDefault: () => {} });
 await sleep(700);
-if (!disk().includes(stamp2)) fail("manual save did not reach the disk");
+if (!disk().includes(stamp2)) fail("Ctrl+S save did not reach the disk");
 
 // 5. Code view: gutter-aligned colored lines (not the md code block).
 const rsRow = find((n) => n.id === "tn-src/main.rs");

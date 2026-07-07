@@ -26,7 +26,7 @@ https://claude.ai/code/artifact/613e032a-dc77-45a6-b88a-8f77ed63cb92
 
 | Decision | Call |
 |---|---|
-| Keyboard save | **In** — generic `data-save-key` runtime behavior (~120B, sibling of `data-enter-submit`) |
+| Keyboard shortcuts | **In** — generic `data-kbd="combo"` runtime behavior (clicks the bound element; bare keys guarded in fields, Esc exempt): ⌘S save, ⌘Z/⇧⌘Z undo/redo, F2 rename, Del delete-confirm, Esc cancel |
 | Managed ops (create/rename/delete) | **In**, behind `.managed(true)`; all IO via `FsSnapshot::resolve` — adoption-complete for claw `files.rs` |
 | Conflict resolution | **Reload theirs / Overwrite** banner (mtime-gated, never silent); no merge machinery |
 | Autosave | **In — toggleable, ON by default**: status-bar switch backed by `FileEditorState.autosave`; app default via `.autosave_default(bool)`. On: flushes on the debounced path, no Save button. Off: manual Save + ⌘S. ⌘S saves immediately in either mode |

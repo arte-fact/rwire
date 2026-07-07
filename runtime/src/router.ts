@@ -39,11 +39,19 @@ export function installRouter(): void {
       const f = (e.target as Element).closest("form");
       if (f) f.requestSubmit();
     }
-    // Cmd/Ctrl+S clicks the page's [data-save-key] element (if any) instead
-    // of opening the browser save dialog — the save-shortcut hook.
-    if (e.key === "s" && ((e as KeyboardEvent).metaKey || (e as KeyboardEvent).ctrlKey)) {
-      const t = document.querySelector("[data-save-key]") as HTMLElement | null;
-      if (t) {
+    // Generic shortcut hook: [data-kbd="combo"] elements are clicked when
+    // their combo is pressed (combo = "mod+"?"shift+"?key, e.g. "mod+s",
+    // "mod+shift+z", "f2", "escape", "delete"). Bare-key combos are ignored
+    // while typing in a field — except escape, which cancels.
+    const ke = e as KeyboardEvent;
+    const mod = ke.metaKey || ke.ctrlKey;
+    const key = ke.key.toLowerCase();
+    const combo = (mod ? "mod+" : "") + (ke.shiftKey ? "shift+" : "") + key;
+    const t = document.querySelector('[data-kbd="' + combo + '"]') as HTMLElement | null;
+    if (t) {
+      const tag = (e.target as Element).tagName;
+      const field = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (mod || !field || key === "escape") {
         e.preventDefault();
         t.click();
       }

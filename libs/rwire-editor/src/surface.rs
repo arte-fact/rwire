@@ -72,9 +72,17 @@ impl<'a> FileEditor<'a> {
 
     /// Row action on the solid-accent selected row: light icon, translucent
     /// hover — readable on the emphasis background.
-    fn row_action(&self, icon: icons::Icon, tip: &str, action: Action, i: usize) -> ElementBuilder {
+    fn row_action(
+        &self,
+        icon: icons::Icon,
+        tip: &str,
+        action: Action,
+        i: usize,
+        kbd: &str,
+    ) -> ElementBuilder {
         let btn = el(El::Button)
             .at_str(rwire::At::AriaLabel, tip)
+            .attr("data-kbd", kbd)
             .st([
                 St::DisplayFlex,
                 St::ItemsCenter,
@@ -104,9 +112,10 @@ impl<'a> FileEditor<'a> {
         tip: &str,
         action: Action,
         enabled: bool,
+        kbd: &str,
     ) -> ElementBuilder {
         if enabled {
-            return self.icon_button(icon, tip, action, None, false);
+            return self.icon_button_kbd(icon, tip, action, None, false, Some(kbd));
         }
         el(El::Span)
             .st([
@@ -129,6 +138,19 @@ impl<'a> FileEditor<'a> {
         index: Option<u32>,
         active: bool,
     ) -> ElementBuilder {
+        self.icon_button_kbd(icon, tip, action, index, active, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn icon_button_kbd(
+        &self,
+        icon: icons::Icon,
+        tip: &str,
+        action: Action,
+        index: Option<u32>,
+        active: bool,
+        kbd: Option<&str>,
+    ) -> ElementBuilder {
         let mut btn = el(El::Button)
             .at_str(rwire::At::AriaLabel, tip)
             .st([
@@ -144,6 +166,9 @@ impl<'a> FileEditor<'a> {
             .style(Style::new().width("1.25rem").set("padding", "0"))
             .on(Ev::Click, self.act(action, index))
             .append([icons::icon_sized(icon, 12)]);
+        if let Some(combo) = kbd {
+            btn = btn.attr("data-kbd", combo);
+        }
         if active {
             btn = btn.st([St::BgAccent, St::TextOnEmphasis]);
         } else {
@@ -222,7 +247,14 @@ impl<'a> FileEditor<'a> {
                         St::BgApp,
                     ])
                     .focus([St::BorderAccent]),
-                self.icon_action(icons::Icon::Close, "Cancel", Action::CancelOp, None),
+                self.icon_button_kbd(
+                    icons::Icon::Close,
+                    "Cancel · Esc",
+                    Action::CancelOp,
+                    None,
+                    false,
+                    Some("escape"),
+                ),
             ])
     }
 
@@ -303,8 +335,20 @@ impl<'a> FileEditor<'a> {
                 let mut label = Self::tree_label(entry, selected, dirty);
                 if selected && self.managed {
                     label = label.append([
-                        self.row_action(icons::Icon::Edit, "Rename", Action::RenameStart, i),
-                        self.row_action(icons::Icon::Trash, "Delete", Action::Delete, i),
+                        self.row_action(
+                            icons::Icon::Edit,
+                            "Rename · F2",
+                            Action::RenameStart,
+                            i,
+                            "f2",
+                        ),
+                        self.row_action(
+                            icons::Icon::Trash,
+                            "Delete · Del",
+                            Action::Delete,
+                            i,
+                            "delete",
+                        ),
                     ]);
                 }
                 nodes.push(
@@ -351,7 +395,8 @@ impl<'a> FileEditor<'a> {
                     St::BgWarning,
                     &format!("Discard {n} unsaved line{}?", if n == 1 { "" } else { "s" }),
                     vec![
-                        self.chip_action("Keep editing", Action::GuardKeep, None),
+                        self.chip_action("Keep editing", Action::GuardKeep, None)
+                            .attr("data-kbd", "escape"),
                         self.chip_action("Discard", Action::GuardDiscard, None),
                     ],
                 ))
@@ -365,7 +410,8 @@ impl<'a> FileEditor<'a> {
                     St::BgError,
                     &format!("Delete {name}?"),
                     vec![
-                        self.chip_action("Cancel", Action::CancelOp, None),
+                        self.chip_action("Cancel", Action::CancelOp, None)
+                            .attr("data-kbd", "escape"),
                         self.chip_action("Delete", Action::DeleteConfirm, None),
                     ],
                 ))
@@ -403,15 +449,17 @@ impl<'a> FileEditor<'a> {
             bar = bar.append([el(El::Span).st([St::DisplayFlex, St::GapXs]).append([
                 self.history_button(
                     icons::Icon::RotateCcw,
-                    "Undo",
+                    "Undo · ⌘Z",
                     Action::Undo,
                     self.state.can_undo(),
+                    "mod+z",
                 ),
                 self.history_button(
                     icons::Icon::RotateCw,
-                    "Redo",
+                    "Redo · ⇧⌘Z",
                     Action::Redo,
                     self.state.can_redo(),
+                    "mod+shift+z",
                 ),
             ])]);
         }
@@ -437,7 +485,7 @@ impl<'a> FileEditor<'a> {
         if self.state.autosave {
             bar = bar.append([el(El::Span)
                 .st([St::DisplayNone])
-                .attr("data-save-key", "1")
+                .attr("data-kbd", "mod+s")
                 .on(Ev::Click, self.act(Action::Save, None))]);
         } else {
             let tip = if self.state.dirty() {
@@ -449,13 +497,13 @@ impl<'a> FileEditor<'a> {
             // leading and bumps the toolbar height when the button appears
             bar = bar.append([el(El::Span)
                 .st([St::DisplayFlex, St::ItemsCenter])
-                .attr("data-save-key", "1")
-                .append([self.icon_button(
+                .append([self.icon_button_kbd(
                     icons::Icon::Save,
                     tip,
                     Action::Save,
                     None,
                     self.state.dirty(),
+                    Some("mod+s"),
                 )])]);
         }
         bar

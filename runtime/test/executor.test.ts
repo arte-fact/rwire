@@ -585,27 +585,39 @@ test("BIND_RESIZE drags the previous sibling's width", () => {
   assert.equal(pane.style.flex, "0 0 auto");
 });
 
-test("data-save-key: Cmd/Ctrl+S clicks the save trigger", async () => {
+test("data-kbd: combos click their element; bare keys guarded in fields", async () => {
   const { installRouter } = await import("../src/router.ts");
   (globalThis as any).window = { addEventListener: () => {} };
   (globalThis as any).history = { pushState() {}, replaceState() {} };
   installRouter();
-  const btn = doc.createElement("button");
-  btn.setAttribute("data-save-key", "1");
-  doc.body.appendChild(btn);
-  run(syms("x"), [0x01, ...vint(0x80)]); // any batch; binding not needed
-  // bind a click on the trigger so the click round-trips
   const b2 = doc.createElement("span");
   b2.id = "sk";
   run(syms("sk"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(3)]);
-  b2.setAttribute("data-save-key", "1");
+  b2.setAttribute("data-kbd", "mod+s");
   doc.body.appendChild(b2);
-  btn.removeAttribute("data-save-key");
   let prevented = false;
-  for (const fn of doc.listeners["keydown"] || [])
-    fn({ key: "s", ctrlKey: true, target: doc.body, preventDefault: () => (prevented = true) });
+  const press = (key: string, o: Record<string, unknown> = {}) => {
+    for (const fn of doc.listeners["keydown"] || [])
+      fn({ key, target: doc.body, preventDefault: () => (prevented = true), ...o });
+  };
+  press("s", { ctrlKey: true });
   assert.ok(prevented, "browser save dialog suppressed");
-  assert.equal(sent.length, 1, "save trigger's click binding fired");
+  assert.equal(sent.length, 1, "mod+s clicked the bound trigger");
+  // shift changes the combo: mod+shift+s matches nothing
+  press("s", { ctrlKey: true, shiftKey: true });
+  assert.equal(sent.length, 1, "mod+shift+s is a different combo");
+  // bare key guarded while typing in a field
+  const f2el = doc.createElement("span");
+  f2el.id = "rn";
+  run(syms("rn"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(4)]);
+  f2el.setAttribute("data-kbd", "f2");
+  doc.body.appendChild(f2el);
+  const ta = doc.createElement("textarea");
+  for (const fn of doc.listeners["keydown"] || [])
+    fn({ key: "F2", target: ta, preventDefault: () => {} });
+  assert.equal(sent.length, 1, "F2 ignored while typing");
+  press("F2");
+  assert.equal(sent.length, 2, "F2 fires outside fields");
 });
 
 test("data-echo mirrors field value into the overlay instantly", async () => {

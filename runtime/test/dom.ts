@@ -213,14 +213,24 @@ export function makeDom(): { document: MockDoc } {
       click() {
         node.fire("click", { target: node });
       },
-      // #id and [attr] selectors — enough for the runtime's lookups.
+      // #id, [attr], and [attr="value"] selectors — the runtime's lookups.
       querySelector(sel) {
         const byIdSel = sel.startsWith("#") ? sel.slice(1) : null;
-        const attrSel = sel.startsWith("[") ? sel.slice(1, -1) : null;
+        let attrSel = sel.startsWith("[") ? sel.slice(1, -1) : null;
+        let attrVal: string | null = null;
+        if (attrSel && attrSel.includes("=")) {
+          const eq = attrSel.indexOf("=");
+          attrVal = attrSel.slice(eq + 1).replace(/^"|"$/g, "");
+          attrSel = attrSel.slice(0, eq);
+        }
         if (byIdSel === null && attrSel === null) return null;
         const walk = (e: MockEl): MockEl | null => {
           if (byIdSel !== null && e.id === byIdSel) return e;
-          if (attrSel !== null && e.hasAttribute(attrSel)) return e;
+          if (
+            attrSel !== null &&
+            (attrVal === null ? e.hasAttribute(attrSel) : e.getAttribute(attrSel) === attrVal)
+          )
+            return e;
           for (const c of e.children) {
             const hit = walk(c);
             if (hit) return hit;
