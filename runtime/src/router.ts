@@ -6,6 +6,12 @@ import { st } from "./state.ts";
 import { sh } from "./hash.ts";
 import { bx, bj } from "./connect.ts";
 
+// A newline string the minifier cannot fold back into a raw-newline template
+// literal (the capsule embeds the artifact on a single line): the mutable
+// binding blocks constant folding.
+let nl10 = 10;
+const NL = String.fromCharCode(nl10);
+
 export function installRouter(): void {
   document.addEventListener("click", (e) => {
     const a = (e.target as Element).closest("a[data-route]");
@@ -70,7 +76,7 @@ export function installRouter(): void {
         const v = f2.value;
         let ss = f2.selectionStart;
         if (ke.shiftKey) {
-          const ls = v.lastIndexOf(String.fromCharCode(10), ss - 1) + 1;
+          const ls = v.lastIndexOf(NL, ss - 1) + 1;
           let cut = 0;
           if (v[ls] === "\t") cut = 1;
           else while (cut < ins.length && v[ls + cut] === " ") cut++;

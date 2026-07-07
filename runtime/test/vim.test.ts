@@ -256,3 +256,15 @@ test("chip reflects every mode", () => {
   press("V"); assert.equal(chip.textContent, "V-LINE");
   press("Escape", "i"); assert.equal(chip.textContent, "INSERT");
 });
+
+test("s substitutes: normal-mode chars, visual selection", () => {
+  setup("word here", 0);
+  press("s");
+  assert.equal(ta.value, "ord here");
+  assert.equal(ta.getAttribute("data-vim"), "insert");
+  press("Escape");
+  setup("foo bar", 0);
+  press("v", "e", "s"); // vws-style flow: select then substitute
+  assert.equal(ta.value, " bar", "selection substituted");
+  assert.equal(ta.getAttribute("data-vim"), "insert");
+});

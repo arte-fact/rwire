@@ -251,6 +251,15 @@ function normalKey(doc: Document, el: TA, k: string): void {
       el.setSelectionRange(vs, ve);
       break;
     }
+    case "s": {
+      const e = Math.min(lineEnd(t, p), p + n);
+      if (e > p) {
+        yank(t.slice(p, e), false);
+        put(el, t.slice(0, p) + t.slice(e), p);
+      }
+      setMode(doc, el, "insert");
+      break;
+    }
     case "x": { const e = Math.min(lineEnd(t, p), p + n); if (e > p) { yank(t.slice(p, e), false); put(el, t.slice(0, p) + t.slice(e), p); } break; }
     case "D": { const e = lineEnd(t, p); yank(t.slice(p, e), false); put(el, t.slice(0, p) + t.slice(e), Math.max(lineStart(t, p), p - (e > p ? 0 : 1))); break; }
     case "C": { const e = lineEnd(t, p); yank(t.slice(p, e), false); put(el, t.slice(0, p) + t.slice(e), p); setMode(doc, el, "insert"); break; }
@@ -291,7 +300,7 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
     st.count = "";
     return;
   }
-  if (k === "d" || k === "c" || k === "y" || k === "x") {
+  if (k === "d" || k === "c" || k === "y" || k === "x" || k === "s") {
     let s: number, e: number;
     if (line) [s, e] = lineSpan(t, st.anchor, head);
     else { s = Math.min(st.anchor, head); e = Math.max(st.anchor, head) + 1; e = Math.min(e, t.length); }
@@ -299,9 +308,9 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
     setMode(doc, el, "normal");
     st.count = "";
     if (k === "y") { el.setSelectionRange(s, s); return; }
-    if (line && k !== "c" && e === t.length && s > 0) s--; // EOF eats the leading \n
+    if (line && k !== "c" && k !== "s" && e === t.length && s > 0) s--; // EOF eats the leading \n
     put(el, t.slice(0, s) + t.slice(e), Math.min(s, Math.max(0, t.slice(0, s).length + t.slice(e).length - 1)));
-    if (k === "c") setMode(doc, el, "insert");
+    if (k === "c" || k === "s") setMode(doc, el, "insert");
     return;
   }
   const q = motion(t, head, k, n, !!st.count);
