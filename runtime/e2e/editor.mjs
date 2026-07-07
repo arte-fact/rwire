@@ -54,6 +54,10 @@ const fail = (why) => {
 
 await sleep(1200);
 
+// 0. The synced wrapper is a styled flex item (the full-height fix).
+const wrapper = find((n) => n.id && n.id.startsWith("__synced_") && (n.classList?.all() || []).length);
+if (!wrapper) fail("synced wrapper has no style tokens — region would collapse");
+
 // 1. Select README.md → rendered markdown view.
 const row = find((n) => n.id === "tn-README.md");
 if (!row) fail("tree row for README.md missing");
@@ -84,8 +88,16 @@ if (!document.body.textContent.includes("saved · auto"))
 // 4. Toggle autosave off → edits stay local until the Save button.
 const toggle = find((n) => n.textContent.includes("autosave") && clickable(n));
 if (!toggle) fail("autosave toggle missing");
+const checkboxOn = find((n) => n.tagName === "INPUT" && n.getAttribute("type") === "checkbox");
+if (!checkboxOn || checkboxOn.getAttribute("checked") === null)
+  fail("switch should render checked while autosave is on");
+checkboxOn.checked = true; // as the browser would after native rendering
 toggle.fire("click", { target: toggle });
 await sleep(600);
+const checkboxOff = find((n) => n.tagName === "INPUT" && n.getAttribute("type") === "checkbox");
+if (!checkboxOff) fail("switch disappeared after toggle");
+if (checkboxOff.getAttribute("checked") !== null || checkboxOff.checked === true)
+  fail("switch did not visually flip off (attr/property stale)");
 const ta2 = find((n) => n.tagName === "TEXTAREA");
 const stamp2 = `manually-saved-${Date.now()}`;
 ta2.value = ta2.value ? ta2.value + stamp2 + "\n" : original + "\n" + stamp + "\n" + stamp2 + "\n";
@@ -98,6 +110,22 @@ saveBtn.fire("click", { target: saveBtn });
 await sleep(700);
 if (!disk().includes(stamp2)) fail("manual save did not reach the disk");
 
+// 5. Code view: gutter-aligned colored lines (not the md code block).
+const rsRow = find((n) => n.id === "tn-src/main.rs");
+if (!rsRow) fail("main.rs tree row missing");
+// switching files may trigger the unsaved guard; discard if it appears
+rsRow.fire("click", { target: rsRow });
+await sleep(500);
+const guard = find((n) => n.textContent === "Discard" && clickable(n));
+if (guard) {
+  guard.fire("click", { target: guard });
+  await sleep(500);
+}
+if (!document.body.textContent.includes("fn main")) fail("code view missing content");
+if (find((n) => n.tagName === "PRE"))
+  fail("code view must not use the markdown <pre> block");
+if (!document.body.textContent.match(/\b3\b/)) fail("code view gutter numbers missing");
+
 writeFileSync(samplePath, original);
-console.log("E2E PASS: autosave flushed hands-free; manual mode gated on Save");
+console.log("E2E PASS: autosave hands-free · switch flips visually · manual gated · gutter code view");
 process.exit(0);

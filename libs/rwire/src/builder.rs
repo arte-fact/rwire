@@ -1945,6 +1945,11 @@ impl BuildContext {
             if let Some(rendered) = renderer.render_with_state(state) {
                 // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
                 let ref_idx = self.buf.create_synced(synced_id);
+                // The synced element's own style tokens land on the wrapper —
+                // regions can be flex items (`render_x().st([St::Flex1, ...])`).
+                if !el.style_utils.is_empty() {
+                    self.buf.style_multi(ref_idx, &el.style_utils);
+                }
 
                 // Emit the rendered content as a child, tagging nested regions with this
                 // region as their parent.
@@ -2096,6 +2101,9 @@ impl BuildContext {
             // Use cached render from collect_symbols_multi (single-render path)
             if let Some(rendered) = self.synced_render_cache.remove(&synced_id) {
                 let ref_idx = self.buf.create_synced(synced_id);
+                if !el.style_utils.is_empty() {
+                    self.buf.style_multi(ref_idx, &el.style_utils);
+                }
                 let saved_parent = self.current_synced_parent;
                 self.current_synced_parent = Some(synced_id);
                 self.emit_element_multi(&rendered, Some(ref_idx));
@@ -2741,6 +2749,9 @@ fn emit_update_element(
         });
 
         let wrapper_ref = buf.create_synced(synced_id);
+        if !el.style_utils.is_empty() {
+            buf.style_multi(wrapper_ref, &el.style_utils);
+        }
 
         if is_existing {
             // The region already exists on the client. Emit ONLY the wrapper as a

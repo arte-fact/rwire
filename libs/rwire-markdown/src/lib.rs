@@ -25,7 +25,7 @@ mod sidebar;
 mod site;
 mod toc;
 
-pub use code::highlight_code;
+pub use code::{highlight_code, highlight_lines};
 pub use frontmatter::Frontmatter;
 pub use markdown::Markdown;
 pub use parser::{parse_markdown, parse_markdown_with, ParseResult, TocEntry};

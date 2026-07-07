@@ -9,10 +9,10 @@ use rwire::style::Style;
 use rwire::style_tokens::St;
 use rwire::{el, icons, At, Av, El, ElementBuilder, Ev, HandlerSpec};
 use rwire_components::{
-    Button, ButtonSize, Chip, CodeEditor, FsEntry, FsSnapshot, SplitPane, Switch, TreeNode,
-    TreeView,
+    Button, ButtonSize, Chip, CodeEditor, FsEntry, FsSnapshot, SplitPane, Switch, Tooltip,
+    TreeNode, TreeView,
 };
-use rwire_markdown::{highlight_code, Markdown};
+use rwire_markdown::{highlight_lines, Markdown};
 
 use crate::state::{Action, FileEditorState, FileKind, Pending};
 
@@ -56,6 +56,36 @@ impl<'a> FileEditor<'a> {
     fn chip_action(&self, label: &str, action: Action, index: Option<u32>) -> ElementBuilder {
         Chip::new(label.to_string())
             .on_click(self.act(action, index))
+            .build()
+    }
+
+    /// A small icon button with a tooltip — the tree affordances.
+    fn icon_action(
+        &self,
+        icon: icons::Icon,
+        tip: &str,
+        action: Action,
+        index: Option<u32>,
+    ) -> ElementBuilder {
+        Tooltip::new(tip.to_string())
+            .child(
+                el(El::Button)
+                    .st([
+                        St::DisplayFlex,
+                        St::ItemsCenter,
+                        St::JustifyCenter,
+                        St::PxSm,
+                        St::PySm,
+                        St::RoundedSm,
+                        St::TextMuted,
+                        St::BgTransparent,
+                        St::BorderNone,
+                        St::CursorPointer,
+                    ])
+                    .hover([St::BgSubtle, St::TextHigh])
+                    .on(Ev::Click, self.act(action, index))
+                    .append([icons::icon_sized(icon, 13)]),
+            )
             .build()
     }
 
@@ -119,7 +149,7 @@ impl<'a> FileEditor<'a> {
                         St::BgApp,
                     ])
                     .focus([St::BorderAccent]),
-                self.chip_action("cancel", Action::CancelOp, None),
+                self.icon_action(icons::Icon::Close, "Cancel", Action::CancelOp, None),
             ])
     }
 
@@ -148,7 +178,12 @@ impl<'a> FileEditor<'a> {
                     entries.iter().filter(|e| !e.is_dir).count()
                 ))]);
         if self.managed {
-            head = head.append([self.chip_action("+ new", Action::CreateStart, None)]);
+            head = head.append([self.icon_action(
+                icons::Icon::Plus,
+                "New file",
+                Action::CreateStart,
+                None,
+            )]);
         }
 
         let mut column = vec![head];
@@ -191,8 +226,18 @@ impl<'a> FileEditor<'a> {
                 let mut label = Self::tree_label(entry, selected, dirty);
                 if selected && self.managed {
                     label = label.append([
-                        self.chip_action("rename", Action::RenameStart, Some(i as u32)),
-                        self.chip_action("delete", Action::Delete, Some(i as u32)),
+                        self.icon_action(
+                            icons::Icon::Edit,
+                            "Rename",
+                            Action::RenameStart,
+                            Some(i as u32),
+                        ),
+                        self.icon_action(
+                            icons::Icon::Trash,
+                            "Delete",
+                            Action::Delete,
+                            Some(i as u32),
+                        ),
                     ]);
                 }
                 nodes.push(
@@ -320,6 +365,39 @@ impl<'a> FileEditor<'a> {
         bar
     }
 
+    /// Read-only code view matching the editor's anatomy: the same gutter and
+    /// mono line grid, with syntax coloration instead of a textarea.
+    fn code_view(&self, lang: Option<&str>) -> ElementBuilder {
+        let lines = highlight_lines(&self.state.working, lang);
+        let count = lines.len().max(1);
+        let line_h = Style::new().set("line-height", "1.5");
+        let gutter = el(El::Div)
+            .st([
+                St::DisplayFlex,
+                St::FlexCol,
+                St::ItemsEnd,
+                St::FlexShrink0,
+                St::TextXs,
+                St::TextLow,
+                St::FontMono,
+                St::PrSm,
+                St::BorderR,
+            ])
+            .append((1..=count).map(|n| el(El::Div).style(line_h.clone()).text(&n.to_string())));
+        let code = el(El::Div)
+            .st([
+                St::Flex1,
+                St::MinW0,
+                St::FontMono,
+                St::TextXs,
+                St::OverflowXAuto,
+            ])
+            .append(lines.into_iter().map(|l| l.style(line_h.clone())));
+        el(El::Div)
+            .st([St::DisplayFlex, St::GapSm, St::MinW0])
+            .append([gutter, code])
+    }
+
     fn body(&self, entry: Option<&FsEntry>) -> ElementBuilder {
         let Some(entry) = entry else {
             return el(El::Div)
@@ -344,7 +422,7 @@ impl<'a> FileEditor<'a> {
             FileKind::Text if lang == Some("md") => {
                 Markdown::new(self.state.working.clone()).build()
             }
-            FileKind::Text => highlight_code(&self.state.working, lang),
+            FileKind::Text => self.code_view(lang),
             FileKind::Image => {
                 let body = match &self.state.preview_b64 {
                     Some(b64) => el(El::Img)

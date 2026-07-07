@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "editor on http://127.0.0.1:9008 — {} entries under sample/",
         workspace().entries.len()
     );
-    Server::bind("127.0.0.1:9008")?
+    Server::bind("0.0.0.0:9008")?
         .root(app)
         .capsule_config(CapsuleConfig::new())
         .theme(app_theme())
@@ -81,7 +81,9 @@ fn app() -> ElementBuilder {
                         .st([St::TextXs, St::TextMuted])
                         .text("FileEditor kit · autosave · managed · sandboxed"),
                 ]),
-            render_editor(),
+            // The synced wrapper is the flex item: without these tokens the
+            // region collapses instead of filling the page.
+            render_editor().st([St::Flex1, St::MinH0, St::DisplayFlex, St::FlexCol]),
         ])
 }
 

@@ -96,3 +96,49 @@ mod tests {
         }
     }
 }
+
+/// Highlight `code` into one `ElementBuilder` per line (bare spans, no block
+/// chrome) — for gutter-aligned code views like `rwire-editor`'s read-only
+/// mode, where each line must be its own row. Unknown languages yield plain
+/// text lines.
+pub fn highlight_lines(code: &str, lang: Option<&str>) -> Vec<ElementBuilder> {
+    let tokens = lang.and_then(|l| highlight(code, l));
+    let line_count = code.lines().count().max(1);
+    let mut lines: Vec<Vec<ElementBuilder>> = Vec::with_capacity(line_count);
+    lines.push(Vec::new());
+    match tokens {
+        Some(tokens) => {
+            for token in &tokens {
+                let mut first = true;
+                for part in token.text.split('\n') {
+                    if !first {
+                        lines.push(Vec::new());
+                    }
+                    first = false;
+                    if !part.is_empty() {
+                        let piece = Token {
+                            kind: token.kind,
+                            text: part.to_string(),
+                        };
+                        lines.last_mut().unwrap().push(highlight_span(&piece));
+                    }
+                }
+            }
+        }
+        None => {
+            lines = code
+                .split('\n')
+                .map(|l| vec![el(El::Span).text(l)])
+                .collect();
+        }
+    }
+    // Trailing newline produces a phantom empty last line; keep parity with
+    // `str::lines()` so gutters align.
+    if lines.len() > line_count {
+        lines.truncate(line_count);
+    }
+    lines
+        .into_iter()
+        .map(|spans| el(El::Div).st([St::WhitespacePre, St::MinW0]).append(spans))
+        .collect()
+}

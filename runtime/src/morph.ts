@@ -31,6 +31,13 @@ export function me(a: Node, b: Node): void {
   ae.__hk = be.__hk;
   ae.__k = be.__k;
   ae.__b = be.__b;
+  // checked is property-backed: syncing the attribute alone leaves the live
+  // control stale (the server owns checkbox/radio state on re-render).
+  if (ae.tagName === "INPUT") {
+    const t = ae.getAttribute("type");
+    if (t === "checkbox" || t === "radio")
+      (ae as any).checked = be.hasAttribute("checked");
+  }
   // Nested region: its own update owns it (guard non-string id so the morph
   // never throws and freezes the stream).
   if (typeof ae.id === "string" && ae.id.indexOf("__synced_") === 0) return;

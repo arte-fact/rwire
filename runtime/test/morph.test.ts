@@ -222,3 +222,15 @@ test("me syncs __k alongside __hk", () => {
   me(a, b);
   assert.equal(a.__k, 42);
 });
+
+test("me syncs the checked property for checkbox inputs", () => {
+  const live = doc.createElement("input") as any;
+  live.setAttribute("type", "checkbox");
+  live.setAttribute("checked", "");
+  live.checked = true; // property, as the browser would have it
+  const shadow = doc.createElement("input") as any;
+  shadow.setAttribute("type", "checkbox"); // no checked attr: server says off
+  me(live, shadow);
+  assert.equal(live.getAttribute("checked"), null, "attribute synced");
+  assert.equal(live.checked, false, "property synced too");
+});
