@@ -1,4 +1,4 @@
-# Vim mode for FileEditor — evaluation & plan (rev. 3 — 2026-07-07)
+# Vim mode for FileEditor — design & roadmap (rev. 4 — decisions locked 2026-07-07)
 
 ## The architectural question: where does vim state live?
 
@@ -58,22 +58,47 @@ diff → autosave → undo history. No new opcodes. No caret sync. Specifically:
 ## Engine scope (locked 2026-07-07: motions for text editing, NO commands)
 
 Modal *text editing* only — the `: ` ex-line is out of scope permanently, not
-deferred. Modes: normal / insert / visual(char). Motions: `h j k l 0 $ ^ w b e
-gg G` + counts (`3j`, `d2w`; wrap=off ⇒ logical lines == visual lines).
-Operators: `d c y` + motion, `x dd yy cc D C p P o O a A i I`, `u`/`Ctrl-R`
-via server history (clicking the data-kbd elements). Unnamed register
-(module-local). Saving stays ⌘S / autosave — no `:w`.
-**v1.5:** `V` line-visual, `f/t/F/T`, dot-repeat, block cursor (overlay
-char-cell tint). **Out permanently:** ex commands, macros, marks, `:%s`.
+deferred. Modes: normal / insert / **visual(char) AND V (line)** — V pulled
+into v1 by review. Motions: `h j k l 0 $ ^ w b e gg G` + counts (`3j`, `d2w`;
+wrap=off ⇒ logical lines == visual lines). Operators: `d c y` + motion,
+`x dd yy cc D C p P o O a A i I`, `u`/`Ctrl-R` via server history (clicking
+the data-kbd elements). Unnamed register (module-local). Saving stays
+⌘S / autosave — no `:w`.
+**v1.5:** `f/t/F/T`, dot-repeat, block cursor (overlay char-cell tint).
+**Out permanently:** ex commands, macros, marks, `:%s`.
 
-## Plan (~2.5 days)
+## Decisions (locked 2026-07-07)
 
-| Phase | Work | Size |
-|---|---|---|
-| **M1 extension primitive** | separate esbuild artifact + own size budget; server route serving vendored module; core loader on `[data-vim]`; `data-kbd` scoping | 0.5d |
-| **M2 vim module** | `ext/vim.ts`: modal engine, motions/operators/counts, synthetic-input dispatch, chip updates; node:test suite against the mock DOM (~40 tests) | 1d |
-| **M3 kit** | `.vim(true)` + status-bar toggle (like autosave) rendering `data-vim` + chip placeholder; insert-mode passthrough | 0.5d |
-| **M4 proof** | examples/editor toggle (off by default), E2E (`dw` → disk via autosave; `i…Esc`; visual-`d`; `u` round-trip), docs page | 0.5d |
+| Decision | Call |
+|---|---|
+| Default | **Off**; status-bar toggle like autosave; app default via `.vim(bool)` |
+| Visual modes | **v AND V both in v1** (+0.25d) |
+| Preference persistence | **Per-session**: `FileEditorState.vim_enabled`, survives re-renders, resets with the state's storage type |
+| Ex commands | **Never** — modal text editing, not a vim clone |
+| Roadmap home | This file (checklist below) |
+
+## Roadmap (~2.75 days)
+
+- [ ] **M1 — extension primitive** (0.5d): separate esbuild artifact with its
+  own size budget; vendored module served at `/_rw/ext/vim.js`; `MOD_DEF`-style
+  server hint opcode starts `import()` during the batch; `data-kbd` hook skips
+  `[data-vim]` targets outside insert mode.
+  *Accept:* module loads once per page, hint deduped per connection, core
+  budget untouched beyond the loader; loader + hint unit-tested.
+- [ ] **M2 — vim module** (1.25d): `ext/vim.ts` modal engine — normal/insert/
+  v/V, motions `h j k l 0 $ ^ w b e gg G` + counts, operators
+  `d c y x dd yy cc D C p P o O a A i I`, unnamed register, synthetic-input
+  dispatch, chip updates, `u`/`Ctrl-R` via data-kbd clicks.
+  *Accept:* ~45 node:test cases green (motions, operators on both visual
+  modes, counts, register round-trip, mode transitions); module size budget.
+- [ ] **M3 — kit integration** (0.5d): `FileEditorState.vim_enabled` +
+  status-bar toggle (off default), `.vim(bool)` builder default, `data-vim`
+  + `[data-vim-chip]` rendering, insert-mode passthrough.
+  *Accept:* toggle round-trips like autosave's; kit tests.
+- [ ] **M4 — proof** (0.5d): examples/editor toggle, live E2E (`dw` reaches
+  disk via autosave, `i…Esc` mode cycle, `Vd` line delete, `u` reverts),
+  docs-site section.
+  *Accept:* E2E green; docs build.
 
 ## Risks
 
