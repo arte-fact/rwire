@@ -128,6 +128,10 @@ impl Composer {
             .st([
                 St::WFull,
                 St::TextDefault,
+                // Transparent by default so the field shows its themed parent, never the UA white
+                // default. The full mode nests it in a `BgSurface` box; the compact mode borders it
+                // directly on the page — without this the compact `<textarea>` renders white.
+                St::BgTransparent,
                 St::BorderNone,
                 St::OutlineNone,
                 St::ResizeNone,
@@ -216,7 +220,6 @@ impl Composer {
             .append([hint, self.send_button()]);
         let field = self
             .field()
-            .st([St::BgTransparent])
             .style(rwire::style::Style::new().set("padding", "0.25rem"));
         form.st([
             St::DisplayFlex,
