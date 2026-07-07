@@ -495,3 +495,37 @@ test("plain y/p never touch the clipboard", () => {
   press("y", "w", "p");
   assert.equal(touched, false);
 });
+
+// ------------------------------------------------------- deferred batch v7
+test("ge lands on the previous word end; g-prefix stays clean", () => {
+  setup("alpha beta gamma", 12);
+  press("g", "e");
+  assert.equal(ta.selectionStart, 9, "end of beta");
+  press("g", "e");
+  assert.equal(ta.selectionStart, 4, "end of alpha");
+});
+
+test("visual o swaps the active end; gv reselects", () => {
+  setup("one two three", 4);
+  press("v", "w"); // select from 4 toward three
+  assert.equal(ta.selectionEnd, 9);
+  press("o"); // head now at anchor side
+  press("b"); // extend LEFT from the swapped head
+  assert.equal(ta.selectionStart, 0, "extends backward after o");
+  press("Escape");
+  press("g", "v");
+  assert.equal(ta.getAttribute("data-vim"), "v", "gv re-enters visual");
+  assert.equal(ta.selectionStart, 0, "same range reselected");
+});
+
+test("R overtypes until Escape, appending past line end", () => {
+  setup("abcd\nx", 0);
+  press("R");
+  assert.equal(ta.getAttribute("data-vim"), "replace");
+  press("X", "Y");
+  assert.equal(ta.value, "XYcd\nx", "overtyped in place");
+  press("Z", "Z", "W"); // last one runs past the line end
+  assert.equal(ta.value, "XYZZW\nx", "appends at line end, next line intact");
+  press("Escape");
+  assert.equal(ta.getAttribute("data-vim"), "normal");
+});

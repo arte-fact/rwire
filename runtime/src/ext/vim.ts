@@ -19,9 +19,9 @@
 
 /** Version stamp logged by the loader — bump with every engine change so a
  * stale cached/embedded module is instantly visible in the console. */
-export const v = 6;
+export const v = 7;
 
-type Mode = "normal" | "insert" | "v" | "V";
+type Mode = "normal" | "insert" | "v" | "V" | "replace";
 interface Pend {
   count: string;
   op: "" | "d" | "c" | "y" | "g" | ">" | "<";
@@ -31,6 +31,8 @@ interface Pend {
   seek: "" | "f" | "F" | "t" | "T" | "r" | '"';
   anchor: number; // visual-mode anchor
   head: number; // visual-mode cursor (selection ends can't encode it in V)
+  /** Last visual range, for gv. */
+  lastVis: { anchor: number; head: number; line: boolean } | null;
 }
 
 const P = new WeakMap<Element, Pend>();
@@ -43,7 +45,7 @@ let pendingReg = "";
 const pend = (el: Element): Pend => {
   let p = P.get(el);
   if (!p) {
-    p = { count: "", op: "", obj: "", seek: "", anchor: 0, head: 0 };
+    p = { count: "", op: "", obj: "", seek: "", anchor: 0, head: 0, lastVis: null };
     P.set(el, p);
   }
   return p;
@@ -267,7 +269,8 @@ function setMode(doc: Document, el: TA, m: Mode): void {
   el.setAttribute("data-vim", m);
   const chip = doc.querySelector("[data-vim-chip]");
   if (chip) {
-    chip.textContent = m === "v" ? "VISUAL" : m === "V" ? "V-LINE" : m.toUpperCase();
+    chip.textContent =
+      m === "v" ? "VISUAL" : m === "V" ? "V-LINE" : m === "replace" ? "REPLACE" : m.toUpperCase();
     chip.setAttribute("data-vim-mode", m);
   }
 }
@@ -469,13 +472,28 @@ function normalKey(doc: Document, el: TA, k: string): void {
     return;
   }
 
-  // gg
+  // g-prefix: gg / ge / gv
   if (st.op === "g") {
     st.op = "";
+    st.count = "";
     if (k === "g") {
       const q = hadCount ? lineForCount(t, n) : firstNonBlank(t, 0);
-      st.count = "";
       el.setSelectionRange(q, q);
+    } else if (k === "e") {
+      let q = p;
+      for (let i = 0; i < n; i++) {
+        if (q <= 0) break;
+        q--;
+        while (q > 0 && cls(t[q]) !== 0) q--; // leave the current word
+        while (q > 0 && cls(t[q]) === 0) q--; // skip the gap
+      }
+      el.setSelectionRange(q, q);
+    } else if (k === "v" && st.lastVis) {
+      const lv = st.lastVis;
+      st.anchor = lv.anchor;
+      st.head = lv.head;
+      setMode(doc, el, lv.line ? "V" : "v");
+      extendTo(el, t, st, lv.head, lv.line);
     }
     return;
   }
@@ -723,6 +741,9 @@ function normalKey(doc: Document, el: TA, k: string): void {
       break;
     }
 
+    case "R":
+      setMode(doc, el, "replace");
+      break;
     case "u":
       clickKbd(doc, "mod+z");
       break;
@@ -782,9 +803,18 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
   }
 
   if (k === "Escape" || k === "v" || k === "V") {
+    st.lastVis = { anchor: st.anchor, head, line };
     setMode(doc, el, "normal");
     el.setSelectionRange(head, head);
     st.count = "";
+    return;
+  }
+  if (k === "o") {
+    // swap the selection's active end
+    const a = st.anchor;
+    st.anchor = head;
+    st.head = a;
+    extendTo(el, t, st, a, line);
     return;
   }
   if (k === "f" || k === "F" || k === "t" || k === "T") {
@@ -815,6 +845,7 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
       s = Math.min(st.anchor, head);
       e = Math.min(Math.max(st.anchor, head) + 1, t.length);
     }
+    st.lastVis = { anchor: st.anchor, head, line };
     yank(t.slice(s, e), line);
     setMode(doc, el, "normal");
     st.count = "";
@@ -868,6 +899,22 @@ export function i(doc: Document): void {
           setMode(doc, el, "normal");
         }
         return; // insert mode is the ordinary editor
+      }
+      if (mode === "replace") {
+        if (k === "Escape") {
+          e.preventDefault();
+          setMode(doc, el, "normal");
+          return;
+        }
+        if (mod || k.length > 1) return; // backspace/arrows stay native
+        e.preventDefault();
+        const t2 = el.value;
+        const p2 = el.selectionStart;
+        const le = lineEnd(t2, p2);
+        // overtype within the line; append past its end (vim R semantics)
+        const cut = p2 < le ? 1 : 0;
+        put(el, t2.slice(0, p2) + k + t2.slice(p2 + cut), p2 + 1);
+        return;
       }
       if (mod) {
         if (k === "r") {
