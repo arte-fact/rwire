@@ -20,8 +20,13 @@ pub struct FsEntry {
 }
 
 /// A scanned directory tree with a sealed root.
+///
+/// The snapshot remembers how it was scanned (`max_depth`, `ignore`) so
+/// [`rescan`](Self::rescan) reproduces the same view after the tree changes.
 pub struct FsSnapshot {
     root: PathBuf,
+    max_depth: usize,
+    ignore: Vec<String>,
     pub entries: Vec<FsEntry>,
 }
 
@@ -30,10 +35,32 @@ impl FsSnapshot {
     /// (dot-prefixed) and symlinks are skipped — symlinks could point outside
     /// the sandbox.
     pub fn scan(root: &Path, max_depth: usize) -> io::Result<Self> {
+        Self::scan_ignoring(root, max_depth, &[])
+    }
+
+    /// Like [`scan`](Self::scan), but also skip any directory whose name is in
+    /// `ignore` (e.g. `["target", "node_modules", "dist"]`) — build output an
+    /// editor never wants to walk. The ignore list is remembered for
+    /// [`rescan`](Self::rescan).
+    pub fn scan_ignoring(root: &Path, max_depth: usize, ignore: &[&str]) -> io::Result<Self> {
         let root = root.canonicalize()?;
+        let ignore: Vec<String> = ignore.iter().map(|s| (*s).to_string()).collect();
         let mut entries = Vec::new();
-        walk(&root, &root, 0, max_depth, &mut entries)?;
-        Ok(Self { root, entries })
+        walk(&root, &root, 0, max_depth, &ignore, &mut entries)?;
+        Ok(Self {
+            root,
+            max_depth,
+            ignore,
+            entries,
+        })
+    }
+
+    /// Re-scan the sealed root with the same depth and ignore list this
+    /// snapshot was built with — the truthful way to refresh after a create,
+    /// rename, or delete.
+    pub fn rescan(&self) -> io::Result<Self> {
+        let ignore: Vec<&str> = self.ignore.iter().map(String::as_str).collect();
+        Self::scan_ignoring(&self.root, self.max_depth, &ignore)
     }
 
     /// The sealed root.
@@ -67,6 +94,7 @@ fn walk(
     dir: &Path,
     depth: usize,
     max_depth: usize,
+    ignore: &[String],
     out: &mut Vec<FsEntry>,
 ) -> io::Result<()> {
     if depth >= max_depth {
@@ -86,13 +114,16 @@ fn walk(
         if ft.is_symlink() {
             continue;
         }
+        let is_dir = ft.is_dir();
+        if is_dir && ignore.iter().any(|n| n == &name) {
+            continue;
+        }
         let path = item.path();
         let rel = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
-        let is_dir = ft.is_dir();
         out.push(FsEntry {
             rel,
             name,
@@ -100,7 +131,7 @@ fn walk(
             depth,
         });
         if is_dir {
-            walk(root, &path, depth + 1, max_depth, out)?;
+            walk(root, &path, depth + 1, max_depth, ignore, out)?;
         }
     }
     Ok(())
@@ -138,5 +169,51 @@ mod tests {
         assert!(snap.resolve("../outside").is_none());
         assert!(snap.resolve("src/../../outside").is_none());
         assert!(snap.resolve("/etc/passwd").is_none());
+    }
+
+    #[test]
+    fn scan_ignoring_skips_named_dirs_but_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        fs::create_dir_all(dir.path().join("target/debug")).unwrap();
+        fs::write(dir.path().join("target/debug/app"), "bin").unwrap();
+        fs::create_dir(dir.path().join("node_modules")).unwrap();
+        fs::write(dir.path().join("node_modules/pkg.js"), "//").unwrap();
+
+        let snap = FsSnapshot::scan_ignoring(dir.path(), 8, &["target", "node_modules"]).unwrap();
+        let rels: Vec<_> = snap.entries.iter().map(|e| e.rel.as_str()).collect();
+        assert_eq!(rels, ["src", "src/main.rs"], "build dirs are pruned");
+    }
+
+    #[test]
+    fn rescan_reproduces_the_ignore_list_and_picks_up_new_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        fs::create_dir(dir.path().join("target")).unwrap();
+        fs::write(dir.path().join("target/junk"), "x").unwrap();
+
+        let snap = FsSnapshot::scan_ignoring(dir.path(), 8, &["target"]).unwrap();
+        assert_eq!(
+            snap.entries
+                .iter()
+                .map(|e| e.rel.as_str())
+                .collect::<Vec<_>>(),
+            ["a.txt"]
+        );
+
+        // A file appears after the initial scan; a fresh `target/` entry too.
+        fs::write(dir.path().join("b.txt"), "b").unwrap();
+        fs::write(dir.path().join("target/more"), "y").unwrap();
+        let fresh = snap.rescan().unwrap();
+        assert_eq!(
+            fresh
+                .entries
+                .iter()
+                .map(|e| e.rel.as_str())
+                .collect::<Vec<_>>(),
+            ["a.txt", "b.txt"],
+            "rescan sees new files and still prunes the ignored dir"
+        );
     }
 }

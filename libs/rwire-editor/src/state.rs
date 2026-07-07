@@ -270,7 +270,7 @@ impl FileEditorState {
     }
 
     fn rescan(&mut self, snap: &FsSnapshot) {
-        match FsSnapshot::scan(snap.root(), 8) {
+        match snap.rescan() {
             Ok(fresh) => {
                 self.entries = fresh.entries;
                 self.scanned = true;
