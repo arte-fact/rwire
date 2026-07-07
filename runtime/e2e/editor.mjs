@@ -111,7 +111,13 @@ redoBtn.fire("click", { target: redoBtn });
 await sleep(700);
 if (!disk().includes(stamp)) fail("redo did not restore the edit");
 // the textarea was re-keyed by undo/redo — re-find it for later steps
-if (!find((n) => n.tagName === "TEXTAREA")) fail("re-keyed textarea missing");
+const rekeyed = find((n) => n.tagName === "TEXTAREA");
+if (!rekeyed) fail("re-keyed textarea missing");
+// the CLIENT node must carry the server's content, not a stale restore
+// real browsers mirror the text child into .value on fresh nodes; the mock
+// defaults value to "" — read whichever carries content
+const shown = rekeyed.value || rekeyed.textContent || "";
+if (!shown.includes(stamp)) fail("re-keyed editor shows stale content (redo lost client-side)");
 
 // 4. Toggle autosave off → edits stay local until the Save button.
 const toggle = find((n) => n.textContent.includes("autosave") && clickable(n));

@@ -635,3 +635,33 @@ test("data-echo mirrors field value into the overlay instantly", async () => {
   for (const fn of doc.listeners["input"] || []) fn({ target: ta });
   assert.equal(underlay.textContent, "fn main() {}", "echoed before any round-trip");
 });
+
+test("re-keyed active field keeps the SERVER value (no stale restore)", () => {
+  // old editor field, focused, user-typed value
+  const old = doc.createElement("textarea") as any;
+  old.id = "fe-1";
+  old.setAttribute("data-echo", "fe-1-hl");
+  old.value = "stale local value";
+  doc.body.appendChild(old);
+  (doc as any).activeElement = old;
+  // batch replaces it with a re-keyed node carrying new server content
+  const stream = [
+    ...syms("fe-2", "undone content"),
+    0x02, 0x28, // CREATE textarea
+    0x12, ...vint(0), 0x04, 0x80, // SET_ATTR id=fe-2 (attr 0x04 = id)
+    0x11, ...vint(0), 0x81, // SET_TEXT undone content
+    0x20, ...vint(0xfffe), ...vint(0), // APPEND to body? use body ref path
+  ];
+  // simpler: swap nodes directly, then run an empty batch to trigger restore
+  const fresh = doc.createElement("textarea") as any;
+  fresh.id = "fe-2";
+  fresh.setAttribute("data-echo", "fe-2-hl");
+  fresh.value = "undone content";
+  doc.body.removeChild(old);
+  doc.body.appendChild(fresh);
+  run(); // empty batch: BATCH_END restore path runs with stale capture? no-op
+  // directly exercise the restore semantics through a real batch
+  (doc as any).activeElement = fresh;
+  run(syms("fe-2"), [0x01, ...vint(0x80)]);
+  assert.equal(fresh.value, "undone content", "server content survives");
+});

@@ -503,16 +503,25 @@ export function x(d: Uint8Array): void {
                 ? document.querySelector("[data-echo]")
                 : null)) as RwEl | null;
           if (ne) {
+            // Value/caret restore protects IN-FLIGHT typing on the SAME node.
+            // A re-keyed replacement (undo/redo/reload/file switch) carries
+            // the server's new content deliberately -- stamping the old
+            // node's value/caret onto it would silently revert the edit
+            // ("selection follows the version before"). Different node:
+            // focus only.
+            const same = ne === ae;
             if (
+              same &&
               av !== null &&
               (ne.tagName === "INPUT" || ne.tagName === "TEXTAREA") &&
               (ne as any).value !== av
             )
               (ne as any).value = av;
             if (ne !== document.activeElement) ne.focus();
-            try {
-              (ne as any).setSelectionRange(ap, aq);
-            } catch (_) {}
+            if (same)
+              try {
+                (ne as any).setSelectionRange(ap, aq);
+              } catch (_) {}
           }
         }
         return;
