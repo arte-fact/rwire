@@ -1,86 +1,92 @@
-# Vim mode for FileEditor — evaluation & plan (draft 2026-07-07)
+# Vim mode for FileEditor — evaluation & plan (rev. 2 — 2026-07-07)
 
 ## The architectural question: where does vim state live?
 
 Modal editing is keystroke-latency-sensitive: `j` must move the caret *now*.
-Four options were evaluated:
+
+**Rev. 1 recommended a full server-side engine** (every normal-mode key a
+round trip), reasoning from the localhost consumers (RTT ~1ms) and pure-Rust
+testability. **User review overturned it**: a client interpreter is viable if
+it is *lazy-loaded like the CSS and name maps* — pay-for-what-you-use, capsule
+untouched. That dissolves the size objection, and with it the philosophical
+one: **vim is an input method, not application state.** Pending operators,
+counts, registers are keystroke *composition* — the same class of state as IME
+composition, which the browser already owns. The server keeps owning what it
+always owned: the working copy, autosave, undo, persistence.
 
 | Option | Verdict |
 |---|---|
-| **A. Full server-side engine** (every normal-mode key is a round trip) | **Recommended** — see below |
-| B. Client-side vim interpreter in the runtime | Rejected: a usable core is 3–10KB min (CodeMirror's vim is ~60KB); blows the 15KB budget and puts app logic in the browser — against the framework's soul |
-| C. Hybrid (client motions, server mutations) | Rejected for v1: duplicates motion semantics in two languages; can be layered onto A later without changing the wire contract if internet latency ever matters |
-| D. Embed CodeMirror/Monaco | Already rejected in the syntax-coloring survey; doubly so here |
+| **B′. Client engine as a lazy runtime extension** | **Recommended** — zero-latency motions on any link; capsule unchanged; composes with the shipped editor paths (see below) |
+| A. Full server-side engine | Rejected after review: adds `Ev::Keydown` flood + SET_SELECTION wire surface, feels heavy off-LAN, and misplaces input-method state on the server |
+| B. Vim inside the CORE runtime | Rejected: 3–10KB against the 15KB capsule budget for a feature most apps never use |
+| C. Hybrid split engine / D. CodeMirror | Rejected as before (duplication / against the framework) |
 
-**Why A wins here:** rwire's real consumers (claw, llama-modnitor, the examples)
-are localhost/LAN apps — RTT ~1ms, so server-side vim feels native. The engine
-becomes **pure Rust** (`fn key(&mut VimState, text, caret, key) -> VimEffect`),
-unit-testable without a browser. And every mutation flows through the existing
-working-copy path, so **autosave, dirty tracking, undo/redo, and conflict
-gating compose for free** — vim `u` literally maps to `Action::Undo`.
-Trade-off: over high-latency links motions feel heavy; vim mode is opt-in and
-the modeless editor remains the default.
+## Delivery: the runtime-extension primitive (new, reusable)
 
-## Framework gaps to fill (the reusable part)
+Not wire-streamed JS (that would need `eval` → CSP `unsafe-eval`). Instead:
 
-Verified against the current tree:
+- `runtime/src/ext/vim.ts` builds to a **separate artifact** `vim.min.js`,
+  vendored via `include_str!` like `runtime.min.js`, served from memory at a
+  server route (`/_rw/ext/vim.js`) — single-binary story intact.
+- The core runtime gains a tiny **extension loader** (~150B): after a batch,
+  if `[data-vim]` exists and the module isn't loaded, `import()` it once.
+  Standard dynamic import: same-origin, HTTP-cacheable, `script-src 'self'`.
+- This is a general mechanism: any future heavy interaction module
+  (drag-drop kit, canvas widget) ships the same way, with its own size budget,
+  outside the capsule.
 
-1. **`Ev::Keydown` + `EventPayload::Key`** — no keydown event type exists;
-   payloads are Text/Data/Form/Empty. New payload carries
-   `{ key, mods, sel_start, sel_end }` — **caret position rides on every
-   keystroke**, so the server never tracks caret between keys (no drift;
-   clicking around in normal mode just works).
-2. **`SET_SELECTION` opcode** (server → client caret/selection control on an
-   element ref). The runtime already calls `setSelectionRange` in the
-   BATCH_END focus-restore path — this promotes it to a first-class opcode.
-   Also useful beyond vim: caret restore after undo/redo re-keying.
-3. **Conditional preventDefault** — client-side, synchronous, attribute-driven:
-   when the textarea carries `data-vim` (server-rendered mode flag), the
-   keydown binding preventDefaults unmodified printable keys; insert mode has
-   no keydown binding at all (today's editor IS insert mode). The `data-kbd`
-   global hook must skip targets with `data-vim` (Esc means "leave insert",
-   not "cancel prompt", while the editor has vim focus).
-4. Runtime budget: ~+300–400B → next bump justified.
+## Why the composition is nearly free
+
+The module interprets normal/visual-mode keydowns on the `[data-vim]`
+textarea, mutates `textarea.value` + caret **locally**, and dispatches a
+synthetic `input` event. Everything downstream is the shipped machinery,
+unchanged: overlay echo → debounced `Edit` → server working copy → dirty
+diff → autosave → undo history. No new opcodes. No caret sync. Specifically:
+
+- `u` / `Ctrl-R` → module clicks the existing `[data-kbd="mod+z"]` /
+  `[data-kbd="mod+shift+z"]` elements (server undo stays the one history).
+- `:w` (v1.5) → clicks `[data-kbd="mod+s"]`.
+- Visual-mode highlight → native textarea selection. Free.
+- Mode chip (NORMAL/INSERT/VISUAL) → a server-rendered `[data-vim-chip]`
+  placeholder whose text/class the module updates client-side — input-method
+  status is client-owned by definition.
+- `data-kbd` global hook skips events whose target has `[data-vim]` while not
+  in insert mode (Esc = leave insert, not cancel-prompt).
 
 ## Engine scope
 
 **v1** — modes: normal / insert / visual(char). Motions: `h j k l 0 $ ^ w b e
-gg G` (+counts, e.g. `3j`, `d2w`; wrap=off means logical lines == visual
-lines — `j`/`k` are exact). Operators: `d c y` + motion, `x dd yy cc D C p P`,
-`o O a A i I`, `u` → existing undo stack, `Ctrl-R` → redo. Unnamed register
-only. Mode chip in the status bar (NORMAL/INSERT/VISUAL, distinct tones);
-visual mode renders through the native textarea selection via SET_SELECTION —
-free highlighting.
-
-**v1.5 backlog:** `V` line-visual, `f/t/F/T`, dot-repeat (needs change
-recording), named registers, `:w :q` ex-line, block-cursor rendering (overlay
-tint on the caret's char cell).
-
-**Out of scope:** macros, marks, plugins, `:%s` — this is a modal-editing
+gg G` + counts (`3j`, `d2w`; wrap=off ⇒ logical lines == visual lines).
+Operators: `d c y` + motion, `x dd yy cc D C p P o O a A i I`, `u`/`Ctrl-R`
+via server history. Unnamed register (module-local).
+**v1.5:** `V` line-visual, `f/t/F/T`, dot-repeat, `:w :q` ex-line, block
+cursor (overlay char-cell tint). **Out:** macros, marks, `:%s` — modal
 affordance, not a vim clone.
 
-## Plan (phases, ~2.5 days)
+## Plan (~2.5 days)
 
 | Phase | Work | Size |
 |---|---|---|
-| **V1 transport** | `Ev::Keydown`, `EventPayload::Key` (key+mods+caret), `SET_SELECTION` opcode (next free El-op slot), `data-vim` preventDefault rules, `data-kbd` scoping, runtime tests | 0.5d |
-| **V2 engine** | `VimState` + `key()` reducer in rwire-editor, pure Rust, ~40 unit tests (motions, operators, counts, register, mode transitions) | 1d |
-| **V3 kit** | `FileEditorState.vim` + status-bar toggle (like autosave), mode chip, insert-mode passthrough, undo/redo mapping, generation interplay | 0.5d |
-| **V4 proof** | Enable in examples/editor (off by default), E2E: `dw` hits the disk via autosave, `i…Esc,u` round-trips, visual-`d`; docs page | 0.5d |
+| **M1 extension primitive** | separate esbuild artifact + own size budget; server route serving vendored module; core loader on `[data-vim]`; `data-kbd` scoping | 0.5d |
+| **M2 vim module** | `ext/vim.ts`: modal engine, motions/operators/counts, synthetic-input dispatch, chip updates; node:test suite against the mock DOM (~40 tests) | 1d |
+| **M3 kit** | `.vim(true)` + status-bar toggle (like autosave) rendering `data-vim` + chip placeholder; insert-mode passthrough | 0.5d |
+| **M4 proof** | examples/editor toggle (off by default), E2E (`dw` → disk via autosave; `i…Esc`; visual-`d`; `u` round-trip), docs page | 0.5d |
 
 ## Risks
 
-- **IME / dead keys** in normal mode (`e.key`-based): documented limitation;
-  standard for web vim implementations.
-- **preventDefault correctness**: only unmodified keys — never eat
-  browser-level chords (⌘L, ⌘T are uninterceptable anyway).
-- **Key-event volume**: ~15 keys/s × ~30B is negligible on the wire.
-- **Latency over internet**: opt-in feature; hybrid motion-echo (option C) is
-  the future escape hatch, layerable without wire changes.
+- **IME / dead keys** in normal mode (`e.key`-based) — documented limitation,
+  standard for web vim.
+- **Synthetic-input fidelity**: the module must dispatch events the delegated
+  dispatcher and echo hook both see (bubbling `Event("input")`) — covered by
+  M1 tests.
+- **Module staleness vs core**: vendored together, synced by the same
+  `npm run sync` + CI drift gate.
+- **preventDefault correctness**: unmodified keys only; browser-level chords
+  untouched.
 
 ## Open decisions
 
-1. Default state of vim mode in the example/kit (`off` recommended — discoverable via status-bar toggle).
+1. Default state of vim mode in the example/kit (`off` recommended — status-bar toggle).
 2. Is visual-char enough for v1, or is `V` (line) a must-have?
-3. `:w`/`:q` ex-line in v1 or v1.5? (v1.5 recommended; ⌘S already saves.)
-4. Persist the vim preference per session (memory state) or per app default only?
+3. `:w`/`:q` ex-line in v1 or v1.5? (v1.5 recommended; ⌘S exists.)
+4. Persist the vim preference (per-session state) or per-app default only?
