@@ -101,6 +101,7 @@ Single-byte opcodes followed by arguments. Strings are interned in a symbol tabl
 | BIND_SENTINEL | 0x4F | `[ref, handler, len, params...]` | One-shot visibility sentinel (infinite scroll) |
 | STYLE_DEF | 0x87 | `[count, (rule_len, rule)...]` | Lazy CSS rule delivery |
 | MAP_DEF | 0x88 | `[count, (kind, code, len, name)...]` | Lazy name-map delivery |
+| MOD_DEF | 0x8B | `[count, (len, name)...]` | Lazy runtime-extension hint (`/_rw/ext/{name}.js`) |
 | BATCH_END | 0xFF | | End of message |
 
 Symbol indices: 0x00-0x7F reserved (e.g., 0x04="id"), 0x80-0xFF session-specific.

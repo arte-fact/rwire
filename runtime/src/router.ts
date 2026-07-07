@@ -49,7 +49,12 @@ export function installRouter(): void {
     const combo = (mod ? "mod+" : "") + (ke.shiftKey ? "shift+" : "") + key;
     const t = document.querySelector('[data-kbd="' + combo + '"]') as HTMLElement | null;
     if (t) {
-      const tag = (e.target as Element).tagName;
+      const tgt = e.target as Element;
+      // A vim-moded editor owns its keys outside insert (Esc = leave mode,
+      // not cancel-prompt); the vim extension handles them in capture phase.
+      const vim = tgt.getAttribute && tgt.getAttribute("data-vim");
+      if (vim && vim !== "insert") return;
+      const tag = tgt.tagName;
       const field = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if (mod || !field || key === "escape") {
         e.preventDefault();

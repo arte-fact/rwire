@@ -79,12 +79,18 @@ the data-kbd elements). Unnamed register (module-local). Saving stays
 
 ## Roadmap (~2.75 days)
 
-- [ ] **M1 — extension primitive** (0.5d): separate esbuild artifact with its
-  own size budget; vendored module served at `/_rw/ext/vim.js`; `MOD_DEF`-style
-  server hint opcode starts `import()` during the batch; `data-kbd` hook skips
-  `[data-vim]` targets outside insert mode.
-  *Accept:* module loads once per page, hint deduped per connection, core
-  budget untouched beyond the loader; loader + hint unit-tested.
+- [x] **M1 — extension primitive** (done 2026-07-07): `MOD_DEF` = 0x8B;
+  `ElementBuilder::ext("vim")` registers the need at all three emission sites
+  and the hint prefixes the message BEFORE MAP_DEF (imports start earliest).
+  Deviation: no per-connection dedup — the runtime's page-level import set
+  makes re-hints idempotent at ~7B/batch, so no signature threading.
+  Separate ESM artifact (`ext/vim.min.js`, own 9K/3.5K budget, synced +
+  drift-gated with the core); served vendored at `/_rw/ext/vim.js`
+  (curl-verified); loader in core (+~330B, inside the frozen line — the
+  loader IS the freeze's enabling mechanism); `__rwImport` hook for sandboxed
+  harnesses; `data-kbd` yields to `[data-vim]` outside insert. M1 skeleton of
+  the vim module ships mode plumbing (normal/insert/v/V transitions + chip).
+  69 runtime tests + 2 Rust tests cover the loader, dedup, scoping, format.
 - [ ] **M2 — vim module** (1.25d): `ext/vim.ts` modal engine — normal/insert/
   v/V, motions `h j k l 0 $ ^ w b e gg G` + counts, operators
   `d c y x dd yy cc D C p P o O a A i I`, unnamed register, synthetic-input

@@ -1389,6 +1389,21 @@ fn login_capsule_config(
     config.with_composite_css(composite_table.generate_css())
 }
 
+/// Vendored lazy runtime extensions, served at `/_rw/ext/{name}.js` and
+/// dynamic-imported by the core loader on a MOD_DEF hint. Same single-binary
+/// vendoring as the core runtime artifact; `npm run sync` is the write path.
+const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
+
+async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: public, max-age=300\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_client<F>(
     mut stream: TcpStream,
@@ -1424,6 +1439,14 @@ async fn handle_client<F>(
     // while the server is at capacity.
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
+        if path == "/_rw/ext/vim.js" {
+            let mut drain = vec![0u8; n];
+            let _ = stream.read_exact(&mut drain).await;
+            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
+                eprintln!("[{}] ext module error: {}", peer_addr, e);
+            }
+            return;
+        }
         if path == "/health" || path == "/ready" || path == "/metrics" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;

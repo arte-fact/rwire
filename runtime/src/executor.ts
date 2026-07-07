@@ -14,6 +14,10 @@ import { BL, xi } from "./bind.ts";
 import { fl2, fb2, sl2, sb2, uf2, us2 } from "./actions.ts";
 import { bind } from "./delegate.ts";
 
+/** Extensions already imported (once per page). */
+const ext = new Set<string>();
+const TD = new TextDecoder();
+
 export function x(d: Uint8Array): void {
   const r: RwEl[] = [];
   let i = 0,
@@ -37,7 +41,7 @@ export function x(d: Uint8Array): void {
         while (n--) {
           const [sl, ll] = rv(d, i);
           i += ll;
-          st.s[st.sc++] = new TextDecoder().decode(d.slice(i, i + sl));
+          st.s[st.sc++] = TD.decode(d.slice(i, i + sl));
           i += sl;
         }
       } else if (o === OP.SYMBOLS_EXTEND) {
@@ -49,7 +53,7 @@ export function x(d: Uint8Array): void {
         while (n--) {
           const [sl2c, ll] = rv(d, i);
           i += ll;
-          st.s[st.sc++] = new TextDecoder().decode(d.slice(i, i + sl2c));
+          st.s[st.sc++] = TD.decode(d.slice(i, i + sl2c));
           i += sl2c;
         }
       } else if (o === OP.WORD_TABLE) {
@@ -58,7 +62,7 @@ export function x(d: Uint8Array): void {
         while (n--) {
           const [l, ll] = rv(d, i);
           i += ll;
-          st.wt.push(new TextDecoder().decode(d.slice(i, i + l)));
+          st.wt.push(TD.decode(d.slice(i, i + l)));
           i += l;
         }
       } else if (o === OP.GET_BY_ID) {
@@ -217,13 +221,13 @@ export function x(d: Uint8Array): void {
       } else if (o === OP.ROUTE_PUSH_INLINE) {
         const [sl, ll] = rv(d, i);
         i += ll;
-        const u = new TextDecoder().decode(d.slice(i, i + sl));
+        const u = TD.decode(d.slice(i, i + sl));
         i += sl;
         history.pushState(null, "", u);
       } else if (o === OP.ROUTE_REPLACE_INLINE) {
         const [sl, ll] = rv(d, i);
         i += ll;
-        const u = new TextDecoder().decode(d.slice(i, i + sl));
+        const u = TD.decode(d.slice(i, i + sl));
         i += sl;
         history.replaceState(null, "", u);
       } else if (o === OP.STYLE_SET) {
@@ -276,7 +280,7 @@ export function x(d: Uint8Array): void {
         while (n--) {
           const [rl, ll] = rv(d, i);
           i += ll;
-          const rule = new TextDecoder().decode(d.slice(i, i + rl));
+          const rule = TD.decode(d.slice(i, i + rl));
           i += rl;
           try {
             st.DS.sheet!.insertRule(rule, st.DS.sheet!.cssRules.length);
@@ -292,7 +296,7 @@ export function x(d: Uint8Array): void {
             c = d[i++],
             [l, ll] = rv(d, i);
           i += ll;
-          const nm = new TextDecoder().decode(d.slice(i, i + l));
+          const nm = TD.decode(d.slice(i, i + l));
           i += l;
           if (k === 6) {
             E[c] = nm;
@@ -301,6 +305,25 @@ export function x(d: Uint8Array): void {
             (k === 0 ? E : k === 1 ? V : k === 2 ? AT : k === 3 ? AV : k === 4 ? P : Y)[
               c
             ] = nm;
+        }
+      } else if (o === OP.MOD_DEF) {
+        // Lazy runtime extensions: import each named module once per page;
+        // the module's exported i(document) installs it. __rwImport lets the
+        // sandboxed E2E harness substitute a loader.
+        let [mn, mnl] = rv(d, i);
+        i += mnl;
+        while (mn--) {
+          const [l, ll] = rv(d, i);
+          i += ll;
+          const name = TD.decode(d.slice(i, i + l));
+          i += l;
+          if (!ext.has(name)) {
+            ext.add(name);
+            const imp = (globalThis as any).__rwImport || ((u: string) => import(u));
+            imp(BASE + "/_rw/ext/" + name + ".js")
+              .then((m: any) => m.i && m.i(document))
+              .catch((err: unknown) => console.error("ext", name, err));
+          }
         }
       } else if (o === OP.STYLE_COMPOSITE) {
         const [f, fl] = rv(d, i);

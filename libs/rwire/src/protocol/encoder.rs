@@ -46,6 +46,7 @@ pub struct OpcodeBuffer {
     /// `(category, code)` name-map entries referenced by this buffer, for lazy
     /// name delivery (`MAP_DEF`) — the element/event/attr/style-token names.
     referenced_names: BTreeSet<(u8, u8)>,
+    referenced_exts: BTreeSet<&'static str>,
 }
 
 impl OpcodeBuffer {
@@ -56,6 +57,7 @@ impl OpcodeBuffer {
             next_symbol: SYMBOL_SESSION_START as u32,
             referenced_styles: BTreeSet::new(),
             referenced_names: BTreeSet::new(),
+            referenced_exts: BTreeSet::new(),
         }
     }
 
@@ -67,6 +69,16 @@ impl OpcodeBuffer {
     /// The set of `(category, code)` name-map entries referenced so far (for `MAP_DEF`).
     pub fn referenced_names(&self) -> &BTreeSet<(u8, u8)> {
         &self.referenced_names
+    }
+
+    /// Lazy runtime-extension modules referenced by this message (MOD_DEF).
+    pub fn referenced_exts(&self) -> &BTreeSet<&'static str> {
+        &self.referenced_exts
+    }
+
+    /// Record that an element in this message needs the named extension.
+    pub fn ref_ext(&mut self, name: &'static str) {
+        self.referenced_exts.insert(name);
     }
 
     /// Get the current ref count.

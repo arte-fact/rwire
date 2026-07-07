@@ -187,6 +187,23 @@ fn name_for(category: u8, code: u8) -> Option<&'static str> {
 /// style-token names: the capsule ships empty maps and each name arrives the first time
 /// its code is referenced. SVG element codes are emitted with wire `kind` 6, so the client
 /// sets both `E[code]` and `SE[code]=1`. Returns empty bytes when there is nothing new.
+/// `MOD_DEF` bytes for the lazy runtime-extension names this message references.
+/// No per-connection tracking: the runtime's page-level import set makes
+/// re-hints idempotent, and a hint is ~7 bytes. Empty when nothing referenced.
+pub fn mod_def_prefix(referenced: &BTreeSet<&'static str>) -> BytesMut {
+    if referenced.is_empty() {
+        return BytesMut::new();
+    }
+    let mut out = BytesMut::new();
+    out.put_u8(crate::protocol::opcodes::MOD_DEF);
+    crate::protocol::varint::write_varint(&mut out, referenced.len() as u32);
+    for name in referenced {
+        crate::protocol::varint::write_varint(&mut out, name.len() as u32);
+        out.extend_from_slice(name.as_bytes());
+    }
+    out
+}
+
 pub fn map_def_prefix(referenced: &BTreeSet<(u8, u8)>, sent: &mut HashSet<(u8, u8)>) -> BytesMut {
     let mut new_entries: Vec<(u8, u8, &'static str)> = Vec::new();
     for &(category, code) in referenced {
@@ -461,6 +478,7 @@ pub struct ElementBuilder {
     resize_handle: bool,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
+    exts: Vec<&'static str>,
     /// Binary-encoded style utility tokens (compact 1-byte each)
     style_utils: Vec<u16>,
     /// Binary-encoded style property+value pairs (2 bytes each)
@@ -497,6 +515,7 @@ impl ElementBuilder {
             resize_handle: false,
             children: Vec::new(),
             synced: None,
+            exts: Vec::new(),
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
@@ -569,6 +588,7 @@ impl ElementBuilder {
             resize_handle: false,
             children: Vec::new(),
             synced: Some(synced),
+            exts: Vec::new(),
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
@@ -600,6 +620,15 @@ impl ElementBuilder {
     }
 
     /// Set an attribute on this element.
+    /// Declare that this element needs the named lazy runtime extension
+    /// (e.g. `"vim"`). The server hints it via MOD_DEF; the runtime imports
+    /// `/_rw/ext/{name}.js` once per page. Idempotent client-side, so the
+    /// server re-hints per batch instead of tracking per connection.
+    pub fn ext(mut self, name: &'static str) -> Self {
+        self.exts.push(name);
+        self
+    }
+
     pub fn attr(mut self, key: &str, value: &str) -> Self {
         self.attrs.push((key.to_string(), value.to_string()));
         self
@@ -1969,6 +1998,9 @@ impl BuildContext {
             }
         }
 
+        for e in &el.exts {
+            self.buf.ref_ext(e);
+        }
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
         if let Some(ref class) = el.class {
@@ -2120,6 +2152,9 @@ impl BuildContext {
             return 0;
         }
 
+        for e in &el.exts {
+            self.buf.ref_ext(e);
+        }
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
         if let Some(ref class) = el.class {
@@ -2255,7 +2290,8 @@ impl BuildContext {
     ) -> Bytes {
         self.buf.end();
         // Names (MAP_DEF) before CSS (STYLE_DEF); both land before the body that uses them.
-        let mut prefix = map_def_prefix(self.buf.referenced_names(), sent_maps);
+        let mut prefix = mod_def_prefix(self.buf.referenced_exts());
+        prefix.extend_from_slice(&map_def_prefix(self.buf.referenced_names(), sent_maps));
         prefix.extend_from_slice(&style_def_prefix(self.buf.referenced_styles(), sent));
         let body = self.buf.finish();
         prepend(prefix, body)
@@ -2656,10 +2692,11 @@ pub fn build_synced_update_with_known_symbols(
     // Lazy delivery: prepend MAP_DEF (element/event/attr/style-token names) then STYLE_DEF
     // (CSS rules) for anything this batch references that the connection hasn't received yet.
     // Both land before the body opcodes that use them.
-    let mut prefix = match sent_maps {
+    let mut prefix = mod_def_prefix(buf.referenced_exts());
+    prefix.extend_from_slice(&match sent_maps {
         Some(sent) => map_def_prefix(buf.referenced_names(), sent),
         None => BytesMut::new(),
-    };
+    });
     let style_prefix = match sent_css {
         Some(sent) => style_def_prefix(buf.referenced_styles(), sent),
         None => BytesMut::new(),
@@ -2793,6 +2830,9 @@ fn emit_update_element(
     }
 
     // Create the element
+    for e in &el.exts {
+        buf.ref_ext(e);
+    }
     let ref_idx = buf.create(el.el_type.as_u8());
 
     // Set class
@@ -3037,6 +3077,34 @@ fn collect_symbols_recursive_with_known(
 mod map_def_tests {
     use super::*;
     use std::collections::{BTreeSet, HashSet};
+
+    #[test]
+    fn mod_def_prefix_format_and_emptiness() {
+        let mut refs: BTreeSet<&'static str> = BTreeSet::new();
+        assert!(mod_def_prefix(&refs).is_empty());
+        refs.insert("vim");
+        let bytes = mod_def_prefix(&refs);
+        assert_eq!(
+            &bytes[..],
+            &[crate::protocol::opcodes::MOD_DEF, 1, 3, b'v', b'i', b'm']
+        );
+    }
+
+    #[test]
+    fn ext_rides_the_message_as_a_mod_def_prefix() {
+        let element = el(El::Div).ext("vim").text("x");
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&element, &());
+        ctx.emit(&element, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+        let needle = [crate::protocol::opcodes::MOD_DEF, 1, 3, b'v', b'i', b'm'];
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MOD_DEF hint missing from emission"
+        );
+    }
 
     #[test]
     fn map_def_prefix_encodes_names_and_dedups_per_connection() {

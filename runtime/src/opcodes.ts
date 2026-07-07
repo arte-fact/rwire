@@ -48,6 +48,7 @@ export const STYLE_DEF = 0x87;
 export const MAP_DEF = 0x88;
 export const STYLE_PSEUDO = 0x89;
 export const STYLE_BREAKPOINT = 0x8a;
+export const MOD_DEF = 0x8b;
 export const SYMBOLS = 0xf0;
 export const SYMBOLS_EXTEND = 0xf1;
 export const WORD_TABLE = 0xf2;

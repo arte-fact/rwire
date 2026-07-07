@@ -7,7 +7,7 @@
 // - dist/runtime.js (readable) is emitted beside dist/runtime.min.js for
 //   debugging; only the .min.js is embedded by the rwire crate (via sync.mjs).
 import { build } from "esbuild";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
 // --- step 0: regenerate src/opcodes.ts from protocol/opcodes.rs (RT3) ---
@@ -57,3 +57,17 @@ const min = readFileSync("dist/runtime.min.js", "utf8").trimEnd();
 writeFileSync("dist/runtime.min.js", min);
 const gz = gzipSync(Buffer.from(min)).length;
 console.log(`runtime.min.js: ${min.length} bytes (${gz} gzipped)`);
+
+// --- extensions: separately-built lazy modules (ESM for dynamic import) ---
+mkdirSync(new URL("dist/ext/", import.meta.url), { recursive: true });
+await build({
+  entryPoints: [new URL("src/ext/vim.ts", import.meta.url).pathname],
+  bundle: true,
+  format: "esm",
+  minify: true,
+  outfile: new URL("dist/ext/vim.min.js", import.meta.url).pathname,
+});
+{
+  const out = readFileSync(new URL("dist/ext/vim.min.js", import.meta.url));
+  console.log(`ext/vim.min.js: ${out.length} bytes (${gzipSync(out).length} gzipped)`);
+}

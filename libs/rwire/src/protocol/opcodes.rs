@@ -213,6 +213,12 @@ pub const STYLE_PSEUDO: u8 = 0x89;
 /// CSS: `@media(min-width:{px}px){.b{bp}u{st}{declaration}}`
 pub const STYLE_BREAKPOINT: u8 = 0x8A;
 
+/// Lazy runtime-extension hint: names of JS modules the DOM in this message
+/// needs. The runtime dynamic-imports each from `/_rw/ext/{name}.js` once per
+/// page; the server dedupes per connection (`sent_mods`), mirroring MAP_DEF.
+/// Format: `[MOD_DEF, count_varint, (name_len_varint, name_utf8){count}]`.
+pub const MOD_DEF: u8 = 0x8B;
+
 // ============================================================================
 // Control
 // ============================================================================

@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
+// FROZEN (docs/vim-mode-design.md): features >~500B ship as lazy extensions.
+// The one-time cost of the extension LOADER itself is included in this line.
 const MAX_RAW = 15_200;
-const MAX_GZIP = 5_500;
+const MAX_GZIP = 5_550;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;
