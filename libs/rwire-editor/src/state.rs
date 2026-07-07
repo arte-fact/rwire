@@ -135,6 +135,7 @@ pub enum Pending {
 
 /// The embeddable state. `Default` enables autosave; use
 /// [`FileEditorState::manual`] for an off-by-default editor.
+#[derive(Clone, Debug)]
 pub struct FileEditorState {
     pub entries: Vec<FsEntry>,
     pub selected: Option<usize>,
