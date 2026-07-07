@@ -136,7 +136,10 @@ impl<'a> CodeEditor<'a> {
                     .set("overflow", "hidden")
                     .set("width", &layer_w),
             )
-            .text(self.content);
+            .text(self.content)
+            // Tab indents instead of moving focus (runtime editor behavior);
+            // Shift+Tab dedents. Empty value = tab character.
+            .attr("data-tab-insert", "");
         if self.vim {
             field = field.attr("data-vim", "normal");
         }

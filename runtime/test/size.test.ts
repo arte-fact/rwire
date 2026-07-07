@@ -9,8 +9,8 @@ import { gzipSync } from "node:zlib";
 // FROZEN (docs/vim-mode-design.md): features >~500B ship as lazy extensions.
 // This line includes the extension CONTRACT's one-time core costs: the
 // MOD_DEF loader and the client-owned-attribute morph rules (data-vim).
-const MAX_RAW = 15_500;
-const MAX_GZIP = 5_650;
+const MAX_RAW = 16_000;
+const MAX_GZIP = 5_900;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

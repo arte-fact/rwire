@@ -56,6 +56,38 @@ export function installRouter(): void {
       if (key === "escape") e.preventDefault();
       if (vim !== "insert") return;
     }
+    // Tab is an editor action on [data-tab-insert] fields: insert indentation
+    // (attr value N = that many spaces, else a tab char); Shift+Tab removes
+    // one leading indent from the line. Synthetic input keeps echo/server in
+    // sync. Vim normal/visual modes returned above, so this only runs while
+    // actually typing.
+    if (ke.key === "Tab" && !mod) {
+      const f2 = tgt as HTMLTextAreaElement;
+      const spec = f2.getAttribute && f2.getAttribute("data-tab-insert");
+      if (spec != null) {
+        e.preventDefault();
+        const ins = /^[1-9]$/.test(spec) ? " ".repeat(+spec) : "\t";
+        const v = f2.value;
+        let ss = f2.selectionStart;
+        if (ke.shiftKey) {
+          const ls = v.lastIndexOf("\n", ss - 1) + 1;
+          let cut = 0;
+          if (v[ls] === "\t") cut = 1;
+          else while (cut < ins.length && v[ls + cut] === " ") cut++;
+          if (cut) {
+            f2.value = v.slice(0, ls) + v.slice(ls + cut);
+            f2.setSelectionRange(Math.max(ls, ss - cut), Math.max(ls, ss - cut));
+          }
+        } else {
+          f2.value = v.slice(0, ss) + ins + v.slice(f2.selectionEnd);
+          ss += ins.length;
+          f2.setSelectionRange(ss, ss);
+        }
+        if ((f2 as any).dispatchEvent) f2.dispatchEvent(new Event("input", { bubbles: true }));
+        else (f2 as any).fire && (f2 as any).fire("input", { target: f2 });
+        return;
+      }
+    }
     const t = document.querySelector('[data-kbd="' + combo + '"]') as HTMLElement | null;
     if (t) {
       const tag = tgt.tagName;

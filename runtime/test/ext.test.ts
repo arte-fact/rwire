@@ -115,3 +115,46 @@ test("ext/vim.min.js stays within its own budget", async () => {
   assert.ok(out.length <= 9_000, `vim ext ${out.length} bytes exceeds 9000`);
   assert.ok(gzipSync(out).length <= 3_500, "vim ext gzip exceeds 3500");
 });
+
+test("Tab indents on [data-tab-insert] fields; Shift+Tab dedents", async () => {
+  const { installRouter } = await import("../src/router.ts");
+  (globalThis as any).window = { addEventListener: () => {} };
+  (globalThis as any).history = { pushState() {}, replaceState() {} };
+  installRouter();
+  const ta = doc.createElement("textarea") as any;
+  ta.setAttribute("data-tab-insert", "");
+  ta.value = "line";
+  ta.selectionStart = 2;
+  ta.selectionEnd = 2;
+  doc.body.appendChild(ta);
+  let inputs = 0;
+  ta.addEventListener("input", () => inputs++);
+  let prevented = 0;
+  const press = (o: Record<string, unknown> = {}) => {
+    for (const fn of doc.listeners["keydown"] || [])
+      fn({ key: "Tab", target: ta, preventDefault: () => prevented++, ...o });
+  };
+  press();
+  assert.equal(ta.value, "li\tne", "tab char inserted at caret");
+  assert.equal(ta.selectionStart, 3);
+  assert.equal(prevented, 1, "focus move suppressed");
+  assert.equal(inputs, 1, "synthetic input keeps echo/server in sync");
+  // dedent strips LINE-LEADING indent only
+  ta.value = "\tline";
+  ta.setSelectionRange(3, 3);
+  press({ shiftKey: true });
+  assert.equal(ta.value, "line", "Shift+Tab removed the leading tab");
+  assert.equal(ta.selectionStart, 2, "caret shifted with the removal");
+  // spaces variant
+  ta.setAttribute("data-tab-insert", "2");
+  ta.value = "x";
+  ta.setSelectionRange(0, 0);
+  press();
+  assert.equal(ta.value, "  x", "N spaces per the attr value");
+  // vim normal mode owns Tab (guard returns before the insert)
+  ta.setAttribute("data-vim", "normal");
+  ta.value = "x";
+  ta.setSelectionRange(0, 0);
+  press();
+  assert.equal(ta.value, "x", "no insert while vim owns the keys");
+});
