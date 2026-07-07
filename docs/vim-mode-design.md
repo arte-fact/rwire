@@ -1,4 +1,4 @@
-# Vim mode for FileEditor — evaluation & plan (rev. 2 — 2026-07-07)
+# Vim mode for FileEditor — evaluation & plan (rev. 3 — 2026-07-07)
 
 ## The architectural question: where does vim state live?
 
@@ -28,9 +28,11 @@ Not wire-streamed JS (that would need `eval` → CSP `unsafe-eval`). Instead:
 - `runtime/src/ext/vim.ts` builds to a **separate artifact** `vim.min.js`,
   vendored via `include_str!` like `runtime.min.js`, served from memory at a
   server route (`/_rw/ext/vim.js`) — single-binary story intact.
-- The core runtime gains a tiny **extension loader** (~150B): after a batch,
-  if `[data-vim]` exists and the module isn't loaded, `import()` it once.
-  Standard dynamic import: same-origin, HTTP-cacheable, `script-src 'self'`.
+- The core runtime gains a tiny **extension loader**: the server HINTS the
+  modules a batch needs via a `MOD_DEF`-style opcode (exactly like `MAP_DEF` —
+  sent once per connection, deduped), so the `import()` starts while the batch
+  executes instead of after a DOM scan. Standard dynamic import: same-origin,
+  HTTP-cacheable, `script-src 'self'`.
 - This is a general mechanism: any future heavy interaction module
   (drag-drop kit, canvas widget) ships the same way, with its own size budget,
   outside the capsule.
@@ -53,15 +55,16 @@ diff → autosave → undo history. No new opcodes. No caret sync. Specifically:
 - `data-kbd` global hook skips events whose target has `[data-vim]` while not
   in insert mode (Esc = leave insert, not cancel-prompt).
 
-## Engine scope
+## Engine scope (locked 2026-07-07: motions for text editing, NO commands)
 
-**v1** — modes: normal / insert / visual(char). Motions: `h j k l 0 $ ^ w b e
+Modal *text editing* only — the `: ` ex-line is out of scope permanently, not
+deferred. Modes: normal / insert / visual(char). Motions: `h j k l 0 $ ^ w b e
 gg G` + counts (`3j`, `d2w`; wrap=off ⇒ logical lines == visual lines).
 Operators: `d c y` + motion, `x dd yy cc D C p P o O a A i I`, `u`/`Ctrl-R`
-via server history. Unnamed register (module-local).
-**v1.5:** `V` line-visual, `f/t/F/T`, dot-repeat, `:w :q` ex-line, block
-cursor (overlay char-cell tint). **Out:** macros, marks, `:%s` — modal
-affordance, not a vim clone.
+via server history (clicking the data-kbd elements). Unnamed register
+(module-local). Saving stays ⌘S / autosave — no `:w`.
+**v1.5:** `V` line-visual, `f/t/F/T`, dot-repeat, block cursor (overlay
+char-cell tint). **Out permanently:** ex commands, macros, marks, `:%s`.
 
 ## Plan (~2.5 days)
 
@@ -84,9 +87,30 @@ affordance, not a vim clone.
 - **preventDefault correctness**: unmodified keys only; browser-level chords
   untouched.
 
+## Should the BASE runtime be split into lazy modules too? (evaluated: no)
+
+Considered as part of this design (user question, 2026-07-07). Inventory of
+split candidates in the 14.9KB core: sentinel ~400B, resize ~300B, router
+~800B, clipboard ~150B, kbd ~250B, echo ~100B, tooltip-escape ~350B, client
+actions ~1KB ≈ **3.3KB raw / ~1.2KB gz**. Unlike CSS/`MAP_DEF` (defs ride the
+same message that first references them — race-free by construction), JS
+modules arrive by async `import()`, so migrating opcode-backed features
+(sentinel, resize) needs a pending-bindings queue in core (~+400B). Net win
+≈ **<1KB gz**, paid with a race-window bug class in features freshly
+stabilized by three E2E harnesses.
+
+**Verdict: build the primitive (vim justifies it alone), don't migrate the
+existing hooks.** Instead, stop the creep with policy:
+
+- **Core budget frozen at 15.2KB raw / 5.5KB gz.** Raises need a reason the
+  feature can't be an extension.
+- New interaction features >~500B, or useful to a minority of apps, ship as
+  extensions.
+- Documented second wave IF capsule pressure returns: router → sentinel →
+  resize. A decision for evidence, not symmetry.
+
 ## Open decisions
 
 1. Default state of vim mode in the example/kit (`off` recommended — status-bar toggle).
 2. Is visual-char enough for v1, or is `V` (line) a must-have?
-3. `:w`/`:q` ex-line in v1 or v1.5? (v1.5 recommended; ⌘S exists.)
-4. Persist the vim preference (per-session state) or per-app default only?
+3. Persist the vim preference (per-session state) or per-app default only?
