@@ -1,6 +1,6 @@
-//! FileEditor — a stateful component kit for rwire: a sandboxed file explorer
-//! + editor with dirty tracking, toggleable autosave (on by default), guarded
-//! saves, managed file operations, and image previews.
+//! FileEditor — a stateful component kit for rwire: a sandboxed file
+//! explorer/editor with dirty tracking, toggleable autosave (on by default),
+//! guarded saves, managed file operations, and image previews.
 //!
 //! Design: `docs/file-editor-design.md` (decisions locked 2026-07-07).
 //!
