@@ -1396,7 +1396,7 @@ const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
 
 async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: public, max-age=300\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );

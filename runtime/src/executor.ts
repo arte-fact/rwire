@@ -322,7 +322,10 @@ export function x(d: Uint8Array): void {
             const imp = (globalThis as any).__rwImport || ((u: string) => import(u));
             const u = BASE + "/_rw/ext/" + name + ".js";
             imp(u)
-              .then((m: any) => m.i && m.i(document))
+              .then((m: any) => {
+                console.info("rw ext " + name + (m.v ? " v" + m.v : " (no version)"));
+                m.i && m.i(document);
+              })
               .catch(() => {
                 // some page contexts reject dynamic import; a module script
                 // tag still works (the ext self-installs via side effect)

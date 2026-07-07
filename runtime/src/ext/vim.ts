@@ -11,6 +11,10 @@
 // input-method state and live here by design. Motions for TEXT EDITING only:
 // no ex commands, ever.
 
+/** Version stamp logged by the loader — bump with every engine change so a
+ * stale cached/embedded module is instantly visible in the console. */
+export const v = 3;
+
 type Mode = "normal" | "insert" | "v" | "V";
 interface Pend {
   count: string;
