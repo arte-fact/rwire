@@ -405,7 +405,10 @@ impl<'a> FileEditor<'a> {
             } else {
                 "Saved"
             };
+            // flex, not inline: an inline wrapper's line box adds descender
+            // leading and bumps the toolbar height when the button appears
             bar = bar.append([el(El::Span)
+                .st([St::DisplayFlex, St::ItemsCenter])
                 .attr("data-save-key", "1")
                 .append([self.icon_button(
                     icons::Icon::Save,

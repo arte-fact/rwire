@@ -111,7 +111,7 @@ impl<'a> CodeEditor<'a> {
                 St::FieldSizingContent,
                 St::WhitespacePre,
             ])
-            .style(Style::new().set("line-height", "1.5"))
+            .style(Style::new().set("line-height", "1.5").set("padding", "0"))
             .text(self.content);
         if let Some(handler) = self.on_edit {
             field = field.on(Ev::Input, handler);
