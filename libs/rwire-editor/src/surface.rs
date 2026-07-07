@@ -563,6 +563,7 @@ impl<'a> FileEditor<'a> {
                     .dirty_lines(&flags)
                     .overlay(highlight_lines(&self.state.working, lang))
                     .vim(self.state.vim)
+                    .caret(self.state.caret)
                     .on_edit(self.act(Action::Edit, None))
                     .build();
                 if self.state.vim {

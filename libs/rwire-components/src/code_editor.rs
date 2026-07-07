@@ -22,6 +22,7 @@ pub struct CodeEditor<'a> {
     save: Option<(HandlerSpec, bool)>,
     overlay: Option<Vec<ElementBuilder>>,
     vim: bool,
+    caret: Option<usize>,
 }
 
 impl<'a> CodeEditor<'a> {
@@ -35,6 +36,7 @@ impl<'a> CodeEditor<'a> {
             save: None,
             overlay: None,
             vim: false,
+            caret: None,
         }
     }
 
@@ -62,6 +64,13 @@ impl<'a> CodeEditor<'a> {
     /// ancestor so the module is hinted.
     pub fn vim(mut self, vim: bool) -> Self {
         self.vim = vim;
+        self
+    }
+
+    /// Caret hint (UTF-16 units) applied by the runtime when this field is a
+    /// re-keyed replacement — undo/redo land the caret at the change.
+    pub fn caret(mut self, caret: Option<usize>) -> Self {
+        self.caret = caret;
         self
     }
 
@@ -142,6 +151,9 @@ impl<'a> CodeEditor<'a> {
             .attr("data-tab-insert", "");
         if self.vim {
             field = field.attr("data-vim", "normal");
+        }
+        if let Some(caret) = self.caret {
+            field = field.attr("data-caret", &caret.to_string());
         }
         if let Some(handler) = self.on_edit {
             field = field.on(Ev::Input, handler);

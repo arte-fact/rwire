@@ -156,6 +156,9 @@ pub struct FileEditorState {
     /// conflict reload) — keys the textarea so the morph replaces the node
     /// and the browser adopts the new content instead of its stale value.
     pub generation: u32,
+    /// Caret hint for the re-keyed textarea (UTF-16 units): undo/redo place
+    /// the caret at the start of the reverted change, like vim.
+    pub caret: Option<usize>,
     undo: Vec<String>,
     redo: Vec<String>,
     opened_mtime: Option<SystemTime>,
@@ -178,6 +181,7 @@ impl Default for FileEditorState {
             error: None,
             saved_at: None,
             generation: 0,
+            caret: None,
             undo: Vec::new(),
             redo: Vec::new(),
             opened_mtime: None,
@@ -229,6 +233,20 @@ impl FileEditorState {
     /// Unsaved lines vs the baseline (content diff, not keystrokes).
     pub fn dirty(&self) -> bool {
         self.working != self.baseline
+    }
+
+    /// First differing position between two texts in UTF-16 code units —
+    /// the browser's selection coordinate space.
+    fn first_diff_utf16(a: &str, b: &str) -> usize {
+        let mut units = 0;
+        let mut bc = b.chars();
+        for ca in a.chars() {
+            match bc.next() {
+                Some(cb) if ca == cb => units += ca.len_utf16(),
+                _ => break,
+            }
+        }
+        units
     }
 
     /// Per-line dirty flags for the gutter.
@@ -309,6 +327,7 @@ impl FileEditorState {
                         self.undo.push(std::mem::take(&mut self.working));
                         self.redo.clear();
                         self.working = text.to_string();
+                        self.caret = None;
                     }
                     if self.autosave && self.dirty() {
                         self.save(snap);
@@ -335,6 +354,7 @@ impl FileEditorState {
             }
             Action::Undo => {
                 if let Some(prev) = self.undo.pop() {
+                    self.caret = Some(Self::first_diff_utf16(&self.working, &prev));
                     self.redo.push(std::mem::replace(&mut self.working, prev));
                     self.generation += 1;
                     if self.autosave {
@@ -344,6 +364,7 @@ impl FileEditorState {
             }
             Action::Redo => {
                 if let Some(next) = self.redo.pop() {
+                    self.caret = Some(Self::first_diff_utf16(&self.working, &next));
                     self.undo.push(std::mem::replace(&mut self.working, next));
                     self.generation += 1;
                     if self.autosave {
@@ -389,6 +410,7 @@ impl FileEditorState {
         self.undo.clear();
         self.redo.clear();
         self.generation += 1;
+        self.caret = None;
         match fs::read(&path) {
             Ok(bytes) => match String::from_utf8(bytes.clone()) {
                 Ok(text) if size <= MAX_TEXT_BYTES => {
@@ -775,6 +797,11 @@ mod tests {
         ed.apply(&snap, &ctx(Action::Undo, None));
         assert_eq!(ed.working, "v1\n");
         assert!(ed.generation > g0, "undo re-keys the textarea");
+        assert_eq!(
+            ed.caret,
+            Some(3),
+            "caret at the start of the reverted change"
+        );
         let disk = fs::read_to_string(snap.resolve("README.md").unwrap()).unwrap();
         assert_eq!(disk, "v1\n", "autosave flushed the undo");
         ed.apply(&snap, &ctx(Action::Redo, None));

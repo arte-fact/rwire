@@ -518,10 +518,15 @@ export function x(d: Uint8Array): void {
             )
               (ne as any).value = av;
             if (ne !== document.activeElement) ne.focus();
-            if (same)
-              try {
-                (ne as any).setSelectionRange(ap, aq);
-              } catch (_) {}
+            try {
+              if (same) (ne as any).setSelectionRange(ap, aq);
+              else {
+                // server-declared caret for re-keyed fields (undo/redo land
+                // at the start of the reverted change)
+                const dc = ne.getAttribute && ne.getAttribute("data-caret");
+                if (dc) (ne as any).setSelectionRange(+dc, +dc);
+              }
+            } catch (_) {}
           }
         }
         return;
