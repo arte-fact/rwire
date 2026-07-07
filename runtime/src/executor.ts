@@ -482,7 +482,14 @@ export function x(d: Uint8Array): void {
       } else if (o === OP.BATCH_END) {
         fm();
         if (ae) {
-          const ne = (ai ? document.getElementById(ai) : ae.isConnected ? ae : null) as RwEl | null;
+          // id lookup first; a generation-re-keyed editor field (undo/redo/
+          // reload swap the node AND its id) is found again by data-echo.
+          const ne = ((ai && document.getElementById(ai)) ||
+            (ae.isConnected
+              ? ae
+              : ae.getAttribute && ae.getAttribute("data-echo")
+                ? document.querySelector("[data-echo]")
+                : null)) as RwEl | null;
           if (ne) {
             if (
               av !== null &&

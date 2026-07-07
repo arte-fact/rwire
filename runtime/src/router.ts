@@ -47,13 +47,17 @@ export function installRouter(): void {
     const mod = ke.metaKey || ke.ctrlKey;
     const key = ke.key.toLowerCase();
     const combo = (mod ? "mod+" : "") + (ke.shiftKey ? "shift+" : "") + key;
+    // A vim-moded editor owns its keys outside insert; Esc is ALWAYS
+    // prevented on a vim target (even while the module is still importing)
+    // because Firefox natively reverts a textarea on unprevented Escape.
+    const tgt = e.target as Element;
+    const vim = tgt.getAttribute && tgt.getAttribute("data-vim");
+    if (vim) {
+      if (key === "escape") e.preventDefault();
+      if (vim !== "insert") return;
+    }
     const t = document.querySelector('[data-kbd="' + combo + '"]') as HTMLElement | null;
     if (t) {
-      const tgt = e.target as Element;
-      // A vim-moded editor owns its keys outside insert (Esc = leave mode,
-      // not cancel-prompt); the vim extension handles them in capture phase.
-      const vim = tgt.getAttribute && tgt.getAttribute("data-vim");
-      if (vim && vim !== "insert") return;
       const tag = tgt.tagName;
       const field = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if (mod || !field || key === "escape") {

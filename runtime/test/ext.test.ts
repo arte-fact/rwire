@@ -62,6 +62,21 @@ test("data-kbd hook yields to a vim-moded target outside insert", async () => {
   assert.equal(clicked, 1, "insert mode falls through to data-kbd");
 });
 
+test("Escape on a vim target is always prevented (module-lag safety)", async () => {
+  const { installRouter } = await import("../src/router.ts");
+  (globalThis as any).window = { addEventListener: () => {} };
+  (globalThis as any).history = { pushState() {}, replaceState() {} };
+  installRouter();
+  // NO [data-kbd=escape] element exists; module not loaded either.
+  const ta = doc.createElement("textarea");
+  ta.setAttribute("data-vim", "insert");
+  doc.body.appendChild(ta);
+  let prevented = 0;
+  for (const fn of doc.listeners["keydown"] || [])
+    fn({ key: "Escape", target: ta, preventDefault: () => prevented++ });
+  assert.ok(prevented >= 1, "Firefox's native textarea revert suppressed");
+});
+
 test("vim skeleton: mode transitions + chip + printables swallowed", () => {
   installVim(doc as any);
   const ta = doc.createElement("textarea");

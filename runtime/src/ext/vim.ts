@@ -97,6 +97,7 @@ function put(el: TA, text: string, caret: number): void {
   el.value = text;
   el.setSelectionRange(caret, caret);
   fire(el);
+  if ((el as any).focus) el.focus();
 }
 
 function setMode(doc: Document, el: TA, m: Mode): void {
