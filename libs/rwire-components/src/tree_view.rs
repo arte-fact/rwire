@@ -86,7 +86,7 @@ impl TreeNode {
         ];
         let mut row = el(El::Div).st(row_tokens).append([self.label]);
         if self.selected {
-            row = row.st([St::BgMuted, St::TextHigh]);
+            row = row.st([St::BgAccentSubtle, St::TextHigh]);
         } else {
             row = row.hover([St::BgSubtle]);
         }

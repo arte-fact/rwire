@@ -59,7 +59,8 @@ impl<'a> FileEditor<'a> {
             .build()
     }
 
-    /// A small icon button with a tooltip — the tree affordances.
+    /// A compact icon button with a tooltip: a fixed 1.25rem box so it never
+    /// changes its row's height; tooltip drops below to stay inside panes.
     fn icon_action(
         &self,
         icon: icons::Icon,
@@ -67,25 +68,42 @@ impl<'a> FileEditor<'a> {
         action: Action,
         index: Option<u32>,
     ) -> ElementBuilder {
+        self.icon_button(icon, tip, action, index, false)
+    }
+
+    fn icon_button(
+        &self,
+        icon: icons::Icon,
+        tip: &str,
+        action: Action,
+        index: Option<u32>,
+        active: bool,
+    ) -> ElementBuilder {
+        let mut btn = el(El::Button)
+            .at_str(rwire::At::AriaLabel, tip)
+            .st([
+                St::DisplayFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::H1_25rem,
+                St::RoundedSm,
+                St::BorderNone,
+                St::CursorPointer,
+                St::FlexShrink0,
+            ])
+            .style(Style::new().width("1.25rem").set("padding", "0"))
+            .on(Ev::Click, self.act(action, index))
+            .append([icons::icon_sized(icon, 12)]);
+        if active {
+            btn = btn.st([St::BgAccent, St::TextOnEmphasis]);
+        } else {
+            btn = btn
+                .st([St::TextMuted, St::BgTransparent])
+                .hover([St::BgSubtle, St::TextHigh]);
+        }
         Tooltip::new(tip.to_string())
-            .child(
-                el(El::Button)
-                    .st([
-                        St::DisplayFlex,
-                        St::ItemsCenter,
-                        St::JustifyCenter,
-                        St::PxSm,
-                        St::PySm,
-                        St::RoundedSm,
-                        St::TextMuted,
-                        St::BgTransparent,
-                        St::BorderNone,
-                        St::CursorPointer,
-                    ])
-                    .hover([St::BgSubtle, St::TextHigh])
-                    .on(Ev::Click, self.act(action, index))
-                    .append([icons::icon_sized(icon, 13)]),
-            )
+            .position(rwire_components::TooltipPosition::Bottom)
+            .child(btn)
             .build()
     }
 
@@ -114,6 +132,7 @@ impl<'a> FileEditor<'a> {
                         [St::TextSm, St::TextDefault]
                     })
                     .text(&entry.name),
+                el(El::Span).st([St::Flex1]),
             ]);
         if dirty {
             label = label.append([el(El::Span)
@@ -178,17 +197,21 @@ impl<'a> FileEditor<'a> {
                     entries.iter().filter(|e| !e.is_dir).count()
                 ))]);
         if self.managed {
-            head = head.append([self.icon_action(
-                icons::Icon::Plus,
-                "New file",
-                Action::CreateStart,
-                None,
-            )]);
+            head = head.append([
+                self.icon_action(icons::Icon::FilePlus, "New file", Action::CreateStart, None),
+                self.icon_action(
+                    icons::Icon::FolderPlus,
+                    "New folder",
+                    Action::CreateDirStart,
+                    None,
+                ),
+            ]);
         }
 
         let mut column = vec![head];
-        if self.state.pending == Pending::Create {
-            column.push(self.name_form(Action::CreateSubmit, "new-file.md", ""));
+        if let Pending::Create { dir } = self.state.pending {
+            let placeholder = if dir { "new-folder" } else { "new-file.md" };
+            column.push(self.name_form(Action::CreateSubmit, placeholder, ""));
         }
         column.push(TreeView::new().roots(roots).build());
         el(El::Div)
@@ -334,14 +357,20 @@ impl<'a> FileEditor<'a> {
         bar = bar.append([el(El::Span).st([St::Flex1])]);
         if entry.is_some() && self.state.kind == FileKind::Text {
             bar = bar.append([el(El::Span).st([St::DisplayFlex, St::GapXs]).append([
-                Chip::new("View")
-                    .active(!self.state.editing)
-                    .on_click(self.act(Action::ToggleMode, None))
-                    .build(),
-                Chip::new("Edit")
-                    .active(self.state.editing)
-                    .on_click(self.act(Action::ToggleMode, None))
-                    .build(),
+                self.icon_button(
+                    icons::Icon::Eye,
+                    "View",
+                    Action::ToggleMode,
+                    None,
+                    !self.state.editing,
+                ),
+                self.icon_button(
+                    icons::Icon::Edit,
+                    "Edit",
+                    Action::ToggleMode,
+                    None,
+                    self.state.editing,
+                ),
             ])]);
         }
         // save trigger: visible button in manual mode, hidden span under autosave

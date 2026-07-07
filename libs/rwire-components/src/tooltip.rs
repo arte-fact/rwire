@@ -113,11 +113,15 @@ impl Tooltip {
             .attr("data-tip", "")
             .text(&self.text);
 
-        let mut container = el(El::Div).st([
-            St::PositionRelative,
-            St::DisplayInlineFlex,
-            St::HoverShowChild,
-        ]);
+        let mut container = el(El::Div)
+            .st([
+                St::PositionRelative,
+                St::DisplayInlineFlex,
+                St::HoverShowChild,
+            ])
+            // Lift the anchor while hovered so the popup paints above later
+            // siblings (rows, toolbars) that would otherwise stack over it.
+            .hover([St::Z50]);
 
         if let Some(ref extra) = self.extra_class {
             container = container.class(extra.as_ref());

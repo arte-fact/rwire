@@ -38,6 +38,7 @@ pub enum Action {
     Delete = 14,
     DeleteConfirm = 15,
     CancelOp = 16,
+    CreateDirStart = 17,
 }
 
 impl Action {
@@ -59,6 +60,7 @@ impl Action {
             14 => Self::Delete,
             15 => Self::DeleteConfirm,
             16 => Self::CancelOp,
+            17 => Self::CreateDirStart,
             _ => return None,
         })
     }
@@ -117,8 +119,8 @@ pub enum Pending {
     Guard { to: usize },
     /// The file changed on disk; offer Reload theirs / Overwrite.
     Conflict,
-    /// Inline name input for a new file.
-    Create,
+    /// Inline name input for a new file or folder.
+    Create { dir: bool },
     /// Inline rename input for entry `index`.
     Rename { index: usize },
     /// Confirm deletion of entry `index`.
@@ -296,7 +298,8 @@ impl FileEditorState {
                 self.pending = Pending::None;
                 self.write_through(snap);
             }
-            Action::CreateStart => self.pending = Pending::Create,
+            Action::CreateStart => self.pending = Pending::Create { dir: false },
+            Action::CreateDirStart => self.pending = Pending::Create { dir: true },
             Action::CreateSubmit => self.create(snap, ctx),
             Action::RenameStart => {
                 if let Some(i) = index {
@@ -403,6 +406,9 @@ impl FileEditorState {
     }
 
     fn create(&mut self, snap: &FsSnapshot, ctx: &EventContext) {
+        let Pending::Create { dir } = self.pending else {
+            return;
+        };
         let Some(name) = Self::form_name(ctx) else {
             self.error = Some("names are one plain segment (no /, no leading dot)".into());
             return;
@@ -415,13 +421,20 @@ impl FileEditorState {
             self.error = Some(format!("{name} already exists"));
             return;
         }
-        match fs::write(&path, "") {
+        let result = if dir {
+            fs::create_dir(&path)
+        } else {
+            fs::write(&path, "")
+        };
+        match result {
             Ok(()) => {
                 self.pending = Pending::None;
                 self.rescan(snap);
-                if let Some(i) = self.index_of(&name) {
-                    self.open(snap, i);
-                    self.editing = true;
+                if !dir {
+                    if let Some(i) = self.index_of(&name) {
+                        self.open(snap, i);
+                        self.editing = true;
+                    }
                 }
             }
             Err(e) => self.error = Some(format!("create failed: {e}")),
@@ -660,6 +673,10 @@ mod tests {
         ed.apply(&snap, &form_ctx(Action::CreateSubmit, "notes.md"));
         assert!(snap.resolve("notes.md").unwrap().exists());
         assert!(ed.editing, "new file opens in edit mode");
+        // folder creation
+        ed.apply(&snap, &ctx(Action::CreateDirStart, None));
+        ed.apply(&snap, &form_ctx(Action::CreateSubmit, "docs"));
+        assert!(snap.resolve("docs").unwrap().is_dir());
         // traversal refused
         ed.apply(&snap, &ctx(Action::CreateStart, None));
         ed.apply(&snap, &form_ctx(Action::CreateSubmit, "../escape"));

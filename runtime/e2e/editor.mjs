@@ -67,9 +67,9 @@ if (!document.body.textContent.includes("Sample workspace"))
   fail("rendered markdown view missing");
 
 // 2. Edit mode.
-const editChip = find((n) => n.textContent === "Edit" && clickable(n));
-if (!editChip) fail("Edit chip missing");
-editChip.fire("click", { target: editChip });
+const editBtn = find((n) => n.getAttribute?.("aria-label") === "Edit" && clickable(n));
+if (!editBtn) fail("Edit icon button missing");
+editBtn.fire("click", { target: editBtn });
 await sleep(600);
 const ta = find((n) => n.tagName === "TEXTAREA");
 if (!ta) fail("editor textarea missing");
