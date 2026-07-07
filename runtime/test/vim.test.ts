@@ -37,6 +37,29 @@ const setup = (text: string, caret: number) => {
 };
 
 // -------------------------------------------------------------- motions
+test("double install handles each keydown ONCE (browser side-effect + loader)", () => {
+  installVim(doc as any); // second install: the real-browser scenario
+  setup("foo bar", 0);
+  press("v");
+  assert.equal(ta.getAttribute("data-vim"), "v", "v must not self-cancel");
+  press("w");
+  assert.equal(ta.selectionStart, 0);
+  assert.equal(ta.selectionEnd, 5, "single w extension (inclusive display)");
+  press("d");
+  assert.equal(ta.value, "ar", "vwd cuts once");
+});
+
+test("char-visual highlights exactly what operators cut", () => {
+  setup("abcdef", 1);
+  press("v");
+  assert.equal(ta.selectionStart, 1);
+  assert.equal(ta.selectionEnd, 2, "entering v selects the cursor char");
+  press("l", "l");
+  assert.equal(ta.selectionEnd, 4, "display inclusive of head");
+  press("d");
+  assert.equal(ta.value, "aef", "cut matches the highlight");
+});
+
 test("h l stay within the line", () => {
   setup("ab\ncd", 1);
   press("l"); assert.equal(ta.selectionStart, 2, "l stops at line end");
@@ -198,7 +221,7 @@ test("v extends with motions and d cuts the range", () => {
   setup("foo bar baz", 0);
   press("v", "2", "w");
   assert.equal(ta.selectionStart, 0);
-  assert.equal(ta.selectionEnd, 8);
+  assert.equal(ta.selectionEnd, 9, "display inclusive of head char");
   press("d");
   assert.equal(ta.value, "az", "inclusive char range cut");
   assert.equal(ta.getAttribute("data-vim"), "normal");

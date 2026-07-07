@@ -13,7 +13,7 @@
 
 /** Version stamp logged by the loader — bump with every engine change so a
  * stale cached/embedded module is instantly visible in the console. */
-export const v = 3;
+export const v = 4;
 
 type Mode = "normal" | "insert" | "v" | "V";
 interface Pend {
@@ -244,6 +244,7 @@ function normalKey(doc: Document, el: TA, k: string): void {
       ps.anchor = p;
       ps.head = p;
       setMode(doc, el, "v");
+      el.setSelectionRange(p, Math.min(p + 1, t.length));
       break;
     }
     case "V": {
@@ -324,12 +325,23 @@ function visualKey(doc: Document, el: TA, k: string, line: boolean): void {
   if (line) {
     const [s, e] = lineSpan(t, st.anchor, q);
     el.setSelectionRange(s, e);
-  } else el.setSelectionRange(Math.min(st.anchor, q), Math.max(st.anchor, q));
+  } else
+    el.setSelectionRange(
+      Math.min(st.anchor, q),
+      Math.min(t.length, Math.max(st.anchor, q) + 1),
+    );
 }
 
+const installed = new WeakSet<Document>();
+
 /** Install on a document (exported so tests and the sandboxed E2E harness can
- * pass their own; the auto-install below covers the browser). */
+ * pass their own; the auto-install below covers the browser). IDEMPOTENT per
+ * document: in a real browser BOTH the import side effect and the loader's
+ * m.i(document) run — a double install would handle every keydown twice,
+ * making v enter AND exit visual within one keypress. */
 export function i(doc: Document): void {
+  if (installed.has(doc)) return;
+  installed.add(doc);
   doc.addEventListener(
     "keydown",
     (e) => {
