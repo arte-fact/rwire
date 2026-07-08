@@ -19,9 +19,11 @@
 //! }
 //! ```
 
+use crate::actions::reflect_action;
 use crate::builder::ElementBuilder;
 use crate::protocol::{El, Ev};
 use crate::state::HandlerSpec;
+use crate::style_tokens::St;
 
 /// Validation rule for form fields.
 #[derive(Clone, Debug)]
@@ -242,11 +244,7 @@ impl Field {
 
         if self.is_submit {
             let text = self.default_value.unwrap_or_else(|| "Submit".to_string());
-            let mut btn = el(El::Button).attr("type", "submit").text(&text);
-            if let Some(class) = self.class {
-                btn = btn.class(&class);
-            }
-            return btn;
+            return submit_button(&text, self.class.as_deref(), SubmitPhase::Idle);
         }
 
         let mut input = el(El::Input)
@@ -291,6 +289,9 @@ pub struct Form {
     class: Option<String>,
     fields: Vec<Field>,
     children: Vec<ElementBuilder>,
+    /// When set, the submit button skips action reflection. Inverted so the derived `Default`
+    /// (false) keeps reflection **on** — like `Button`/`Composer`.
+    reflect_off: bool,
 }
 
 impl Form {
@@ -302,7 +303,17 @@ impl Form {
             class: None,
             fields: Vec::new(),
             children: Vec::new(),
+            reflect_off: false,
         }
+    }
+
+    /// Opt the submit button out of automatic action reflection (on by default): when the
+    /// `action` handler defers, the submit button spins in place while the work runs and turns
+    /// destructive with the message on a native tooltip if it fails, staying a submit so it
+    /// retries. Same contract as `Button`.
+    pub fn reflect(mut self, enabled: bool) -> Self {
+        self.reflect_off = !enabled;
+        self
     }
 
     /// Set the form submission handler.
@@ -351,19 +362,95 @@ impl Form {
             form = form.class(&class);
         }
 
+        // The submit action's identity, captured before the handler is moved onto the form, so
+        // the submit button can reflect it (unless reflection is off or there is no handler).
+        let submit_reflect: Option<(u32, Vec<u8>)> = if self.reflect_off {
+            None
+        } else {
+            self.action_handler
+                .as_ref()
+                .map(|h| (h.handler_id, h.param_bytes.clone().unwrap_or_default()))
+        };
+
         // Add submit handler
         if let Some(handler) = self.action_handler {
             form = form.on(Ev::Submit, handler);
         }
 
-        // Add field elements
-        let field_elements: Vec<ElementBuilder> =
-            self.fields.into_iter().map(|f| f.build()).collect();
+        // Add field elements — a submit field becomes action-aware when there's an action to bind.
+        let field_elements: Vec<ElementBuilder> = self
+            .fields
+            .into_iter()
+            .map(|f| match (&submit_reflect, f.is_submit) {
+                (Some((handler_id, param)), true) => {
+                    let (handler_id, param) = (*handler_id, param.clone());
+                    let text = f
+                        .default_value
+                        .clone()
+                        .unwrap_or_else(|| "Submit".to_string());
+                    let class = f.class.clone();
+                    let (t_idle, t_load, t_err) = (text.clone(), text.clone(), text);
+                    let (c_idle, c_load, c_err) = (class.clone(), class.clone(), class);
+                    reflect_action(
+                        handler_id,
+                        param,
+                        move || submit_button(&t_idle, c_idle.as_deref(), SubmitPhase::Idle),
+                        move || submit_button(&t_load, c_load.as_deref(), SubmitPhase::Loading),
+                        move |message| {
+                            submit_button(&t_err, c_err.as_deref(), SubmitPhase::Errored)
+                                .attr("title", message)
+                        },
+                    )
+                }
+                _ => f.build(),
+            })
+            .collect();
 
         form = form.append(field_elements);
         form = form.append(self.children);
 
         form
+    }
+}
+
+/// The reflected phases of a form submit button.
+enum SubmitPhase {
+    Idle,
+    Loading,
+    Errored,
+}
+
+/// Render a submit button in one phase (rwire primitives only — `Form` sits below the component
+/// library). `Loading` hides the label behind an in-place spinner ring and blocks pointer events;
+/// `Errored` recolours destructive and stays a submit, so a click retries (the caller adds the
+/// message as a native `title` tooltip).
+fn submit_button(text: &str, class: Option<&str>, phase: SubmitPhase) -> ElementBuilder {
+    use crate::builder::el;
+    let mut btn = el(El::Button).attr("type", "submit").text(text);
+    if let Some(class) = class {
+        btn = btn.class(class);
+    }
+    match phase {
+        SubmitPhase::Idle => btn,
+        SubmitPhase::Loading => btn
+            .st([
+                St::PositionRelative,
+                St::TextTransparent,
+                St::PointerEventsNone,
+                St::Opacity50,
+            ])
+            .after([
+                St::ContentEmpty,
+                St::PositionAbsolute,
+                St::W1rem,
+                St::H1rem,
+                St::Border2,
+                St::BorderDefault,
+                St::BorderRTransparent,
+                St::RoundedFull,
+                St::AnimateSpinFast,
+            ]),
+        SubmitPhase::Errored => btn.st([St::BgDestructive, St::TextOnDestructive]),
     }
 }
 

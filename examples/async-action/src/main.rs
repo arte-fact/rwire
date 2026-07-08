@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
+use rwire::form::{Field, Form};
 use rwire::style_tokens::St;
 use rwire::theme::Theme;
 use rwire::{handler, theme, ElementBuilder, Server, State};
@@ -53,6 +54,15 @@ fn run_bad(_ui: &mut Ui, ctx: &EventContext) {
     });
 }
 
+#[handler]
+fn save_form(_ui: &mut Ui, ctx: &EventContext) {
+    let resolver = ctx.defer();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(WORK_MS));
+        resolver.ok();
+    });
+}
+
 // ============================================================================
 // UI — plain buttons; the reflection is automatic
 // ============================================================================
@@ -86,6 +96,7 @@ fn app() -> ElementBuilder {
             .muted()
             .build(),
             demo(),
+            form_demo(),
             // Opt-in page-level slot: lists any failed action, clears on retry.
             Stack::column()
                 .child(ActionErrors::new().build())
@@ -111,6 +122,27 @@ fn demo() -> ElementBuilder {
         ])
         .build()
         .st([St::WFull, St::MaxWMd])
+}
+
+/// A plain `Form` whose submit handler defers — the Save button reflects the same way a Button
+/// does (spinner in place, then clears on success), with no extra code.
+fn form_demo() -> ElementBuilder {
+    Stack::column()
+        .gap(Gap::Sm)
+        .children([
+            Text::body_small("A form — its submit button reflects too:")
+                .muted()
+                .build(),
+            Form::new()
+                .action(save_form())
+                .fields([
+                    Field::text("name").placeholder("Name"),
+                    Field::submit("Save"),
+                ])
+                .build(),
+        ])
+        .build()
+        .st([St::WFull, St::MaxWMd, St::BgSurface, St::PMd, St::BorderB])
 }
 
 fn action_row(label: &'static str, control: ElementBuilder) -> ElementBuilder {
