@@ -265,6 +265,10 @@ impl Button {
                 St::W1rem,
                 St::H1rem,
                 St::Border2,
+                // Loading sets the label to `color: transparent`, so the ring can't inherit its
+                // colour from `currentColor` — give it an explicit one, as `Spinner` does, or the
+                // whole spinner is invisible. `BorderRTransparent` then re-opens the spin gap.
+                St::BorderDefault,
                 St::BorderRTransparent,
                 St::RoundedFull,
                 St::AnimateSpinFast,
@@ -404,7 +408,13 @@ mod tests {
         let built = btn.build();
         let groups = built.get_pseudo_groups();
         // Should have after group for spinner
-        assert!(groups.iter().any(|(pc, _)| *pc == 0x08)); // Pc::After
+        let after = groups
+            .iter()
+            .find(|(pc, _)| *pc == 0x08) // Pc::After
+            .expect("loading button renders an ::after spinner");
+        // Regression: the ring must set an explicit colour. Loading makes the label
+        // `color: transparent`, so a `currentColor` ring would inherit transparent and vanish.
+        assert!(after.1.contains(&(St::BorderDefault as u16)));
     }
 
     #[test]
