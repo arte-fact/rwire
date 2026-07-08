@@ -54,6 +54,7 @@
 mod token_macro;
 
 pub mod action;
+pub mod actions;
 pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
@@ -79,6 +80,7 @@ pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 // Builder API exports
+pub use actions::{reflect_action, ActionKey, Actions, Phase, Resolver};
 pub use builder::{el, ElementBuilder, ElementKey};
 
 // Item reference exports

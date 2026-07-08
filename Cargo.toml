@@ -19,6 +19,7 @@ members = [
     "examples/fine-grained",
     "examples/nested",
     "examples/router",
+    "examples/async-action",
 ]
 resolver = "2"
 

@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
     build_synced_update_with_known_symbols, extract_renderers, BuildContext, ClientActionIndices,
     ElementBuilder, SyncedElement,
@@ -215,6 +216,49 @@ impl SharedServerState {
         }
         // except_conn_id = 0 is never a real connection id (ids start at 1).
         self.broadcast(&key, TypeId::of::<T>(), changes, 0);
+    }
+
+    // ── Async-action registry (see `crate::actions`) ──────────────────────────
+    // All mutations go through `update_shared_changed::<Actions>`, so every phase
+    // change broadcasts to subscribed connections exactly like any shared state.
+
+    /// Mark an action `Loading` (called by `EventContext::defer`).
+    pub fn set_action_loading(&self, key: ActionKey) {
+        self.update_shared_changed::<Actions>(ChangeSet::all(), move |a| {
+            a.set(key, Phase::Loading);
+        });
+    }
+
+    /// Resolve an action: `None` removes it (success → idle); `Some(msg)` marks it `Errored`.
+    pub fn resolve_action(&self, key: ActionKey, error: Option<String>) {
+        self.update_shared_changed::<Actions>(ChangeSet::all(), move |a| match error {
+            Some(msg) => a.set(key, Phase::Errored(msg)),
+            None => a.clear(&key),
+        });
+    }
+
+    /// Timeout backstop: fail an action **only if** it is still `Loading`, so a resolution that
+    /// already landed isn't clobbered and no wasted broadcast is sent for a settled action.
+    pub fn fail_action_if_loading(&self, key: ActionKey, message: &str) {
+        if self.action_phase(&key) == Some(Phase::Loading) {
+            self.resolve_action(key, Some(message.to_string()));
+        }
+    }
+
+    /// Drop every action for a session (called when its connection ends).
+    pub fn drop_action_session(&self, session: &str) {
+        let session = session.to_string();
+        self.update_shared_changed::<Actions>(ChangeSet::all(), move |a| a.drop_session(&session));
+    }
+
+    /// Read an action's current phase (introspection / backstop / tests).
+    pub fn action_phase(&self, key: &ActionKey) -> Option<Phase> {
+        let cache = self.shared_cache.read().unwrap_or_else(|e| e.into_inner());
+        let cache_key = shared_cache_key(StorageType::Shared, Some(Actions::TABLE_NAME), "")?;
+        cache
+            .get(&cache_key)
+            .and_then(|b| b.downcast_ref::<Actions>())
+            .and_then(|a| a.phase(key).cloned())
     }
 
     /// Allocate unique connection ID.
@@ -607,6 +651,16 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
         task::sleep(ttl / 2).await;
         shared.evict_expired_sessions(ttl);
     }
+}
+
+/// Backstop for a deferred action: after [`crate::actions::LOADING_TIMEOUT`], fail it if it is
+/// still `Loading`, so a worker that crashed or forgot to resolve can't leave a control spinning
+/// forever. Spawned by `EventContext::defer`; it exits as soon as it fires.
+pub(crate) fn spawn_action_timeout(shared: Arc<SharedServerState>, key: ActionKey) {
+    task::spawn(async move {
+        task::sleep(crate::actions::LOADING_TIMEOUT).await;
+        shared.fail_action_if_loading(key, "timed out");
+    });
 }
 
 // ============================================================================
@@ -2104,11 +2158,14 @@ impl ConnectionState {
 struct ConnectionGuard {
     shared: Arc<SharedServerState>,
     connection_id: u64,
+    session: String,
 }
 
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.shared.unregister_connection(self.connection_id);
+        // GC this session's action entries so the registry stays bounded by live sessions.
+        self.shared.drop_action_session(&self.session);
     }
 }
 
@@ -2155,6 +2212,7 @@ where
     let _cleanup = ConnectionGuard {
         shared: Arc::clone(&shared),
         connection_id,
+        session: session_id.as_str().to_string(),
     };
 
     // Create per-connection state with the session ID from cookie
@@ -2367,14 +2425,30 @@ where
                     );
 
                     if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned() {
-                        // Create EventContext from payload and param_bytes
+                        // Create EventContext from payload and param_bytes. The action key is
+                        // (session, handler_id, param) — all present right here — so `defer()`
+                        // can drive the lifecycle with no developer-authored key.
+                        let action_key = ActionKey::new(
+                            conn_state.session_id.clone(),
+                            event.handler_idx,
+                            event.param_bytes.clone(),
+                        );
                         let ctx = EventContext::new_with_params(event.payload, event.param_bytes)
-                            .with_session(conn_state.session_id.clone());
+                            .with_session(conn_state.session_id.clone())
+                            .with_action(Arc::clone(&shared), action_key.clone());
                         let state_type_id = handler.state_type_id();
 
                         // Execute the handler against its state (shared cache or memory)
                         // and learn whether it was shared/persisted (cache key).
                         let cache_key = conn_state.dispatch_handler(&shared, &handler, &ctx)?;
+
+                        // A handler that did NOT defer resolves its action in this same
+                        // round-trip: clear any entry a prior deferred run left, so a stale
+                        // spinner or error can't outlive a completed immediate click. (When it
+                        // did defer, `defer()` already set `Loading`; leave that alone.)
+                        if !ctx.was_deferred() && shared.action_phase(&action_key).is_some() {
+                            shared.resolve_action(action_key, None);
+                        }
 
                         // Re-render this handler's state type (TypeId-filtered; hash
                         // dedup skips identical output). Persisted/shared state is
@@ -2575,6 +2649,63 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_loading_then_success_clears_to_idle() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 0x42, Vec::new());
+        assert_eq!(shared.action_phase(&key), None, "starts idle");
+        shared.set_action_loading(key.clone());
+        assert_eq!(shared.action_phase(&key), Some(Phase::Loading));
+        shared.resolve_action(key.clone(), None);
+        assert_eq!(shared.action_phase(&key), None, "success removes the entry");
+    }
+
+    #[test]
+    fn action_error_records_the_message() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 1, b"row".to_vec());
+        shared.set_action_loading(key.clone());
+        shared.resolve_action(key.clone(), Some("working tree is dirty".into()));
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("working tree is dirty".into()))
+        );
+    }
+
+    #[test]
+    fn timeout_backstop_only_fails_still_loading_actions() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 2, Vec::new());
+        // No entry → no-op.
+        shared.fail_action_if_loading(key.clone(), "timed out");
+        assert_eq!(shared.action_phase(&key), None);
+        // Loading → failed.
+        shared.set_action_loading(key.clone());
+        shared.fail_action_if_loading(key.clone(), "timed out");
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("timed out".into()))
+        );
+        // Already resolved (not Loading) → the backstop must not clobber the real outcome.
+        shared.fail_action_if_loading(key.clone(), "second message");
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("timed out".into()))
+        );
+    }
+
+    #[test]
+    fn dropping_a_session_clears_only_its_actions() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let a = ActionKey::new("a".into(), 1, Vec::new());
+        let b = ActionKey::new("b".into(), 1, Vec::new());
+        shared.set_action_loading(a.clone());
+        shared.set_action_loading(b.clone());
+        shared.drop_action_session("a");
+        assert_eq!(shared.action_phase(&a), None);
+        assert_eq!(shared.action_phase(&b), Some(Phase::Loading));
+    }
 
     #[test]
     fn apply_base_path_folds_a_prefix_and_drops_empty() {
