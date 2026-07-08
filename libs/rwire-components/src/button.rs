@@ -27,7 +27,7 @@
 use crate::tooltip::Tooltip;
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{el, icons, reflect_action, El, ElementBuilder, Ev, HandlerSpec, Icon};
+use rwire::{el, icons, reflect_action, El, ElementBuilder, Ev, HandlerSpec, Icon, ItemRef};
 use std::borrow::Cow;
 
 /// Button visual intent.
@@ -400,6 +400,22 @@ impl Button {
             },
         )
     }
+
+    /// Build with a click handler scoped to a list item — the action-aware equivalent of
+    /// [`ElementBuilder::on_ref`](rwire::ElementBuilder::on_ref).
+    ///
+    /// Encodes `item_ref` into the handler's param bytes, so each item's button reflects its own
+    /// action independently: clicking one row's button spins only that row. Otherwise identical to
+    /// [`Button::on_click`](Self::on_click).
+    pub fn on_click_ref<T: 'static>(
+        self,
+        handler: HandlerSpec,
+        item_ref: ItemRef<T>,
+    ) -> ElementBuilder {
+        let mut param_bytes = Vec::new();
+        item_ref.encode(&mut param_bytes);
+        self.on_click(handler.with_param_bytes(param_bytes))
+    }
 }
 
 #[cfg(test)]
@@ -482,6 +498,38 @@ mod tests {
         assert_eq!(Button::new().size(ButtonSize::Sm).icon_px(), 12);
         assert_eq!(Button::new().size(ButtonSize::Md).icon_px(), 14);
         assert_eq!(Button::new().size(ButtonSize::Lg).icon_px(), 16);
+    }
+
+    #[test]
+    fn test_on_click_ref_encodes_param_and_reflects() {
+        use rwire::ChangeSet;
+
+        #[derive(rwire::State, Default)]
+        #[storage(memory)]
+        struct S;
+        fn noop(_s: &mut S) {}
+        let spec = || HandlerSpec::from_fn_with_changes::<S>(noop, ChangeSet::all());
+
+        let item = ItemRef::<S>::new(3);
+        let mut expected = Vec::new();
+        item.encode(&mut expected);
+
+        // reflect(false): the click handler carries the encoded item_ref as its param bytes.
+        let plain = Button::primary("Run")
+            .reflect(false)
+            .on_click_ref(spec(), item);
+        let events = plain.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].1.param_bytes.as_deref(),
+            Some(expected.as_slice())
+        );
+
+        // Default: wrapped in a display:contents reflection region keyed to that param.
+        let reflected = Button::primary("Run").on_click_ref(spec(), ItemRef::<S>::new(3));
+        assert!(reflected
+            .get_style_utils()
+            .contains(&(St::DisplayContents as u16)));
     }
 
     #[test]
