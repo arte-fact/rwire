@@ -31,6 +31,13 @@ use crate::style_tokens::St;
 /// or forgot to resolve never leaves a control spinning forever.
 pub(crate) const LOADING_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Factory rendering an idle/loading phase of a reflected control.
+type PhaseRender = Arc<dyn Fn() -> ElementBuilder + Send + Sync>;
+/// Factory rendering the errored phase of a reflected control, given the message.
+type ErrorRender = Arc<dyn Fn(&str) -> ElementBuilder + Send + Sync>;
+/// Factory rendering a page-level error slot, given every current message.
+type ErrorsRender = Arc<dyn Fn(&[String]) -> ElementBuilder + Send + Sync>;
+
 /// Identity of one action instance. Every part is known both at dispatch (decoded from the
 /// `ClientEvent`) and at render (from the control's binding), so resolution and reflection agree
 /// without a developer-authored key.
@@ -115,6 +122,18 @@ impl Actions {
         self.entries.remove(key);
     }
 
+    /// Every current error message (for a page-level error slot). Session-agnostic, like
+    /// [`Self::any_phase`], for the same render-context reason.
+    pub fn errors(&self) -> Vec<String> {
+        self.entries
+            .values()
+            .filter_map(|p| match p {
+                Phase::Errored(message) => Some(message.clone()),
+                Phase::Loading => None,
+            })
+            .collect()
+    }
+
     /// Drop every entry for a session — called when its connection ends.
     pub fn drop_session(&mut self, session: &str) {
         self.entries.retain(|k, _| k.session != session);
@@ -165,9 +184,9 @@ impl Resolver {
 struct ActionReflector {
     handler_id: u32,
     param: Vec<u8>,
-    idle: Arc<dyn Fn() -> ElementBuilder + Send + Sync>,
-    loading: Arc<dyn Fn() -> ElementBuilder + Send + Sync>,
-    errored: Arc<dyn Fn(&str) -> ElementBuilder + Send + Sync>,
+    idle: PhaseRender,
+    loading: PhaseRender,
+    errored: ErrorRender,
 }
 
 impl SyncedRenderer for ActionReflector {
@@ -236,6 +255,61 @@ pub fn reflect_action(
     // layout-transparent — the rendered phase participates in the parent layout as if unwrapped.
     // This is what lets an ordinary `Button` become action-aware without shifting anything.
     .st([St::DisplayContents])
+}
+
+/// A [`SyncedRenderer`] over every current error message — the engine behind a page-level error
+/// slot. Re-renders whenever the registry changes; `render` receives all messages currently
+/// `Errored` (empty when there are none).
+struct ActionErrorsReflector {
+    render: ErrorsRender,
+}
+
+impl SyncedRenderer for ActionErrorsReflector {
+    fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
+        let messages = match state.downcast_ref::<Actions>() {
+            Some(actions) => actions.errors(),
+            None => Vec::new(),
+        };
+        Some((self.render)(&messages))
+    }
+
+    fn clone_box(&self) -> Box<dyn SyncedRenderer> {
+        Box::new(ActionErrorsReflector {
+            render: Arc::clone(&self.render),
+        })
+    }
+
+    fn state_type_id(&self) -> TypeId {
+        TypeId::of::<Actions>()
+    }
+
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        Box::new(Actions::default())
+    }
+
+    fn storage_type(&self) -> StorageType {
+        StorageType::Shared
+    }
+
+    fn table_name(&self) -> Option<&'static str> {
+        Some(Actions::TABLE_NAME)
+    }
+
+    fn deps(&self) -> RendererDeps {
+        RendererDeps::always()
+    }
+}
+
+/// Build a synced region that renders every current action error — a page-level slot for errors
+/// whose triggering control may be off-screen. `render` is called with all current messages
+/// (empty slice when there are none, so it can render nothing). An error clears the moment its
+/// action is retried or resolved.
+pub fn reflect_action_errors(
+    render: impl Fn(&[String]) -> ElementBuilder + Send + Sync + 'static,
+) -> ElementBuilder {
+    ElementBuilder::synced_from(Box::new(ActionErrorsReflector {
+        render: Arc::new(render),
+    }))
 }
 
 #[cfg(test)]

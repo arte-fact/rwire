@@ -67,6 +67,7 @@
 //! ```
 
 mod accordion;
+mod action_errors;
 mod alert;
 mod app_shell;
 mod avatar;
@@ -136,6 +137,7 @@ mod typing_indicator;
 pub mod utils;
 
 pub use accordion::{Accordion, AccordionItem};
+pub use action_errors::ActionErrors;
 pub use alert::{Alert, AlertIntent};
 pub use app_shell::AppShell;
 pub use avatar::{Avatar, AvatarSize};

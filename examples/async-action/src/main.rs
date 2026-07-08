@@ -20,7 +20,7 @@ use rwire::capsule_gen::CapsuleConfig;
 use rwire::style_tokens::St;
 use rwire::theme::Theme;
 use rwire::{handler, theme, ElementBuilder, Server, State};
-use rwire_components::{Button, Gap, Stack, StackAlign, StackJustify, Text};
+use rwire_components::{ActionErrors, Button, Gap, Stack, StackAlign, StackJustify, Text};
 use rwire_themes::palettes;
 
 /// Simulated bridge-worker latency.
@@ -86,6 +86,11 @@ fn app() -> ElementBuilder {
             .muted()
             .build(),
             demo(),
+            // Opt-in page-level slot: lists any failed action, clears on retry.
+            Stack::column()
+                .child(ActionErrors::new().build())
+                .build()
+                .st([St::WFull, St::MaxWMd]),
         ])
         .build()
         .st([St::MinHDvh, St::BgApp, St::PLg])
