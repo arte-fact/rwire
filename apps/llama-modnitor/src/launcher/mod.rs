@@ -13,7 +13,7 @@ use std::process::Child;
 use std::sync::{Arc, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
-use rwire::{ChangeSet, SharedServerState};
+use rwire::{ChangeSet, Resolver, SharedServerState};
 
 use crate::snapshot::{App, EngineKind, NodePhase, NodeStats, OrphanProc};
 
@@ -29,17 +29,21 @@ pub enum SupervisorMsg {
     /// Stop a node; the bool sets phase to `Stopped` (false = leave the phase
     /// alone, used when returning a node to configuration).
     Stop(u64, bool),
-    /// Run a multi-turn test chat against a node, writing the reply back.
+    /// Run a multi-turn test chat against a node, writing the reply back. The `resolver`
+    /// reflects the Send button (spins until the reply lands; failure surfaces as an error).
     Chat {
         id: u64,
         port: u16,
         model: String,
         messages: Vec<(String, String)>,
+        resolver: Resolver,
     },
-    /// Run a pp/tg benchmark suite against a node.
+    /// Run a pp/tg benchmark suite against a node. The `resolver` reflects the
+    /// triggering button's async-action lifecycle (spins until the suite finishes).
     Bench {
         id: u64,
         port: u16,
+        resolver: Resolver,
     },
     /// Kill an arbitrary engine process by PID (orphan cleanup).
     KillPid(u32),
@@ -130,11 +134,12 @@ fn run(rx: &mpsc::Receiver<SupervisorMsg>, shared: &Arc<SharedServerState>) {
                 port,
                 model,
                 messages,
+                resolver,
             }) => {
-                spawn_chat(Arc::clone(shared), id, port, model, messages);
+                spawn_chat(Arc::clone(shared), id, port, model, messages, resolver);
             }
-            Ok(SupervisorMsg::Bench { id, port }) => {
-                spawn_bench(Arc::clone(shared), id, port);
+            Ok(SupervisorMsg::Bench { id, port, resolver }) => {
+                spawn_bench(Arc::clone(shared), id, port, resolver);
             }
             Ok(SupervisorMsg::KillPid(pid)) => {
                 kill_pid(pid);
@@ -180,21 +185,30 @@ fn read_log_tail(id: u64) -> String {
 
 /// Request a multi-turn test chat (handled off-thread by the supervisor). The
 /// full conversation is sent; the reply replaces the node's pending turn.
-pub fn request_chat(id: u64, port: u16, model: String, messages: Vec<(String, String)>) {
+pub fn request_chat(
+    id: u64,
+    port: u16,
+    model: String,
+    messages: Vec<(String, String)>,
+    resolver: Resolver,
+) {
     if let Some(tx) = TX.get() {
         let _ = tx.send(SupervisorMsg::Chat {
             id,
             port,
             model,
             messages,
+            resolver,
         });
     }
 }
 
-/// Request a pp/tg benchmark run against a node (handled off-thread).
-pub fn request_bench(id: u64, port: u16) {
+/// Request a pp/tg benchmark run against a node (handled off-thread). The `resolver` resolves
+/// when the suite finishes; if the supervisor is unreachable it drops and the action's timeout
+/// backstop clears it.
+pub fn request_bench(id: u64, port: u16, resolver: Resolver) {
     if let Some(tx) = TX.get() {
-        let _ = tx.send(SupervisorMsg::Bench { id, port });
+        let _ = tx.send(SupervisorMsg::Bench { id, port, resolver });
     }
 }
 

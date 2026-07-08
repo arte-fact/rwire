@@ -256,11 +256,9 @@ pub fn chat_block(
                     None,
                 )
                 .on_ref(Ev::Input, update_chat_input(), item_ref),
-                Button::primary("Send").size(ButtonSize::Sm).build().on_ref(
-                    Ev::Click,
-                    send_chat(),
-                    item_ref,
-                ),
+                Button::primary("Send")
+                    .size(ButtonSize::Sm)
+                    .on_click_ref(send_chat(), item_ref),
                 Button::ghost("Clear").size(ButtonSize::Sm).build().on_ref(
                     Ev::Click,
                     clear_chat(),
@@ -277,17 +275,11 @@ pub fn bench_block(
     item_ref: rwire::ItemRef<LlmNode>,
     body: &mut Vec<ElementBuilder>,
 ) {
-    let run_label = if node.bench_running {
-        "Running…"
-    } else {
-        "Run benchmark"
-    };
-    let mut run = Button::primary(run_label).size(ButtonSize::Sm).build();
-    if node.bench_running {
-        run = run.st([St::Opacity50, St::CursorNotAllowed]);
-    } else {
-        run = run.on_ref(Ev::Click, run_bench(), item_ref);
-    }
+    // Action-aware: the button spins in place while the suite runs, then returns to idle when
+    // `spawn_bench` resolves — no hand-rolled running flag.
+    let run = Button::primary("Run benchmark")
+        .size(ButtonSize::Sm)
+        .on_click_ref(run_bench(), item_ref);
     body.push(action_row(vec![
         Text::label("Benchmark (pp / tg, tokens/s)".to_string()).build(),
         run,

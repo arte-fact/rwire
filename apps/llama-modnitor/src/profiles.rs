@@ -97,7 +97,6 @@ impl NodeProfile {
             chat_input: String::new(),
             chat_log: Vec::new(),
             bench_results: Vec::new(),
-            bench_running: false,
             pending: None,
         }
     }
