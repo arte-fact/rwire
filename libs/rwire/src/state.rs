@@ -526,11 +526,12 @@ impl EventContext {
     pub fn defer(&self) -> Resolver {
         self.deferred.set(true);
         match &self.action {
-            Some(slot) => {
-                slot.shared.set_action_loading(slot.key.clone());
-                crate::server::spawn_action_timeout(Arc::clone(&slot.shared), slot.key.clone());
-                Resolver::new(Arc::clone(&slot.shared), slot.key.clone())
-            }
+            // Only claim the action + hand back a live resolver. Marking it `Loading` (and arming
+            // the timeout) is done by the server *after* the handler returns — a `&mut SharedState`
+            // handler runs holding the shared-cache write lock, and `set_action_loading` re-enters
+            // that lock, so setting it here would self-deadlock. The deferred work outlives the
+            // handler, so the post-handler `Loading` still lands before the resolver's `ok`/`err`.
+            Some(slot) => Resolver::new(Arc::clone(&slot.shared), slot.key.clone()),
             None => Resolver::noop(),
         }
     }
