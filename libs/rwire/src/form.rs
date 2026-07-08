@@ -448,10 +448,16 @@ enum SubmitPhase {
 /// message as a native `title` tooltip).
 fn submit_button(text: &str, class: Option<&str>, phase: SubmitPhase) -> ElementBuilder {
     use crate::builder::el;
-    let mut btn = el(El::Button).attr("type", "submit").text(text).st([
-        // Themed defaults so a bare form submit looks like a real button, matching `Button`.
+    let mut btn = el(El::Button).attr("type", "submit").st([
+        // Themed defaults so a bare form submit looks like a real button, matching `Button`. A
+        // fixed height + flex centring (not text-driven padding) keeps the footprint constant
+        // across phases and centres the label / spinner.
         St::PxLg,
-        St::PySm,
+        St::Py0,
+        St::H2_25rem,
+        St::DisplayInlineFlex,
+        St::ItemsCenter,
+        St::JustifyCenter,
         St::RoundedMd,
         St::BorderNone,
         St::CursorPointer,
@@ -466,28 +472,36 @@ fn submit_button(text: &str, class: Option<&str>, phase: SubmitPhase) -> Element
     match phase {
         SubmitPhase::Idle => btn
             .st([St::BgPrimary, St::TextOnPrimary])
-            .hover([St::BgPrimaryHover]),
+            .hover([St::BgPrimaryHover])
+            .text(text),
         SubmitPhase::Loading => btn
             .st([
                 St::BgPrimary,
                 St::TextOnPrimary,
                 St::PositionRelative,
-                St::TextTransparent,
                 St::PointerEventsNone,
                 St::Opacity50,
             ])
             .after([
                 St::ContentEmpty,
                 St::PositionAbsolute,
+                // inset:0 + margin:auto centres the fixed-size ring on both axes.
+                St::Inset0,
+                St::MAuto,
                 St::W1rem,
                 St::H1rem,
+                // Ring tinted from the button's foreground (currentColor stays live because the
+                // label is only hidden, not recoloured); colour + spin gap bundled in one token.
                 St::Border2,
-                St::BorderDefault,
-                St::BorderRTransparent,
+                St::SpinnerRingCurrent,
                 St::RoundedFull,
                 St::AnimateSpinFast,
-            ]),
-        SubmitPhase::Errored => btn.st([St::BgDestructive, St::TextOnDestructive]),
+            ])
+            // Keep the label's box (constant footprint) but invisible behind the ring.
+            .append([el(El::Span).st([St::Opacity0]).text(text)]),
+        SubmitPhase::Errored => btn
+            .st([St::BgDestructive, St::TextOnDestructive])
+            .text(text),
     }
 }
 

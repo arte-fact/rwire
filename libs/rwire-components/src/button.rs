@@ -234,7 +234,10 @@ impl Button {
         }
 
         if self.loading {
-            tokens.extend([St::PositionRelative, St::TextTransparent]);
+            // The label is hidden by wrapping it in an opacity:0 span at build time (keeps its
+            // box, so the footprint never changes), leaving the button's own colour live — so the
+            // ::after ring can tint itself from the foreground via currentColor.
+            tokens.push(St::PositionRelative);
         }
         if self.full_width {
             tokens.push(St::WFull);
@@ -266,14 +269,17 @@ impl Button {
             builder = builder.after([
                 St::ContentEmpty,
                 St::PositionAbsolute,
+                // inset:0 + margin:auto centres the fixed-size ring on both axes for any button
+                // width; an insetless absolute ::after drifts to where the label used to sit.
+                St::Inset0,
+                St::MAuto,
                 St::W1rem,
                 St::H1rem,
+                // 2px ring tinted from the button's own foreground (currentColor stays live
+                // because the label is hidden with font-size:0, not colour:transparent). The ring
+                // colour + spin gap are one bundled token so the gap is cascade-order-proof.
                 St::Border2,
-                // Loading sets the label to `color: transparent`, so the ring can't inherit its
-                // colour from `currentColor` — give it an explicit one, as `Spinner` does, or the
-                // whole spinner is invisible. `BorderRTransparent` then re-opens the spin gap.
-                St::BorderDefault,
-                St::BorderRTransparent,
+                St::SpinnerRingCurrent,
                 St::RoundedFull,
                 St::AnimateSpinFast,
             ]);
@@ -325,7 +331,13 @@ impl Button {
                 None => builder.append([icon_el]),
             };
         } else if let Some(t) = text {
-            builder = builder.text(&t);
+            if self.loading {
+                // Keep the label's box (constant footprint) but invisible, so the centred spinner
+                // reads over it and the button doesn't shrink to the ring.
+                builder = builder.append([el(El::Span).st([St::Opacity0]).text(&t)]);
+            } else {
+                builder = builder.text(&t);
+            }
         }
 
         if let Some(label) = self.aria_label {
@@ -448,7 +460,9 @@ mod tests {
         let btn = Button::primary("Save").loading(true);
         let tokens = btn.compute_tokens();
         assert!(tokens.contains(&St::PositionRelative));
-        assert!(tokens.contains(&St::TextTransparent));
+        // The button keeps its own colour live (label hidden via an opacity:0 span at build time)
+        // so the ring can read the foreground through currentColor.
+        assert!(!tokens.contains(&St::TextTransparent));
         let built = btn.build();
         let groups = built.get_pseudo_groups();
         // Should have after group for spinner
@@ -456,9 +470,11 @@ mod tests {
             .iter()
             .find(|(pc, _)| *pc == 0x08) // Pc::After
             .expect("loading button renders an ::after spinner");
-        // Regression: the ring must set an explicit colour. Loading makes the label
-        // `color: transparent`, so a `currentColor` ring would inherit transparent and vanish.
-        assert!(after.1.contains(&(St::BorderDefault as u16)));
+        // The ring tints from currentColor (bundled with its spin gap) and is centred via
+        // inset:0 + margin:auto so it renders and sits dead-centre on any button width.
+        assert!(after.1.contains(&(St::SpinnerRingCurrent as u16)));
+        assert!(after.1.contains(&(St::Inset0 as u16)));
+        assert!(after.1.contains(&(St::MAuto as u16)));
     }
 
     #[test]
@@ -500,13 +516,18 @@ mod tests {
 
     #[test]
     fn test_loading_hides_icon() {
-        // The spinner overlay replaces the icon, so it isn't rendered while loading.
+        // The spinner overlay replaces the icon, so it isn't rendered while loading. The label is
+        // kept — in an invisible span, not textContent — so the button's footprint never shrinks
+        // to the ring and the ring can read the live foreground via currentColor.
         let btn = Button::primary("Save")
             .icon(Icon::Check)
             .loading(true)
             .build();
-        assert!(btn.children().is_empty());
-        assert_eq!(btn.text_content(), Some("Save"));
+        assert_eq!(btn.text_content(), None);
+        let kids = btn.children();
+        assert_eq!(kids.len(), 1); // just the hidden label span — no icon
+        assert_eq!(kids[0].el_type(), El::Span);
+        assert_eq!(kids[0].text_content(), Some("Save"));
     }
 
     #[test]

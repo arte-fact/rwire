@@ -921,6 +921,12 @@ define_token_enum! {
         H025rem = 0x34A => "height:0.25rem",
         /// A warning-toned hairline border (needs-attention panels).
         BorderWarning = 0x34B => "border:1px solid var(--p)",
+        /// A spinner ring in the element's own foreground colour, with the right edge cut as the
+        /// spin gap. Bundled into one rule so the gap is deterministic — a separate
+        /// `border-right-color:transparent` token would lose to a later `border-color` class in
+        /// the cascade. Pair with a width (`Border2`) + `RoundedFull` + `AnimateSpinFast`; the
+        /// element must keep a live `color` (hide a label with `FontSize0`, not `TextTransparent`).
+        SpinnerRingCurrent = 0x34F => "border-style:solid;border-color:currentColor;border-right-color:transparent",
     }
 }
 
