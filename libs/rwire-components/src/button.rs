@@ -24,9 +24,10 @@
 //!     .build()
 //! ```
 
+use crate::tooltip::Tooltip;
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{el, icons, El, ElementBuilder, Ev, HandlerSpec, Icon};
+use rwire::{el, icons, reflect_action, El, ElementBuilder, Ev, HandlerSpec, Icon};
 use std::borrow::Cow;
 
 /// Button visual intent.
@@ -71,6 +72,9 @@ pub struct Button {
     loading: bool,
     full_width: bool,
     extra_class: Option<Cow<'static, str>>,
+    /// When set, `on_click` skips action reflection and binds a plain click. Inverted so the
+    /// derived `Default` (false) keeps reflection **on** — the intended default.
+    reflect_off: bool,
 }
 
 #[rwire::component]
@@ -340,9 +344,49 @@ impl Button {
         builder
     }
 
-    /// Build with click handler.
+    /// Opt this button out of (or back into) automatic action reflection.
+    ///
+    /// Reflection is **on by default**: a button whose `on_click` handler defers shows a spinner
+    /// while the work runs and surfaces its error, with no extra code. Pass `false` for the rare
+    /// button that must never reflect (e.g. one already inside a hand-rolled reflecting region).
+    pub fn reflect(mut self, enabled: bool) -> Self {
+        self.reflect_off = !enabled;
+        self
+    }
+
+    /// Build with a click handler.
+    ///
+    /// By default the button is **action-aware**: it reflects the lifecycle of the action its
+    /// handler drives (see [`rwire::actions`]). While the action is `Loading` it shows an in-place
+    /// spinner (constant footprint); if it fails it turns destructive and carries the message on a
+    /// hover tooltip, staying clickable as retry; otherwise it renders normally. A handler that
+    /// never defers has no action entry, so the button simply behaves as a plain button — the
+    /// reflection is free and complete. Opt out with [`Button::reflect(false)`](Self::reflect).
     pub fn on_click(self, handler: HandlerSpec) -> ElementBuilder {
-        self.build().on(Ev::Click, handler)
+        if self.reflect_off {
+            return self.build().on(Ev::Click, handler);
+        }
+        let handler_id = handler.handler_id;
+        let param = handler.param_bytes.clone().unwrap_or_default();
+        let (idle_btn, loading_btn, err_btn) = (self.clone(), self.clone(), self);
+        let (idle_handler, err_handler) = (handler.clone(), handler);
+        reflect_action(
+            handler_id,
+            param,
+            move || idle_btn.clone().build().on(Ev::Click, idle_handler.clone()),
+            move || loading_btn.clone().loading(true).disabled(true).build(),
+            move |message| {
+                Tooltip::new(message.to_string())
+                    .child(
+                        err_btn
+                            .clone()
+                            .intent(ButtonIntent::Destructive)
+                            .build()
+                            .on(Ev::Click, err_handler.clone()),
+                    )
+                    .build()
+            },
+        )
     }
 }
 

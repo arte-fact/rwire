@@ -1,16 +1,15 @@
-//! The async-action lifecycle, end to end, on the real rwire primitive.
+//! The async-action lifecycle with **zero reflection code** — ordinary `Button`s are action-aware.
 //!
-//! Open http://127.0.0.1:9008. Each **Deliver** button is bound to a handler that hands its work
-//! to a background thread with `ctx.defer()`:
+//! Open http://127.0.0.1:9008. Each button is just `Button::primary("Deliver").on_click(handler())`.
+//! Its handler hands the work to a background thread with `ctx.defer()` and returns immediately;
+//! `defer()` marks the action `Loading`, so the button spins in place (constant footprint) —
+//! pushed to the browser with no further client event. ~1.5s later the worker calls
+//! `resolver.ok()` (button returns to idle) or `resolver.err(msg)` (button turns destructive,
+//! message on a hover tooltip, still clickable as retry).
 //!
-//! - the handler returns immediately, but `defer()` marks the action `Loading`, so the button
-//!   spins in place (constant footprint) — pushed to the browser with **no further client event**;
-//! - ~1.5s later the background thread calls `resolver.ok()` (the button returns to idle) or
-//!   `resolver.err(msg)` (a ⚠ badge appears, the message on a hover tooltip).
-//!
-//! The buttons carry **no reflection code and no key** — `reflect_action(handler_id, param, …)`
-//! keys off the same `(handler_id, param)` the binding already carries. Making an ordinary
-//! `Button` do this automatically (no `reflect_action` call at all) is M3.
+//! No `reflect_action`, no key, no loading/error markup here: because the handler defers, the
+//! `Button` reflects the whole lifecycle automatically. A handler that never defers leaves its
+//! button a plain button — the reflection is free and complete.
 
 use std::error::Error;
 use std::thread;
@@ -20,8 +19,8 @@ use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::style_tokens::St;
 use rwire::theme::Theme;
-use rwire::{handler, reflect_action, theme, ElementBuilder, HandlerSpec, Server, State};
-use rwire_components::{Badge, Button, Gap, Stack, StackAlign, StackJustify, Text, Tooltip};
+use rwire::{handler, theme, ElementBuilder, Server, State};
+use rwire_components::{Button, Gap, Stack, StackAlign, StackJustify, Text};
 use rwire_themes::palettes;
 
 /// Simulated bridge-worker latency.
@@ -55,7 +54,7 @@ fn run_bad(_ui: &mut Ui, ctx: &EventContext) {
 }
 
 // ============================================================================
-// UI
+// UI — plain buttons; the reflection is automatic
 // ============================================================================
 
 #[theme]
@@ -81,9 +80,11 @@ fn app() -> ElementBuilder {
         .justify(StackJustify::Center)
         .children([
             Text::heading2("async-action — the lifecycle primitive").build(),
-            Text::body("Each Deliver defers its work; the result is pushed back ~1.5s later.")
-                .muted()
-                .build(),
+            Text::body(
+                "Plain buttons. Each defers its work; the result is pushed back ~1.5s later.",
+            )
+            .muted()
+            .build(),
             demo(),
         ])
         .build()
@@ -94,8 +95,14 @@ fn demo() -> ElementBuilder {
     Stack::column()
         .gap(Gap::Md)
         .children([
-            action_row("Deliver (succeeds)", deliver(run_good)),
-            action_row("Deliver (fails)", deliver(run_bad)),
+            action_row(
+                "Deliver (succeeds)",
+                Button::primary("Deliver").on_click(run_good()),
+            ),
+            action_row(
+                "Deliver (fails)",
+                Button::primary("Deliver").on_click(run_bad()),
+            ),
         ])
         .build()
         .st([St::WFull, St::MaxWMd])
@@ -109,56 +116,4 @@ fn action_row(label: &'static str, control: ElementBuilder) -> ElementBuilder {
         .children([Text::body_small(label).build(), control])
         .build()
         .st([St::BgSurface, St::PMd, St::BorderB])
-}
-
-/// An action-aware control: reflect the action's phase for `spec`'s `(handler_id, param)`.
-///
-/// This is the whole integration a caller writes today. In every phase the button keeps a
-/// constant footprint — loading spins in place, the error is a fixed-size ⚠ badge in a reserved
-/// slot with the message on a tooltip — so the row never reflows. The button stays clickable in
-/// the idle and errored phases, so it doubles as retry. M3 folds all of this into `Button` itself.
-fn deliver(spec_fn: fn() -> HandlerSpec) -> ElementBuilder {
-    let spec = spec_fn();
-    let param = spec.param_bytes.clone().unwrap_or_default();
-    reflect_action(
-        spec.handler_id,
-        param,
-        move || control_row(None, Button::primary("Deliver").on_click(spec_fn())),
-        || {
-            control_row(
-                None,
-                Button::primary("Deliver")
-                    .loading(true)
-                    .disabled(true)
-                    .build(),
-            )
-        },
-        move |msg| {
-            control_row(
-                Some(warn(msg)),
-                Button::primary("Deliver").on_click(spec_fn()),
-            )
-        },
-    )
-}
-
-/// A fixed-width status slot (so its content can't move the button) beside the control.
-fn control_row(status: Option<ElementBuilder>, button: ElementBuilder) -> ElementBuilder {
-    let slot = Stack::row()
-        .justify(StackJustify::Center)
-        .children(status)
-        .build()
-        .st([St::W2rem]);
-    Stack::row()
-        .gap(Gap::Sm)
-        .align(StackAlign::Center)
-        .children([slot, button])
-        .build()
-}
-
-/// The failure affordance: a compact ⚠ badge carrying the full message on a hover tooltip.
-fn warn(message: &str) -> ElementBuilder {
-    Tooltip::new(message.to_string())
-        .child(Badge::error("⚠").build())
-        .build()
 }

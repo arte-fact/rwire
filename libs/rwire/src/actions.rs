@@ -25,6 +25,7 @@ use std::time::Duration;
 use crate::builder::{ElementBuilder, SyncedRenderer};
 use crate::server::SharedServerState;
 use crate::state::{RendererDeps, State, StorageType};
+use crate::style_tokens::St;
 
 /// How long an action may sit `Loading` before the backstop fails it, so a worker that crashed
 /// or forgot to resolve never leaves a control spinning forever.
@@ -231,6 +232,10 @@ pub fn reflect_action(
         loading: Arc::new(loading),
         errored: Arc::new(errored),
     }))
+    // `display:contents`: the synced wrapper adds no box of its own, so reflecting a control is
+    // layout-transparent — the rendered phase participates in the parent layout as if unwrapped.
+    // This is what lets an ordinary `Button` become action-aware without shifting anything.
+    .st([St::DisplayContents])
 }
 
 #[cfg(test)]
