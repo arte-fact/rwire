@@ -377,7 +377,8 @@ impl Form {
     pub fn build(self) -> ElementBuilder {
         use crate::builder::el;
 
-        let mut form = el(El::Form);
+        // Base layout so stacked fields breathe (a bare <form> block-stacks them flush).
+        let mut form = el(El::Form).st([St::DisplayFlex, St::FlexCol, St::GapMd]);
 
         if let Some(class) = self.class {
             form = form.class(&class);

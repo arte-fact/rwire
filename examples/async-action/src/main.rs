@@ -9,7 +9,7 @@
 //! 4. **Per-instance rows** — same handler, one `param` each; only the row you click spins.
 //! 5. **Form** — its submit button reflects the same way, for free.
 //!
-//! Plus the opt-in `ActionErrors` page slot, which lists any failure and clears on retry.
+//! Plus the opt-in `ActionToasts` notification, which pops on any failure and clears on retry.
 
 use std::error::Error;
 use std::thread;
@@ -21,7 +21,7 @@ use rwire::form::{Field, Form};
 use rwire::style_tokens::St;
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, State};
-use rwire_components::{ActionErrors, Button, Gap, Stack, StackAlign, StackJustify, Text};
+use rwire_components::{ActionToasts, Button, Gap, Stack, StackAlign, StackJustify, Text};
 use rwire_themes::palettes;
 
 /// Simulated bridge-worker latency.
@@ -123,10 +123,11 @@ fn app() -> ElementBuilder {
                     immediate_section(),
                     per_instance_section(),
                     form_section(),
-                    ActionErrors::new().build(),
                 ])
                 .build()
                 .st([St::WFull, St::MaxWMd]),
+            // A failed action slides in a toast (fixed, bottom-right); it clears on retry.
+            ActionToasts::new().build(),
         ])
         .build()
         .st([St::MinHDvh, St::BgApp, St::PLg])
@@ -191,19 +192,14 @@ fn per_instance_section() -> ElementBuilder {
 fn form_section() -> ElementBuilder {
     section(
         "Form (submit reflects too)",
-        [Stack::column()
-            .gap(Gap::Sm)
-            .child(
-                Form::new()
-                    .action(save_form())
-                    .fields([
-                        Field::text("name")
-                            .label("Name")
-                            .placeholder("Ada Lovelace"),
-                        Field::submit("Save"),
-                    ])
-                    .build(),
-            )
+        [Form::new()
+            .action(save_form())
+            .fields([
+                Field::text("name")
+                    .label("Name")
+                    .placeholder("Ada Lovelace"),
+                Field::submit("Save"),
+            ])
             .build()
             .st([St::PMd])],
     )
