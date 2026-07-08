@@ -249,7 +249,21 @@ impl Field {
 
         let mut input = el(El::Input)
             .attr("type", self.field_type.as_str())
-            .attr("name", &self.name);
+            .attr("name", &self.name)
+            // Sensible themed defaults so a form looks at home in the app without per-field
+            // styling; `.class()` still layers on top as an escape hatch.
+            .st([
+                St::WFull,
+                St::PySm,
+                St::PxMd,
+                St::BgApp,
+                St::BorderDefault,
+                St::RoundedMd,
+                St::TextHigh,
+                St::TextSm,
+                St::FontInheritAll,
+            ])
+            .focus([St::BorderAccent]);
 
         if let Some(placeholder) = self.placeholder {
             input = input.attr("placeholder", &placeholder);
@@ -274,7 +288,14 @@ impl Field {
 
         // Wrap with label if provided
         if let Some(label_text) = self.label_text {
-            el(El::Label).append([el(El::Span).text(&label_text), input])
+            el(El::Label)
+                .st([St::DisplayFlex, St::FlexCol, St::GapXs])
+                .append([
+                    el(El::Span)
+                        .st([St::TextSm, St::TextMuted])
+                        .text(&label_text),
+                    input,
+                ])
         } else {
             input
         }
@@ -426,14 +447,29 @@ enum SubmitPhase {
 /// message as a native `title` tooltip).
 fn submit_button(text: &str, class: Option<&str>, phase: SubmitPhase) -> ElementBuilder {
     use crate::builder::el;
-    let mut btn = el(El::Button).attr("type", "submit").text(text);
+    let mut btn = el(El::Button).attr("type", "submit").text(text).st([
+        // Themed defaults so a bare form submit looks like a real button, matching `Button`.
+        St::PxLg,
+        St::PySm,
+        St::RoundedMd,
+        St::BorderNone,
+        St::CursorPointer,
+        St::FontMedium,
+        St::TextSm,
+        St::FontInheritAll,
+    ]);
     if let Some(class) = class {
         btn = btn.class(class);
     }
+    // Each phase sets its own background, so the phases never fight over the cascade.
     match phase {
-        SubmitPhase::Idle => btn,
+        SubmitPhase::Idle => btn
+            .st([St::BgPrimary, St::TextOnPrimary])
+            .hover([St::BgPrimaryHover]),
         SubmitPhase::Loading => btn
             .st([
+                St::BgPrimary,
+                St::TextOnPrimary,
                 St::PositionRelative,
                 St::TextTransparent,
                 St::PointerEventsNone,
