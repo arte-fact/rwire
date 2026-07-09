@@ -72,6 +72,16 @@ pub struct Button {
     loading: bool,
     full_width: bool,
     extra_class: Option<Cow<'static, str>>,
+    /// Extra hover style tokens applied to the built button, composing with the intent's own
+    /// hover treatment (e.g. a destructive text tint on a ghost icon button). Kept on the
+    /// builder — an `ElementBuilder::hover` chained after `on_click` would land on the
+    /// action-reflection wrapper, which is `display:contents` and has no box to hover.
+    hover_extra: Vec<St>,
+    /// `data-*` attributes applied to the built button — the payload the click handler reads
+    /// via `ctx.data(...)`. Kept on the builder for the same reason as `hover_extra`: chained
+    /// after `on_click` they'd land on the reflection wrapper, which the client's click payload
+    /// collection never reads (it looks at the bound element, walking up only for `data-id`).
+    data: Vec<(String, String)>,
     /// When set, `on_click` skips action reflection and binds a plain click. Inverted so the
     /// derived `Default` (false) keeps reflection **on** — the intended default.
     reflect_off: bool,
@@ -168,6 +178,24 @@ impl Button {
     /// Set a leading icon, rendered before the text and sized to the button.
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    /// Add hover style tokens on top of the intent's own hover treatment — e.g. a destructive
+    /// text tint on a ghost icon button. Set here (not via `ElementBuilder::hover` chained
+    /// after `on_click`), so the tokens land on the button element rather than its action
+    /// reflection wrapper, which is `display:contents` and has no box to hover.
+    pub fn hover(mut self, tokens: impl IntoIterator<Item = St>) -> Self {
+        self.hover_extra.extend(tokens);
+        self
+    }
+
+    /// Set a `data-*` attribute on the built button — the payload its click handler reads via
+    /// `ctx.data(key)`. Set here (not via `ElementBuilder::data` chained after `on_click`), so
+    /// the attribute lands on the button element rather than its action-reflection wrapper,
+    /// which the client's click payload collection never reads.
+    pub fn data(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.data.push((key.into(), value.into()));
         self
     }
 
@@ -318,6 +346,12 @@ impl Button {
             tokens.push(St::AspectSquare);
         }
         let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
+        if !self.hover_extra.is_empty() {
+            builder = builder.hover(self.hover_extra.clone());
+        }
+        for (key, value) in &self.data {
+            builder = builder.data(key, value);
+        }
 
         // Render the icon and text as element children so the appended icon isn't
         // clobbered by `textContent` (and stays *before* the label). Text-only
@@ -415,6 +449,47 @@ impl Button {
         let mut param_bytes = Vec::new();
         item_ref.encode(&mut param_bytes);
         self.on_click(handler.with_param_bytes(param_bytes))
+    }
+
+    /// Build as a form-submit button (`type="submit"`) that reflects the **form's** submit action.
+    ///
+    /// A submit button owns no event — the surrounding `<form>` does — so pass the same
+    /// `HandlerSpec` the form binds (`el(El::Form).on(Ev::Submit, save())` + `.submit(&save())`).
+    /// The button then mirrors that action's lifecycle exactly like [`Button::on_click`]: an
+    /// in-place spinner while `Loading`, destructive with the message on a hover tooltip when
+    /// `Errored`. No event is bound to the button itself; clicking it submits the form natively,
+    /// which is also the retry.
+    pub fn submit(self, action: &HandlerSpec) -> ElementBuilder {
+        if self.reflect_off {
+            return self.build().at(At::Type, Av::Submit);
+        }
+        let handler_id = action.handler_id;
+        let param = action.param_bytes.clone().unwrap_or_default();
+        let (idle_btn, loading_btn, err_btn) = (self.clone(), self.clone(), self);
+        reflect_action(
+            handler_id,
+            param,
+            move || idle_btn.clone().build().at(At::Type, Av::Submit),
+            move || {
+                loading_btn
+                    .clone()
+                    .loading(true)
+                    .disabled(true)
+                    .build()
+                    .at(At::Type, Av::Submit)
+            },
+            move |message| {
+                Tooltip::new(message.to_string())
+                    .child(
+                        err_btn
+                            .clone()
+                            .intent(ButtonIntent::Destructive)
+                            .build()
+                            .at(At::Type, Av::Submit),
+                    )
+                    .build()
+            },
+        )
     }
 }
 
@@ -530,6 +605,55 @@ mod tests {
         assert!(reflected
             .get_style_utils()
             .contains(&(St::DisplayContents as u16)));
+    }
+
+    #[test]
+    fn test_submit_reflects_the_forms_action_without_binding_events() {
+        use rwire::ChangeSet;
+
+        #[derive(rwire::State, Default)]
+        #[storage(memory)]
+        struct S;
+        fn noop(_s: &mut S) {}
+        let spec = || HandlerSpec::from_fn_with_changes::<S>(noop, ChangeSet::all());
+
+        // reflect(false): a plain type=submit button, no events (the form owns the submit).
+        let plain = Button::outline("Save").reflect(false).submit(&spec());
+        assert!(plain.events().is_empty());
+        assert!(plain.to_static_html().contains("type=\"submit\""));
+
+        // Default: wrapped in a display:contents reflection region keyed to the form's action.
+        let reflected = Button::outline("Save").submit(&spec());
+        assert!(reflected
+            .get_style_utils()
+            .contains(&(St::DisplayContents as u16)));
+    }
+
+    #[test]
+    fn test_data_and_hover_land_on_the_button_not_the_wrapper() {
+        use rwire::ChangeSet;
+
+        #[derive(rwire::State, Default)]
+        #[storage(memory)]
+        struct S;
+        fn noop(_s: &mut S) {}
+        let spec = HandlerSpec::from_fn_with_changes::<S>(noop, ChangeSet::all());
+
+        // The payload must sit on the <button> element itself: the client's click payload
+        // collection reads the bound element's dataset, never the reflection wrapper's.
+        let plain = Button::secondary("Edit")
+            .data("name", "k1")
+            .hover([St::TextError])
+            .reflect(false)
+            .on_click(spec);
+        assert_eq!(
+            plain.attributes().iter().find(|(k, _)| k == "data-name"),
+            Some(&("data-name".to_string(), "k1".to_string()))
+        );
+        assert!(plain
+            .get_pseudo_groups()
+            .iter()
+            .any(|(_, tokens)| tokens.contains(&(St::TextError as u16))));
     }
 
     #[test]
