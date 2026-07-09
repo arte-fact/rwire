@@ -229,6 +229,17 @@ impl SyncedRenderer for ActionReflector {
         // Any change to the registry may flip this control — always re-render on a broadcast.
         RendererDeps::always()
     }
+
+    fn identity(&self) -> Option<u64> {
+        // The reflected `(handler_id, param)` is the region's stable identity: when a parent
+        // re-renders, this wrapper keeps its wire id however its siblings changed, so the live
+        // span (and any in-flight phase) stays attached to the right control.
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.handler_id.hash(&mut hasher);
+        self.param.hash(&mut hasher);
+        Some(hasher.finish())
+    }
 }
 
 /// Build a synced region that reflects an action's phase for the given `(handler_id, param)`.

@@ -1851,27 +1851,105 @@ impl ConnectionState {
             ),
             None => None,
         };
-        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-            self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
-        if let (Some(key), Some(cache)) = (inject_key, &cache_guard) {
-            if let Some(state) = cache.get(key) {
-                states_map.insert(changed_type, state.as_ref());
+        // Floor new nested ids above every id this client holds, so a region minted by
+        // this update can never collide with (and be morph-preserved as) a live span.
+        let synced_id_floor = self
+            .synced_elements
+            .iter()
+            .map(|se| se.id + 1)
+            .max()
+            .unwrap_or(0);
+        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
+        let mut rerendered: Vec<u32> = Vec::new();
+        let update = {
+            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+            if let (Some(key), Some(cache)) = (inject_key, &cache_guard) {
+                if let Some(state) = cache.get(key) {
+                    states_map.insert(changed_type, state.as_ref());
+                }
+            }
+            build_synced_update_with_known_symbols(
+                &self.synced_elements,
+                &states_map,
+                &mut self.handlers,
+                changes,
+                Some(&mut self.sent_symbols),
+                Some(changed_type),
+                Some(&mut self.synced_hashes),
+                Some(&mut self.sent_css),
+                Some(&mut self.sent_maps),
+                Some(&mut discovered),
+                Some(&mut rerendered),
+                synced_id_floor,
+                Some(&self.client_actions),
+            )
+        };
+        drop(cache_guard);
+        // A re-rendered region may have changed its set of nested regions: register the
+        // new ones (and refresh the kept ones' renderers), drop the ones that no longer
+        // exist, and subscribe any shared state the newcomers read.
+        if !rerendered.is_empty() {
+            self.reconcile_nested_regions(discovered, &rerendered);
+            for (_, key) in
+                shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+            {
+                if self.subscribed_keys.insert(key.clone()) {
+                    shared.subscribe(self.connection_id, &key);
+                }
             }
         }
-        Ok(build_synced_update_with_known_symbols(
-            &self.synced_elements,
-            &states_map,
-            &mut self.handlers,
-            changes,
-            Some(&mut self.sent_symbols),
-            Some(changed_type),
-            Some(&mut self.synced_hashes),
-            Some(&mut self.sent_css),
-            Some(&mut self.sent_maps),
-            None,
-            0,
-            Some(&self.client_actions),
-        ))
+        Ok(update)
+    }
+
+    /// Reconcile nested-region registrations after an update pass: `discovered` is every
+    /// nested region encountered while re-rendering (kept + new), `rerendered` the regions
+    /// that re-rendered. A registered region whose parent re-rendered without re-discovering
+    /// it is gone from the client DOM — unregister it (and, transitively, its own children)
+    /// so no later broadcast re-renders a stale span. Kept regions get their freshly-built
+    /// renderer (its closures may capture newer content); new ones are registered.
+    fn reconcile_nested_regions(
+        &mut self,
+        discovered: Vec<crate::builder::SyncedElement>,
+        rerendered: &[u32],
+    ) {
+        let discovered_ids: std::collections::HashSet<u32> =
+            discovered.iter().map(|d| d.id).collect();
+        let rerendered_set: std::collections::HashSet<u32> = rerendered.iter().copied().collect();
+        let mut dropped: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        loop {
+            let mut changed = false;
+            for se in &self.synced_elements {
+                let Some(parent) = se.parent else { continue };
+                if dropped.contains(&se.id) {
+                    continue;
+                }
+                let orphaned = dropped.contains(&parent);
+                let stale = rerendered_set.contains(&parent) && !discovered_ids.contains(&se.id);
+                if orphaned || stale {
+                    dropped.insert(se.id);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        if !dropped.is_empty() {
+            self.synced_elements.retain(|se| !dropped.contains(&se.id));
+            self.synced_hashes.retain(|id, _| !dropped.contains(id));
+        }
+        for region in discovered {
+            if let Some(existing) = self
+                .synced_elements
+                .iter_mut()
+                .find(|se| se.id == region.id)
+            {
+                *existing = region;
+            } else {
+                self.synced_elements.push(region);
+            }
+        }
     }
 
     /// Run `handler` against its state. Shared/persisted state executes on (and is
@@ -1995,6 +2073,7 @@ impl ConnectionState {
         self.synced_elements.retain(|se| !stale.contains(&se.id));
 
         let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
+        let mut rerendered: Vec<u32> = Vec::new();
         let update = {
             let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
                 self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
@@ -2023,18 +2102,15 @@ impl ConnectionState {
                 Some(&mut self.sent_css),
                 Some(&mut self.sent_maps),
                 Some(&mut discovered),
+                Some(&mut rerendered),
                 synced_id_floor,
                 Some(&self.client_actions),
             )
         };
 
-        // Register the new view's regions so later state changes re-render them, and
-        // subscribe any shared/persisted state they read.
-        for region in discovered {
-            if !self.synced_elements.iter().any(|se| se.id == region.id) {
-                self.synced_elements.push(region);
-            }
-        }
+        // Register the new view's regions (refreshing kept ones), drop any the swap
+        // re-rendered away, and subscribe any shared/persisted state they read.
+        self.reconcile_nested_regions(discovered, &rerendered);
         for (_, key) in
             shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
         {

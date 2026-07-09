@@ -354,6 +354,7 @@ fn test_update_collects_discovered_nested_regions_with_parent() {
         None,
         None,
         Some(&mut discovered),
+        None,
         0,
         None,
     );
