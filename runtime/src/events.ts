@@ -17,11 +17,17 @@ export function gp(e: Event, el: RwEl): string {
     fd.forEach((v, k) => (obj[k] = v));
     return JSON.stringify({ t: "form", v: obj });
   }
-  if (
-    (e.type === "input" || e.type === "change") &&
-    (t === "input" || t === "textarea" || t === "select")
-  ) {
-    return JSON.stringify({ t: "text", v: (el as HTMLInputElement).value });
+  if (e.type === "input" || e.type === "change") {
+    // The value lives on the control that actually fired, which may not be the bound
+    // element: a styled <select> (rwire's Select component) binds change on its wrapper
+    // div for the arrow overlay. Resolve the real control from the event target, falling
+    // back to the bound element — without this, every wrapped <select> delivers an empty
+    // payload and its change silently no-ops server-side.
+    const R = /^(INPUT|TEXTAREA|SELECT)$/,
+      s = e.target as RwEl | null,
+      c = s && R.test(s.tagName) ? s : el;
+    if (R.test(c.tagName))
+      return JSON.stringify({ t: "text", v: (c as unknown as HTMLInputElement).value });
   }
   if (e.type === "click") {
     const tg = ((e.target as Element).closest("[data-id]") || el) as HTMLElement,

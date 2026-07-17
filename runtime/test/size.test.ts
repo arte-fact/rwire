@@ -10,7 +10,9 @@ import { gzipSync } from "node:zlib";
 // This line includes the extension CONTRACT's one-time core costs: the
 // MOD_DEF loader and the client-owned-attribute morph rules (data-vim).
 const MAX_RAW = 16_400;
-const MAX_GZIP = 6_000;
+// +50B (2026-07-17): gp()'s wrapper-select resolution — the payload reads the control that
+// actually fired, not the bound wrapper, so styled <select>s deliver their value.
+const MAX_GZIP = 6_050;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;
