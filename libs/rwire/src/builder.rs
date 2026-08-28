@@ -1516,6 +1516,11 @@ pub struct BuildContext {
     /// This avoids rendering synced elements twice, which would produce
     /// different generate_element_id() values between passes.
     synced_render_cache: HashMap<u32, ElementBuilder>,
+    /// Default states materialized during the multi build for regions whose
+    /// state type was absent from the states map (no handler references it).
+    /// The server adopts these so events and updates start from the same
+    /// instances the initial DOM was rendered from.
+    materialized_states: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
     /// Mapping from target TypeId to target index (u8)
     target_indices: HashMap<TypeId, u8>,
     /// Next available target index
@@ -1613,6 +1618,7 @@ impl BuildContext {
             text_encodings: HashMap::new(),
             composite_table: crate::style_groups::CompositeTable::new(),
             synced_render_cache: HashMap::new(),
+            materialized_states: HashMap::new(),
             target_indices: HashMap::new(),
             next_target_idx: 0,
             selector_indices: HashMap::new(),
@@ -1838,13 +1844,25 @@ impl BuildContext {
             let synced_id = self.next_synced_id;
             self.next_synced_id += 1;
 
-            // Render once, cache result for emit pass (single-render path)
+            // Render once, cache result for emit pass (single-render path).
+            // A region whose state type is absent from the map (no handler
+            // references it — e.g. a routed page over quiet memory state)
+            // renders from a materialized default instead of vanishing; the
+            // server adopts those instances after the build.
             let state_type_id = renderer.state_type_id();
-            if let Some(state) = states.get(&state_type_id) {
-                if let Some(rendered) = renderer.render_with_state(*state) {
-                    self.collect_symbols_multi(&rendered, states);
-                    self.synced_render_cache.insert(synced_id, rendered);
+            let rendered = match states.get(&state_type_id) {
+                Some(state) => renderer.render_with_state(*state),
+                None => {
+                    let state = self
+                        .materialized_states
+                        .entry(state_type_id)
+                        .or_insert_with(|| renderer.create_default_state());
+                    renderer.render_with_state(state.as_ref())
                 }
+            };
+            if let Some(rendered) = rendered {
+                self.collect_symbols_multi(&rendered, states);
+                self.synced_render_cache.insert(synced_id, rendered);
             }
             return;
         }
@@ -2163,7 +2181,18 @@ impl BuildContext {
 
                 return ref_idx;
             }
-            return 0;
+            // No cached render (the state failed to downcast): still mount an
+            // empty wrapper so a later update has a node to fill.
+            let ref_idx = self.buf.create_synced(synced_id);
+            if !el.style_utils.is_empty() {
+                self.buf.style_multi(ref_idx, &el.style_utils);
+            }
+            if let Some(parent) = parent_ref {
+                self.buf.append(parent, ref_idx);
+            } else {
+                self.buf.append_to_body(ref_idx);
+            }
+            return ref_idx;
         }
 
         for e in &el.exts {
@@ -2319,6 +2348,11 @@ impl BuildContext {
     /// Take the synced elements.
     pub fn take_synced_elements(&mut self) -> Vec<SyncedElement> {
         std::mem::take(&mut self.synced_elements)
+    }
+
+    /// Take the default states materialized for regions no handler references.
+    pub fn take_materialized_states(&mut self) -> HashMap<TypeId, Box<dyn Any + Send + Sync>> {
+        std::mem::take(&mut self.materialized_states)
     }
 
     /// Get the symbol map for tracking sent symbols.

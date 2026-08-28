@@ -2181,6 +2181,12 @@ impl ConnectionState {
         self.synced_elements = ctx.take_synced_elements();
         self.sent_symbols = ctx.take_symbol_map();
         self.client_actions = ctx.client_action_indices();
+        // Adopt states materialized for regions no handler references (their
+        // content was rendered from defaults), so events and later updates
+        // start from the same instances the client is showing.
+        for (tid, state) in ctx.take_materialized_states() {
+            self.states.entry(tid).or_insert(state);
+        }
         // Prepend STYLE_DEF for the styles this render uses (lazy CSS): the capsule
         // ships only global CSS; class rules arrive over the wire.
         Ok(ctx.finish_with_style_defs(&mut self.sent_css, &mut self.sent_maps))
@@ -2242,6 +2248,43 @@ impl ConnectionState {
                 .or_insert_with(|| synced.create_default_state());
         }
     }
+}
+
+/// Subscribe the connection to every shared/persisted state its handlers and
+/// synced regions read, lazily creating the single `__shared__` instance so the
+/// first connection doesn't render an empty default. Idempotent — called before
+/// the initial render, and again after it for regions the render discovered
+/// nested inside other regions.
+fn subscribe_render_sources(
+    conn_state: &mut ConnectionState,
+    shared: &SharedServerState,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let keys = shared_persisted_keys(
+        &conn_state.handlers,
+        &conn_state.synced_elements,
+        &conn_state.session_id,
+    );
+    let mut cache = shared
+        .shared_cache
+        .write()
+        .map_err(|_| "shared cache lock poisoned")?;
+    for (tid, key) in keys {
+        if key.starts_with("__shared__:") {
+            if let Some(synced) = conn_state
+                .synced_elements
+                .iter()
+                .find(|s| s.state_type_id == tid)
+            {
+                cache
+                    .entry(key.clone())
+                    .or_insert_with(|| synced.renderer.create_default_state());
+            }
+        }
+        if conn_state.subscribed_keys.insert(key.clone()) {
+            shared.subscribe(conn_state.connection_id, &key);
+        }
+    }
+    Ok(())
 }
 
 /// RAII guard that unregisters a connection when dropped.
@@ -2365,38 +2408,16 @@ where
     // mutates, so broadcasts (cross-tab persisted writes, or background
     // `update_shared` calls) re-render it. Also lazily create the single shared
     // instance so the first connection doesn't render an empty default.
-    {
-        let keys = shared_persisted_keys(
-            &conn_state.handlers,
-            &conn_state.synced_elements,
-            &conn_state.session_id,
-        );
-        let mut cache = shared
-            .shared_cache
-            .write()
-            .map_err(|_| "shared cache lock poisoned")?;
-        for (tid, key) in keys {
-            if key.starts_with("__shared__:") {
-                if let Some(synced) = conn_state
-                    .synced_elements
-                    .iter()
-                    .find(|s| s.state_type_id == tid)
-                {
-                    cache
-                        .entry(key.clone())
-                        .or_insert_with(|| synced.renderer.create_default_state());
-                }
-            }
-            if conn_state.subscribed_keys.insert(key.clone()) {
-                shared.subscribe(conn_state.connection_id, &key);
-            }
-        }
-    }
+    subscribe_render_sources(&mut conn_state, &shared)?;
 
     // Now rebuild the DOM with all states available
     // Build a HashMap of all states for multi-state rendering
     // For persisted state, use shared cache; for memory state, use connection state
     let initial_dom = conn_state.render_initial_dom(&shared, &root_element, &composite_table)?;
+
+    // The initial render discovers regions nested inside other regions (the
+    // route outlet's view, most commonly); subscribe their shared state too.
+    subscribe_render_sources(&mut conn_state, &shared)?;
 
     // Send initial DOM message (global CSS is in the capsule; class rules are
     // delivered lazily via STYLE_DEF, starting with this initial batch).
