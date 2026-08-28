@@ -1303,7 +1303,14 @@ async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &s
     let mut upstream = match TcpStream::connect(("127.0.0.1", port)).await {
         Ok(upstream) => upstream,
         Err(_) => {
-            let _ = crate::health::serve_unavailable(stream, "preview_unreachable").await;
+            // A human clicked a link to a service that resolved but isn't answering — a page,
+            // not JSON (this is a browser navigation, not a health probe).
+            let _ = crate::health::serve_unavailable_page(
+                stream,
+                "The service behind this link isn't responding — it may be restarting. \
+                 Try again from the page that linked here.",
+            )
+            .await;
             return;
         }
     };
@@ -1604,15 +1611,24 @@ async fn handle_client<F>(
     }
 
     // Reverse-proxy gate (after auth, so previews inherit the gate): a matched path forwards to a
-    // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw bytes.
+    // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw
+    // bytes. A path the resolver claims without a live upstream gets the human 503 page — never
+    // the app shell (see `ProxyDecision::Gone`).
     if let Some(resolver) = config.proxy.as_ref() {
         let (_, path) = request_line(&peek_str);
-        if let Some((port, prefix)) = resolver.resolve(path) {
-            let mut head = vec![0u8; n];
-            if stream.read_exact(&mut head).await.is_ok() {
-                serve_proxy(stream, head, port, &prefix).await;
+        match resolver.resolve(path) {
+            Some(crate::config::ProxyDecision::Forward { port, prefix }) => {
+                let mut head = vec![0u8; n];
+                if stream.read_exact(&mut head).await.is_ok() {
+                    serve_proxy(stream, head, port, &prefix).await;
+                }
+                return;
             }
-            return;
+            Some(crate::config::ProxyDecision::Gone { message }) => {
+                let _ = crate::health::serve_unavailable_page(stream, &message).await;
+                return;
+            }
+            None => {}
         }
     }
 

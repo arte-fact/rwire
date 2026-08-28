@@ -3,29 +3,40 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Resolves a request path to a reverse-proxy upstream. Returns `(port, prefix)` when the path is a
-/// proxied route — `port` is the local upstream to forward to on `127.0.0.1`, and `prefix` is the
-/// leading path segment to strip so the upstream sees a root-relative path — or `None` for a normal
-/// request the server should handle itself.
+/// One reverse-proxy routing decision for a request path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProxyDecision {
+    /// Forward to a local upstream on `127.0.0.1:port`, stripping the leading `prefix` path
+    /// segment so the upstream sees a root-relative path.
+    Forward { port: u16, prefix: String },
+    /// The path belongs to the proxy's namespace but has no live upstream. The server answers
+    /// with a small human-facing 503 page carrying `message` — it must NOT fall through to the
+    /// app: a stale deep link (e.g. a dead preview bookmarked or held open in an installed PWA)
+    /// would otherwise open the app shell where the linked service was expected, which reads as
+    /// the app mysteriously relaunching.
+    Gone { message: String },
+}
+
+/// Resolves a request path to a reverse-proxy decision — or `None` for a normal request the
+/// server should handle itself.
 ///
-/// The mechanism lives here; the *policy* (which paths map to which ports) is the host app's
+/// The mechanism lives here; the *policy* (which paths map to which upstreams) is the host app's
 /// closure. It's how one origin can front several sibling servers behind a single auth gate — e.g.
 /// a preview supervisor mapping `/preview/<id>/…` to a pooled port (claw's P2 CD flow).
-/// The boxed closure a [`ProxyResolver`] holds: a request path → `(upstream port, prefix to strip)`.
-type ProxyFn = dyn Fn(&str) -> Option<(u16, String)> + Send + Sync;
+type ProxyFn = dyn Fn(&str) -> Option<ProxyDecision> + Send + Sync;
 
 #[derive(Clone)]
 pub struct ProxyResolver(Arc<ProxyFn>);
 
 impl ProxyResolver {
-    /// Wrap a path→`(port, prefix)` resolver.
-    pub fn new(resolve: impl Fn(&str) -> Option<(u16, String)> + Send + Sync + 'static) -> Self {
+    /// Wrap a path→[`ProxyDecision`] resolver.
+    pub fn new(resolve: impl Fn(&str) -> Option<ProxyDecision> + Send + Sync + 'static) -> Self {
         Self(Arc::new(resolve))
     }
 
-    /// Resolve `path` to an upstream, or `None` to handle it normally.
+    /// Resolve `path` to a decision, or `None` to handle it normally.
     #[must_use]
-    pub fn resolve(&self, path: &str) -> Option<(u16, String)> {
+    pub fn resolve(&self, path: &str) -> Option<ProxyDecision> {
         (self.0)(path)
     }
 }
