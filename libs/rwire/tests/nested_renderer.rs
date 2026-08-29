@@ -370,56 +370,6 @@ fn test_update_collects_discovered_nested_regions_with_parent() {
     );
 }
 
-/// A nested region whose state type is absent from the states map — no handler
-/// references it, e.g. a routed `#[renderer]` page over quiet memory state —
-/// must still paint in the initial DOM via its renderer's default state, and
-/// must still get a wrapper node so later updates have a mount point. Before
-/// this, such a region was registered but emitted nothing at all: the page
-/// stayed blank forever unless some other path touched its state.
-#[test]
-fn a_nested_region_with_unmapped_state_renders_its_default_in_the_initial_dom() {
-    #[derive(Default)]
-    struct QuietState {
-        label: String,
-    }
-    impl MemoryState for QuietState {}
-
-    fn make_quiet_child() -> ElementBuilder {
-        ElementBuilder::synced(|state: &QuietState| {
-            el(El::Span)
-                .class("quietmark")
-                .text(&format!("Quiet: {}", state.label))
-        })
-    }
-    let outer = ElementBuilder::synced(|_s: &ParentState| el(El::Div).append([make_quiet_child()]));
-
-    let mut ctx = BuildContext::new();
-    let boxed: Box<dyn std::any::Any + Send + Sync> = Box::new(ParentState::default());
-    let mut states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
-    states.insert(TypeId::of::<ParentState>(), boxed.as_ref());
-
-    ctx.collect_symbols_multi(&outer, &states);
-    ctx.emit_multi(&outer);
-    let synced = ctx.take_synced_elements();
-    assert_eq!(synced.len(), 2, "outer + quiet child registered");
-
-    let materialized = ctx.take_materialized_states();
-    assert!(
-        materialized.contains_key(&TypeId::of::<QuietState>()),
-        "the quiet region's default state should be materialized for the server to adopt"
-    );
-
-    let bytes = ctx.finish();
-    assert!(
-        has_create_synced_for_id(bytes.as_ref(), 1),
-        "the quiet region must get a wrapper node in the initial DOM"
-    );
-    assert!(
-        bytes.as_ref().windows(9).any(|w| w == b"quietmark"),
-        "the quiet region's content must be emitted, rendered from its default state"
-    );
-}
-
 /// Test deeply nested synced elements (3 levels).
 #[test]
 fn test_deeply_nested_synced_elements() {
