@@ -1,0 +1,7 @@
+[package]
+name = "empire"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+empire-lib = { path = "../../libs/empire-lib" }
