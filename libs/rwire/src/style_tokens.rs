@@ -907,6 +907,9 @@ define_token_enum! {
         MinHDvh = 0x345 => "min-height:100dvh",
         MaxHDvh = 0x346 => "max-height:100dvh",
         PbSafe = 0x347 => "padding-bottom:max(var(--S2),env(safe-area-inset-bottom))",
+        TranslateYPosFull = 0x348 => "transform:translateY(100%)",
+        MaxH85Dvh = 0x349 => "max-height:85dvh",
+        RoundedTLg = 0x34A => "border-top-left-radius:var(--R3);border-top-right-radius:var(--R3)",
     }
 }
 

@@ -39,6 +39,8 @@ pub enum DrawerPosition {
     #[default]
     Left,
     Right,
+    /// Bottom sheet: full width, slides up, capped at 85dvh.
+    Bottom,
 }
 
 /// Drawer builder.
@@ -99,9 +101,7 @@ impl Drawer {
     pub fn compute_panel_tokens() -> Vec<St> {
         vec![
             St::PositionFixed,
-            St::Top0,
             St::Bottom0,
-            St::W320px,
             St::MaxWFull,
             St::BgApp,
             St::ShadowXl,
@@ -113,12 +113,28 @@ impl Drawer {
         ]
     }
 
+    /// Side panels are 320px tall columns; the bottom sheet spans the width.
+    pub fn compute_shape_tokens(position: DrawerPosition) -> Vec<St> {
+        match position {
+            DrawerPosition::Left | DrawerPosition::Right => vec![St::Top0, St::W320px],
+            DrawerPosition::Bottom => vec![
+                St::Left0,
+                St::Right0,
+                St::WFull,
+                St::MaxH85Dvh,
+                St::RoundedTLg,
+                St::PbSafe,
+            ],
+        }
+    }
+
     /// Build the drawer into an ElementBuilder.
     ///
     /// Always renders the full DOM structure. Open/close state is toggled
     /// via transform (slide) and opacity (backdrop), enabling CSS transitions.
     pub fn build(self) -> ElementBuilder {
         let mut panel_tokens = Self::compute_panel_tokens();
+        panel_tokens.extend(Self::compute_shape_tokens(self.position));
 
         // Position the panel and set slide transform
         match self.position {
@@ -136,6 +152,13 @@ impl Drawer {
                     panel_tokens.push(St::TransformNone);
                 } else {
                     panel_tokens.push(St::TranslateXFull);
+                }
+            }
+            DrawerPosition::Bottom => {
+                if self.open {
+                    panel_tokens.push(St::TransformNone);
+                } else {
+                    panel_tokens.push(St::TranslateYPosFull);
                 }
             }
         };
@@ -210,9 +233,13 @@ impl Drawer {
         }
 
         // Backdrop — always present, visibility toggled
-        let mut backdrop = el(El::Div)
-            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50,
-                 St::TransitionOpacity]);
+        let mut backdrop = el(El::Div).st([
+            St::PositionFixed,
+            St::Inset0,
+            St::Z1300,
+            St::BgOverlay50,
+            St::TransitionOpacity,
+        ]);
 
         if !self.open {
             backdrop = backdrop.st([St::Opacity0, St::PointerEventsNone]);
@@ -243,8 +270,12 @@ mod tests {
     fn test_drawer_panel_tokens() {
         let tokens = Drawer::compute_panel_tokens();
         assert!(tokens.contains(&St::PositionFixed));
-        assert!(tokens.contains(&St::W320px));
         assert!(tokens.contains(&St::BgApp));
+        let side = Drawer::compute_shape_tokens(DrawerPosition::Left);
+        assert!(side.contains(&St::W320px) && side.contains(&St::Top0));
+        let sheet = Drawer::compute_shape_tokens(DrawerPosition::Bottom);
+        assert!(sheet.contains(&St::WFull) && sheet.contains(&St::MaxH85Dvh));
+        assert!(!sheet.contains(&St::W320px));
         assert!(tokens.contains(&St::ShadowXl));
         assert!(tokens.contains(&St::TransitionTransformMd));
         assert!(tokens.contains(&St::Z1400));
