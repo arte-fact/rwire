@@ -8,9 +8,9 @@ use empire_lib::trade::MAX_GRAIN_PRICE;
 use empire_lib::{Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, St};
 use rwire_components::{
-    Alert, Badge, Button, ButtonSize, Card, CardPadding, CopyButton, FormField, Gap, Grid,
-    GridColumns, Input, Link, Progress, Select, Slider, Spinner, Stack, StackJustify, Stat,
-    Stepper, Table, TableRow, Text, TextVariant,
+    Alert, Badge, Button, ButtonSize, Card, CardPadding, CopyButton, Drawer, DrawerPosition,
+    FormField, Gap, Grid, GridColumns, Input, Link, Progress, Select, Slider, Spinner, Stack,
+    StackJustify, Stat, Stepper, Table, TableRow, Text, TextVariant,
 };
 
 use crate::room::{self, by, invest_fr, Battle, Room, Rooms, Seat, Stage, Step};
@@ -19,6 +19,70 @@ type Label = Cow<'static, str>;
 
 /// Bottom tabs.
 const TABS: [&str; 3] = ["Partie", "Royaumes", "Journal"];
+
+/// An open bottom sheet, pinned to the step/year it was opened for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sheet {
+    pub action: u8,
+    pub step: u8,
+    pub year: u16,
+}
+
+/// Step tag used for lobby sheets (no step is active).
+const LOBBY_STEP: u8 = 0xFF;
+
+/// Every form that lives in the bottom sheet.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Rename = 1,
+    Buy,
+    Sell,
+    Land,
+    Feed,
+    Taxes,
+    Invest,
+    Attack,
+}
+
+impl Action {
+    fn from_u8(n: u8) -> Option<Action> {
+        Some(match n {
+            1 => Action::Rename,
+            2 => Action::Buy,
+            3 => Action::Sell,
+            4 => Action::Land,
+            5 => Action::Feed,
+            6 => Action::Taxes,
+            7 => Action::Invest,
+            8 => Action::Attack,
+            _ => return None,
+        })
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Action::Rename => "Votre nom",
+            Action::Buy => "Acheter du grain",
+            Action::Sell => "Vendre du grain",
+            Action::Land => "Vendre des terres",
+            Action::Feed => "Nourrir le royaume",
+            Action::Taxes => "Taux d'imposition",
+            Action::Invest => "Investissements",
+            Action::Attack => "Expédition",
+        }
+    }
+
+    /// The step this action belongs to (`None` = lobby).
+    fn step(self) -> Option<Step> {
+        Some(match self {
+            Action::Rename => return None,
+            Action::Buy | Action::Sell | Action::Land => Step::Trade,
+            Action::Feed => Step::Feed,
+            Action::Taxes | Action::Invest => Step::Economy,
+            Action::Attack => Step::War,
+        })
+    }
+}
 
 /// The viewer's handle on one table: everything a view needs to bind actions.
 #[derive(Clone, Copy)]
@@ -34,9 +98,15 @@ impl T<'_> {
     }
 }
 
-pub fn page(rooms: &Rooms, token: u64, tab: u8, code: Option<&str>) -> ElementBuilder {
+pub fn page(
+    rooms: &Rooms,
+    token: u64,
+    tab: u8,
+    code: Option<&str>,
+    sheet: Option<Sheet>,
+) -> ElementBuilder {
     match code.and_then(|c| rooms.get(c).map(|r| (c, r))) {
-        Some((code, room)) => room_page(T { room, code, token }, tab),
+        Some((code, room)) => room_page(T { room, code, token }, tab, sheet),
         None => home_page(rooms, token, code.is_some()),
     }
 }
@@ -44,7 +114,12 @@ pub fn page(rooms: &Rooms, token: u64, tab: u8, code: Option<&str>) -> ElementBu
 /// App shell: the root is exactly one dynamic viewport tall and never scrolls;
 /// `main` is the scroll container and the bar sits in normal flow below it. No
 /// `position: fixed`, so a collapsing mobile address bar can't hide or jolt it.
-fn shell(header: ElementBuilder, content: ElementBuilder, bar: ElementBuilder) -> ElementBuilder {
+fn shell(
+    header: ElementBuilder,
+    content: ElementBuilder,
+    bar: ElementBuilder,
+    overlay: Option<ElementBuilder>,
+) -> ElementBuilder {
     el(El::Div)
         .st([
             St::HDvh,
@@ -69,6 +144,7 @@ fn shell(header: ElementBuilder, content: ElementBuilder, bar: ElementBuilder) -
                     ])
                     .append([content])]),
             bar,
+            overlay.unwrap_or_else(|| el(El::Div)),
         ])
 }
 
@@ -147,6 +223,7 @@ fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
             )),
             None,
         ),
+        None,
     )
 }
 
@@ -154,14 +231,88 @@ fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
 // A table
 // ---------------------------------------------------------------------------
 
-fn room_page(t: T, tab: u8) -> ElementBuilder {
+fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
     let me = t.room.seat_of(t.token);
+    let open = sheet.and_then(|sh| open_action(t, me, sh));
     let (content, action) = match tab {
         1 => (kingdoms_tab(t.room), None),
         2 => (journal_tab(t.room), None),
-        _ => partie(t, me),
+        _ => partie(t, me, open.is_some()),
     };
-    shell(header(t, me), content, bottom_bar(action, Some(tab)))
+    let overlay = open.map(|(id, act)| {
+        let mut body = Vec::new();
+        if let Some(notice) = &t.room.seat(id).notice {
+            body.push(Alert::info().message(notice.clone()).build());
+        }
+        body.push(sheet_form(t, id, act));
+        Drawer::new()
+            .position(DrawerPosition::Bottom)
+            .open(true)
+            .title(act.title())
+            .on_close(crate::close_sheet())
+            .content(Stack::column().gap(Gap::Md).children(body).build())
+            .build()
+    });
+    shell(
+        header(t, me),
+        content,
+        bottom_bar(action, Some(tab)),
+        overlay,
+    )
+}
+
+/// The sheet's action if it is still valid for this viewer at this moment.
+fn open_action(t: T, me: Option<Kingdoms>, sh: Sheet) -> Option<(Kingdoms, Action)> {
+    let id = me?;
+    let act = Action::from_u8(sh.action)?;
+    let room = t.room;
+    let valid = match act.step() {
+        None => room.stage == Stage::Lobby && sh.step == LOBBY_STEP,
+        Some(step) => {
+            room.stage == Stage::Playing
+                && room.active() == Some(id)
+                && room.battle.is_none()
+                && room.step == step
+                && sh.step == step.index() as u8
+                && sh.year == room.game.year as u16
+        }
+    };
+    let k = room.game.kingdom(id);
+    let available = match act {
+        Action::Attack => room.seat(id).attacks_left > 0 && k.soldiers > 0,
+        Action::Sell => k.grain_stocks > 0,
+        Action::Land => k.surface > 1,
+        _ => true,
+    };
+    (valid && available).then_some((id, act))
+}
+
+/// A button that opens the sheet for `act`.
+fn opener(t: T, act: Action, label: &'static str, disabled: bool, main: bool) -> ElementBuilder {
+    let step = act.step().map(|s| s.index() as u8).unwrap_or(LOBBY_STEP);
+    let year = (t.room.game.year as u16).to_le_bytes();
+    let spec = crate::open_sheet().with_param_bytes(vec![act as u8, step, year[0], year[1]]);
+    let b = if main {
+        Button::primary(label).size(ButtonSize::Lg)
+    } else {
+        Button::secondary(label)
+    };
+    b.full_width(true).disabled(disabled).on_click(spec)
+}
+
+/// The form shown inside the sheet.
+fn sheet_form(t: T, id: Kingdoms, act: Action) -> ElementBuilder {
+    let k = t.room.game.kingdom(id);
+    match act {
+        Action::Rename => rename_form(t, k),
+        Action::Buy => buy_form(t, id),
+        Action::Sell => sell_form(t, k),
+        Action::Land => land_form(t, k),
+        Action::Feed => feed_form(t, k),
+        Action::Taxes => taxes_form(t, k),
+        Action::Invest => invest_form(t, k, t.room.seat(id)),
+        Action::Attack => attack_form(t, id),
+    }
 }
 
 fn header(t: T, me: Option<Kingdoms>) -> ElementBuilder {
@@ -330,7 +481,7 @@ fn kingdoms_tab(room: &Room) -> ElementBuilder {
 
 type View = (ElementBuilder, Option<ElementBuilder>);
 
-fn partie(t: T, me: Option<Kingdoms>) -> View {
+fn partie(t: T, me: Option<Kingdoms>, sheet_open: bool) -> View {
     let room = t.room;
     match room.stage {
         Stage::Lobby => (
@@ -346,7 +497,7 @@ fn partie(t: T, me: Option<Kingdoms>) -> View {
                 return (battle_page(room, b), None);
             }
             match me {
-                Some(id) if room.active() == Some(id) => turn(t, id),
+                Some(id) if room.active() == Some(id) => turn(t, id, sheet_open),
                 Some(id) if room.game.kingdom(id).is_dead => (
                     Stack::column()
                         .gap(Gap::Md)
@@ -453,23 +604,8 @@ fn lobby(t: T, me: Option<Kingdoms>) -> ElementBuilder {
         );
     }
 
-    if let Some(id) = me {
-        items.push(section(
-            "Votre nom",
-            form(
-                t.act(room::rename()),
-                [
-                    Input::text()
-                        .name("name")
-                        .id("name")
-                        .value(room.game.kingdom(id).player_name.clone())
-                        .placeholder("Nom du seigneur")
-                        .required(true)
-                        .build(),
-                    Button::secondary("Prendre ce nom").full_width(true).build(),
-                ],
-            ),
-        ));
+    if me.is_some() {
+        items.push(opener(t, Action::Rename, "Changer de nom", false, false));
     }
     items.push(
         Text::caption(format!("{} seigneur(s) à table", room.humans().count()))
@@ -636,18 +772,21 @@ fn side(name: String, count: i32, start: i32) -> ElementBuilder {
 // The active player's turn
 // ---------------------------------------------------------------------------
 
-fn turn(t: T, id: Kingdoms) -> View {
+fn turn(t: T, id: Kingdoms, sheet_open: bool) -> View {
     let room = t.room;
     let k = room.game.kingdom(id);
     let seat = room.seat(id);
     let mut items = vec![stepper(room.step)];
-    if let Some(notice) = &seat.notice {
+    if let (Some(notice), false) = (&seat.notice, sheet_open) {
         items.push(Alert::info().message(notice.clone()).build());
     }
     let (body, action) = match room.step {
         Step::Weather => (weather_step(room, k), Some(next("Continuer", t))),
         Step::Trade => (trade_step(t, id), Some(next("Passer à l'intendance", t))),
-        Step::Feed => (feed_step(t, k), None),
+        Step::Feed => (
+            feed_step(k),
+            Some(opener(t, Action::Feed, "Nourrir le royaume", false, true)),
+        ),
         Step::Report => (report_step(seat), Some(next("Continuer", t))),
         Step::Economy => (
             economy_step(t, k, seat),
@@ -683,15 +822,56 @@ fn weather_step(room: &Room, k: &Kingdom) -> ElementBuilder {
 fn trade_step(t: T, id: Kingdoms) -> ElementBuilder {
     let room = t.room;
     let k = room.game.kingdom(id);
+    let offers = room
+        .game
+        .alive_kingdoms()
+        .into_iter()
+        .filter(|&o| o != id)
+        .filter(|&o| {
+            let s = room.game.kingdom(o);
+            s.grain_to_sell > 0 && s.grain_price > 0
+        })
+        .count();
+    let market = if offers == 0 {
+        "Personne ne vend de grain cette année.".to_string()
+    } else {
+        format!("{offers} royaume(s) vendent du grain.")
+    };
+    Stack::column()
+        .gap(Gap::Md)
+        .children([
+            resources(k),
+            section(
+                "Commerce",
+                Stack::column()
+                    .gap(Gap::Sm)
+                    .children([
+                        Text::caption(market).muted().build(),
+                        opener(t, Action::Buy, "Acheter du grain", offers == 0, false),
+                        opener(
+                            t,
+                            Action::Sell,
+                            "Vendre du grain",
+                            k.grain_stocks < 1,
+                            false,
+                        ),
+                        opener(t, Action::Land, "Vendre des terres", k.surface < 2, false),
+                    ])
+                    .build(),
+            ),
+        ])
+        .build()
+}
+
+fn buy_form(t: T, id: Kingdoms) -> ElementBuilder {
+    let room = t.room;
     let mut sellers = Select::new().name("seller");
-    let mut offers = 0;
     let mut largest = 0;
     for other in room.game.alive_kingdoms().into_iter().filter(|&o| o != id) {
         let s = room.game.kingdom(other);
         if s.grain_to_sell < 1 || s.grain_price < 1 {
             continue;
         }
-        offers += 1;
         largest = largest.max(s.grain_to_sell);
         sellers = sellers.option(
             (other.index() + 1).to_string(),
@@ -703,84 +883,102 @@ fn trade_step(t: T, id: Kingdoms) -> ElementBuilder {
             ),
         );
     }
-    let buy = if offers == 0 {
-        Text::body("Personne ne vend de grain cette année.")
-            .muted()
-            .build()
-    } else {
-        form(
-            t.act(room::buy_grain()),
-            [
-                labeled("Vendeur", sellers.build()),
-                slider(
-                    "buy_amount",
-                    "Boisseaux (courtage 10 %)",
-                    1,
-                    largest.min(500),
-                    100,
-                    "boisseaux",
-                ),
-                Button::secondary("Acheter").full_width(true).build(),
-            ],
-        )
-    };
+    form(
+        t.act(room::buy_grain()),
+        [
+            labeled("Vendeur", sellers.build()),
+            slider(
+                "buy_amount",
+                "Boisseaux (courtage 10 %)",
+                1,
+                largest.clamp(1, 500),
+                100,
+                "boisseaux",
+            ),
+            Button::primary("Acheter").full_width(true).build(),
+        ],
+    )
+}
+
+fn sell_form(t: T, k: &Kingdom) -> ElementBuilder {
     let stocks = k.grain_stocks.max(1);
+    form(
+        t.act(room::sell_grain()),
+        [
+            slider(
+                "sell_amount",
+                "Boisseaux à vendre",
+                1,
+                stocks,
+                (stocks / 10).max(1),
+                "boisseaux",
+            ),
+            slider(
+                "price",
+                "Prix du boisseau",
+                1,
+                MAX_GRAIN_PRICE,
+                5,
+                k.currency(),
+            ),
+            Button::primary("Mettre en vente").full_width(true).build(),
+        ],
+    )
+}
+
+fn land_form(t: T, k: &Kingdom) -> ElementBuilder {
+    form(
+        t.act(room::sell_land()),
+        [
+            slider(
+                "arpents",
+                "Arpents (2 pièces l'arpent)",
+                1,
+                (k.surface / 2).max(1),
+                (k.surface / 100).max(1),
+                "arpents",
+            ),
+            Button::primary("Vendre aux Barbares")
+                .full_width(true)
+                .build(),
+        ],
+    )
+}
+
+fn rename_form(t: T, k: &Kingdom) -> ElementBuilder {
+    form(
+        t.act(room::rename()),
+        [
+            Input::text()
+                .name("name")
+                .id("name")
+                .value(k.player_name.clone())
+                .placeholder("Nom du seigneur")
+                .required(true)
+                .build(),
+            Button::primary("Prendre ce nom").full_width(true).build(),
+        ],
+    )
+}
+
+fn feed_step(k: &Kingdom) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Md)
         .children([
             resources(k),
-            section("Acheter du grain", buy),
             section(
-                "Vendre du grain",
-                form(
-                    t.act(room::sell_grain()),
-                    [
-                        slider(
-                            "sell_amount",
-                            "Boisseaux à vendre",
-                            1,
-                            stocks,
-                            (stocks / 10).max(1),
-                            "boisseaux",
-                        ),
-                        slider(
-                            "price",
-                            "Prix du boisseau",
-                            1,
-                            MAX_GRAIN_PRICE,
-                            5,
-                            k.currency(),
-                        ),
-                        Button::secondary("Mettre en vente")
-                            .full_width(true)
-                            .build(),
-                    ],
-                ),
-            ),
-            section(
-                "Vendre des terres",
-                form(
-                    t.act(room::sell_land()),
-                    [
-                        slider(
-                            "arpents",
-                            "Arpents (2 pièces l'arpent)",
-                            1,
-                            (k.surface / 2).max(1),
-                            (k.surface / 100).max(1),
-                            "arpents",
-                        ),
-                        Button::secondary("Vendre aux Barbares")
-                            .full_width(true)
-                            .build(),
-                    ],
-                ),
+                "Intendance",
+                Text::body(
+                    "Répartissez le grain entre le peuple et l'ost. Mal nourris, serfs et soldats meurent ou désertent ; bien nourris, les étrangers immigrent et l'ost combat mieux.",
+                )
+                .muted()
+                .build(),
             ),
         ])
         .build()
 }
 
-fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
+fn feed_form(t: T, k: &Kingdom) -> ElementBuilder {
     let stocks = k.grain_stocks.max(0);
     let needs = k.peasants_grain_needs();
     let army = k.soldiers_grain_needs();
@@ -788,53 +986,39 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
     // army's needs efficiency is already maxed — so the sliders stop there.
     let peasants_max = (needs * 2).min(stocks).max(0);
     let soldiers_max = (army * 3 / 2).min(stocks).max(0);
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            resources(k),
-            section(
-                "Nourrir le royaume",
-                form(
-                    t.act(room::feed()),
-                    [
-                        slider(
-                            "peasants",
-                            format!(
-                                "Grain pour les {} habitants (besoin : {})",
-                                fmt(k.population()),
-                                fmt(needs)
-                            ),
-                            0,
-                            peasants_max,
-                            needs.min(peasants_max),
-                            "boisseaux",
-                        ),
-                        slider(
-                            "soldiers",
-                            format!(
-                                "Grain pour l'ost de {} hommes (besoin : {})",
-                                fmt(k.soldiers),
-                                fmt(army)
-                            ),
-                            0,
-                            soldiers_max,
-                            army.min(soldiers_max),
-                            "boisseaux",
-                        ),
-                        Text::caption(
-                            "Mal nourris, serfs et soldats meurent ou désertent ; bien nourris, les étrangers immigrent et l'ost combat mieux.",
-                        )
-                        .muted()
-                        .build(),
-                        Button::primary("Nourrir")
-                            .size(ButtonSize::Lg)
-                            .full_width(true)
-                            .build(),
-                    ],
+    form(
+        t.act(room::feed()),
+        [
+            slider(
+                "peasants",
+                format!(
+                    "Grain pour les {} habitants (besoin : {})",
+                    fmt(k.population()),
+                    fmt(needs)
                 ),
+                0,
+                peasants_max,
+                needs.min(peasants_max),
+                "boisseaux",
             ),
-        ])
-        .build()
+            slider(
+                "soldiers",
+                format!(
+                    "Grain pour l'ost de {} hommes (besoin : {})",
+                    fmt(k.soldiers),
+                    fmt(army)
+                ),
+                0,
+                soldiers_max,
+                army.min(soldiers_max),
+                "boisseaux",
+            ),
+            Button::primary("Nourrir")
+                .size(ButtonSize::Lg)
+                .full_width(true)
+                .build(),
+        ],
+    )
 }
 
 fn report_step(seat: &Seat) -> ElementBuilder {
@@ -894,7 +1078,6 @@ fn report_step(seat: &Seat) -> ElementBuilder {
 
 fn economy_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let mut items = Vec::new();
-
     if let Some(e) = &seat.eco {
         let rows = [
             ("Champs de foire", k.marketplaces, e.marketplaces_profits),
@@ -925,27 +1108,45 @@ fn economy_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             scroll(tbl.build()),
         ));
     }
-
     items.push(section(
-        "Taux d'imposition",
-        form(
-            t.act(room::set_taxes()),
-            [
-                slider(
-                    "customs",
-                    "Droits de douane",
-                    0,
-                    50,
-                    k.immigration_taxes,
-                    "%",
+        format!("Trésor : {} {}", fmt(k.treasury), k.currency()),
+        Stack::column()
+            .gap(Gap::Sm)
+            .children([
+                opener(
+                    t,
+                    Action::Taxes,
+                    "Ajuster les taux d'imposition",
+                    false,
+                    false,
                 ),
-                slider("sales", "Taxe commerciale", 0, 20, k.commercial_taxes, "%"),
-                slider("income", "Impôts directs", 0, 35, k.income_taxes, "%"),
-                Button::secondary("Promulguer").full_width(true).build(),
-            ],
-        ),
+                opener(t, Action::Invest, "Investir", false, false),
+            ])
+            .build(),
     ));
+    Stack::column().gap(Gap::Md).children(items).build()
+}
 
+fn taxes_form(t: T, k: &Kingdom) -> ElementBuilder {
+    form(
+        t.act(room::set_taxes()),
+        [
+            slider(
+                "customs",
+                "Droits de douane",
+                0,
+                50,
+                k.immigration_taxes,
+                "%",
+            ),
+            slider("sales", "Taxe commerciale", 0, 20, k.commercial_taxes, "%"),
+            slider("income", "Impôts directs", 0, 35, k.income_taxes, "%"),
+            Button::primary("Promulguer").full_width(true).build(),
+        ],
+    )
+}
+
+fn invest_form(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let kind = seat.invest_kind.unwrap_or(InvestmentType::Marketplaces);
     let max = kind.max_investment(k).max(0);
     let mut kinds = Select::new()
@@ -963,37 +1164,31 @@ fn economy_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             ),
         );
     }
-    items.push(section(
-        format!(
-            "Investissements — trésor : {} {}",
-            fmt(k.treasury),
-            k.currency()
-        ),
-        form(
-            t.act(room::invest()),
-            [
-                labeled("Type", kinds.on_change(t.act(room::pick_investment()))),
-                slider(
-                    "invest_amount",
-                    format!(
-                        "Quantité (max {max} à {} {} pièce)",
-                        fmt(kind.cost()),
-                        k.currency()
-                    ),
-                    0,
-                    max,
-                    1.min(max),
-                    invest_fr(kind),
+    form(
+        t.act(room::invest()),
+        [
+            Text::caption(format!("Trésor : {} {}", fmt(k.treasury), k.currency()))
+                .muted()
+                .build(),
+            labeled("Type", kinds.on_change(t.act(room::pick_investment()))),
+            slider(
+                "invest_amount",
+                format!(
+                    "Quantité (max {max} à {} {} pièce)",
+                    fmt(kind.cost()),
+                    k.currency()
                 ),
-                Button::secondary("Investir")
-                    .full_width(true)
-                    .disabled(max < 1)
-                    .build(),
-            ],
-        ),
-    ));
-
-    Stack::column().gap(Gap::Md).children(items).build()
+                0,
+                max,
+                1.min(max),
+                invest_fr(kind),
+            ),
+            Button::primary("Investir")
+                .full_width(true)
+                .disabled(max < 1)
+                .build(),
+        ],
+    )
 }
 
 /// Menu number of an investment type (1..=6), the inverse of `from_number`.
@@ -1006,7 +1201,7 @@ fn kind_number(kind: InvestmentType) -> i32 {
 fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     let room = t.room;
     let k = room.game.kingdom(id);
-    let year = room.game.year;
+    let left = room.seat(id).attacks_left;
     let mut tbl = Table::new()
         .headers(["Terres vassales", "Arpents", "Soldats"])
         .striped(true)
@@ -1015,12 +1210,55 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
             fmt(room.game.barbarians_surface),
             "?".to_string(),
         ]));
-    let mut targets = Select::new().name("target").option("0", "Barbares");
     for other in room.game.alive_kingdoms().into_iter().filter(|&o| o != id) {
         let o = room.game.kingdom(other);
         tbl = tbl.row(TableRow::new().cells([o.full_title(), fmt(o.surface), fmt(o.soldiers)]));
-        if year >= 3 {
-            targets = targets.option((other.index() + 1).to_string(), o.full_title());
+    }
+    let status = if k.soldiers < 1 {
+        "Vous n'avez plus d'hommes d'armes.".to_string()
+    } else if left < 1 {
+        "Vos nobles ne peuvent mener davantage d'expéditions cette année.".to_string()
+    } else {
+        format!(
+            "{left} expédition(s) possible(s) cette année (une par tranche de 4 nobles, plus une) · {} hommes d'armes",
+            fmt(k.soldiers)
+        )
+    };
+    Stack::column()
+        .gap(Gap::Md)
+        .children([
+            scroll(tbl.build()),
+            section(
+                "Guerre",
+                Stack::column()
+                    .gap(Gap::Sm)
+                    .children([
+                        Text::caption(status).muted().build(),
+                        opener(
+                            t,
+                            Action::Attack,
+                            "Lancer une expédition",
+                            k.soldiers < 1 || left < 1,
+                            false,
+                        ),
+                    ])
+                    .build(),
+            ),
+        ])
+        .build()
+}
+
+fn attack_form(t: T, id: Kingdoms) -> ElementBuilder {
+    let room = t.room;
+    let k = room.game.kingdom(id);
+    let year = room.game.year;
+    let mut targets = Select::new().name("target").option("0", "Barbares");
+    if year >= 3 {
+        for other in room.game.alive_kingdoms().into_iter().filter(|&o| o != id) {
+            targets = targets.option(
+                (other.index() + 1).to_string(),
+                room.game.kingdom(other).full_title(),
+            );
         }
     }
     let hint = if year < 3 {
@@ -1028,31 +1266,22 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     } else {
         "Conquérir toutes les terres d'un royaume l'annexe : ses serfs deviennent les vôtres."
     };
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            scroll(tbl.build()),
-            section(
-                "Expédition",
-                form(
-                    t.act(room::attack()),
-                    [
-                        labeled("Cible", targets.build()),
-                        slider(
-                            "soldiers",
-                            format!("Hommes d'armes (vous en avez {})", fmt(k.soldiers)),
-                            1,
-                            k.soldiers.max(1),
-                            (k.soldiers / 2).max(1),
-                            "hommes",
-                        ),
-                        Text::caption(hint).muted().build(),
-                        Button::destructive("Attaquer").full_width(true).build(),
-                    ],
-                ),
+    form(
+        t.act(room::attack()),
+        [
+            labeled("Cible", targets.build()),
+            slider(
+                "soldiers",
+                format!("Hommes d'armes (vous en avez {})", fmt(k.soldiers)),
+                1,
+                k.soldiers.max(1),
+                (k.soldiers / 2).max(1),
+                "hommes",
             ),
-        ])
-        .build()
+            Text::caption(hint).muted().build(),
+            Button::destructive("Attaquer").full_width(true).build(),
+        ],
+    )
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,8 @@ pub struct Seat {
     pub notice: Option<String>,
     /// Investment type currently selected in the economy form.
     pub invest_kind: Option<InvestmentType>,
+    /// Expeditions left this turn (original rule: nobles / 4 + 1).
+    pub attacks_left: i32,
 }
 
 #[derive(Clone)]
@@ -292,10 +294,12 @@ impl Room {
             if self.is_computer(id) {
                 self.pause = AI_PAUSE;
             } else {
+                let attacks = self.game.kingdom(id).nobles / 4 + 1;
                 let seat = self.seat_mut(id);
                 seat.demo = None;
                 seat.eco = None;
                 seat.notice = None;
+                seat.attacks_left = attacks;
             }
             return;
         }
@@ -429,6 +433,9 @@ impl Room {
         if a.soldiers < 1 {
             return Err("Vous n'avez plus d'hommes d'armes.".into());
         }
+        if self.seat(attack.attacker).attacks_left < 1 {
+            return Err("Vos nobles ne peuvent mener davantage d'expéditions cette année.".into());
+        }
         match attack.target {
             None if self.game.barbarians_surface <= 0 => {
                 return Err("Toutes les terres barbares ont déjà été conquises.".into());
@@ -441,7 +448,11 @@ impl Room {
             }
             _ => {}
         }
+        let attacker = attack.attacker;
         self.start_battle(attack);
+        if self.battle.is_some() {
+            self.seat_mut(attacker).attacks_left -= 1;
+        }
         Ok(())
     }
 

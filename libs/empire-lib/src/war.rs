@@ -58,7 +58,7 @@ pub fn simulate_kingdom_battle(
     let defender_surface = defender.surface;
 
     // Peasants defend when there are no soldiers (at fixed efficiency 5).
-    let mut population_defending = defender_soldiers <= 0;
+    let population_defending = defender_soldiers <= 0;
     if population_defending {
         defending_strength = 5;
     }
@@ -92,10 +92,18 @@ pub fn simulate_kingdom_battle(
             };
         }
 
-        // Original line 143: soldiers depleted → peasants take over the defence.
+        // The defending army is wiped out: the expedition ends with the land taken
+        // so far. (Serfs only defend when the realm had no army to begin with.)
         if defender_soldiers <= 0 && !population_defending {
-            population_defending = true;
-            defending_strength = 5;
+            return BattleResult {
+                attacker_won: true,
+                attacker_remaining_soldiers: attacker_soldiers,
+                surface_conquered,
+                defender_conquered: false,
+                defender_remaining_soldiers: 0,
+                defender_remaining_peasants: defender_peasants,
+                collateral_damage: None,
+            };
         }
 
         if attacker_soldiers <= 0 {
@@ -303,6 +311,34 @@ mod tests {
         assert!(rounds > 0);
         assert!(result.surface_conquered >= 0);
         assert!(result.attacker_remaining_soldiers >= 0);
+    }
+
+    #[test]
+    fn expedition_ends_when_the_defending_army_is_wiped_out() {
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::France).soldiers = 5000;
+        game.kingdom_mut(Kingdoms::Spain).soldiers = 5; // tiny army, huge land
+        for _ in 0..30 {
+            let r = simulate_kingdom_battle(&game, Kingdoms::France, Kingdoms::Spain, 5000, |p| {
+                assert!(!p.population_defending, "serfs must not take over mid-battle");
+            });
+            if r.attacker_won && !r.defender_conquered {
+                assert_eq!(r.defender_remaining_soldiers, 0);
+                assert!(r.surface_conquered < 10000);
+            }
+        }
+    }
+
+    #[test]
+    fn serfs_defend_a_realm_without_an_army() {
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::France).soldiers = 100;
+        game.kingdom_mut(Kingdoms::Spain).soldiers = 0;
+        let mut saw_serfs = false;
+        simulate_kingdom_battle(&game, Kingdoms::France, Kingdoms::Spain, 100, |p| {
+            saw_serfs |= p.population_defending;
+        });
+        assert!(saw_serfs);
     }
 
     #[test]

@@ -36,6 +36,9 @@ struct Me {
     tab: u8,
     /// Room code from the URL (`/r/<code>`); `None` = home.
     room: Option<String>,
+    /// Open bottom sheet: `(action, step, year)` — shown only while the table
+    /// is still at that step/year, so a stale sheet never reappears.
+    sheet: Option<ui::Sheet>,
 }
 
 impl Default for Me {
@@ -44,6 +47,7 @@ impl Default for Me {
             token: rand::random::<u64>() | 1,
             tab: 0,
             room: None,
+            sheet: None,
         }
     }
 }
@@ -65,6 +69,22 @@ fn on_route(me: &mut Me, ctx: &EventContext) {
     me.tab = 0;
 }
 
+/// Open the bottom sheet for an action; params: `[action, step, year_lo, year_hi]`.
+#[handler]
+fn open_sheet(me: &mut Me, ctx: &EventContext) {
+    let p = ctx.param_bytes();
+    me.sheet = (p.len() >= 4).then(|| ui::Sheet {
+        action: p[0],
+        step: p[1],
+        year: u16::from_le_bytes([p[2], p[3]]),
+    });
+}
+
+#[handler]
+fn close_sheet(me: &mut Me) {
+    me.sheet = None;
+}
+
 #[handler]
 fn go_home(me: &mut Me, ctx: &EventContext) {
     me.room = None;
@@ -74,9 +94,9 @@ fn go_home(me: &mut Me, ctx: &EventContext) {
 
 #[renderer]
 fn root(me: &Me) -> ElementBuilder {
-    let (token, tab, room) = (me.token, me.tab, me.room.clone());
+    let (token, tab, room, sheet) = (me.token, me.tab, me.room.clone(), me.sheet);
     ElementBuilder::synced_with_storage::<Rooms, _>(
-        move |rooms| ui::page(rooms, token, tab, room.as_deref()),
+        move |rooms| ui::page(rooms, token, tab, room.as_deref(), sheet),
         RendererDeps::always(),
     )
 }
@@ -91,15 +111,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut server = Server::bind("0.0.0.0:7782")?
         .root(root)
         .on_route(on_route())
-        .capsule_config(CapsuleConfig::new().pwa(
-            Pwa::new("Empire")
-                .short_name("Empire")
-                .description("Six royaumes, un seul empereur — jouez entre amis.")
-                .display(PwaDisplay::Standalone)
-                .icon(192, &include_bytes!("../assets/icon-192.png")[..])
-                .icon(512, &include_bytes!("../assets/icon-512.png")[..])
-                .maskable_icon(512, &include_bytes!("../assets/icon-512-maskable.png")[..]),
-        ))
+        .capsule_config(
+            CapsuleConfig::new().pwa(
+                Pwa::new("Empire")
+                    .short_name("Empire")
+                    .description("Six royaumes, un seul empereur — jouez entre amis.")
+                    .display(PwaDisplay::Standalone)
+                    .icon(192, &include_bytes!("../assets/icon-192.png")[..])
+                    .icon(512, &include_bytes!("../assets/icon-512.png")[..])
+                    .maskable_icon(512, &include_bytes!("../assets/icon-512-maskable.png")[..]),
+            ),
+        )
         .theme(app_theme());
 
     // The clock of every table: animates battles, plays the computer's turns
