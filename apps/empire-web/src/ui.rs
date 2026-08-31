@@ -9,7 +9,7 @@ use empire_lib::{Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, St};
 use rwire_components::{
     Alert, Badge, Button, ButtonSize, Card, CardPadding, FormField, Gap, Grid, GridColumns, Input,
-    Progress, Select, Spinner, Stack, StackJustify, Stat, Stepper, Table, TableRow, Text,
+    Progress, Select, Slider, Spinner, Stack, StackJustify, Stat, Stepper, Table, TableRow, Text,
     TextVariant,
 };
 
@@ -152,17 +152,20 @@ fn journal_tab(room: &Room) -> ElementBuilder {
     if room.log.is_empty() {
         return Text::body("Le journal est encore vierge.").muted().build();
     }
+    // Chronological, in a scroll box that follows the latest entry.
     section(
         "Journal",
-        Stack::column()
-            .gap(Gap::Xs)
-            .children(
-                room.log
-                    .iter()
-                    .rev()
-                    .map(|line| Text::body_small(line.clone()).build()),
-            )
-            .build(),
+        el(El::Div)
+            .st([St::OverflowYAuto, St::MaxH96])
+            .data("autoscroll", "1")
+            .append([Stack::column()
+                .gap(Gap::Xs)
+                .children(
+                    room.log
+                        .iter()
+                        .map(|line| Text::body_small(line.clone()).build()),
+                )
+                .build()]),
     )
 }
 
@@ -399,9 +402,29 @@ fn waiting(room: &Room) -> ElementBuilder {
                 "Ordre du tour",
                 Stack::column().gap(Gap::Sm).children(order).build(),
             ),
-            kingdoms_table(room),
+            latest(room),
         ])
         .build()
+}
+
+/// The last journal lines, so the main screen keeps a pulse without the tables.
+fn latest(room: &Room) -> ElementBuilder {
+    if room.log.is_empty() {
+        return el(El::Div);
+    }
+    section(
+        "Dernières nouvelles",
+        Stack::column()
+            .gap(Gap::Xs)
+            .children(
+                room.log
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .map(|line| Text::caption(line.clone()).muted().build()),
+            )
+            .build(),
+    )
 }
 
 /// The live battle, replayed identically on every screen.
@@ -487,7 +510,7 @@ fn turn(room: &Room, token: u64, id: Kingdoms) -> View {
         items.push(Alert::info().message(notice.clone()).build());
     }
     let (body, action) = match room.step {
-        Step::Weather => (weather_step(room), Some(next("Continuer", token))),
+        Step::Weather => (weather_step(room, k), Some(next("Continuer", token))),
         Step::Trade => (
             trade_step(room, id, token),
             Some(next("Passer à l'intendance", token)),
@@ -512,7 +535,7 @@ fn stepper(step: Step) -> ElementBuilder {
     scroll(s.current(step.index()).build())
 }
 
-fn weather_step(room: &Room) -> ElementBuilder {
+fn weather_step(room: &Room, k: &Kingdom) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Md)
         .children([
@@ -520,7 +543,8 @@ fn weather_step(room: &Room) -> ElementBuilder {
                 .title(format!("An {}", room.game.year))
                 .message(room.game.weather.sentence())
                 .build(),
-            kingdoms_table(room),
+            resources(k),
+            latest(room),
         ])
         .build()
 }
@@ -529,12 +553,14 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
     let k = room.game.kingdom(id);
     let mut sellers = Select::new().name("seller");
     let mut offers = 0;
+    let mut largest = 0;
     for other in room.game.alive_kingdoms().into_iter().filter(|&o| o != id) {
         let s = room.game.kingdom(other);
         if s.grain_to_sell < 1 || s.grain_price < 1 {
             continue;
         }
         offers += 1;
+        largest = largest.max(s.grain_to_sell);
         sellers = sellers.option(
             (other.index() + 1).to_string(),
             format!(
@@ -554,14 +580,19 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
             by(room::buy_grain(), token, &[]),
             [
                 labeled("Vendeur", sellers.build()),
-                labeled(
-                    "Boisseaux (max 500, courtage 10 %)",
-                    number("buy_amount", 1, 500, 100),
+                slider(
+                    "buy_amount",
+                    "Boisseaux (courtage 10 %)",
+                    1,
+                    largest.min(500),
+                    100,
+                    "boisseaux",
                 ),
                 Button::secondary("Acheter").full_width(true).build(),
             ],
         )
     };
+    let stocks = k.grain_stocks.max(1);
     Stack::column()
         .gap(Gap::Md)
         .children([
@@ -572,18 +603,21 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
                 form(
                     by(room::sell_grain(), token, &[]),
                     [
-                        labeled(
-                            "Boisseaux",
-                            number(
-                                "sell_amount",
-                                1,
-                                k.grain_stocks.max(1),
-                                (k.grain_stocks / 10).max(1),
-                            ),
+                        slider(
+                            "sell_amount",
+                            "Boisseaux à vendre",
+                            1,
+                            stocks,
+                            (stocks / 10).max(1),
+                            "boisseaux",
                         ),
-                        labeled(
-                            "Prix du boisseau (max 15)",
-                            number("price", 1, MAX_GRAIN_PRICE, 5),
+                        slider(
+                            "price",
+                            "Prix du boisseau",
+                            1,
+                            MAX_GRAIN_PRICE,
+                            5,
+                            k.currency(),
                         ),
                         Button::secondary("Mettre en vente")
                             .full_width(true)
@@ -596,9 +630,13 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
                 form(
                     by(room::sell_land(), token, &[]),
                     [
-                        labeled(
+                        slider(
+                            "arpents",
                             "Arpents (2 pièces l'arpent)",
-                            number("arpents", 1, (k.surface - 1).max(1), 100),
+                            1,
+                            (k.surface / 2).max(1),
+                            (k.surface / 100).max(1),
+                            "arpents",
                         ),
                         Button::secondary("Vendre aux Barbares")
                             .full_width(true)
@@ -612,8 +650,12 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
 
 fn feed_step(k: &Kingdom, token: u64) -> ElementBuilder {
     let stocks = k.grain_stocks.max(0);
-    let peasants = k.peasants_grain_needs().min(stocks);
-    let soldiers = k.soldiers_grain_needs().min(stocks - peasants);
+    let needs = k.peasants_grain_needs();
+    let army = k.soldiers_grain_needs();
+    // Beyond 2× the people's needs immigration barely grows; beyond 1.5× the
+    // army's needs efficiency is already maxed — so the sliders stop there.
+    let peasants_max = (needs * 2).min(stocks).max(0);
+    let soldiers_max = (army * 3 / 2).min(stocks).max(0);
     Stack::column()
         .gap(Gap::Md)
         .children([
@@ -623,24 +665,24 @@ fn feed_step(k: &Kingdom, token: u64) -> ElementBuilder {
                 form(
                     by(room::feed(), token, &[]),
                     [
-                        labeled(
-                            format!(
-                                "Grain pour les {} habitants (besoin : {})",
-                                fmt(k.population()),
-                                fmt(k.peasants_grain_needs())
-                            ),
-                            number("peasants", 0, stocks, peasants),
+                        slider(
+                            "peasants",
+                            format!("Grain pour les {} habitants (besoin : {})", fmt(k.population()), fmt(needs)),
+                            0,
+                            peasants_max,
+                            needs.min(peasants_max),
+                            "boisseaux",
                         ),
-                        labeled(
-                            format!(
-                                "Grain pour l'ost de {} hommes (besoin : {})",
-                                fmt(k.soldiers),
-                                fmt(k.soldiers_grain_needs())
-                            ),
-                            number("soldiers", 0, stocks, soldiers),
+                        slider(
+                            "soldiers",
+                            format!("Grain pour l'ost de {} hommes (besoin : {})", fmt(k.soldiers), fmt(army)),
+                            0,
+                            soldiers_max,
+                            army.min(soldiers_max),
+                            "boisseaux",
                         ),
                         Text::caption(
-                            "Mal nourris, serfs et soldats meurent ou désertent ; bien nourris, les étrangers immigrent.",
+                            "Mal nourris, serfs et soldats meurent ou désertent ; bien nourris, les étrangers immigrent et l'ost combat mieux.",
                         )
                         .muted()
                         .build(),
@@ -749,25 +791,25 @@ fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
         form(
             by(room::set_taxes(), token, &[]),
             [
-                labeled(
-                    "Droits de douane (max 50 %)",
-                    number("customs", 0, 50, k.immigration_taxes),
+                slider(
+                    "customs",
+                    "Droits de douane",
+                    0,
+                    50,
+                    k.immigration_taxes,
+                    "%",
                 ),
-                labeled(
-                    "Taxe commerciale (max 20 %)",
-                    number("sales", 0, 20, k.commercial_taxes),
-                ),
-                labeled(
-                    "Impôts directs (max 35 %)",
-                    number("income", 0, 35, k.income_taxes),
-                ),
+                slider("sales", "Taxe commerciale", 0, 20, k.commercial_taxes, "%"),
+                slider("income", "Impôts directs", 0, 35, k.income_taxes, "%"),
                 Button::secondary("Promulguer").full_width(true).build(),
             ],
         ),
     ));
 
     let mut kinds = Select::new().name("kind");
+    let mut largest = 0;
     for (n, kind) in (1..=6).filter_map(|n| InvestmentType::from_number(n).map(|k| (n, k))) {
+        largest = largest.max(kind.max_investment(k));
         kinds = kinds.option(
             n.to_string(),
             format!(
@@ -789,7 +831,7 @@ fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
             by(room::invest(), token, &[]),
             [
                 labeled("Type", kinds.build()),
-                labeled("Quantité", number("invest_amount", 0, 99_999, 1)),
+                slider("invest_amount", "Quantité", 0, largest.max(1), 1, ""),
                 Button::secondary("Investir").full_width(true).build(),
             ],
         ),
@@ -832,9 +874,13 @@ fn war_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
                     by(room::attack(), token, &[]),
                     [
                         labeled("Cible", targets.build()),
-                        labeled(
+                        slider(
+                            "soldiers",
                             format!("Hommes d'armes (vous en avez {})", fmt(k.soldiers)),
-                            number("soldiers", 1, k.soldiers.max(1), (k.soldiers / 2).max(1)),
+                            1,
+                            k.soldiers.max(1),
+                            (k.soldiers / 2).max(1),
+                            "hommes",
                         ),
                         Text::caption(hint).muted().build(),
                         Button::destructive("Attaquer").full_width(true).build(),
@@ -934,14 +980,22 @@ fn labeled(label: impl Into<Label>, input: ElementBuilder) -> ElementBuilder {
     FormField::new().label(label).input(input).build()
 }
 
-fn number(name: &'static str, min: i32, max: i32, value: i32) -> ElementBuilder {
-    Input::number()
+fn slider(
+    name: &'static str,
+    label: impl Into<Label>,
+    min: i32,
+    max: i32,
+    value: i32,
+    unit: impl Into<Label>,
+) -> ElementBuilder {
+    Slider::new()
         .name(name)
         .id(name)
-        .min(min.to_string())
-        .max(max.to_string())
-        .value(value.clamp(min, max).to_string())
-        .required(true)
+        .label(label)
+        .unit(unit)
+        .min(min)
+        .max(max.max(min))
+        .value(value)
         .build()
 }
 

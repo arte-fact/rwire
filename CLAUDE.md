@@ -249,6 +249,15 @@ Give text/number inputs a stable `id` (`Input::id`, honoured by `FormField`): th
 the focused element's value by id after a morph, so another player's broadcast doesn't clobber
 what the user is typing.
 
+### Client-side live bindings (no round-trip)
+
+- `el.live_source(ch)` on an input pushes its value on every `input` event to elements bound with
+  `el.live_text(ch)` (text mirror) / `el.live_fill(ch)` (width between the input's `min`/`max`).
+  Channels come from `rwire::builder::next_live_channel()`. `Slider` uses this for its readout
+  and fill; give it `.name()` to submit it with a `<form>`.
+- `el.data("autoscroll", "1")` on a scroll box keeps it scrolled to the bottom after every update
+  (journals, logs).
+
 ## Capsule Size (lazy delivery)
 
 The capsule is just the runtime — there is no static tree-shaking pass. The name maps and CSS
