@@ -20,8 +20,8 @@ use std::error::Error;
 use std::time::Duration;
 
 use rwire::{
-    handler, renderer, theme, CapsuleConfig, ChangeSet, ElementBuilder, RendererDeps, Server,
-    State, Theme,
+    handler, renderer, theme, CapsuleConfig, ChangeSet, ElementBuilder, Pwa, PwaDisplay,
+    RendererDeps, Server, State, Theme,
 };
 use rwire_themes::palettes;
 
@@ -91,7 +91,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut server = Server::bind("0.0.0.0:7782")?
         .root(root)
         .on_route(on_route())
-        .capsule_config(CapsuleConfig::new())
+        .capsule_config(CapsuleConfig::new().pwa(
+            Pwa::new("Empire")
+                .short_name("Empire")
+                .description("Six royaumes, un seul empereur — jouez entre amis.")
+                .display(PwaDisplay::Standalone)
+                .icon(192, &include_bytes!("../assets/icon-192.png")[..])
+                .icon(512, &include_bytes!("../assets/icon-512.png")[..])
+                .maskable_icon(512, &include_bytes!("../assets/icon-512-maskable.png")[..]),
+        ))
         .theme(app_theme());
 
     // The clock of every table: animates battles, plays the computer's turns
