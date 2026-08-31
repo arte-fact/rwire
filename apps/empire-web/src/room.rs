@@ -1,0 +1,831 @@
+//! Shared game table: state, turn order, battles and every handler.
+
+use std::collections::VecDeque;
+
+use empire_lib::demography::{apply_feed, YearDemography};
+use empire_lib::economy::{apply_economy, apply_tax_change, economy_report, TaxType, YearEconomy};
+use empire_lib::events::{check_random_events, RulerDeathCause};
+use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
+use empire_lib::ia::plan_ai_turn;
+use empire_lib::investments::{apply_investment, InvestmentType};
+use empire_lib::trade::{apply_trade, calculate_buy_cost, Trade, MAX_GRAIN_PRICE};
+use empire_lib::war::{
+    apply_barbarian_battle_result, apply_kingdom_battle_result, simulate_barbarian_battle,
+    simulate_kingdom_battle, BarbarianBattleResult, BattleProgress, BattleResult,
+};
+use empire_lib::{EmpireGame, Kingdoms, KINGDOMS};
+use rwire::{handler, EventContext, HandlerSpec, State};
+
+/// Ticker period; battle frames and computer pauses are counted in ticks.
+pub const TICK_MS: u64 = 100;
+const BATTLE_FRAMES: usize = 40;
+const BATTLE_LINGER: u8 = 25;
+const AI_PAUSE: u8 = 15;
+const JOURNAL_LEN: usize = 40;
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Stage {
+    #[default]
+    Lobby,
+    Playing,
+    Over,
+}
+
+/// The active player's position inside their turn.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Step {
+    #[default]
+    Weather,
+    Trade,
+    Feed,
+    Report,
+    Economy,
+    War,
+}
+
+impl Step {
+    pub const LABELS: [&'static str; 6] = [
+        "Saison",
+        "Commerce",
+        "Intendance",
+        "Peuple",
+        "Économie",
+        "Guerre",
+    ];
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn label(self) -> &'static str {
+        Self::LABELS[self.index()]
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct Seat {
+    /// Token of the connection playing this kingdom; `None` = computer.
+    pub owner: Option<u64>,
+    pub demo: Option<YearDemography>,
+    pub eco: Option<YearEconomy>,
+    /// Feedback from the player's last action.
+    pub notice: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct Attack {
+    pub attacker: Kingdoms,
+    /// `None` = the barbarians.
+    pub target: Option<Kingdoms>,
+    pub soldiers: i32,
+}
+
+pub enum Outcome {
+    Kingdom(Kingdoms, BattleResult),
+    Barbarians(BarbarianBattleResult),
+}
+
+/// A battle being replayed for everyone: precomputed, applied when the
+/// animation ends so nobody sees the outcome early.
+pub struct Battle {
+    pub attack: Attack,
+    pub frames: Vec<BattleProgress>,
+    pub cursor: usize,
+    linger: u8,
+    outcome: Outcome,
+    /// Defender head-count at the first frame (for the progress bar).
+    pub defender_start: i32,
+    pub summary: String,
+}
+
+impl Battle {
+    pub fn frame(&self) -> &BattleProgress {
+        &self.frames[self.cursor.min(self.frames.len() - 1)]
+    }
+
+    pub fn finished(&self) -> bool {
+        self.cursor + 1 >= self.frames.len()
+    }
+}
+
+/// The single game table, shared by every connection.
+#[derive(State, Default)]
+#[storage(shared)]
+pub struct Room {
+    pub stage: Stage,
+    pub seats: [Seat; 6],
+    pub game: EmpireGame,
+    pub log: Vec<String>,
+    /// Index into [`KINGDOMS`] of the kingdom whose turn it is.
+    pub turn: usize,
+    /// Step of the active (human) player.
+    pub step: Step,
+    pub battle: Option<Battle>,
+    queue: VecDeque<Attack>,
+    /// Ticks before the computer plays ("Un moment…").
+    pause: u8,
+}
+
+impl Room {
+    pub fn seat(&self, id: Kingdoms) -> &Seat {
+        &self.seats[id.index()]
+    }
+
+    fn seat_mut(&mut self, id: Kingdoms) -> &mut Seat {
+        &mut self.seats[id.index()]
+    }
+
+    pub fn seat_of(&self, token: u64) -> Option<Kingdoms> {
+        KINGDOMS
+            .into_iter()
+            .find(|&id| self.seat(id).owner == Some(token))
+    }
+
+    /// Kingdoms played by humans, in canonical order.
+    pub fn humans(&self) -> impl Iterator<Item = Kingdoms> + '_ {
+        KINGDOMS
+            .into_iter()
+            .filter(|&id| self.seat(id).owner.is_some())
+    }
+
+    /// The kingdom whose turn it is.
+    pub fn active(&self) -> Option<Kingdoms> {
+        (self.stage == Stage::Playing)
+            .then(|| KINGDOMS.get(self.turn).copied())
+            .flatten()
+    }
+
+    pub fn is_computer(&self, id: Kingdoms) -> bool {
+        self.seat(id).owner.is_none()
+    }
+
+    pub fn journal(&mut self, line: impl Into<String>) {
+        self.log.push(line.into());
+        if self.log.len() > JOURNAL_LEN {
+            self.log.remove(0);
+        }
+    }
+
+    fn note(&mut self, id: Kingdoms, msg: impl Into<String>) {
+        self.seat_mut(id).notice = Some(msg.into());
+    }
+
+    fn release(&mut self, id: Kingdoms) {
+        self.seat_mut(id).owner = None;
+        let k = self.game.kingdom_mut(id);
+        k.is_player = false;
+        k.player_name = id.default_king_name().to_string();
+    }
+
+    // -- year & turn order ---------------------------------------------------
+
+    fn begin_year(&mut self) {
+        let weather = self.game.random_weather();
+        self.journal(format!("An {} — {}", self.game.year, weather.sentence()));
+        for id in KINGDOMS {
+            let k = self.game.kingdom_mut(id);
+            if k.is_dead {
+                continue;
+            }
+            apply_seed_grain(k);
+            apply_rat_loss_rate(k);
+            apply_grain_harvest(k, weather);
+        }
+        self.turn = 0;
+    }
+
+    /// Hand the turn to `self.turn`, skipping the dead and rolling the year over.
+    fn start_turn(&mut self) {
+        loop {
+            if self.stage != Stage::Playing {
+                return;
+            }
+            let Some(&id) = KINGDOMS.get(self.turn) else {
+                self.end_year();
+                continue;
+            };
+            if self.game.kingdom(id).is_dead {
+                self.turn += 1;
+                continue;
+            }
+            self.step = Step::Weather;
+            if self.is_computer(id) {
+                self.pause = AI_PAUSE;
+            } else {
+                let seat = self.seat_mut(id);
+                seat.demo = None;
+                seat.eco = None;
+                seat.notice = None;
+            }
+            return;
+        }
+    }
+
+    fn next_turn(&mut self) {
+        self.turn += 1;
+        self.start_turn();
+    }
+
+    fn end_year(&mut self) {
+        for id in KINGDOMS {
+            let starved = self
+                .seat(id)
+                .demo
+                .as_ref()
+                .is_some_and(|d| d.starvation_victims > 0);
+            let k = self.game.kingdom_mut(id);
+            if k.is_dead {
+                continue;
+            }
+            let title = k.full_title();
+            let (plague, death) = check_random_events(k, starved);
+            if plague.occurred {
+                self.journal(format!(
+                    "La peste ravage la {} : {} morts.",
+                    id.name(),
+                    plague.serfs_killed
+                        + plague.merchants_killed
+                        + plague.soldiers_killed
+                        + plague.nobles_killed
+                ));
+            }
+            if death.occurred {
+                self.journal(format!("{title} {}.", death_fr(&death.cause)));
+            }
+        }
+        if self.check_over() {
+            return;
+        }
+        self.game.increment_year();
+        self.begin_year();
+    }
+
+    fn check_over(&mut self) -> bool {
+        let humans_alive = self.humans().any(|id| !self.game.kingdom(id).is_dead);
+        if humans_alive && self.game.alive_kingdoms().len() > 1 {
+            return false;
+        }
+        self.stage = Stage::Over;
+        self.battle = None;
+        self.queue.clear();
+        self.journal("La partie est terminée.");
+        true
+    }
+
+    // -- ticker: computer turns and battle replay ----------------------------
+
+    /// Advance the table clock by one tick. Returns true when the view changed.
+    pub fn tick(&mut self) -> bool {
+        if self.stage != Stage::Playing {
+            return false;
+        }
+        if let Some(b) = &mut self.battle {
+            if !b.finished() {
+                b.cursor += 1;
+                return true;
+            }
+            if b.linger > 0 {
+                b.linger -= 1;
+                return b.linger == 0;
+            }
+            self.finish_battle();
+            self.after_battle();
+            return true;
+        }
+        if let Some(attack) = self.queue.pop_front() {
+            self.start_battle(attack);
+            if self.battle.is_none() {
+                self.after_battle();
+            }
+            return true;
+        }
+        if self.pause > 0 {
+            self.pause -= 1;
+            if self.pause > 0 {
+                return false;
+            }
+            self.run_computer_turn();
+            return true;
+        }
+        false
+    }
+
+    /// Once the queue drains, a computer's turn is over.
+    fn after_battle(&mut self) {
+        if self.stage == Stage::Playing
+            && self.battle.is_none()
+            && self.queue.is_empty()
+            && self.active().is_some_and(|id| self.is_computer(id))
+        {
+            self.next_turn();
+        }
+    }
+
+    fn run_computer_turn(&mut self) {
+        let Some(id) = self.active() else { return };
+        let decision = plan_ai_turn(&mut self.game, id);
+        for soldiers in decision.barbarian_attacks {
+            self.queue.push_back(Attack {
+                attacker: id,
+                target: None,
+                soldiers,
+            });
+        }
+        for (target, soldiers) in decision.kingdom_attacks {
+            self.queue.push_back(Attack {
+                attacker: id,
+                target: Some(target),
+                soldiers,
+            });
+        }
+        if self.queue.is_empty() {
+            self.next_turn();
+        }
+    }
+
+    /// Validate an attack for the active player.
+    fn launch(&mut self, attack: Attack) -> Result<(), String> {
+        let a = self.game.kingdom(attack.attacker);
+        if a.soldiers < 1 {
+            return Err("Vous n'avez plus d'hommes d'armes.".into());
+        }
+        match attack.target {
+            None if self.game.barbarians_surface <= 0 => {
+                return Err("Toutes les terres barbares ont déjà été conquises.".into());
+            }
+            Some(t) if t == attack.attacker || self.game.kingdom(t).is_dead => {
+                return Err("Ce royaume n'est plus.".into());
+            }
+            Some(_) if self.game.year < 3 => {
+                return Err("Nul ne peut attaquer un autre royaume avant la 3ème année.".into());
+            }
+            _ => {}
+        }
+        self.start_battle(attack);
+        Ok(())
+    }
+
+    /// Precompute a battle and start replaying it. Silently drops attacks that
+    /// no longer make sense (a computer's plan can be stale by the time it runs).
+    fn start_battle(&mut self, attack: Attack) {
+        let a = self.game.kingdom(attack.attacker);
+        let soldiers = attack.soldiers.min(a.soldiers);
+        if a.is_dead || soldiers < 1 {
+            return;
+        }
+        let attacker = a.titled_name();
+        let mut frames = Vec::new();
+        let (outcome, defender_start, foe) = match attack.target {
+            Some(t) => {
+                let d = self.game.kingdom(t);
+                if t == attack.attacker || d.is_dead {
+                    return;
+                }
+                let start = if d.soldiers > 0 {
+                    d.soldiers
+                } else {
+                    d.peasants
+                };
+                let r = simulate_kingdom_battle(&self.game, attack.attacker, t, soldiers, |p| {
+                    frames.push(p.clone())
+                });
+                (Outcome::Kingdom(t, r), start, format!("la {}", t.name()))
+            }
+            None => {
+                if self.game.barbarians_surface <= 0 {
+                    return;
+                }
+                let r = simulate_barbarian_battle(&self.game, attack.attacker, soldiers, |p| {
+                    frames.push(p.clone())
+                });
+                let start = frames.iter().map(|f| f.defender_soldiers).max();
+                (
+                    Outcome::Barbarians(r),
+                    start.unwrap_or(1),
+                    "les Barbares".to_string(),
+                )
+            }
+        };
+        if frames.is_empty() {
+            frames.push(BattleProgress {
+                attacker_soldiers: soldiers,
+                defender_soldiers: defender_start,
+                defender_peasants: 0,
+                population_defending: false,
+            });
+        }
+        let summary = match &outcome {
+            Outcome::Kingdom(t, r) => {
+                let defender = self.game.kingdom(*t).full_title();
+                if r.defender_conquered {
+                    format!("Le pays de {defender} est conquis ! Ses serfs jurent fidélité à {attacker}.")
+                } else if r.attacker_won {
+                    won(&attacker, r.surface_conquered)
+                } else {
+                    let mut m = format!(
+                        "{attacker} perd, mais arrache tout de même {} arpents.",
+                        r.surface_conquered
+                    );
+                    if let Some(d) = &r.collateral_damage {
+                        m.push_str(&format!(
+                            " Grande bataille : {} serfs, {} foires et {} nobles ennemis anéantis.",
+                            d.peasants_killed, d.marketplaces_destroyed, d.nobles_killed
+                        ));
+                    }
+                    m
+                }
+            }
+            Outcome::Barbarians(r) => {
+                if r.all_barbarians_conquered {
+                    format!("{attacker} conquiert les dernières terres barbares ; les survivants ont fui.")
+                } else if r.attacker_won {
+                    won(&attacker, r.surface_conquered)
+                } else {
+                    format!(
+                        "{attacker} perd, mais arrache tout de même {} arpents.",
+                        r.surface_conquered
+                    )
+                }
+            }
+        };
+        self.journal(format!(
+            "{attacker} marche sur {foe} avec {soldiers} hommes d'armes."
+        ));
+        self.battle = Some(Battle {
+            attack: Attack { soldiers, ..attack },
+            frames: sample(frames),
+            cursor: 0,
+            linger: BATTLE_LINGER,
+            outcome,
+            defender_start: defender_start.max(1),
+            summary,
+        });
+    }
+
+    fn finish_battle(&mut self) {
+        let Some(b) = self.battle.take() else { return };
+        let id = b.attack.attacker;
+        match &b.outcome {
+            Outcome::Kingdom(t, r) => {
+                apply_kingdom_battle_result(&mut self.game, id, *t, b.attack.soldiers, r);
+            }
+            Outcome::Barbarians(r) => {
+                apply_barbarian_battle_result(&mut self.game, id, b.attack.soldiers, r);
+            }
+        }
+        self.journal(b.summary.clone());
+        if !self.is_computer(id) {
+            self.note(id, b.summary);
+        }
+        self.check_over();
+    }
+}
+
+fn won(attacker: &str, arpents: i32) -> String {
+    if arpents > 0 {
+        format!("{attacker} gagne : {arpents} arpents conquis.")
+    } else {
+        format!("{attacker} repousse l'ennemi sans gagner un arpent.")
+    }
+}
+
+/// Keep a battle replay to a few seconds whatever its length.
+fn sample(frames: Vec<BattleProgress>) -> Vec<BattleProgress> {
+    if frames.len() <= BATTLE_FRAMES {
+        return frames;
+    }
+    let last = frames.len() - 1;
+    (0..BATTLE_FRAMES)
+        .map(|i| frames[i * last / (BATTLE_FRAMES - 1)].clone())
+        .collect()
+}
+
+fn death_fr(cause: &RulerDeathCause) -> &'static str {
+    match cause {
+        RulerDeathCause::None => "",
+        RulerDeathCause::Assassination => "a été assassiné par un noble ambitieux",
+        RulerDeathCause::HuntingAccident => "est mort dans un accident de chasse",
+        RulerDeathCause::FoodPoisoning => "est mort empoisonné (le cuisinier a été exécuté)",
+        RulerDeathCause::NaturalCauses => "est mort de sa belle mort",
+        RulerDeathCause::StarvationAssassination => "a été assassiné par une mère affamée",
+    }
+}
+
+pub fn invest_fr(kind: InvestmentType) -> &'static str {
+    match kind {
+        InvestmentType::Marketplaces => "champs de foire",
+        InvestmentType::GrainMills => "moulins à grain",
+        InvestmentType::Foundries => "fonderies",
+        InvestmentType::Shipyards => "chantiers navals",
+        InvestmentType::Soldiers => "hommes d'armes",
+        InvestmentType::Palaces => "dixièmes de palais",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Handler plumbing: the caller's token travels as the handler's param bytes.
+// ---------------------------------------------------------------------------
+
+/// Bind a handler to the calling connection (plus optional extra bytes).
+pub fn by(spec: HandlerSpec, token: u64, extra: &[u8]) -> HandlerSpec {
+    let mut bytes = token.to_le_bytes().to_vec();
+    bytes.extend_from_slice(extra);
+    spec.with_param_bytes(bytes)
+}
+
+fn caller(ctx: &EventContext) -> (u64, &[u8]) {
+    let p = ctx.param_bytes();
+    if p.len() < 8 {
+        return (0, &[]);
+    }
+    let mut t = [0u8; 8];
+    t.copy_from_slice(&p[..8]);
+    (u64::from_le_bytes(t), &p[8..])
+}
+
+fn num(ctx: &EventContext, field: &str) -> i32 {
+    ctx.field(field)
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(0)
+}
+
+/// The caller's kingdom if it is their turn, at `step`, with no battle running.
+fn acting(room: &Room, ctx: &EventContext, step: Step) -> Option<Kingdoms> {
+    let (token, _) = caller(ctx);
+    let id = room.seat_of(token)?;
+    (room.active() == Some(id) && room.step == step && room.battle.is_none()).then_some(id)
+}
+
+// ---------------------------------------------------------------------------
+// Lobby
+// ---------------------------------------------------------------------------
+
+#[handler]
+pub fn join(room: &mut Room, ctx: &EventContext) {
+    let (token, args) = caller(ctx);
+    let Some(id) = args
+        .first()
+        .and_then(|&i| KINGDOMS.get(i as usize))
+        .copied()
+    else {
+        return;
+    };
+    if room.stage != Stage::Lobby || room.seat(id).owner.is_some_and(|o| o != token) {
+        return;
+    }
+    if let Some(prev) = room.seat_of(token) {
+        room.release(prev);
+    }
+    room.seats[id.index()].owner = Some(token);
+    room.game.kingdom_mut(id).is_player = true;
+}
+
+#[handler]
+pub fn leave(room: &mut Room, ctx: &EventContext) {
+    let (token, _) = caller(ctx);
+    if room.stage == Stage::Lobby {
+        if let Some(id) = room.seat_of(token) {
+            room.release(id);
+        }
+    }
+}
+
+#[handler]
+pub fn rename(room: &mut Room, ctx: &EventContext) {
+    let (token, _) = caller(ctx);
+    let Some(id) = room.seat_of(token) else {
+        return;
+    };
+    let name: String = ctx
+        .field("name")
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(24)
+        .collect();
+    if !name.is_empty() {
+        room.game.kingdom_mut(id).player_name = name;
+    }
+}
+
+#[handler]
+pub fn start(room: &mut Room, ctx: &EventContext) {
+    let (token, _) = caller(ctx);
+    if room.stage == Stage::Lobby && room.seat_of(token).is_some() {
+        room.stage = Stage::Playing;
+        room.log.clear();
+        room.begin_year();
+        room.start_turn();
+    }
+}
+
+#[handler]
+pub fn new_game(room: &mut Room, ctx: &EventContext) {
+    let (token, _) = caller(ctx);
+    if room.stage != Stage::Over || room.seat_of(token).is_none() {
+        return;
+    }
+    let owners: Vec<(Kingdoms, u64, String)> = room
+        .humans()
+        .filter_map(|id| {
+            room.seat(id)
+                .owner
+                .map(|o| (id, o, room.game.kingdom(id).player_name.clone()))
+        })
+        .collect();
+    *room = Room::default();
+    for (id, owner, name) in owners {
+        room.seats[id.index()].owner = Some(owner);
+        let k = room.game.kingdom_mut(id);
+        k.is_player = true;
+        k.player_name = name;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Turn
+// ---------------------------------------------------------------------------
+
+/// Move to the next step; from the war step this ends the turn.
+#[handler]
+pub fn advance(room: &mut Room, ctx: &EventContext) {
+    let (token, _) = caller(ctx);
+    let Some(id) = room.seat_of(token) else {
+        return;
+    };
+    if room.active() != Some(id) || room.battle.is_some() {
+        return;
+    }
+    room.seat_mut(id).notice = None;
+    match room.step {
+        Step::Weather => room.step = Step::Trade,
+        Step::Trade => room.step = Step::Feed,
+        Step::Feed => {} // only the feed form advances this step
+        Step::Report => room.step = Step::Economy,
+        Step::Economy => room.step = Step::War,
+        Step::War => room.next_turn(),
+    }
+}
+
+#[handler]
+pub fn buy_grain(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::Trade) else {
+        return;
+    };
+    let Some(seller) = Kingdoms::from_number(num(ctx, "seller")) else {
+        return;
+    };
+    if seller == id {
+        return;
+    }
+    let s = room.game.kingdom(seller);
+    let price = s.grain_price.min(MAX_GRAIN_PRICE);
+    let on_sale = s.grain_to_sell;
+    if on_sale < 1 || price < 1 {
+        room.note(
+            id,
+            format!("La {} n'a pas de grain à vendre.", seller.name()),
+        );
+        return;
+    }
+    let amount = num(ctx, "buy_amount").clamp(1, 500.min(on_sale));
+    let cost = calculate_buy_cost(amount, price);
+    if cost > room.game.kingdom(id).treasury {
+        room.note(
+            id,
+            format!(
+                "Le trésor ne couvre pas les {cost} {} demandés.",
+                id.currency()
+            ),
+        );
+        return;
+    }
+    apply_trade(&mut room.game, id, Trade::Buy { amount, seller });
+    room.note(
+        id,
+        format!(
+            "{amount} boisseaux achetés à la {} pour {cost} {}.",
+            seller.name(),
+            id.currency()
+        ),
+    );
+}
+
+#[handler]
+pub fn sell_grain(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::Trade) else {
+        return;
+    };
+    let stocks = room.game.kingdom(id).grain_stocks;
+    if stocks < 1 {
+        return;
+    }
+    let amount = num(ctx, "sell_amount").clamp(1, stocks);
+    let price = num(ctx, "price").clamp(1, MAX_GRAIN_PRICE);
+    apply_trade(&mut room.game, id, Trade::Sell { amount, price });
+    room.note(
+        id,
+        format!("{amount} boisseaux mis en vente à {price} le boisseau."),
+    );
+}
+
+#[handler]
+pub fn sell_land(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::Trade) else {
+        return;
+    };
+    let surface = room.game.kingdom(id).surface;
+    if surface < 2 {
+        return;
+    }
+    let arpents = num(ctx, "arpents").clamp(1, surface - 1);
+    apply_trade(&mut room.game, id, Trade::SellLand { arpents });
+    room.note(id, format!("{arpents} arpents vendus aux Barbares."));
+}
+
+#[handler]
+pub fn feed(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::Feed) else {
+        return;
+    };
+    let weather = room.game.weather;
+    let k = room.game.kingdom_mut(id);
+    let stocks = k.grain_stocks.max(0);
+    let peasants = num(ctx, "peasants").clamp(0, stocks);
+    let soldiers = num(ctx, "soldiers").clamp(0, stocks - peasants);
+    let demo = apply_feed(k, peasants, soldiers);
+    let eco = economy_report(k, weather, demo.immigrants);
+    apply_economy(k, &eco);
+    let seat = room.seat_mut(id);
+    seat.demo = Some(demo);
+    seat.eco = Some(eco);
+    seat.notice = None;
+    room.step = Step::Report;
+}
+
+#[handler]
+pub fn set_taxes(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::Economy) else {
+        return;
+    };
+    let k = room.game.kingdom_mut(id);
+    apply_tax_change(k, TaxType::Immigration, num(ctx, "customs"));
+    apply_tax_change(k, TaxType::Commercial, num(ctx, "sales"));
+    apply_tax_change(k, TaxType::Income, num(ctx, "income"));
+    room.note(id, "Nouveaux taux promulgués.");
+}
+
+#[handler]
+pub fn invest(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::Economy) else {
+        return;
+    };
+    let Some(kind) = InvestmentType::from_number(num(ctx, "kind")) else {
+        return;
+    };
+    let amount = num(ctx, "invest_amount").max(0);
+    let result = apply_investment(room.game.kingdom_mut(id), kind, amount);
+    let msg = match result.error {
+        Some(err) => err,
+        None => {
+            let fx = result.side_effects;
+            let mut m = format!(
+                "{amount} × {} pour {} {}.",
+                invest_fr(kind),
+                result.total_cost,
+                id.currency()
+            );
+            if fx.merchants_attracted > 0 {
+                m.push_str(&format!(
+                    " {} serfs sont devenus marchands.",
+                    fx.merchants_attracted
+                ));
+            }
+            if fx.nobles_attracted > 0 {
+                m.push_str(&format!(
+                    " {} nobles rejoignent la cour.",
+                    fx.nobles_attracted
+                ));
+            }
+            m
+        }
+    };
+    room.note(id, msg);
+}
+
+#[handler]
+pub fn attack(room: &mut Room, ctx: &EventContext) {
+    let Some(id) = acting(room, ctx, Step::War) else {
+        return;
+    };
+    let soldiers = num(ctx, "soldiers").clamp(1, room.game.kingdom(id).soldiers.max(1));
+    let attack = Attack {
+        attacker: id,
+        target: Kingdoms::from_number(num(ctx, "target")),
+        soldiers,
+    };
+    room.seat_mut(id).notice = None;
+    if let Err(msg) = room.launch(attack) {
+        room.note(id, msg);
+    }
+}

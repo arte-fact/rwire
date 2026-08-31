@@ -34,7 +34,12 @@ pub fn calculate_buy_cost(amount: i32, price_per_unit: i32) -> i32 {
 pub fn apply_trade(game: &mut EmpireGame, buyer: Kingdoms, trade: Trade) {
     match trade {
         Trade::Buy { amount, seller } => {
-            let price = game.kingdom(seller).grain_price.min(MAX_GRAIN_PRICE);
+            let s = game.kingdom_mut(seller);
+            let price = s.grain_price.min(MAX_GRAIN_PRICE);
+            let amount = amount.clamp(0, s.grain_to_sell);
+            // The seller receives the base price; the 10% broker fee is lost.
+            s.grain_to_sell -= amount;
+            s.treasury += amount * price;
             let cost = calculate_buy_cost(amount, price);
             let k = game.kingdom_mut(buyer);
             k.grain_stocks += amount;
@@ -72,9 +77,11 @@ mod tests {
     }
 
     #[test]
-    fn buying_uses_sellers_capped_price() {
+    fn buying_uses_sellers_capped_price_and_pays_the_seller() {
         let mut game = EmpireGame::default();
-        game.kingdom_mut(Kingdoms::Spain).grain_price = 40; // capped to 15
+        let spain = game.kingdom_mut(Kingdoms::Spain);
+        spain.grain_price = 40; // capped to 15
+        spain.grain_to_sell = 100;
         let before = game.kingdom(Kingdoms::France).clone();
         apply_trade(
             &mut game,
@@ -87,6 +94,24 @@ mod tests {
         let after = game.kingdom(Kingdoms::France);
         assert_eq!(after.grain_stocks, before.grain_stocks + 9);
         assert_eq!(after.treasury, before.treasury - 150);
+        let spain = game.kingdom(Kingdoms::Spain);
+        assert_eq!(spain.grain_to_sell, 91);
+        assert_eq!(spain.treasury, 1000 + 9 * 15);
+    }
+
+    #[test]
+    fn buying_is_capped_to_what_is_on_the_market() {
+        let mut game = EmpireGame::default();
+        let before = game.kingdom(Kingdoms::France).clone();
+        apply_trade(
+            &mut game,
+            Kingdoms::France,
+            Trade::Buy {
+                amount: 500,
+                seller: Kingdoms::Spain, // nothing for sale
+            },
+        );
+        assert_eq!(game.kingdom(Kingdoms::France), &before);
     }
 
     #[test]

@@ -11,6 +11,7 @@ members = [
     "apps/rwire-design-system",
     "apps/rwire-examples",
     "apps/empire",
+    "apps/empire-web",
     "examples/counter",
     "examples/todolist",
     "examples/todo-combined",

@@ -200,12 +200,15 @@ pub fn simulate_barbarian_battle(
             population_defending: false,
         });
 
-        if defender_soldiers <= 0 {
+        let all_conquered = surface_conquered >= barbarian_surface;
+        let surface_conquered = surface_conquered.min(barbarian_surface);
+
+        if defender_soldiers <= 0 || all_conquered {
             return BarbarianBattleResult {
                 attacker_won: true,
                 attacker_remaining_soldiers: max(0, attacker_soldiers),
                 surface_conquered,
-                all_barbarians_conquered: false,
+                all_barbarians_conquered: all_conquered,
             };
         }
 
@@ -215,15 +218,6 @@ pub fn simulate_barbarian_battle(
                 attacker_remaining_soldiers: 0,
                 surface_conquered,
                 all_barbarians_conquered: false,
-            };
-        }
-
-        if surface_conquered >= barbarian_surface {
-            return BarbarianBattleResult {
-                attacker_won: true,
-                attacker_remaining_soldiers: max(0, attacker_soldiers),
-                surface_conquered: barbarian_surface,
-                all_barbarians_conquered: true,
             };
         }
     }
@@ -368,6 +362,20 @@ mod tests {
         assert_eq!(d.peasants, 1900);
         assert_eq!(d.marketplaces, 1);
         assert!(!d.is_dead);
+    }
+
+    #[test]
+    fn barbarian_conquest_never_exceeds_barbarian_land() {
+        let mut game = EmpireGame {
+            barbarians_surface: 50,
+            ..Default::default()
+        };
+        game.kingdom_mut(Kingdoms::France).soldiers = 5000;
+        for _ in 0..50 {
+            let r = simulate_barbarian_battle(&game, Kingdoms::France, 5000, |_| {});
+            assert!(r.surface_conquered <= 50);
+            assert_eq!(r.all_barbarians_conquered, r.surface_conquered == 50);
+        }
     }
 
     #[test]

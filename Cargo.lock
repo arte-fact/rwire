@@ -303,6 +303,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "empire-web"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "empire-lib",
+ "rand",
+ "rwire",
+ "rwire-components",
+ "rwire-themes",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

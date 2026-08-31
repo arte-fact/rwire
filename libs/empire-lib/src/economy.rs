@@ -39,6 +39,7 @@ pub fn apply_tax_change(kingdom: &mut Kingdom, tax_type: TaxType, rate: i32) {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct YearEconomy {
     pub marketplaces_profits: i32,
     pub grain_mills_profits: i32,

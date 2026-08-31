@@ -60,12 +60,15 @@ rwire/
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
 │   ├── rwire-components/    # UI component library (50 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
-│   └── rwire-themes/        # Predefined styles and palettes
+│   ├── rwire-themes/        # Predefined styles and palettes
+│   └── empire-lib/          # Empire game rules; `EmpireGame` derives rwire::State
 ├── apps/
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
 │   ├── rwire-design-system/ # Component showcase
-│   └── rwire-examples/      # Examples gallery
+│   ├── rwire-examples/      # Examples gallery
+│   ├── empire/              # Empire — terminal (ANSI) front-end
+│   └── empire-web/          # Empire — multiplayer web app (shared state + identity pattern)
 └── examples/
     ├── counter/             # Simple counter app
     ├── todolist/            # Todo list with filtering
@@ -219,6 +222,32 @@ struct AppState { count: i32 }
 #[storage(persisted)]
 struct UserData { name: String }
 ```
+
+### Multiplayer: shared state + per-connection identity
+
+Handlers and renderers take exactly one state and `EventContext` carries no session id, so a
+multi-user app identifies the caller itself (see `apps/empire-web`):
+
+1. A `#[storage(shared)]` state holds the whole table (one instance for the process; every
+   connection that renders it is subscribed and re-rendered on change).
+2. A `#[storage(memory)]` state mints a random `token` per connection in its `Default` (it can
+   also hold per-connection UI state such as the active tab).
+3. The root renderer reads the memory state and nests a **closure region** over the shared state:
+   `ElementBuilder::synced_with_storage::<Room, _>(move |room| view(room, token, tab), RendererDeps::always())`.
+   - Regions discovered only through another renderer's output are found by the server's
+     discovery pass (renders with default states until no new state type appears).
+   - When a parent region re-renders, its existing nested regions are re-rendered with the
+     parent's fresh renderer (closure captures) and the connection adopts that renderer — so a
+     memory-state change (e.g. the tab) repaints the shared view.
+4. Every handler bound from that view carries the token as param bytes
+   (`spec.with_param_bytes(token.to_le_bytes())`) and reads it back with `ctx.param_bytes()`.
+5. Server-driven time (animations, computer turns) is a background task calling
+   `SharedServerState::update_shared_if::<Room>(|room| room.tick().then(ChangeSet::all))` — it
+   broadcasts only on ticks that changed something.
+
+Give text/number inputs a stable `id` (`Input::id`, honoured by `FormField`): the runtime restores
+the focused element's value by id after a morph, so another player's broadcast doesn't clobber
+what the user is typing.
 
 ## Capsule Size (lazy delivery)
 

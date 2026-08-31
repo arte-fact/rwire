@@ -3,6 +3,7 @@ use std::cmp::max;
 use crate::kingdom::Kingdom;
 use crate::random::random;
 
+#[derive(Debug, Clone)]
 pub struct YearDemography {
     pub births: i32,
     pub immigrants: i32,
