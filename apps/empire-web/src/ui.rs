@@ -1,5 +1,5 @@
-//! Mobile-first views over the shared [`Room`]. Pure functions: `page` is
-//! re-run for every connection whenever the room changes.
+//! Mobile-first views over the shared [`Rooms`]. Pure functions: `page` is
+//! re-run for every connection whenever any table changes.
 
 use std::borrow::Cow;
 
@@ -8,56 +8,164 @@ use empire_lib::trade::MAX_GRAIN_PRICE;
 use empire_lib::{Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, St};
 use rwire_components::{
-    Alert, Badge, Button, ButtonSize, Card, CardPadding, FormField, Gap, Grid, GridColumns, Input,
-    Progress, Select, Slider, Spinner, Stack, StackJustify, Stat, Stepper, Table, TableRow, Text,
-    TextVariant,
+    Alert, Badge, Button, ButtonSize, Card, CardPadding, CopyButton, FormField, Gap, Grid,
+    GridColumns, Input, Link, Progress, Select, Slider, Spinner, Stack, StackJustify, Stat,
+    Stepper, Table, TableRow, Text, TextVariant,
 };
 
-use crate::room::{self, by, invest_fr, Battle, Room, Seat, Stage, Step};
+use crate::room::{self, by, invest_fr, Battle, Room, Rooms, Seat, Stage, Step};
 
 type Label = Cow<'static, str>;
 
 /// Bottom tabs.
 const TABS: [&str; 3] = ["Partie", "Royaumes", "Journal"];
 
-pub fn page(room: &Room, token: u64, tab: u8) -> ElementBuilder {
-    let me = room.seat_of(token);
-    let (content, action) = match tab {
-        1 => (kingdoms_tab(room), None),
-        2 => (journal_tab(room), None),
-        _ => partie(room, token, me),
-    };
+/// The viewer's handle on one table: everything a view needs to bind actions.
+#[derive(Clone, Copy)]
+struct T<'a> {
+    room: &'a Room,
+    code: &'a str,
+    token: u64,
+}
+
+impl T<'_> {
+    fn act(&self, spec: HandlerSpec) -> HandlerSpec {
+        by(spec, self.token, self.code, &[])
+    }
+}
+
+pub fn page(rooms: &Rooms, token: u64, tab: u8, code: Option<&str>) -> ElementBuilder {
+    match code.and_then(|c| rooms.get(c).map(|r| (c, r))) {
+        Some((code, room)) => room_page(T { room, code, token }, tab),
+        None => home_page(rooms, token, code.is_some()),
+    }
+}
+
+/// App shell: the root is exactly one dynamic viewport tall and never scrolls;
+/// `main` is the scroll container and the bar sits in normal flow below it. No
+/// `position: fixed`, so a collapsing mobile address bar can't hide or jolt it.
+fn shell(header: ElementBuilder, content: ElementBuilder, bar: ElementBuilder) -> ElementBuilder {
     el(El::Div)
         .st([
-            St::MinHDvh,
+            St::HDvh,
             St::BgApp,
             St::TextDefault,
             St::DisplayFlex,
             St::FlexCol,
+            St::OverflowHidden,
         ])
         .append([
-            header(room, me),
+            header,
             el(El::Main)
-                .st([
-                    St::Flex1,
-                    St::WFull,
-                    St::MaxWMd,
-                    St::MxAuto,
-                    St::PMd,
-                    St::DisplayFlex,
-                    St::FlexCol,
-                    St::GapMd,
-                ])
-                .append([content, el(El::Div).st([St::MinH6rem])]),
-            bottom_bar(action, tab),
+                .st([St::Flex1, St::MinH0, St::OverflowYAuto, St::WFull])
+                .append([el(El::Div)
+                    .st([
+                        St::MaxWMd,
+                        St::MxAuto,
+                        St::PMd,
+                        St::DisplayFlex,
+                        St::FlexCol,
+                        St::GapMd,
+                    ])
+                    .append([content])]),
+            bar,
         ])
 }
 
 // ---------------------------------------------------------------------------
-// Chrome
+// Home: create a table or join one
 // ---------------------------------------------------------------------------
 
-fn header(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
+fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
+    let mut items = vec![
+        Text::new()
+            .variant(TextVariant::Heading1)
+            .content("E M P I R E")
+            .build(),
+        Text::body("Six royaumes, un seul empereur. Créez une table et partagez son lien avec vos amis ; les royaumes sans seigneur seront joués par l'ordinateur.")
+            .muted()
+            .build(),
+    ];
+    if unknown {
+        items.push(
+            Alert::error()
+                .title("Table introuvable")
+                .message("Cette table n'existe plus ou le code est erroné.")
+                .build(),
+        );
+    }
+    items.push(section(
+        "Rejoindre avec un code",
+        form(
+            by(room::enter_code(), token, "", &[]),
+            [
+                Input::text()
+                    .name("code")
+                    .id("code")
+                    .placeholder("Code de la table (ex. K7PQ2)")
+                    .autocomplete("off")
+                    .spellcheck(false)
+                    .required(true)
+                    .build(),
+                Button::secondary("Rejoindre").full_width(true).build(),
+            ],
+        ),
+    ));
+    let mine: Vec<ElementBuilder> = rooms
+        .mine(token)
+        .map(|r| {
+            let status = match r.stage {
+                Stage::Lobby => format!("{} seigneur(s) à table", r.humans().count()),
+                Stage::Playing => format!("An {}", r.game.year),
+                Stage::Over => "terminée".to_string(),
+            };
+            Stack::row()
+                .justify(StackJustify::Between)
+                .align_center()
+                .children([
+                    Link::new(format!("/r/{}", r.code))
+                        .text(format!("Table {}", r.code))
+                        .build(),
+                    Text::caption(status).muted().build(),
+                ])
+                .build()
+        })
+        .collect();
+    if !mine.is_empty() {
+        items.push(section(
+            "Vos tables",
+            Stack::column().gap(Gap::Sm).children(mine).build(),
+        ));
+    }
+    shell(
+        header_bar("Empire", "Six royaumes, un seul empereur.", None, None),
+        Stack::column().gap(Gap::Md).children(items).build(),
+        bottom_bar(
+            Some(primary(
+                "Créer une table",
+                by(room::create_room(), token, "", &[]),
+            )),
+            None,
+        ),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// A table
+// ---------------------------------------------------------------------------
+
+fn room_page(t: T, tab: u8) -> ElementBuilder {
+    let me = t.room.seat_of(t.token);
+    let (content, action) = match tab {
+        1 => (kingdoms_tab(t.room), None),
+        2 => (journal_tab(t.room), None),
+        _ => partie(t, me),
+    };
+    shell(header(t, me), content, bottom_bar(action, Some(tab)))
+}
+
+fn header(t: T, me: Option<Kingdoms>) -> ElementBuilder {
+    let room = t.room;
     let (title, sub) = match me {
         Some(id) if room.stage != Stage::Lobby => {
             let k = room.game.kingdom(id);
@@ -74,18 +182,38 @@ fn header(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
         }
         Some(id) => (
             room.game.kingdom(id).full_title(),
-            "En attente du début de la partie".into(),
+            format!("Table {} · en attente du début", t.code),
         ),
-        None => (
-            "Empire".to_string(),
-            "Six royaumes, un seul empereur.".into(),
-        ),
+        None => (format!("Table {}", t.code), "Spectateur".to_string()),
     };
+    header_bar(
+        &title,
+        &sub,
+        Some(Badge::primary(format!("An {}", room.game.year)).build()),
+        Some(
+            Button::ghost("Accueil")
+                .size(ButtonSize::Sm)
+                .on_click(crate::go_home()),
+        ),
+    )
+}
+
+fn header_bar(
+    title: &str,
+    sub: &str,
+    badge: Option<ElementBuilder>,
+    action: Option<ElementBuilder>,
+) -> ElementBuilder {
+    let mut right = Vec::new();
+    if let Some(b) = badge {
+        right.push(b);
+    }
+    if let Some(a) = action {
+        right.push(a);
+    }
     el(El::Header)
         .st([
-            St::PositionSticky,
-            St::Top0,
-            St::Z10,
+            St::FlexShrink0,
             St::BgSurface,
             St::BorderB,
             St::PxMd,
@@ -104,44 +232,50 @@ fn header(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
                 el(El::Div).st([St::MinW0]).append([
                     el(El::Strong)
                         .st([St::DisplayBlock, St::Truncate])
-                        .text(&title),
-                    Text::caption(sub).muted().build(),
+                        .text(title),
+                    Text::caption(sub.to_string()).muted().build(),
                 ]),
-                Badge::primary(format!("An {}", room.game.year)).build(),
+                el(El::Div)
+                    .st([St::FlexShrink0, St::WhitespaceNowrap])
+                    .append([Stack::row()
+                        .gap(Gap::Sm)
+                        .align_center()
+                        .children(right)
+                        .build()]),
             ])])
 }
 
-/// Fixed bottom bar: the current primary action (if any) above the tabs.
-fn bottom_bar(action: Option<ElementBuilder>, tab: u8) -> ElementBuilder {
-    let tabs = Stack::row()
-        .gap(Gap::Sm)
-        .children(TABS.iter().enumerate().map(|(i, label)| {
-            let b = if i as u8 == tab {
-                Button::secondary(*label)
-            } else {
-                Button::ghost(*label)
-            };
-            b.size(ButtonSize::Sm)
-                .full_width(true)
-                .on_click(crate::set_tab().with_param_bytes(vec![i as u8]))
-        }))
-        .build();
+/// Bottom bar: the current primary action (if any) above the tabs.
+fn bottom_bar(action: Option<ElementBuilder>, tab: Option<u8>) -> ElementBuilder {
     let mut rows = Vec::new();
     if let Some(action) = action {
         rows.push(action);
     }
-    rows.push(tabs);
+    if let Some(tab) = tab {
+        rows.push(
+            Stack::row()
+                .gap(Gap::Sm)
+                .children(TABS.iter().enumerate().map(|(i, label)| {
+                    let b = if i as u8 == tab {
+                        Button::secondary(*label)
+                    } else {
+                        Button::ghost(*label)
+                    };
+                    b.size(ButtonSize::Sm)
+                        .full_width(true)
+                        .on_click(crate::set_tab().with_param_bytes(vec![i as u8]))
+                }))
+                .build(),
+        );
+    }
     el(El::Div)
         .st([
-            St::PositionFixed,
-            St::Bottom0,
-            St::Left0,
-            St::Right0,
-            St::Z20,
+            St::FlexShrink0,
             St::BgSurface,
             St::BorderT,
             St::PxMd,
             St::PySm,
+            St::PbSafe,
         ])
         .append([el(El::Div)
             .st([St::MaxWMd, St::MxAuto, St::WFull])
@@ -196,22 +330,23 @@ fn kingdoms_tab(room: &Room) -> ElementBuilder {
 
 type View = (ElementBuilder, Option<ElementBuilder>);
 
-fn partie(room: &Room, token: u64, me: Option<Kingdoms>) -> View {
+fn partie(t: T, me: Option<Kingdoms>) -> View {
+    let room = t.room;
     match room.stage {
         Stage::Lobby => (
-            lobby(room, token, me),
-            me.map(|_| primary("Commencer la partie", by(room::start(), token, &[]))),
+            lobby(t, me),
+            me.map(|_| primary("Commencer la partie", t.act(room::start()))),
         ),
         Stage::Over => (
             over(room),
-            me.map(|_| primary("Nouvelle partie", by(room::new_game(), token, &[]))),
+            me.map(|_| primary("Nouvelle partie", t.act(room::new_game()))),
         ),
         Stage::Playing => {
             if let Some(b) = &room.battle {
                 return (battle_page(room, b), None);
             }
             match me {
-                Some(id) if room.active() == Some(id) => turn(room, token, id),
+                Some(id) if room.active() == Some(id) => turn(t, id),
                 Some(id) if room.game.kingdom(id).is_dead => (
                     Stack::column()
                         .gap(Gap::Md)
@@ -231,12 +366,32 @@ fn partie(room: &Room, token: u64, me: Option<Kingdoms>) -> View {
     }
 }
 
-fn lobby(room: &Room, token: u64, me: Option<Kingdoms>) -> ElementBuilder {
+fn lobby(t: T, me: Option<Kingdoms>) -> ElementBuilder {
+    let room = t.room;
     let mut items = vec![
-        Text::new()
-            .variant(TextVariant::Heading1)
-            .content("E M P I R E")
-            .build(),
+        section(
+            "Invitez vos amis",
+            Stack::column()
+                .gap(Gap::Sm)
+                .children([
+                    Stack::row()
+                        .justify(StackJustify::Between)
+                        .align_center()
+                        .children([
+                            el(El::Strong)
+                                .st([St::Text3xl, St::TrackingWidest])
+                                .text(t.code),
+                            CopyButton::new(t.code).build(),
+                        ])
+                        .build(),
+                    Text::caption(
+                        "Partagez l'adresse de cette page, ou ce code à saisir sur l'accueil.",
+                    )
+                    .muted()
+                    .build(),
+                ])
+                .build(),
+        ),
         Text::body(
             "Choisissez votre royaume. Les royaumes sans seigneur seront joués par l'ordinateur.",
         )
@@ -247,11 +402,11 @@ fn lobby(room: &Room, token: u64, me: Option<Kingdoms>) -> ElementBuilder {
     for (i, id) in KINGDOMS.into_iter().enumerate() {
         let k = room.game.kingdom(id);
         let (badge, action) = match room.seat(id).owner {
-            Some(o) if o == token => (
+            Some(o) if o == t.token => (
                 Badge::success("Vous").build(),
                 Button::secondary("Quitter")
                     .size(ButtonSize::Sm)
-                    .on_click(by(room::leave(), token, &[])),
+                    .on_click(t.act(room::leave())),
             ),
             Some(_) => (
                 Badge::warning(k.player_name.clone()).build(),
@@ -264,7 +419,7 @@ fn lobby(room: &Room, token: u64, me: Option<Kingdoms>) -> ElementBuilder {
                 Badge::default_badge("Ordinateur").build(),
                 Button::primary("Rejoindre")
                     .size(ButtonSize::Sm)
-                    .on_click(by(room::join(), token, &[i as u8])),
+                    .on_click(by(room::join(), t.token, t.code, &[i as u8])),
             ),
         };
         items.push(
@@ -302,7 +457,7 @@ fn lobby(room: &Room, token: u64, me: Option<Kingdoms>) -> ElementBuilder {
         items.push(section(
             "Votre nom",
             form(
-                by(room::rename(), token, &[]),
+                t.act(room::rename()),
                 [
                     Input::text()
                         .name("name")
@@ -402,29 +557,8 @@ fn waiting(room: &Room) -> ElementBuilder {
                 "Ordre du tour",
                 Stack::column().gap(Gap::Sm).children(order).build(),
             ),
-            latest(room),
         ])
         .build()
-}
-
-/// The last journal lines, so the main screen keeps a pulse without the tables.
-fn latest(room: &Room) -> ElementBuilder {
-    if room.log.is_empty() {
-        return el(El::Div);
-    }
-    section(
-        "Dernières nouvelles",
-        Stack::column()
-            .gap(Gap::Xs)
-            .children(
-                room.log
-                    .iter()
-                    .rev()
-                    .take(3)
-                    .map(|line| Text::caption(line.clone()).muted().build()),
-            )
-            .build(),
-    )
 }
 
 /// The live battle, replayed identically on every screen.
@@ -502,7 +636,8 @@ fn side(name: String, count: i32, start: i32) -> ElementBuilder {
 // The active player's turn
 // ---------------------------------------------------------------------------
 
-fn turn(room: &Room, token: u64, id: Kingdoms) -> View {
+fn turn(t: T, id: Kingdoms) -> View {
+    let room = t.room;
     let k = room.game.kingdom(id);
     let seat = room.seat(id);
     let mut items = vec![stepper(room.step)];
@@ -510,18 +645,15 @@ fn turn(room: &Room, token: u64, id: Kingdoms) -> View {
         items.push(Alert::info().message(notice.clone()).build());
     }
     let (body, action) = match room.step {
-        Step::Weather => (weather_step(room, k), Some(next("Continuer", token))),
-        Step::Trade => (
-            trade_step(room, id, token),
-            Some(next("Passer à l'intendance", token)),
-        ),
-        Step::Feed => (feed_step(k, token), None),
-        Step::Report => (report_step(seat), Some(next("Continuer", token))),
+        Step::Weather => (weather_step(room, k), Some(next("Continuer", t))),
+        Step::Trade => (trade_step(t, id), Some(next("Passer à l'intendance", t))),
+        Step::Feed => (feed_step(t, k), None),
+        Step::Report => (report_step(seat), Some(next("Continuer", t))),
         Step::Economy => (
-            economy_step(k, seat, token),
-            Some(next("Passer à la guerre", token)),
+            economy_step(t, k, seat),
+            Some(next("Passer à la guerre", t)),
         ),
-        Step::War => (war_step(room, id, token), Some(next("Fin du tour", token))),
+        Step::War => (war_step(t, id), Some(next("Fin du tour", t))),
     };
     items.push(body);
     (Stack::column().gap(Gap::Md).children(items).build(), action)
@@ -544,12 +676,12 @@ fn weather_step(room: &Room, k: &Kingdom) -> ElementBuilder {
                 .message(room.game.weather.sentence())
                 .build(),
             resources(k),
-            latest(room),
         ])
         .build()
 }
 
-fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
+fn trade_step(t: T, id: Kingdoms) -> ElementBuilder {
+    let room = t.room;
     let k = room.game.kingdom(id);
     let mut sellers = Select::new().name("seller");
     let mut offers = 0;
@@ -577,7 +709,7 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
             .build()
     } else {
         form(
-            by(room::buy_grain(), token, &[]),
+            t.act(room::buy_grain()),
             [
                 labeled("Vendeur", sellers.build()),
                 slider(
@@ -601,7 +733,7 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
             section(
                 "Vendre du grain",
                 form(
-                    by(room::sell_grain(), token, &[]),
+                    t.act(room::sell_grain()),
                     [
                         slider(
                             "sell_amount",
@@ -628,7 +760,7 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
             section(
                 "Vendre des terres",
                 form(
-                    by(room::sell_land(), token, &[]),
+                    t.act(room::sell_land()),
                     [
                         slider(
                             "arpents",
@@ -648,7 +780,7 @@ fn trade_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
         .build()
 }
 
-fn feed_step(k: &Kingdom, token: u64) -> ElementBuilder {
+fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
     let stocks = k.grain_stocks.max(0);
     let needs = k.peasants_grain_needs();
     let army = k.soldiers_grain_needs();
@@ -663,11 +795,15 @@ fn feed_step(k: &Kingdom, token: u64) -> ElementBuilder {
             section(
                 "Nourrir le royaume",
                 form(
-                    by(room::feed(), token, &[]),
+                    t.act(room::feed()),
                     [
                         slider(
                             "peasants",
-                            format!("Grain pour les {} habitants (besoin : {})", fmt(k.population()), fmt(needs)),
+                            format!(
+                                "Grain pour les {} habitants (besoin : {})",
+                                fmt(k.population()),
+                                fmt(needs)
+                            ),
                             0,
                             peasants_max,
                             needs.min(peasants_max),
@@ -675,7 +811,11 @@ fn feed_step(k: &Kingdom, token: u64) -> ElementBuilder {
                         ),
                         slider(
                             "soldiers",
-                            format!("Grain pour l'ost de {} hommes (besoin : {})", fmt(k.soldiers), fmt(army)),
+                            format!(
+                                "Grain pour l'ost de {} hommes (besoin : {})",
+                                fmt(k.soldiers),
+                                fmt(army)
+                            ),
                             0,
                             soldiers_max,
                             army.min(soldiers_max),
@@ -752,7 +892,7 @@ fn report_step(seat: &Seat) -> ElementBuilder {
     )
 }
 
-fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
+fn economy_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let mut items = Vec::new();
 
     if let Some(e) = &seat.eco {
@@ -774,22 +914,22 @@ fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
             ),
             ("Impôts directs (%)", k.income_taxes, e.income_taxes_profits),
         ];
-        let mut t = Table::new()
+        let mut tbl = Table::new()
             .headers(["Poste", "Nombre", "Profits"])
             .striped(true);
         for (label, count, profit) in rows {
-            t = t.row(TableRow::new().cells([label.to_string(), fmt(count), fmt(profit)]));
+            tbl = tbl.row(TableRow::new().cells([label.to_string(), fmt(count), fmt(profit)]));
         }
         items.push(section(
             format!("Revenus d'état : {} {}", fmt(e.net()), k.currency()),
-            scroll(t.build()),
+            scroll(tbl.build()),
         ));
     }
 
     items.push(section(
         "Taux d'imposition",
         form(
-            by(room::set_taxes(), token, &[]),
+            t.act(room::set_taxes()),
             [
                 slider(
                     "customs",
@@ -806,18 +946,20 @@ fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
         ),
     ));
 
-    let mut kinds = Select::new().name("kind");
-    let mut largest = 0;
-    for (n, kind) in (1..=6).filter_map(|n| InvestmentType::from_number(n).map(|k| (n, k))) {
-        largest = largest.max(kind.max_investment(k));
+    let kind = seat.invest_kind.unwrap_or(InvestmentType::Marketplaces);
+    let max = kind.max_investment(k).max(0);
+    let mut kinds = Select::new()
+        .name("kind")
+        .value(kind_number(kind).to_string());
+    for (n, other) in (1..=6).filter_map(|n| InvestmentType::from_number(n).map(|k| (n, k))) {
         kinds = kinds.option(
             n.to_string(),
             format!(
                 "{} — {} {} pièce (max {})",
-                invest_fr(kind),
-                fmt(kind.cost()),
+                invest_fr(other),
+                fmt(other.cost()),
                 k.currency(),
-                kind.max_investment(k).max(0)
+                other.max_investment(k).max(0)
             ),
         );
     }
@@ -828,11 +970,25 @@ fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
             k.currency()
         ),
         form(
-            by(room::invest(), token, &[]),
+            t.act(room::invest()),
             [
-                labeled("Type", kinds.build()),
-                slider("invest_amount", "Quantité", 0, largest.max(1), 1, ""),
-                Button::secondary("Investir").full_width(true).build(),
+                labeled("Type", kinds.on_change(t.act(room::pick_investment()))),
+                slider(
+                    "invest_amount",
+                    format!(
+                        "Quantité (max {max} à {} {} pièce)",
+                        fmt(kind.cost()),
+                        k.currency()
+                    ),
+                    0,
+                    max,
+                    1.min(max),
+                    invest_fr(kind),
+                ),
+                Button::secondary("Investir")
+                    .full_width(true)
+                    .disabled(max < 1)
+                    .build(),
             ],
         ),
     ));
@@ -840,10 +996,18 @@ fn economy_step(k: &Kingdom, seat: &Seat, token: u64) -> ElementBuilder {
     Stack::column().gap(Gap::Md).children(items).build()
 }
 
-fn war_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
+/// Menu number of an investment type (1..=6), the inverse of `from_number`.
+fn kind_number(kind: InvestmentType) -> i32 {
+    (1..=6)
+        .find(|&n| InvestmentType::from_number(n) == Some(kind))
+        .unwrap_or(1)
+}
+
+fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
+    let room = t.room;
     let k = room.game.kingdom(id);
     let year = room.game.year;
-    let mut t = Table::new()
+    let mut tbl = Table::new()
         .headers(["Terres vassales", "Arpents", "Soldats"])
         .striped(true)
         .row(TableRow::new().cells([
@@ -854,7 +1018,7 @@ fn war_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
     let mut targets = Select::new().name("target").option("0", "Barbares");
     for other in room.game.alive_kingdoms().into_iter().filter(|&o| o != id) {
         let o = room.game.kingdom(other);
-        t = t.row(TableRow::new().cells([o.full_title(), fmt(o.surface), fmt(o.soldiers)]));
+        tbl = tbl.row(TableRow::new().cells([o.full_title(), fmt(o.surface), fmt(o.soldiers)]));
         if year >= 3 {
             targets = targets.option((other.index() + 1).to_string(), o.full_title());
         }
@@ -867,11 +1031,11 @@ fn war_step(room: &Room, id: Kingdoms, token: u64) -> ElementBuilder {
     Stack::column()
         .gap(Gap::Md)
         .children([
-            scroll(t.build()),
+            scroll(tbl.build()),
             section(
                 "Expédition",
                 form(
-                    by(room::attack(), token, &[]),
+                    t.act(room::attack()),
                     [
                         labeled("Cible", targets.build()),
                         slider(
@@ -1006,8 +1170,8 @@ fn primary(label: &'static str, spec: HandlerSpec) -> ElementBuilder {
         .on_click(spec)
 }
 
-fn next(label: &'static str, token: u64) -> ElementBuilder {
-    primary(label, by(room::advance(), token, &[]))
+fn next(label: &'static str, t: T) -> ElementBuilder {
+    primary(label, t.act(room::advance()))
 }
 
 /// 12345 → "12 345"

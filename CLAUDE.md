@@ -242,8 +242,13 @@ multi-user app identifies the caller itself (see `apps/empire-web`):
 4. Every handler bound from that view carries the token as param bytes
    (`spec.with_param_bytes(token.to_le_bytes())`) and reads it back with `ctx.param_bytes()`.
 5. Server-driven time (animations, computer turns) is a background task calling
-   `SharedServerState::update_shared_if::<Room>(|room| room.tick().then(ChangeSet::all))` — it
+   `SharedServerState::update_shared_if::<Rooms>(|rooms| rooms.tick().then(ChangeSet::all))` — it
    broadcasts only on ticks that changed something.
+6. Many tables: the shared state is a map of rooms keyed by a share code; the URL (`/r/<code>`)
+   names the viewer's room via an `on_route` handler on the memory state, and handlers carry
+   `(token, code)` as param bytes. `ctx.navigate("/r/<code>")` from a handler pushes the URL
+   **and** runs the route handling (router swap / `on_route`), exactly like a `Link` click — so
+   creating or entering a table is just a navigation.
 
 Give text/number inputs a stable `id` (`Input::id`, honoured by `FormField`): the runtime restores
 the focused element's value by id after a morph, so another player's broadcast doesn't clobber

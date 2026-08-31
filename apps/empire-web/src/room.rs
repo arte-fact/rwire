@@ -1,6 +1,6 @@
 //! Shared game table: state, turn order, battles and every handler.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use empire_lib::demography::{apply_feed, YearDemography};
 use empire_lib::economy::{apply_economy, apply_tax_change, economy_report, TaxType, YearEconomy};
@@ -14,6 +14,7 @@ use empire_lib::war::{
     simulate_kingdom_battle, BarbarianBattleResult, BattleProgress, BattleResult,
 };
 use empire_lib::{EmpireGame, Kingdoms, KINGDOMS};
+use rand::Rng;
 use rwire::{handler, EventContext, HandlerSpec, State};
 
 /// Ticker period; battle frames and computer pauses are counted in ticks.
@@ -70,6 +71,8 @@ pub struct Seat {
     pub eco: Option<YearEconomy>,
     /// Feedback from the player's last action.
     pub notice: Option<String>,
+    /// Investment type currently selected in the economy form.
+    pub invest_kind: Option<InvestmentType>,
 }
 
 #[derive(Clone)]
@@ -108,10 +111,87 @@ impl Battle {
     }
 }
 
-/// The single game table, shared by every connection.
+/// Idle rooms are forgotten: empty lobbies after 10 minutes, anything after an hour.
+const EMPTY_ROOM_TTL: u32 = (10 * 60 * 1000 / TICK_MS) as u32;
+const IDLE_ROOM_TTL: u32 = (60 * 60 * 1000 / TICK_MS) as u32;
+const CODE_LEN: usize = 5;
+const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/// Every table on this server, keyed by share code. Shared by every connection.
 #[derive(State, Default)]
 #[storage(shared)]
+pub struct Rooms {
+    pub rooms: BTreeMap<String, Room>,
+}
+
+impl Rooms {
+    pub fn get(&self, code: &str) -> Option<&Room> {
+        self.rooms.get(code)
+    }
+
+    /// Tables where this connection holds a seat or is the host.
+    pub fn mine(&self, token: u64) -> impl Iterator<Item = &Room> + '_ {
+        self.rooms
+            .values()
+            .filter(move |r| r.host == token || r.seat_of(token).is_some())
+    }
+
+    fn create(&mut self, host: u64) -> String {
+        let mut rng = rand::thread_rng();
+        let code = loop {
+            let code: String = (0..CODE_LEN)
+                .map(|_| CODE_ALPHABET[rng.gen_range(0..CODE_ALPHABET.len())] as char)
+                .collect();
+            if !self.rooms.contains_key(&code) {
+                break code;
+            }
+        };
+        self.rooms.insert(
+            code.clone(),
+            Room {
+                code: code.clone(),
+                host,
+                ..Default::default()
+            },
+        );
+        code
+    }
+
+    /// Advance every table by one tick; returns true when any view changed.
+    pub fn tick(&mut self) -> bool {
+        let mut changed = false;
+        for room in self.rooms.values_mut() {
+            changed |= room.tick();
+            room.idle = room.idle.saturating_add(1);
+        }
+        let before = self.rooms.len();
+        self.rooms.retain(|_, r| {
+            let empty = r.humans().next().is_none();
+            !(r.idle > IDLE_ROOM_TTL
+                || (empty && r.stage == Stage::Lobby && r.idle > EMPTY_ROOM_TTL))
+        });
+        changed || self.rooms.len() != before
+    }
+}
+
+/// Upper-case a user-typed or URL code and drop anything outside the alphabet.
+pub fn normalize_code(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_uppercase()
+        .chars()
+        .filter(|c| CODE_ALPHABET.contains(&(*c as u8)))
+        .take(CODE_LEN)
+        .collect()
+}
+
+/// One game table.
+#[derive(Default)]
 pub struct Room {
+    pub code: String,
+    /// Token of the connection that created the table.
+    pub host: u64,
+    /// Ticks since the last player action.
+    idle: u32,
     pub stage: Stage,
     pub seats: [Seat; 6],
     pub game: EmpireGame,
@@ -526,21 +606,34 @@ pub fn invest_fr(kind: InvestmentType) -> &'static str {
 // Handler plumbing: the caller's token travels as the handler's param bytes.
 // ---------------------------------------------------------------------------
 
-/// Bind a handler to the calling connection (plus optional extra bytes).
-pub fn by(spec: HandlerSpec, token: u64, extra: &[u8]) -> HandlerSpec {
+/// Bind a handler to the calling connection and a table (plus optional extra
+/// bytes). Layout: `[token: 8][code_len: 1][code][extra]`.
+pub fn by(spec: HandlerSpec, token: u64, code: &str, extra: &[u8]) -> HandlerSpec {
     let mut bytes = token.to_le_bytes().to_vec();
+    bytes.push(code.len() as u8);
+    bytes.extend_from_slice(code.as_bytes());
     bytes.extend_from_slice(extra);
     spec.with_param_bytes(bytes)
 }
 
-fn caller(ctx: &EventContext) -> (u64, &[u8]) {
+fn caller(ctx: &EventContext) -> (u64, &str, &[u8]) {
     let p = ctx.param_bytes();
-    if p.len() < 8 {
-        return (0, &[]);
+    if p.len() < 9 {
+        return (0, "", &[]);
     }
     let mut t = [0u8; 8];
     t.copy_from_slice(&p[..8]);
-    (u64::from_le_bytes(t), &p[8..])
+    let end = (9 + p[8] as usize).min(p.len());
+    let code = std::str::from_utf8(&p[9..end]).unwrap_or("");
+    (u64::from_le_bytes(t), code, &p[end..])
+}
+
+/// The caller's token, extra bytes and table, if the table exists.
+fn table<'a>(rooms: &'a mut Rooms, ctx: &'a EventContext) -> Option<(u64, &'a [u8], &'a mut Room)> {
+    let (token, code, extra) = caller(ctx);
+    let room = rooms.rooms.get_mut(code)?;
+    room.idle = 0;
+    Some((token, extra, room))
 }
 
 fn num(ctx: &EventContext, field: &str) -> i32 {
@@ -550,10 +643,30 @@ fn num(ctx: &EventContext, field: &str) -> i32 {
 }
 
 /// The caller's kingdom if it is their turn, at `step`, with no battle running.
-fn acting(room: &Room, ctx: &EventContext, step: Step) -> Option<Kingdoms> {
-    let (token, _) = caller(ctx);
+fn acting(room: &Room, token: u64, step: Step) -> Option<Kingdoms> {
     let id = room.seat_of(token)?;
     (room.active() == Some(id) && room.step == step && room.battle.is_none()).then_some(id)
+}
+
+// ---------------------------------------------------------------------------
+// Home
+// ---------------------------------------------------------------------------
+
+#[handler]
+pub fn create_room(rooms: &mut Rooms, ctx: &EventContext) {
+    let (token, _, _) = caller(ctx);
+    let code = rooms.create(token);
+    ctx.navigate(format!("/r/{code}"));
+}
+
+#[handler]
+pub fn enter_code(rooms: &mut Rooms, ctx: &EventContext) {
+    // Navigate even when the table is unknown: the room page then says so.
+    let code = normalize_code(ctx.field("code").unwrap_or(""));
+    if !code.is_empty() {
+        ctx.navigate(format!("/r/{code}"));
+    }
+    let _ = rooms;
 }
 
 // ---------------------------------------------------------------------------
@@ -561,8 +674,10 @@ fn acting(room: &Room, ctx: &EventContext, step: Step) -> Option<Kingdoms> {
 // ---------------------------------------------------------------------------
 
 #[handler]
-pub fn join(room: &mut Room, ctx: &EventContext) {
-    let (token, args) = caller(ctx);
+pub fn join(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, args, room)) = table(rooms, ctx) else {
+        return;
+    };
     let Some(id) = args
         .first()
         .and_then(|&i| KINGDOMS.get(i as usize))
@@ -581,8 +696,10 @@ pub fn join(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn leave(room: &mut Room, ctx: &EventContext) {
-    let (token, _) = caller(ctx);
+pub fn leave(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
     if room.stage == Stage::Lobby {
         if let Some(id) = room.seat_of(token) {
             room.release(id);
@@ -591,8 +708,10 @@ pub fn leave(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn rename(room: &mut Room, ctx: &EventContext) {
-    let (token, _) = caller(ctx);
+pub fn rename(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
     let Some(id) = room.seat_of(token) else {
         return;
     };
@@ -609,8 +728,10 @@ pub fn rename(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn start(room: &mut Room, ctx: &EventContext) {
-    let (token, _) = caller(ctx);
+pub fn start(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
     if room.stage == Stage::Lobby && room.seat_of(token).is_some() {
         room.stage = Stage::Playing;
         room.log.clear();
@@ -620,8 +741,10 @@ pub fn start(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn new_game(room: &mut Room, ctx: &EventContext) {
-    let (token, _) = caller(ctx);
+pub fn new_game(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
     if room.stage != Stage::Over || room.seat_of(token).is_none() {
         return;
     }
@@ -633,7 +756,11 @@ pub fn new_game(room: &mut Room, ctx: &EventContext) {
                 .map(|o| (id, o, room.game.kingdom(id).player_name.clone()))
         })
         .collect();
-    *room = Room::default();
+    *room = Room {
+        code: room.code.clone(),
+        host: room.host,
+        ..Default::default()
+    };
     for (id, owner, name) in owners {
         room.seats[id.index()].owner = Some(owner);
         let k = room.game.kingdom_mut(id);
@@ -648,8 +775,10 @@ pub fn new_game(room: &mut Room, ctx: &EventContext) {
 
 /// Move to the next step; from the war step this ends the turn.
 #[handler]
-pub fn advance(room: &mut Room, ctx: &EventContext) {
-    let (token, _) = caller(ctx);
+pub fn advance(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
     let Some(id) = room.seat_of(token) else {
         return;
     };
@@ -668,8 +797,11 @@ pub fn advance(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn buy_grain(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::Trade) else {
+pub fn buy_grain(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Trade) else {
         return;
     };
     let Some(seller) = Kingdoms::from_number(num(ctx, "seller")) else {
@@ -712,8 +844,11 @@ pub fn buy_grain(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn sell_grain(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::Trade) else {
+pub fn sell_grain(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Trade) else {
         return;
     };
     let stocks = room.game.kingdom(id).grain_stocks;
@@ -730,8 +865,11 @@ pub fn sell_grain(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn sell_land(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::Trade) else {
+pub fn sell_land(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Trade) else {
         return;
     };
     let surface = room.game.kingdom(id).surface;
@@ -744,8 +882,11 @@ pub fn sell_land(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn feed(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::Feed) else {
+pub fn feed(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Feed) else {
         return;
     };
     let weather = room.game.weather;
@@ -764,8 +905,11 @@ pub fn feed(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn set_taxes(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::Economy) else {
+pub fn set_taxes(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Economy) else {
         return;
     };
     let k = room.game.kingdom_mut(id);
@@ -775,9 +919,28 @@ pub fn set_taxes(room: &mut Room, ctx: &EventContext) {
     room.note(id, "Nouveaux taux promulgués.");
 }
 
+/// The investment type picked in the economy form (drives the quantity slider).
 #[handler]
-pub fn invest(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::Economy) else {
+pub fn pick_investment(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = room.seat_of(token) else {
+        return;
+    };
+    let kind = ctx
+        .text()
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .and_then(InvestmentType::from_number);
+    room.seat_mut(id).invest_kind = kind;
+}
+
+#[handler]
+pub fn invest(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Economy) else {
         return;
     };
     let Some(kind) = InvestmentType::from_number(num(ctx, "kind")) else {
@@ -814,8 +977,11 @@ pub fn invest(room: &mut Room, ctx: &EventContext) {
 }
 
 #[handler]
-pub fn attack(room: &mut Room, ctx: &EventContext) {
-    let Some(id) = acting(room, ctx, Step::War) else {
+pub fn attack(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::War) else {
         return;
     };
     let soldiers = num(ctx, "soldiers").clamp(1, room.game.kingdom(id).soldiers.max(1));
