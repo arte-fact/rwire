@@ -970,7 +970,9 @@ where
         // Spawn session eviction task (5-minute TTL)
         {
             let shared = Arc::clone(&shared);
-            task::spawn(session_eviction_task(shared, Duration::from_secs(300)));
+            // Disconnected sessions keep their state for a day, so a phone that
+            // switches apps (or a PWA relaunch) comes back to the same seat.
+            task::spawn(session_eviction_task(shared, Duration::from_secs(86_400)));
         }
 
         while let Ok((stream, peer_addr)) = listener.accept().await {
