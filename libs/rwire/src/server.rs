@@ -202,19 +202,33 @@ impl SharedServerState {
         changes: ChangeSet,
         f: impl FnOnce(&mut T),
     ) {
+        self.update_shared_if::<T>(|value| {
+            f(value);
+            Some(changes)
+        });
+    }
+
+    /// Like [`Self::update_shared_changed`], but `f` decides whether anything
+    /// worth broadcasting happened: return `Some(changes)` to notify subscribed
+    /// connections, `None` to leave them untouched. Ideal for a periodic ticker
+    /// that usually has nothing to do.
+    pub fn update_shared_if<T: State + Default>(
+        &self,
+        f: impl FnOnce(&mut T) -> Option<ChangeSet>,
+    ) {
         let key = shared_cache_key(StorageType::Shared, Some(T::TABLE_NAME), "");
         let Some(key) = key else { return };
-        {
+        let changes = {
             let mut cache = self.shared_cache.write().unwrap_or_else(|e| e.into_inner());
             let slot = cache
                 .entry(key.clone())
                 .or_insert_with(|| Box::new(T::default()) as Box<dyn Any + Send + Sync>);
-            if let Some(value) = slot.downcast_mut::<T>() {
-                f(value);
-            }
+            slot.downcast_mut::<T>().and_then(f)
+        };
+        if let Some(changes) = changes {
+            // except_conn_id = 0 is never a real connection id (ids start at 1).
+            self.broadcast(&key, TypeId::of::<T>(), changes, 0);
         }
-        // except_conn_id = 0 is never a real connection id (ids start at 1).
-        self.broadcast(&key, TypeId::of::<T>(), changes, 0);
     }
 
     /// Allocate unique connection ID.
@@ -1579,24 +1593,29 @@ impl ConnectionState {
         changes: ChangeSet,
         inject_key: Option<&str>,
     ) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
-        // Only take the read lock when there's a shared/persisted copy to inject.
-        let cache_guard = match inject_key {
-            Some(_) => Some(
-                shared
-                    .shared_cache
-                    .read()
-                    .map_err(|_| "shared cache lock poisoned")?,
-            ),
-            None => None,
-        };
+        // `states` only holds defaults for shared/persisted state; inject the
+        // authoritative copies so any region re-rendered here (including nested
+        // regions over shared state inside a memory region) paints real data.
+        let cache_guard = shared
+            .shared_cache
+            .read()
+            .map_err(|_| "shared cache lock poisoned")?;
         let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
             self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
-        if let (Some(key), Some(cache)) = (inject_key, &cache_guard) {
-            if let Some(state) = cache.get(key) {
+        for (tid, key) in
+            shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+        {
+            if let Some(state) = cache_guard.get(&key) {
+                states_map.insert(tid, state.as_ref());
+            }
+        }
+        if let Some(key) = inject_key {
+            if let Some(state) = cache_guard.get(key) {
                 states_map.insert(changed_type, state.as_ref());
             }
         }
-        Ok(build_synced_update_with_known_symbols(
+        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
+        let update = build_synced_update_with_known_symbols(
             &self.synced_elements,
             &states_map,
             &mut self.handlers,
@@ -1606,10 +1625,27 @@ impl ConnectionState {
             Some(&mut self.synced_hashes),
             Some(&mut self.sent_css),
             Some(&mut self.sent_maps),
-            None,
+            Some(&mut discovered),
             0,
             Some(&self.client_actions),
-        ))
+        );
+        drop(cache_guard);
+        // Adopt the renderers seen during this pass: a nested closure region's
+        // renderer changes whenever its parent re-renders.
+        for region in discovered {
+            match self
+                .synced_elements
+                .iter_mut()
+                .find(|se| se.id == region.id)
+            {
+                Some(se) => {
+                    se.renderer = region.renderer;
+                    se.deps = region.deps;
+                }
+                None => self.synced_elements.push(region),
+            }
+        }
+        Ok(update)
     }
 
     /// Run `handler` against its state. Shared/persisted state executes on (and is
@@ -1959,17 +1995,35 @@ where
         root()
     };
 
-    // First pass: collect handlers to find the state types
-    let mut ctx = BuildContext::new();
-
-    // Use a temporary unit state for the first pass to collect handlers
-    let placeholder_state: () = ();
-    ctx.collect_symbols(&root_element, &placeholder_state);
-    ctx.emit(&root_element, &placeholder_state);
-
-    // Extract handlers
-    conn_state.handlers = ctx.handlers().clone();
-    conn_state.synced_elements = ctx.take_synced_elements();
+    // Discovery pass: find every handler and synced region. Regions are rendered
+    // with default states so that regions nested inside another renderer's output
+    // (and the handlers they bind) are discovered too; iterate until no new state
+    // type appears.
+    let mut discovered: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+    loop {
+        let mut ctx = BuildContext::new();
+        if discovered.is_empty() {
+            let placeholder: () = ();
+            ctx.collect_symbols(&root_element, &placeholder);
+            ctx.emit(&root_element, &placeholder);
+        } else {
+            let refs: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                discovered.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+            ctx.collect_symbols_multi(&root_element, &refs);
+            ctx.emit_multi(&root_element);
+        }
+        conn_state.handlers = ctx.handlers().clone();
+        conn_state.synced_elements = ctx.take_synced_elements();
+        let before = discovered.len();
+        for synced in &conn_state.synced_elements {
+            discovered
+                .entry(synced.state_type_id)
+                .or_insert_with(|| synced.create_default_state());
+        }
+        if discovered.len() == before {
+            break;
+        }
+    }
 
     // Pre-populate theme state with initial value (before state initialization)
     if let Some(ref theme) = initial_theme {

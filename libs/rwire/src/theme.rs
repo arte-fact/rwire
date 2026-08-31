@@ -419,7 +419,7 @@ fn theme_renderer(theme: &Theme) -> ElementBuilder {
 /// On theme state changes, the synced element system patches the `<style>`
 /// content, causing an instant browser restyle.
 pub(crate) fn theme_synced_builder() -> ElementBuilder {
-    ElementBuilder::synced::<Theme>(theme_renderer)
+    ElementBuilder::synced::<Theme, _>(theme_renderer)
 }
 
 // ============================================================================

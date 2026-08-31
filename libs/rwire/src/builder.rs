@@ -43,6 +43,7 @@ use std::any::{Any, TypeId};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use crate::action::{Selector, Target};
 use crate::attr_tokens::{At, Av};
@@ -55,7 +56,7 @@ use crate::protocol::opcodes::{
 };
 use crate::protocol::varint::write_varint;
 use crate::protocol::{El, Ev, OpcodeBuffer};
-use crate::state::{ChangeSet, HandlerFn, HandlerSpec, Renderer, RendererDeps, State, StorageType};
+use crate::state::{ChangeSet, HandlerFn, HandlerSpec, RendererDeps, State, StorageType};
 use crate::style_tokens::StyleKey;
 
 /// Encode a `STYLE_DEF` opcode block carrying complete CSS rule strings.
@@ -304,7 +305,7 @@ pub trait SyncedRenderer: Send + Sync {
 
 /// Implementation of SyncedRenderer for a specific state type.
 struct SyncedRendererImpl<S: Default + Send + Sync + 'static> {
-    render: Renderer<S>,
+    render: Arc<dyn Fn(&S) -> ElementBuilder + Send + Sync>,
     deps: RendererDeps,
     /// Storage class of S, so the connection can resolve where its state lives
     /// (per-connection vs shared/persisted cache) even with no handler present.
@@ -320,7 +321,7 @@ impl<S: Default + Send + Sync + 'static> SyncedRenderer for SyncedRendererImpl<S
 
     fn clone_box(&self) -> Box<dyn SyncedRenderer> {
         Box::new(SyncedRendererImpl {
-            render: self.render,
+            render: Arc::clone(&self.render),
             deps: self.deps,
             storage_type: self.storage_type,
             table_name: self.table_name,
@@ -465,20 +466,25 @@ impl ElementBuilder {
     /// Create a synced element that re-renders on any state change (legacy).
     ///
     /// Prefer `synced_with_deps` for fine-grained re-render filtering.
-    pub fn synced<S: Default + Send + Sync + 'static>(render: Renderer<S>) -> Self {
-        Self::synced_with_deps::<S>(render, RendererDeps::always())
+    pub fn synced<S, F>(render: F) -> Self
+    where
+        S: Default + Send + Sync + 'static,
+        F: Fn(&S) -> ElementBuilder + Send + Sync + 'static,
+    {
+        Self::synced_with_deps::<S, F>(render, RendererDeps::always())
     }
 
     /// Create a memory-state synced element with explicit dependency tracking.
     ///
     /// Used for framework internals (e.g. Theme) and types that impl only the
     /// legacy `MemoryState` marker.
-    pub fn synced_with_deps<S: Default + Send + Sync + 'static>(
-        render: Renderer<S>,
-        deps: RendererDeps,
-    ) -> Self {
+    pub fn synced_with_deps<S, F>(render: F, deps: RendererDeps) -> Self
+    where
+        S: Default + Send + Sync + 'static,
+        F: Fn(&S) -> ElementBuilder + Send + Sync + 'static,
+    {
         Self::synced_from(Box::new(SyncedRendererImpl {
-            render,
+            render: Arc::new(render),
             deps,
             storage_type: StorageType::Memory,
             table_name: None,
@@ -491,17 +497,33 @@ impl ElementBuilder {
     /// `S::TABLE_NAME` lets the connection resolve where a renderer's state lives
     /// (per-connection memory vs. shared/persisted cache) even when no handler
     /// references that state.
-    pub fn synced_with_storage<S: State + Default>(
-        render: Renderer<S>,
-        deps: RendererDeps,
-    ) -> Self {
+    ///
+    /// `render` may be a closure. Nesting a closure region inside another
+    /// renderer is how per-connection data (e.g. a session token from memory
+    /// state) is threaded into a view over shared state:
+    ///
+    /// ```ignore
+    /// #[renderer]
+    /// fn root(me: &Me) -> ElementBuilder {
+    ///     let token = me.token;
+    ///     ElementBuilder::synced_with_storage::<Room, _>(
+    ///         move |room| board(room, token),
+    ///         RendererDeps::always(),
+    ///     )
+    /// }
+    /// ```
+    pub fn synced_with_storage<S, F>(render: F, deps: RendererDeps) -> Self
+    where
+        S: State + Default,
+        F: Fn(&S) -> ElementBuilder + Send + Sync + 'static,
+    {
         let table_name = if S::TABLE_NAME.is_empty() {
             None
         } else {
             Some(S::TABLE_NAME)
         };
         Self::synced_from(Box::new(SyncedRendererImpl {
-            render,
+            render: Arc::new(render),
             deps,
             storage_type: S::STORAGE_TYPE,
             table_name,
@@ -547,6 +569,22 @@ impl ElementBuilder {
     /// Set the `id` attribute on this element.
     pub fn id(self, id: &str) -> Self {
         self.attr("id", id)
+    }
+
+    /// The element's `id` attribute, if one was set (raw or via `At::Id`).
+    pub fn element_id(&self) -> Option<&str> {
+        self.typed_attrs
+            .iter()
+            .find_map(|ta| match ta {
+                TypedAttr::KeySym(At::Id, v) => Some(v.as_str()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.attrs
+                    .iter()
+                    .find(|(k, _)| k == "id")
+                    .map(|(_, v)| v.as_str())
+            })
     }
 
     /// Set an attribute on this element.
@@ -2342,11 +2380,39 @@ pub fn build_synced_update_with_known_symbols(
     let mut synced_counter: u32 = synced_id_floor;
     let mut has_updates = false;
     let mut rendered_cache: HashMap<u32, ElementBuilder> = HashMap::new();
+    // Existing nested regions whose renderer was refreshed by a parent re-render.
+    let mut refreshed: Vec<SyncedElement> = Vec::new();
+
+    // Single O(synced) pass: index every region's children by (parent, state type)
+    // and find the highest existing id. Children stay in `synced` order within each
+    // bucket, matching id reuse order.
+    let mut children_by_parent: HashMap<u32, HashMap<TypeId, Vec<u32>>> = HashMap::new();
+    let mut emit_synced_counter: u32 = synced_id_floor;
+    for s in synced {
+        if s.id >= emit_synced_counter {
+            emit_synced_counter = s.id + 1;
+        }
+        if let Some(parent) = s.parent {
+            children_by_parent
+                .entry(parent)
+                .or_default()
+                .entry(s.state_type_id)
+                .or_default()
+                .push(s.id);
+        }
+    }
+    let no_children: HashMap<TypeId, Vec<u32>> = HashMap::new();
 
     for se in synced {
         // Track the highest synced ID to know where nested ones start
         if se.id >= synced_counter {
             synced_counter = se.id + 1;
+        }
+
+        // Already rendered as a nested region of a parent re-rendered above (with
+        // the parent's fresh renderer, which takes precedence over the stored one).
+        if rendered_cache.contains_key(&se.id) {
+            continue;
         }
 
         // Layer 1: Skip elements bound to a different state type
@@ -2364,31 +2430,99 @@ pub fn build_synced_update_with_known_symbols(
         // Render once, use for both symbol collection and emission
         if let Some(state) = states.get(&se.state_type_id) {
             if let Some(rendered) = se.renderer.render_with_state(*state) {
-                // Layer 2: Skip if output hash matches previous
-                if let Some(ref mut hashes) = prev_hashes {
-                    let hash = rendered.content_hash();
-                    if hashes.get(&se.id) == Some(&hash) {
-                        continue; // Output unchanged, skip emission
+                // Layer 2: emit the region itself only if its output changed.
+                let parent_changed = match prev_hashes {
+                    Some(ref mut hashes) => {
+                        let hash = rendered.content_hash();
+                        if hashes.get(&se.id) == Some(&hash) {
+                            false
+                        } else {
+                            hashes.insert(se.id, hash);
+                            true
+                        }
                     }
-                    hashes.insert(se.id, hash);
+                    None => true,
+                };
+                if parent_changed {
+                    collect_symbols_recursive_with_known(
+                        &rendered,
+                        &mut new_symbols,
+                        symbol_map,
+                        &mut current_next_idx,
+                        &mut synced_counter,
+                        states,
+                    );
+                    has_updates = true;
                 }
 
-                collect_symbols_recursive_with_known(
-                    &rendered,
-                    &mut new_symbols,
-                    symbol_map,
-                    &mut current_next_idx,
-                    &mut synced_counter,
-                    states,
-                );
-                rendered_cache.insert(se.id, rendered);
-                has_updates = true;
+                // A nested region's content is a function of its parent's render (a
+                // closure region captures values from it), so every EXISTING nested
+                // region of a re-rendered parent is re-rendered with the parent's
+                // fresh renderer — even when the parent's own output (often just the
+                // nested placeholder) is unchanged. Matching mirrors the emit pass:
+                // by state type, in document order, against this parent's children.
+                let mut pending: Vec<(u32, Vec<Box<dyn SyncedRenderer>>)> =
+                    vec![(se.id, nested_synced_renderers(&rendered))];
+                if parent_changed {
+                    rendered_cache.insert(se.id, rendered);
+                }
+                while let Some((parent_id, renderers)) = pending.pop() {
+                    let ids_by_type = children_by_parent.get(&parent_id).unwrap_or(&no_children);
+                    let mut next_idx_by_type: HashMap<TypeId, usize> = HashMap::new();
+                    for renderer in renderers {
+                        let tid = renderer.state_type_id();
+                        let Some(ids) = ids_by_type.get(&tid) else {
+                            continue;
+                        };
+                        let idx = next_idx_by_type.entry(tid).or_insert(0);
+                        if *idx >= ids.len() {
+                            continue; // genuinely new: built inline by the emit pass
+                        }
+                        let child_id = ids[*idx];
+                        *idx += 1;
+                        // The connection adopts the fresh renderer either way.
+                        refreshed.push(SyncedElement {
+                            id: child_id,
+                            state_type_id: tid,
+                            renderer: renderer.clone_box(),
+                            deps: renderer.deps(),
+                            parent: Some(parent_id),
+                        });
+                        let Some(state) = states.get(&tid) else {
+                            continue;
+                        };
+                        let Some(child) = renderer.render_with_state(*state) else {
+                            continue;
+                        };
+                        if let Some(ref mut hashes) = prev_hashes {
+                            let hash = child.content_hash();
+                            if hashes.get(&child_id) == Some(&hash) {
+                                continue;
+                            }
+                            hashes.insert(child_id, hash);
+                        }
+                        collect_symbols_recursive_with_known(
+                            &child,
+                            &mut new_symbols,
+                            symbol_map,
+                            &mut current_next_idx,
+                            &mut synced_counter,
+                            states,
+                        );
+                        pending.push((child_id, nested_synced_renderers(&child)));
+                        rendered_cache.insert(child_id, child);
+                        has_updates = true;
+                    }
+                }
             }
         }
     }
 
     // Early return if no updates needed
     if !has_updates {
+        if let Some(out) = discovered_out {
+            *out = refreshed;
+        }
         return Bytes::new();
     }
 
@@ -2415,27 +2549,6 @@ pub fn build_synced_update_with_known_symbols(
     // synced regions are NOT folded into their parent's emission: the parent emits a
     // CREATE_SYNCED placeholder (so the morph preserves the live span) while the
     // nested region's own entry here emits its standalone GET_SYNCED + rebuild.
-
-    // Single O(synced) pass: index every region's children by (parent, state type)
-    // and find the highest existing id. This replaces both the per-region child
-    // rescan below (which was O(regions × synced)) and a separate max() over all ids.
-    // Children stay in `synced` order within each bucket, matching id reuse order.
-    let mut children_by_parent: HashMap<u32, HashMap<TypeId, Vec<u32>>> = HashMap::new();
-    let mut emit_synced_counter: u32 = synced_id_floor;
-    for s in synced {
-        if s.id >= emit_synced_counter {
-            emit_synced_counter = s.id + 1;
-        }
-        if let Some(parent) = s.parent {
-            children_by_parent
-                .entry(parent)
-                .or_default()
-                .entry(s.state_type_id)
-                .or_default()
-                .push(s.id);
-        }
-    }
-    let no_children: HashMap<TypeId, Vec<u32>> = HashMap::new();
 
     // Nested regions encountered while re-rendering each region this pass, tagged with
     // their owning parent — the caller reconciles registrations from this.
@@ -2473,6 +2586,7 @@ pub fn build_synced_update_with_known_symbols(
     }
 
     if let Some(out) = discovered_out {
+        discovered.extend(refreshed);
         *out = discovered;
     }
 
@@ -2492,6 +2606,20 @@ pub fn build_synced_update_with_known_symbols(
     prefix.extend_from_slice(&style_prefix);
     let body = buf.finish();
     prepend(prefix, body)
+}
+
+/// The nested synced regions directly inside `el`'s render, in document order
+/// (not descending into them: their content is rendered separately).
+fn nested_synced_renderers(el: &ElementBuilder) -> Vec<Box<dyn SyncedRenderer>> {
+    fn walk(el: &ElementBuilder, out: &mut Vec<Box<dyn SyncedRenderer>>) {
+        match &el.synced {
+            Some(r) => out.push(r.clone_box()),
+            None => el.children.iter().for_each(|c| walk(c, out)),
+        }
+    }
+    let mut out = Vec::new();
+    walk(el, &mut out);
+    out
 }
 
 /// The stable wire id for a handler binding.

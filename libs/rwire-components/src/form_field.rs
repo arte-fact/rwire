@@ -86,8 +86,13 @@ impl FormField {
 
     /// Build the form field into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        // Generate ID for input-label association
-        let field_id = rwire::builder::generate_element_id("field_");
+        // ID for input-label association: keep an explicit id on the input (stable
+        // across re-renders, so the runtime can restore focus/value), else generate.
+        let field_id = self
+            .input
+            .as_ref()
+            .and_then(|i| i.element_id().map(str::to_string))
+            .unwrap_or_else(|| rwire::builder::generate_element_id("field_"));
 
         let mut container = el(El::Div).st(self.compute_tokens());
 
@@ -103,9 +108,7 @@ impl FormField {
                 .text(&label_text);
 
             if self.required {
-                label = label.append([
-                    el(El::Span).st([St::TextError]).text(" *")
-                ]);
+                label = label.append([el(El::Span).st([St::TextError]).text(" *")]);
             }
 
             container = container.append([label]);
@@ -114,26 +117,24 @@ impl FormField {
         // Add input if provided
         if let Some(mut input) = self.input {
             // Set ID on input for label association
-            input = input.at_str(At::Id, &field_id);
+            if input.element_id().is_none() {
+                input = input.at_str(At::Id, &field_id);
+            }
             container = container.append([input]);
         }
 
         // Add help text if provided
         if let Some(help_text) = self.help {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextXs, St::TextMedium])
-                    .text(&help_text)
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextXs, St::TextMedium])
+                .text(&help_text)]);
         }
 
         // Add error message if provided
         if let Some(error_text) = self.error {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextXs, St::TextError])
-                    .text(&error_text)
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextXs, St::TextError])
+                .text(&error_text)]);
         }
 
         container
@@ -161,5 +162,4 @@ mod tests {
         assert!(tokens.contains(&St::FlexCol));
         assert!(tokens.contains(&St::GapSm));
     }
-
 }

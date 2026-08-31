@@ -442,7 +442,7 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn __render_count_inner(state: &Counter) -> ElementBuilder {
 ///         el(El::Span).text(&state.count.to_string())
 ///     }
-///     ElementBuilder::synced_with_deps::<Counter>(__render_count_inner, DEPS)
+///     ElementBuilder::synced_with_deps::<Counter, _>(__render_count_inner, DEPS)
 /// }
 /// ```
 /// Infer which fields of `param` are accessed as `param.field` in `block`.
@@ -505,10 +505,8 @@ fn field_index_consts(
     fields
         .iter()
         .map(|f| {
-            let const_name = syn::Ident::new(
-                &format!("FIELD_{}", f.to_string().to_uppercase()),
-                f.span(),
-            );
+            let const_name =
+                syn::Ident::new(&format!("FIELD_{}", f.to_string().to_uppercase()), f.span());
             quote! { <#state_type>::#const_name }
         })
         .collect()
@@ -570,7 +568,7 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #vis fn #fn_name() -> rwire::ElementBuilder {
             const DEPS: rwire::RendererDeps = #deps_expr;
             fn #inner_name(#param_pat: &#state_type) #return_type #block
-            rwire::ElementBuilder::synced_with_storage::<#state_type>(#inner_name, DEPS)
+            rwire::ElementBuilder::synced_with_storage::<#state_type, _>(#inner_name, DEPS)
         }
     };
 
@@ -605,12 +603,9 @@ pub fn derive_target(input: TokenStream) -> TokenStream {
             }
         }
         _ => {
-            return syn::Error::new_spanned(
-                &input,
-                "Target can only be derived for unit structs",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&input, "Target can only be derived for unit structs")
+                .to_compile_error()
+                .into();
         }
     }
 
@@ -647,12 +642,9 @@ pub fn derive_selector(input: TokenStream) -> TokenStream {
     let variants = match &input.data {
         syn::Data::Enum(data) => &data.variants,
         _ => {
-            return syn::Error::new_spanned(
-                &input,
-                "Selector can only be derived for enums",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&input, "Selector can only be derived for enums")
+                .to_compile_error()
+                .into();
         }
     };
 

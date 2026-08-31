@@ -187,7 +187,6 @@ impl ChangeSet {
     }
 }
 
-use crate::builder::ElementBuilder;
 use crate::item_ref::ItemRef;
 
 // ============================================================================
@@ -806,9 +805,6 @@ impl std::fmt::Debug for HandlerSpec {
 
 /// Type alias for stateful handler functions.
 pub type StatefulHandler<S> = fn(&mut S);
-
-/// Type alias for renderer functions.
-pub type Renderer<S> = fn(&S) -> ElementBuilder;
 
 /// A type-erased handler that can mutate state.
 pub struct HandlerFn {
