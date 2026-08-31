@@ -107,6 +107,9 @@ pub fn simulate_kingdom_battle(
         }
 
         if attacker_soldiers <= 0 {
+            // Original lines 156–157: a defeated attacker keeps only a fraction
+            // of the ground it took (÷ random 1–3; under 2 arpents, nothing).
+            let surface_conquered = defeat_spoils(surface_conquered);
             let big_battle = surface_conquered >= defender_surface / 3;
             let collateral = big_battle.then(|| collateral_damage(defender));
             return BattleResult {
@@ -143,6 +146,16 @@ pub fn simulate_kingdom_battle(
             defender_peasants,
             population_defending,
         });
+    }
+}
+
+/// What a defeated attacker keeps of the land it overran, per original
+/// Empire.bas lines 156–157: nothing under 2 arpents, else a third to all of it.
+fn defeat_spoils(surface_conquered: i32) -> i32 {
+    if surface_conquered < 2 {
+        0
+    } else {
+        surface_conquered / random(1, 4).max(1)
     }
 }
 
@@ -224,7 +237,7 @@ pub fn simulate_barbarian_battle(
             return BarbarianBattleResult {
                 attacker_won: false,
                 attacker_remaining_soldiers: 0,
-                surface_conquered,
+                surface_conquered: defeat_spoils(surface_conquered),
                 all_barbarians_conquered: false,
             };
         }
@@ -339,6 +352,16 @@ mod tests {
             saw_serfs |= p.population_defending;
         });
         assert!(saw_serfs);
+    }
+
+    #[test]
+    fn defeat_spoils_follow_the_original_rule() {
+        assert_eq!(defeat_spoils(0), 0);
+        assert_eq!(defeat_spoils(1), 0);
+        for _ in 0..200 {
+            let kept = defeat_spoils(900);
+            assert!(kept == 900 || kept == 450 || kept == 300, "kept {kept}");
+        }
     }
 
     #[test]

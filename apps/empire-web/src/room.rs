@@ -731,6 +731,30 @@ pub fn leave(rooms: &mut Rooms, ctx: &EventContext) {
     }
 }
 
+/// Take over a human seat — the recovery path when a device loses its
+/// session (app switch, PWA vs browser, reboot). Among friends, trust rules.
+#[handler]
+pub fn reclaim(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, args, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = args
+        .first()
+        .and_then(|&i| KINGDOMS.get(i as usize))
+        .copied()
+    else {
+        return;
+    };
+    if room.seat(id).owner.is_none() {
+        return; // computer seats are joined via the lobby, not reclaimed
+    }
+    if let Some(prev) = room.seat_of(token) {
+        room.release(prev);
+    }
+    room.seats[id.index()].owner = Some(token);
+    room.game.kingdom_mut(id).is_player = true;
+}
+
 #[handler]
 pub fn rename(rooms: &mut Rooms, ctx: &EventContext) {
     let Some((token, _, room)) = table(rooms, ctx) else {

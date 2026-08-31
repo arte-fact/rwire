@@ -512,10 +512,41 @@ fn partie(t: T, me: Option<Kingdoms>, sheet_open: bool) -> View {
                         .build(),
                     None,
                 ),
-                _ => (waiting(room), None),
+                // Seated players simply wait; only unseated viewers (a lost
+                // session, a spectator) are offered the seat-recovery list.
+                Some(_) => (waiting(room), None),
+                None => (
+                    Stack::column()
+                        .gap(Gap::Md)
+                        .children([reclaim_section(t), waiting(room)])
+                        .build(),
+                    None,
+                ),
             }
         }
     }
+}
+
+/// Offered to unseated viewers of a running table: take back a human seat
+/// (the recovery path after a lost session on another device or app).
+fn reclaim_section(t: T) -> ElementBuilder {
+    let seats: Vec<ElementBuilder> = KINGDOMS
+        .into_iter()
+        .filter(|&id| t.room.seat(id).owner.is_some())
+        .map(|id| {
+            let k = t.room.game.kingdom(id);
+            Button::secondary(format!("{} ({}) — c'est moi", id.name(), k.player_name))
+                .full_width(true)
+                .on_click(by(room::reclaim(), t.token, t.code, &[id.index() as u8]))
+        })
+        .collect();
+    if seats.is_empty() {
+        return el(El::Div);
+    }
+    section(
+        "Reprendre un siège",
+        Stack::column().gap(Gap::Sm).children(seats).build(),
+    )
 }
 
 fn lobby(t: T, me: Option<Kingdoms>) -> ElementBuilder {
