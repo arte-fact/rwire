@@ -471,6 +471,7 @@ fn kingdoms_tab(room: &Room) -> ElementBuilder {
                 ])
                 .build(),
             kingdoms_table(room),
+            market_section(room, None),
         ])
         .build()
 }
@@ -832,21 +833,16 @@ fn trade_step(t: T, id: Kingdoms) -> ElementBuilder {
             s.grain_to_sell > 0 && s.grain_price > 0
         })
         .count();
-    let market = if offers == 0 {
-        "Personne ne vend de grain cette année.".to_string()
-    } else {
-        format!("{offers} royaume(s) vendent du grain.")
-    };
     Stack::column()
         .gap(Gap::Md)
         .children([
             resources(k),
+            market_section(t.room, Some(id)),
             section(
                 "Commerce",
                 Stack::column()
                     .gap(Gap::Sm)
                     .children([
-                        Text::caption(market).muted().build(),
                         opener(t, Action::Buy, "Acheter du grain", offers == 0, false),
                         opener(
                             t,
@@ -861,6 +857,44 @@ fn trade_step(t: T, id: Kingdoms) -> ElementBuilder {
             ),
         ])
         .build()
+}
+
+/// Every current listing on the grain market, the viewer's own included.
+fn market_section(room: &Room, viewer: Option<Kingdoms>) -> ElementBuilder {
+    let sellers: Vec<Kingdoms> = room
+        .game
+        .alive_kingdoms()
+        .into_iter()
+        .filter(|&o| {
+            let s = room.game.kingdom(o);
+            s.grain_to_sell > 0 && s.grain_price > 0
+        })
+        .collect();
+    if sellers.is_empty() {
+        return section(
+            "Marché du grain",
+            Text::body("Personne ne vend de grain en ce moment.")
+                .muted()
+                .build(),
+        );
+    }
+    let mut tbl = Table::new()
+        .headers(["Vendeur", "Boisseaux", "Prix"])
+        .striped(true);
+    for o in sellers {
+        let s = room.game.kingdom(o);
+        let name = if viewer == Some(o) {
+            format!("{} (vous)", s.name())
+        } else {
+            format!("{} ({})", s.name(), s.player_name)
+        };
+        tbl = tbl.row(TableRow::new().cells([
+            name,
+            fmt(s.grain_to_sell),
+            fmt(s.grain_price.min(MAX_GRAIN_PRICE)),
+        ]));
+    }
+    section("Marché du grain", scroll(tbl.build()))
 }
 
 fn buy_form(t: T, id: Kingdoms) -> ElementBuilder {

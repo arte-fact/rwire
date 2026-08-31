@@ -408,6 +408,19 @@ impl Room {
     fn run_computer_turn(&mut self) {
         let Some(id) = self.active() else { return };
         let decision = plan_ai_turn(&mut self.game, id);
+        if let Some((amount, price)) = decision.grain_listed {
+            self.journal(format!(
+                "La {} met {amount} boisseaux en vente à {price} la mesure.",
+                id.name()
+            ));
+        }
+        if let Some((seller, amount)) = decision.grain_bought {
+            self.journal(format!(
+                "La {} achète {amount} boisseaux à la {}.",
+                id.name(),
+                seller.name()
+            ));
+        }
         for soldiers in decision.barbarian_attacks {
             self.queue.push_back(Attack {
                 attacker: id,
