@@ -1694,6 +1694,56 @@ impl ConnectionState {
         Ok(cache_key)
     }
 
+    /// Apply a route change — a client `R<path>` message or a server-initiated
+    /// navigation: swap the built-in router's view and/or run the app's `on_route`
+    /// handler. Returns the update messages to send, in order.
+    fn apply_route(
+        &mut self,
+        shared: &SharedServerState,
+        route_handler: Option<&HandlerFn>,
+        path: &str,
+    ) -> Result<Vec<Bytes>, Box<dyn Error + Send + Sync>> {
+        let mut out = Vec::new();
+        // Built-in router: update CurrentRoute so the outlet re-renders the matched
+        // view, then reconcile the view's renderer registrations so its stateful
+        // regions stay live (and the prior view's are pruned).
+        if let Some(router) = crate::router::installed_router() {
+            let update = self.render_route_view_swap(shared, router, path)?;
+            if !update.is_empty() {
+                out.push(update);
+            }
+        }
+        if let Some(handler) = route_handler {
+            let ctx = EventContext::from_text(path);
+            let state_type_id = handler.state_type_id();
+            if crate::router::installed_router().is_some() {
+                // A router owns the route view + nav re-render (above). Run the app's
+                // on_route purely for side-effects on the connection's state — no
+                // shared write, no broadcast, no re-render: re-rendering shared
+                // renderers here would fight the router's view swap.
+                self.ensure_state_initialized_for(handler);
+                if let Some(state) = self.get_state_mut(state_type_id) {
+                    handler.call_with_context(state, &ctx);
+                }
+            } else {
+                // No router: dispatch like a regular event handler — shared/persisted
+                // executes on the shared cache (broadcast + subscribed), memory state
+                // on the connection.
+                let cache_key = self.dispatch_handler(shared, handler, &ctx)?;
+                let update = self.build_type_update(
+                    shared,
+                    state_type_id,
+                    handler.changes(),
+                    cache_key.as_deref(),
+                )?;
+                if !update.is_empty() {
+                    out.push(update);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Swap the built-in router's outlet to `path`: update `CurrentRoute`, seed the
     /// matched view's renderer states, prune the previous view's regions, render the
     /// new view (ids floored above any still on the client), then register the new
@@ -2242,6 +2292,15 @@ where
                                 buf.route_push_inline(&nav.url);
                             }
                             write.send(Message::Binary(buf.finish().to_vec())).await?;
+                            // The app's route state follows the new URL exactly as it
+                            // would after a client-side navigation.
+                            for update in conn_state.apply_route(
+                                &shared,
+                                route_handler.as_deref(),
+                                &nav.url,
+                            )? {
+                                write.send(Message::Binary(update.to_vec())).await?;
+                            }
                         }
                     } else {
                         eprintln!(
@@ -2272,52 +2331,11 @@ where
                     continue;
                 }
                 if let Some(path) = text.strip_prefix('R') {
-                    // Built-in router: update CurrentRoute so the outlet re-renders the
-                    // matched view, then reconcile the view's renderer registrations so
-                    // its stateful regions stay live (and the prior view's are pruned).
-                    if let Some(router) = crate::router::installed_router() {
-                        let update = conn_state.render_route_view_swap(&shared, router, path)?;
-                        if !update.is_empty() {
-                            write.send(Message::Binary(update.to_vec())).await?;
-                        }
-                    }
-                    if let Some(ref handler) = route_handler {
+                    if route_handler.is_some() {
                         println!("[{}] Route: {}", peer_addr, path);
-
-                        let ctx = EventContext::from_text(path);
-                        let state_type_id = handler.state_type_id();
-
-                        if crate::router::installed_router().is_some() {
-                            // A router owns the route view + nav re-render (above). Run the
-                            // app's on_route purely for side-effects (e.g. asking a bridge to
-                            // load data) on the connection's state — no shared write, no
-                            // broadcast, no re-render. Re-rendering shared renderers here
-                            // (the handler's `changes` are conservative) would fight the
-                            // router's view swap, leaving the page frozen. Data mutations
-                            // should flow through event handlers / the bridge, which
-                            // broadcast their own narrow updates.
-                            conn_state.ensure_state_initialized_for(handler);
-                            if let Some(state) = conn_state.get_state_mut(state_type_id) {
-                                handler.call_with_context(state, &ctx);
-                            }
-                        } else {
-                            // No router: dispatch like a regular event handler —
-                            // shared/persisted executes on the shared cache (broadcast +
-                            // subscribed), memory state on the connection.
-                            let cache_key = conn_state.dispatch_handler(&shared, handler, &ctx)?;
-
-                            let changes = handler.changes();
-                            let update = conn_state.build_type_update(
-                                &shared,
-                                state_type_id,
-                                changes,
-                                cache_key.as_deref(),
-                            )?;
-
-                            if !update.is_empty() {
-                                write.send(Message::Binary(update.to_vec())).await?;
-                            }
-                        }
+                    }
+                    for update in conn_state.apply_route(&shared, route_handler.as_deref(), path)? {
+                        write.send(Message::Binary(update.to_vec())).await?;
                     }
                 } else {
                     println!("[{}] Text message (unexpected): {}", peer_addr, text);

@@ -906,6 +906,7 @@ define_token_enum! {
         HDvh = 0x344 => "height:100dvh",
         MinHDvh = 0x345 => "min-height:100dvh",
         MaxHDvh = 0x346 => "max-height:100dvh",
+        PbSafe = 0x347 => "padding-bottom:max(var(--S2),env(safe-area-inset-bottom))",
     }
 }
 

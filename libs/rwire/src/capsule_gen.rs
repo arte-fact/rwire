@@ -42,7 +42,7 @@ function sa(e,n,v){n=(''+n).toLowerCase();if(n.slice(0,2)==='on')return;if(/^(hr
 function gp(e,el){
 let t=el.tagName.toLowerCase();
 if(e.type==='submit'&&t==='form'){e.preventDefault();let fd=new FormData(el),obj={};fd.forEach((v,k)=>obj[k]=v);return JSON.stringify({t:'form',v:obj})}
-if((e.type==='input'||e.type==='change')&&(t==='input'||t==='textarea'||t==='select')){return JSON.stringify({t:'text',v:el.value})}
+if(e.type==='input'||e.type==='change'){let c=(e.target&&/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))?e.target:el;if(/^(INPUT|TEXTAREA|SELECT)$/.test(c.tagName))return JSON.stringify({t:'text',v:c.value})}
 if(e.type==='click'){let tg=e.target.closest('[data-id]')||el,dt={};for(let k in tg.dataset)dt[k]=tg.dataset[k];if(Object.keys(dt).length)return JSON.stringify({t:'data',v:dt})}
 return ''}
 function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0];wv(a,h);a.push(t,f&255);wv(a,pb.length);let msg=new Uint8Array(a.length+pb.length);for(let j=0;j<a.length;j++)msg[j]=a[j];msg.set(pb,a.length);w.send(msg)}
@@ -179,7 +179,7 @@ function xi(d,i){return i}"#;
 pub fn generate_capsule() -> String {
     // Name maps ship empty; entries arrive lazily via `MAP_DEF` (see `generate_styled_capsule`).
     format!(
-        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
 <script>
 const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
 {BIND_JS}
@@ -544,7 +544,7 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
         .unwrap_or_default();
 
     format!(
-        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{pwa_head}
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{pwa_head}
 <style>{css}</style></head><body>
 <div id="rw"></div>
 <script>
