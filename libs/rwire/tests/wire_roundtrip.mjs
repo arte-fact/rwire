@@ -112,6 +112,7 @@ function makeDom() {
       const n = el("div"); n.id = id; return n;
     },
     addEventListener() {},
+    querySelectorAll: () => [],
     head_appended: [],
   };
   return { document, body, byId };

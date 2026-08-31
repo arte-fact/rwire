@@ -778,10 +778,10 @@ define_token_enum! {
         TextGreen12 = 0x2F0 => "color:var(--P12)",
         TextRed12 = 0x2F1 => "color:var(--O12)",
         // Slider
-        SliderTrack = 0x2F2 => "width:100%;height:6px;border-radius:3px;background:var(--d)",
-        SliderFill = 0x2F3 => "height:100%;border-radius:3px;background:var(--n8)",
-        SliderInput = 0x2F4 => "-webkit-appearance:none;appearance:none;background:transparent;width:100%;height:20px;margin:0;cursor:pointer",
-        SliderThumb = 0x2F5 => "&::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--n9);border:2px solid var(--r);box-shadow:0 1px 2px rgba(0,0,0,.25);cursor:pointer;transition:background .15s,transform .15s,box-shadow .15s}&:hover::-webkit-slider-thumb{background:var(--n10);transform:scale(1.12);box-shadow:0 2px 6px rgba(0,0,0,.3)}&:active::-webkit-slider-thumb{transform:scale(1.04)}&::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--n9);border:2px solid var(--r);cursor:pointer}&:hover::-moz-range-thumb{background:var(--n10)}",
+        SliderTrack = 0x2F2 => "width:100%;height:10px;border-radius:5px;background:var(--d)",
+        SliderFill = 0x2F3 => "height:100%;border-radius:5px;background:var(--n8)",
+        SliderInput = 0x2F4 => "-webkit-appearance:none;appearance:none;background:transparent;width:100%;height:44px;margin:0;cursor:pointer;touch-action:pan-y",
+        SliderThumb = 0x2F5 => "&::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:var(--n9);border:3px solid var(--r);box-shadow:0 1px 2px rgba(0,0,0,.25);cursor:pointer;transition:background .15s,transform .15s,box-shadow .15s}&:hover::-webkit-slider-thumb{background:var(--n10);transform:scale(1.12);box-shadow:0 2px 6px rgba(0,0,0,.3)}&:active::-webkit-slider-thumb{transform:scale(1.04)}&::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--n9);border:3px solid var(--r);cursor:pointer}&:hover::-moz-range-thumb{background:var(--n10)}",
         // Stepper
         StepLine = 0x2F6 => "flex:1;height:2px;background:var(--h)",
         StepLineActive = 0x2F7 => "flex:1;height:2px;background:var(--n8)",

@@ -10,10 +10,10 @@ use super::opcodes::{
     BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL,
-    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
-    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
-    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    LIVE_BIND, LIVE_SOURCE, ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE,
+    SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT,
+    SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP,
+    STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 use crate::style_tokens::StyleKey;
@@ -689,6 +689,23 @@ impl OpcodeBuffer {
         self.buf.put_u8(idx);
         self.buf.put_u8((delay_ms >> 8) as u8);
         self.buf.put_u8((delay_ms & 0xFF) as u8);
+        self
+    }
+
+    /// Mark an element as a live value source on `channel`.
+    pub fn live_source(&mut self, ref_idx: u32, channel: u16) -> &mut Self {
+        self.buf.put_u8(LIVE_SOURCE);
+        write_varint(&mut self.buf, ref_idx);
+        write_varint(&mut self.buf, channel as u32);
+        self
+    }
+
+    /// Bind an element to a live value channel (kind 0 = text, 1 = fill width).
+    pub fn live_bind(&mut self, ref_idx: u32, channel: u16, kind: u8) -> &mut Self {
+        self.buf.put_u8(LIVE_BIND);
+        write_varint(&mut self.buf, ref_idx);
+        write_varint(&mut self.buf, channel as u32);
+        self.buf.put_u8(kind);
         self
     }
 

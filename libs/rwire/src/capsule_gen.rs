@@ -32,7 +32,8 @@ use crate::theme::Theme;
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,MD:0x88,PD:0x89,BP:0x8A,E:0xFF};
+const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,LS:0x4F,LB:0x50,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,MD:0x88,PD:0x89,BP:0x8A,E:0xFF};
+let lv={},lb={};function ul(c){let s=lv[c];if(!s)return;let v=+s.value,mn=+s.min||0,mx=+s.max;for(let b of lb[c]||[]){if(b.k===1)b.e.style.width=(mx>mn?(v-mn)/(mx-mn)*100:0)+'%';else b.e.textContent=String(v)}}
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={},DS,pm=null;
 function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
@@ -126,7 +127,9 @@ else if(o===O.BS){let[f,l]=rv(d,i);i+=l;let si=d[i++],mv=d[i++];let[st,sl]=rv(d,
 else if(o===O.SS2){let[f,l]=rv(d,i);i+=l;let t=d[i++],si=d[i++],sv=d[i++];if(typeof sl2!=='undefined'){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sl2[si]=sv;us2(si)})}}
 else if(o===O.TT){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);fl2[ti]=true;uf2(ti);tm=setTimeout(()=>{fl2[ti]=false;uf2(ti)},ms)})}}
 else if(o===O.AT2){let ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){setTimeout(()=>{fl2[ti]=!fl2[ti];uf2(ti)},ms)}}
-else if(o===O.E){fm();if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}return}
+else if(o===O.LS){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;let e=r[f];lv[c]=e;e.addEventListener('input',()=>{lv[c]=e;ul(c)})}
+else if(o===O.LB){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;let k=d[i++];(lb[c]||(lb[c]=[])).push({e:r[f],k:k})}
+else if(o===O.E){fm();document.querySelectorAll('[data-autoscroll]').forEach(e=>{e.scrollTop=e.scrollHeight});if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '));try{w.close()}catch(_){}}}
 function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
@@ -138,7 +141,7 @@ w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
 w.binaryType='arraybuffer';
 w.onopen=()=>{
 clearTimeout(ot);ov(false);
-if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
+if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}lv={};lb={};if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
 rn=false;rc=0;op=true;
 if(location.pathname!=='/')w.send('R'+location.pathname);
 if(location.hash)sh(location.hash)};

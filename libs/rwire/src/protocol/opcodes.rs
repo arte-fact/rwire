@@ -100,6 +100,15 @@ pub const BIND_TIMED_TOGGLE: u8 = 0x4D;
 /// Format: [AUTO_TOGGLE, target_idx, ms_hi, ms_lo]
 pub const AUTO_TOGGLE: u8 = 0x4E;
 
+/// Live value source: `[ref, channel]` — on `input`, the element's value is
+/// pushed to every element bound to `channel` (client-side only, no round-trip).
+pub const LIVE_SOURCE: u8 = 0x4F;
+
+/// Live value binding: `[ref, channel, kind]` — kind 0 mirrors the source value
+/// as text, kind 1 sets `width` to the value's position between the source's
+/// `min` and `max` (a fill bar).
+pub const LIVE_BIND: u8 = 0x50;
+
 // ============================================================================
 // Form Operations
 // ============================================================================
