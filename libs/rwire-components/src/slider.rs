@@ -41,6 +41,7 @@ pub struct Slider {
     channel: Option<u16>,
     marks: Vec<(i32, Cow<'static, str>)>,
     readout_suffix: Option<ElementBuilder>,
+    above_track: Vec<ElementBuilder>,
     grouped: Option<fn(i32) -> String>,
 }
 
@@ -134,6 +135,13 @@ impl Slider {
     /// Extra content after the live value and unit (e.g. a live percentage).
     pub fn readout_suffix(mut self, suffix: ElementBuilder) -> Self {
         self.readout_suffix = Some(suffix);
+        self
+    }
+
+    /// Content between the readout and the track, as wide as the track (e.g. a
+    /// chart of what the value produces, so the thumb lines up with its x).
+    pub fn above_track(mut self, content: ElementBuilder) -> Self {
+        self.above_track.push(content);
         self
     }
 
@@ -264,14 +272,13 @@ impl Slider {
 
         el(El::Div)
             .st(Self::compute_tokens())
-            .append([
-                header,
-                el(El::Div)
-                    .st([St::PositionRelative, St::WFull, St::H3rem])
-                    .append([track])
-                    .append(ticks)
-                    .append([input]),
-            ])
+            .append([header])
+            .append(self.above_track)
+            .append([el(El::Div)
+                .st([St::PositionRelative, St::WFull, St::H3rem])
+                .append([track])
+                .append(ticks)
+                .append([input])])
             .append(labels)
     }
 }

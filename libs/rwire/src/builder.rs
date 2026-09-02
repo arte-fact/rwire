@@ -473,6 +473,15 @@ pub enum LiveOutput {
     /// Shows child `i` only, for `thresholds[i-1] <= v < thresholds[i]`
     /// (`thresholds.len() + 1` children, ascending thresholds).
     Switch { thresholds: Vec<u32> },
+    /// `textContent` = `table` read at `v`'s position between the source's
+    /// `min`/`max`, interpolated between its evenly spaced entries (a curve
+    /// sampled server-side); `grouped` as for [`Self::Text`], `signed` prefixes
+    /// `+`/`−`.
+    Lookup {
+        table: Vec<i32>,
+        grouped: bool,
+        signed: bool,
+    },
 }
 
 impl ElementBuilder {
@@ -1272,6 +1281,33 @@ impl ElementBuilder {
             LiveSource::Channel(channel),
             LiveOutput::Switch {
                 thresholds: thresholds.to_vec(),
+            },
+        )
+    }
+
+    /// Text = `table` read at the value's position between the source's `min`
+    /// and `max`, interpolated between its evenly spaced entries (at most 255):
+    /// a curve of the value sampled server-side, followed client-side.
+    pub fn live_lookup(self, channel: u16, table: &[i32]) -> Self {
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Lookup {
+                table: table.to_vec(),
+                grouped: false,
+                signed: false,
+            },
+        )
+    }
+
+    /// [`Self::live_lookup`] for a delta: thousands separators (see
+    /// [`Self::live_text_grouped`]) and an explicit `+`/`−` sign.
+    pub fn live_lookup_signed(self, channel: u16, table: &[i32]) -> Self {
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Lookup {
+                table: table.to_vec(),
+                grouped: true,
+                signed: true,
             },
         )
     }

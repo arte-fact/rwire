@@ -16,6 +16,12 @@ pub fn display_demographic_report(kingdom: &Kingdom, year: i32, report: &YearDem
         (report.starvation_victims, "habitant morts de misère"),
         (report.immigrants, "etrangers ont immigré dans votre pays"),
         (
+            report.nobles_immigrants,
+            "nobles parmi eux ont rejoint la cour",
+        ),
+        (report.merchants_settled, "marchands ont ouvert boutique"),
+        (report.nobles_departed, "nobles ont fui la disette"),
+        (
             report.soldiers_starvation_victims,
             "homme d'arme morts d'epuisement",
         ),
@@ -38,7 +44,7 @@ pub fn display_demographic_report(kingdom: &Kingdom, year: i32, report: &YearDem
         row,
         15,
         &format!(
-            "Votre ost combattra avec un efficacité de {}0%",
+            "Votre ost combattra avec un efficacité de {}%",
             report.soldiers_efficiency
         ),
     );
@@ -47,9 +53,10 @@ pub fn display_demographic_report(kingdom: &Kingdom, year: i32, report: &YearDem
     let total_victims = report.disease_victims
         + report.malnutrition_victims
         + report.starvation_victims
+        + report.nobles_departed
         + report.soldiers_starvation_victims
         + report.soldiers_desertion_victims;
-    let delta = report.births + report.immigrants - total_victims;
+    let delta = report.births + report.immigrants + report.merchants_settled - total_victims;
     let verb = match delta {
         d if d > 0 => "gagné",
         d if d < 0 => "perdu",

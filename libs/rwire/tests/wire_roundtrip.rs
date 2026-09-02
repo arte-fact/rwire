@@ -60,6 +60,8 @@ fn live_bindings() -> ElementBuilder {
         el(El::Div).live_fill(a),
         el(El::Span).live_scaled(a, 100, 23_340),
         el(El::Span).live_scaled_grouped(b, 3, 1),
+        el(El::Span).live_lookup(a, &[0, 50, 100, 150]),
+        el(El::Span).live_lookup_signed(b, &[-1_640, -359, 0, 61, 12_345]),
         el(El::Span).live_remainder(50_000, &[a, b]),
         el(El::Span).live_remainder_grouped(50_000, &[a, b]),
         el(El::Div).live_remainder_fill(50_000, &[a, b]),
@@ -89,6 +91,11 @@ fn new_tokens() -> ElementBuilder {
             .at_str(At::Max, "100")
             .at_str(At::Step, "5")
             .bool_attr(At::Autofocus)])
+        .append([el(El::Svg)
+            .at_str(At::ViewBox, "0 0 320 96")
+            .append([el(El::Path)
+                .at_str(At::D, "M0 0L1 1")
+                .at(At::Fill, Av::None)])])
 }
 
 /// A long inline style string that crosses the 128-byte single-byte varint boundary,

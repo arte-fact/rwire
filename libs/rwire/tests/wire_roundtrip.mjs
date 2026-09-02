@@ -36,6 +36,7 @@ const CLIENT_JS =
 // an incidental DOM TypeError. ---
 function makeDom() {
   const byId = new Map();
+  const attrNames = new Set();
   let uid = 0;
   const mkClassList = () => {
     const set = new Set();
@@ -63,7 +64,7 @@ function makeDom() {
       set textContent(v) { this._text = String(v); this._children = []; },
       get value() { return this._value; },
       set value(v) { this._value = v; },
-      setAttribute(n, v) { this._attrs.set(n, String(v)); if (n === "id") byId.set(String(v), this); },
+      setAttribute(n, v) { attrNames.add(n); this._attrs.set(n, String(v)); if (n === "id") byId.set(String(v), this); },
       getAttribute(n) { return this._attrs.has(n) ? this._attrs.get(n) : null; },
       removeAttribute(n) { this._attrs.delete(n); },
       hasAttribute(n) { return this._attrs.has(n); },
@@ -115,14 +116,14 @@ function makeDom() {
     querySelectorAll: () => [],
     head_appended: [],
   };
-  return { document, body, byId };
+  return { document, body, byId, attrNames };
 }
 
 // Build the runnable module: assembled client JS + lenient stubs. The runtime's
 // top-level bootstrap (connect(), event listeners) runs harmlessly against stubs;
 // we then call the now-defined `x` on each fixture.
 function buildRuntime() {
-  const { document } = makeDom();
+  const { document, attrNames } = makeDom();
   const noop = () => {};
   const wsStub = function () { return { binaryType: "", send: noop, close: noop, readyState: 1 }; };
   const historyStub = { pushState: noop, replaceState: noop, scrollRestoration: "auto" };
@@ -150,7 +151,7 @@ function buildRuntime() {
     historyStub, locationStub, navigatorStub, wsStub, MO, captureConsole,
     (fn) => 0, noop, noop
   );
-  return { x: mod.x, state: mod.state, errors, document };
+  return { x: mod.x, state: mod.state, errors, document, attrNames };
 }
 
 // Parse one byte stream; returns { ok, errors }.
@@ -158,6 +159,8 @@ export function runWire(bytes) {
   const rt = buildRuntime();
   rt.x(new Uint8Array(bytes));
   const errors = rt.errors.filter((e) => /PARSE ERROR|Unknown opcode/.test(e));
+  // SVG attribute names are case-sensitive: a lower-cased `viewbox` is silently ignored.
+  if (rt.attrNames.has("viewbox")) errors.push("attribute name case lost: viewbox");
   return { ok: errors.length === 0, errors, allLogs: rt.errors };
 }
 

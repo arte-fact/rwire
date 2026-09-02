@@ -95,7 +95,7 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
     kingdom.shipyards += shipyard_growth;
     kingdom.palaces = (kingdom.palaces + palace_growth).min(10);
     kingdom.nobles += noble_growth;
-    kingdom.soldiers_efficiency = (kingdom.soldiers_efficiency + efficiency_growth).min(15);
+    kingdom.soldiers_efficiency = (kingdom.soldiers_efficiency + efficiency_growth * 10).min(150);
     kingdom.soldiers += soldier_growth;
 
     // Original army size limit:
@@ -258,7 +258,7 @@ mod tests {
         assert!(d.kingdom_attacks.is_empty());
         let k = game.kingdom(Kingdoms::Germany);
         assert_eq!(k.peasants, 2000 + d.growth.peasants);
-        assert!(k.soldiers_efficiency <= 15);
+        assert!(k.soldiers_efficiency <= 150);
     }
 
     #[test]

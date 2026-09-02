@@ -1,4 +1,4 @@
-use empire_lib::trade::{Trade, MAX_GRAIN_PRICE};
+use empire_lib::trade::{max_land_sale, Trade, LAND_SELL_PRICE, MAX_GRAIN_PRICE};
 use empire_lib::{EmpireGame, Kingdom, Kingdoms, KINGDOMS};
 
 use crate::ui::{
@@ -137,9 +137,11 @@ fn prompt_land_to_sell(game: &EmpireGame, id: Kingdoms) -> Trade {
     draw_resource_management_page(game, id);
     Trade::SellLand {
         arpents: bottom_input_number_with_range(
-            Some("A raison de 2 francs l'arpent,combien en vendez-vous aux Barbares ?"),
+            Some(&format!(
+                "A raison de {LAND_SELL_PRICE} francs l'arpent, combien en vendez-vous aux Barbares (un dixième au plus) ?"
+            )),
             1,
-            game.kingdom(id).surface.max(1),
+            max_land_sale(game.kingdom(id).surface).max(1),
         ),
     }
 }

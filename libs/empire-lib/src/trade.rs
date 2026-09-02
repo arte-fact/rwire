@@ -4,8 +4,15 @@ use crate::kingdom::Kingdoms;
 /// Maximum grain price per bushel (original: 15).
 pub const MAX_GRAIN_PRICE: i32 = 15;
 
-/// Land sell price per arpent (original: 2 currency).
-pub const LAND_SELL_PRICE: i32 = 2;
+/// Land sell price per arpent. The original paid 2, a tenth of what the
+/// arpent yields in a year; 80 is four or five harvests, so a hundred arpents
+/// buys about a thousand bushels in a famine.
+pub const LAND_SELL_PRICE: i32 = 80;
+
+/// The most land a kingdom may sell in a year: a tenth of its surface.
+pub fn max_land_sale(surface: i32) -> i32 {
+    surface / 10
+}
 
 pub enum Trade {
     /// Buy `amount` bushels from `seller` at the seller's listed price.
@@ -18,7 +25,8 @@ pub enum Trade {
         amount: i32,
         price: i32,
     },
-    /// Sell `arpents` of land to the barbarians.
+    /// Sell `arpents` of land to the barbarians (capped by [`max_land_sale`]);
+    /// the barbarians' lands grow by as much.
     SellLand {
         arpents: i32,
     },
@@ -60,8 +68,10 @@ pub fn apply_trade(game: &mut EmpireGame, buyer: Kingdoms, trade: Trade) {
         }
         Trade::SellLand { arpents } => {
             let k = game.kingdom_mut(buyer);
+            let arpents = arpents.clamp(0, max_land_sale(k.surface));
             k.surface -= arpents;
             k.treasury += arpents * LAND_SELL_PRICE;
+            game.barbarians_surface += arpents;
         }
         Trade::None => {}
     }
@@ -139,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn selling_land_pays_two_per_arpent() {
+    fn selling_land_pays_and_hands_it_to_the_barbarians() {
         let mut game = EmpireGame::default();
         apply_trade(
             &mut game,
@@ -148,6 +158,21 @@ mod tests {
         );
         let k = game.kingdom(Kingdoms::France);
         assert_eq!(k.surface, 9900);
-        assert_eq!(k.treasury, 1200);
+        assert_eq!(k.treasury, 1000 + 100 * LAND_SELL_PRICE);
+        assert_eq!(game.barbarians_surface, 6100);
+    }
+
+    #[test]
+    fn land_sales_are_capped_to_a_tenth_of_the_surface() {
+        let mut game = EmpireGame::default();
+        apply_trade(
+            &mut game,
+            Kingdoms::France,
+            Trade::SellLand { arpents: 5000 },
+        );
+        let k = game.kingdom(Kingdoms::France);
+        assert_eq!(k.surface, 9000);
+        assert_eq!(k.treasury, 1000 + 1000 * LAND_SELL_PRICE);
+        assert_eq!(max_land_sale(9000), 900);
     }
 }

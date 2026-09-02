@@ -8,7 +8,7 @@ use empire_lib::events::{check_random_events, RulerDeathCause};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::ia::plan_ai_turn;
 use empire_lib::investments::{apply_investment, InvestmentType};
-use empire_lib::trade::{apply_trade, calculate_buy_cost, Trade, MAX_GRAIN_PRICE};
+use empire_lib::trade::{apply_trade, calculate_buy_cost, max_land_sale, Trade, MAX_GRAIN_PRICE};
 use empire_lib::war::{
     apply_barbarian_battle_result, apply_kingdom_battle_result, simulate_barbarian_battle,
     simulate_kingdom_battle, BarbarianBattleResult, BattleProgress, BattleResult,
@@ -979,11 +979,11 @@ pub fn sell_land(rooms: &mut Rooms, ctx: &EventContext) {
     let Some(id) = acting(room, token, Step::Trade) else {
         return;
     };
-    let surface = room.game.kingdom(id).surface;
-    if surface < 2 {
+    let max = max_land_sale(room.game.kingdom(id).surface);
+    if max < 1 {
         return;
     }
-    let arpents = num(ctx, "arpents").clamp(1, surface - 1);
+    let arpents = num(ctx, "arpents").clamp(1, max);
     apply_trade(&mut room.game, id, Trade::SellLand { arpents });
     room.note(id, format!("{arpents} arpents vendus aux Barbares."));
 }
@@ -1023,8 +1023,9 @@ pub fn feed(rooms: &mut Rooms, ctx: &EventContext) {
 
 /// Net change of the civilian and military headcount over the year.
 pub fn population_delta(d: &YearDemography) -> i32 {
-    d.births + d.immigrants
+    d.births + d.immigrants + d.merchants_settled
         - d.disease_victims
+        - d.nobles_departed
         - d.malnutrition_victims
         - d.starvation_victims
         - d.soldiers_starvation_victims

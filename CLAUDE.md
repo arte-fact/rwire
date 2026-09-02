@@ -260,6 +260,12 @@ what the user is typing.
   `el.live_text(ch)` (text mirror) / `el.live_fill(ch)` (width between the input's `min`/`max`).
   Channels come from `rwire::builder::next_live_channel()`. `Slider` uses this for its readout
   and fill; give it `.name()` to submit it with a `<form>`.
+- `el.live_lookup(ch, &table)` / `live_lookup_signed(ch, &table)` show a server-computed curve
+  sampled evenly over the input's `min`..`max` (linear interpolation between samples, signed
+  variant prints `+`/`−` and groups digits). Pair with an SVG drawn from the same samples and a
+  `St::ChartCursor` div bound with `live_fill` to make an "expected outcome" chart follow a
+  slider (`feed_step` in `apps/empire-web`). `Slider::above_track(el)` slots content between
+  the readout and the track.
 - `el.data("autoscroll", "1")` on a scroll box keeps it scrolled to the bottom after every update
   (journals, logs).
 

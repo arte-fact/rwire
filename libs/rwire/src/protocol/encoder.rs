@@ -10,11 +10,11 @@ use super::opcodes::{
     BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    LIVE_BIND, LIVE_GROUPED, LIVE_REMAINDER, LIVE_SOURCE, ROUTE_PUSH, ROUTE_PUSH_INLINE,
-    ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM,
-    SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
-    STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
-    SYMBOL_SESSION_START, WORD_TABLE,
+    LIVE_BIND, LIVE_GROUPED, LIVE_REMAINDER, LIVE_SIGNED, LIVE_SOURCE, ROUTE_PUSH,
+    ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM,
+    SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
+    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
+    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 use crate::builder::{LiveBind, LiveOutput, LiveSource};
@@ -712,6 +712,9 @@ impl OpcodeBuffer {
             LiveOutput::Fill => 1,
             LiveOutput::Scaled { grouped, .. } => 2 | (grouped as u8 * LIVE_GROUPED),
             LiveOutput::Switch { .. } => 3,
+            LiveOutput::Lookup {
+                grouped, signed, ..
+            } => 4 | (grouped as u8 * LIVE_GROUPED) | (signed as u8 * LIVE_SIGNED),
         };
         let (channel, rest) = match &bind.source {
             LiveSource::Channel(c) => (*c, None),
@@ -741,6 +744,14 @@ impl OpcodeBuffer {
                 self.buf.put_u8(thresholds.len() as u8);
                 for t in thresholds {
                     write_varint(&mut self.buf, *t);
+                }
+            }
+            LiveOutput::Lookup { table, .. } => {
+                let lo = table.iter().copied().min().unwrap_or(0);
+                self.buf.put_u8(table.len() as u8);
+                write_varint(&mut self.buf, ((lo << 1) ^ (lo >> 31)) as u32);
+                for v in table {
+                    write_varint(&mut self.buf, (v - lo) as u32);
                 }
             }
             LiveOutput::Text { .. } | LiveOutput::Fill => {}

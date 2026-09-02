@@ -3,8 +3,11 @@
 
 use std::borrow::Cow;
 
+use empire_lib::demography::{
+    army_losses_share, army_outlook, nobles_outlook, people_outlook, Outlook, ARMY_LOSS_SPREAD,
+};
 use empire_lib::investments::InvestmentType;
-use empire_lib::trade::MAX_GRAIN_PRICE;
+use empire_lib::trade::{max_land_sale, LAND_SELL_PRICE, MAX_GRAIN_PRICE};
 use empire_lib::{Kingdom, Kingdoms, PlayerTitle, Weather, KINGDOMS};
 use rwire::attr_tokens::{At, Av};
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, Icon, St, Style};
@@ -1725,9 +1728,12 @@ fn land_form(t: T, k: &Kingdom) -> ElementBuilder {
         [
             slider(
                 "arpents",
-                "Arpents (2 pièces l'arpent)",
+                format!(
+                    "Arpents · {LAND_SELL_PRICE} {} l'arpent, un dixième au plus",
+                    k.currency()
+                ),
                 1,
-                (k.surface / 2).max(1),
+                max_land_sale(k.surface).max(1),
                 (k.surface / 100).max(1),
                 "arpents",
             ),
@@ -1774,6 +1780,9 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
         rwire::builder::next_live_channel(),
     );
 
+    let people_curve: Vec<Outlook> = samples(peasants_max)
+        .map(|g| people_outlook(k, g))
+        .collect();
     let people = Card::new().padding(CardPadding::Md).children([
         ration_slider(
             "peasants",
@@ -1787,19 +1796,27 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
                 (needs * 3 / 2, "150 %"),
                 (needs * 2, "200 %"),
             ],
+            vec![
+                people_outcome(ch_p, k, peasants, peasants_max, &people_curve),
+                nobles_outcome(ch_p, k, peasants, peasants_max),
+                people_chart(ch_p, peasants, peasants_max, &people_curve),
+            ],
         ),
         consequences(
             ch_p,
             peasants,
             &[needs / 2, needs, needs * 3 / 2 + 1],
             &[
-                "Famine : des sujets meurent de faim, d'autres de malnutrition.",
-                "Mal nourri : la malnutrition fait des victimes.",
+                "Famine : des sujets meurent de faim, les naissances s'effondrent.",
+                "Mal nourri : la faim fait des victimes, les naissances baissent.",
                 "Nourri : le peuple survit, personne n'immigre.",
                 "Bien nourri : les étrangers immigrent, des nobles s'installent.",
             ],
         ),
     ]);
+
+    let ost_curve: Vec<(i32, Outlook)> =
+        samples(soldiers_max).map(|g| army_outlook(k, g)).collect();
     let ost = Card::new().padding(CardPadding::Md).children([
         ration_slider(
             "soldiers",
@@ -1809,6 +1826,10 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
             soldiers,
             army,
             &[(army, "100 %"), (army * 3 / 2, "150 %")],
+            vec![
+                ost_outcome(ch_s, k, soldiers, army, &ost_curve),
+                ost_chart(ch_s, k, soldiers, soldiers_max, &ost_curve),
+            ],
         ),
         consequences(
             ch_s,
@@ -1816,7 +1837,7 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
             &[army / 2, army, army * 3 / 2],
             &[
                 "Affamé, l'ost perd des hommes et déserte.",
-                "Rations réduites : des hommes désertent.",
+                "Rations réduites : des hommes désertent, la force chute vite.",
                 "L'ost combattra à pleine force ; mieux encore à 150 %.",
                 "L'ost combattra à 150 %, son maximum.",
             ],
@@ -1882,7 +1903,9 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
     .st([St::GapMd])
 }
 
-/// A grain slider whose readout also shows the value as a percentage of `needs`.
+/// A grain slider whose readout also shows the value as a percentage of `needs`,
+/// with `above_track` content (outcome line, chart) between readout and track.
+#[allow(clippy::too_many_arguments)]
 fn ration_slider(
     name: &'static str,
     channel: u16,
@@ -1891,6 +1914,7 @@ fn ration_slider(
     value: i32,
     needs: i32,
     marks: &[(i32, &'static str)],
+    above_track: Vec<ElementBuilder>,
 ) -> ElementBuilder {
     let pct = if needs > 0 { value * 100 / needs } else { 0 };
     let mut s = Slider::new()
@@ -1918,7 +1942,395 @@ fn ration_slider(
     for &(at, label) in marks {
         s = s.mark(at, label);
     }
+    for content in above_track {
+        s = s.above_track(content);
+    }
     s.build()
+}
+
+// The outcome curves under the ration sliders: the lib's expected figures
+// sampled along the slider's run, drawn as an SVG and read back client-side
+// by `live_lookup` as the thumb moves.
+
+/// Points along a slider's run; the lookup tables and the curves share them.
+const CURVE_SAMPLES: usize = 61;
+const CHART_W: f64 = 320.0;
+const CHART_H: f64 = 96.0;
+const CHART_PAD: f64 = 8.0;
+
+fn samples(max: i32) -> impl Iterator<Item = i32> {
+    (0..CURVE_SAMPLES).map(move |i| (max as i64 * i as i64 / (CURVE_SAMPLES - 1) as i64) as i32)
+}
+
+fn sample_x(i: usize) -> f64 {
+    i as f64 / (CURVE_SAMPLES - 1) as f64 * CHART_W
+}
+
+/// The slider value where `f` first reaches zero or more, interpolated between
+/// samples (a `live_switch` threshold), or `max` if it never does.
+fn crossing(max: i32, values: impl Fn(usize) -> i32) -> u32 {
+    for i in 1..CURVE_SAMPLES {
+        let (a, b) = (values(i - 1), values(i));
+        if b >= 0 {
+            let step = max as f64 / (CURVE_SAMPLES - 1) as f64;
+            let t = if b > a {
+                -a as f64 / (b - a) as f64
+            } else {
+                0.0
+            };
+            return ((i - 1) as f64 * step + t.clamp(0.0, 1.0) * step).round() as u32;
+        }
+    }
+    max.max(0) as u32
+}
+
+fn curve_path(points: impl Iterator<Item = (f64, f64)>) -> String {
+    points
+        .enumerate()
+        .map(|(i, (x, y))| format!("{}{x:.1} {y:.1}", if i == 0 { 'M' } else { 'L' }))
+        .collect()
+}
+
+/// A closed area: along `top`, back along `bottom`.
+fn area_path(top: &[(f64, f64)], bottom: &[(f64, f64)]) -> String {
+    let mut d = curve_path(top.iter().copied());
+    for (x, y) in bottom.iter().rev() {
+        d.push_str(&format!("L{x:.1} {y:.1}"));
+    }
+    d.push('Z');
+    d
+}
+
+fn stroke(d: &str, color: &str, width: &str) -> ElementBuilder {
+    el(El::Path)
+        .at_str(At::D, d)
+        .at(At::Fill, Av::None)
+        .at_str(At::Stroke, color)
+        .at_str(At::StrokeWidth, width)
+        .at(At::StrokeLinejoin, Av::Round)
+}
+
+fn fill(d: &str, color: &str, opacity: &str) -> ElementBuilder {
+    el(El::Path)
+        .at_str(At::D, d)
+        .at_str(At::Fill, color)
+        .attr("opacity", opacity)
+}
+
+fn gridline(y: f64, dashed: bool) -> ElementBuilder {
+    let line = stroke(
+        &format!("M0 {y:.1}H{CHART_W}"),
+        "var(--h)",
+        if dashed { "0.7" } else { "1" },
+    );
+    if dashed {
+        line.attr("stroke-dasharray", "2 3")
+    } else {
+        line
+    }
+}
+
+/// The SVG in a relative box, with axis labels at the right and a cursor whose
+/// right edge follows the slider.
+fn chart_frame(
+    channel: u16,
+    value: i32,
+    max: i32,
+    paths: Vec<ElementBuilder>,
+    labels: Vec<(f64, String)>,
+) -> ElementBuilder {
+    let pct = if max > 0 {
+        value as f64 / max as f64 * 100.0
+    } else {
+        0.0
+    };
+    el(El::Div)
+        .st([St::PositionRelative, St::WFull])
+        .append([el(El::Svg)
+            .at_str(At::ViewBox, &format!("0 0 {CHART_W} {CHART_H}"))
+            .at_str(At::Width, "100%")
+            .st([St::DisplayBlock])
+            .append(paths)])
+        .append(labels.into_iter().map(|(y, text)| {
+            el(El::Span)
+                .st([St::ChartLabel, St::TabularNums])
+                .style(Style::new().set("top", &format!("{:.1}%", y / CHART_H * 100.0)))
+                .text(&text)
+        }))
+        .append([el(El::Div)
+            .st([St::ChartCursor])
+            .style(Style::new().width(&format!("{pct:.1}%")))
+            .live_fill(channel)])
+}
+
+/// Net headcount over the year: the expected curve with its spread, green
+/// above zero and red below, on an asinh scale (linear around zero, compressed
+/// toward the famine).
+fn people_chart(channel: u16, value: i32, max: i32, curve: &[Outlook]) -> ElementBuilder {
+    let top = curve.iter().map(|o| o.high).max().unwrap_or(0).max(1) as f64;
+    let bottom = curve.iter().map(|o| o.low).min().unwrap_or(0).min(-1) as f64;
+    let scale = (top.max(-bottom) / 16.0).max(1.0);
+    let (hi, lo) = ((top * 1.1 / scale).asinh(), (bottom * 1.05 / scale).asinh());
+    let y =
+        |v: f64| CHART_PAD + (hi - (v / scale).asinh()) / (hi - lo) * (CHART_H - 2.0 * CHART_PAD);
+    let y0 = y(0.0);
+
+    let pts = |f: &dyn Fn(&Outlook) -> f64| -> Vec<(f64, f64)> {
+        curve
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (sample_x(i), y(f(o))))
+            .collect()
+    };
+    let expected = pts(&|o| o.expected as f64);
+    let zero: Vec<(f64, f64)> = expected.iter().map(|&(x, _)| (x, y0)).collect();
+    let above: Vec<(f64, f64)> = expected.iter().map(|&(x, y)| (x, y.min(y0))).collect();
+    let below: Vec<(f64, f64)> = expected.iter().map(|&(x, y)| (x, y.max(y0))).collect();
+
+    // Axis ticks: the largest round figure below the top and the bottom.
+    let round_down = |v: f64| {
+        [
+            10_000.0, 5_000.0, 2_000.0, 1_000.0, 500.0, 200.0, 100.0, 50.0, 20.0,
+        ]
+        .into_iter()
+        .find(|&t| t <= v * 0.9)
+    };
+    let mut labels = vec![(y0, "0".to_string())];
+    let mut paths = vec![gridline(y0, false)];
+    if let Some(t) = round_down(top) {
+        paths.push(gridline(y(t), true));
+        labels.push((y(t), format!("+{}", fmt(t as i32))));
+    }
+    if let Some(t) = round_down(-bottom) {
+        paths.push(gridline(y(-t), true));
+        labels.push((y(-t), format!("−{}", fmt(t as i32))));
+    }
+    paths.extend([
+        fill(&area_path(&above, &zero), "var(--o)", ".18"),
+        fill(&area_path(&below, &zero), "var(--q)", ".18"),
+        fill(
+            &area_path(&pts(&|o| o.high as f64), &pts(&|o| o.low as f64)),
+            "var(--k)",
+            ".12",
+        ),
+        stroke(&curve_path(expected.into_iter()), "var(--k)", "1.8"),
+    ]);
+    chart_frame(channel, value, max, paths, labels)
+}
+
+/// The army's efficiency line and its losses band, both in % of the men.
+fn ost_chart(
+    channel: u16,
+    k: &Kingdom,
+    value: i32,
+    max: i32,
+    curve: &[(i32, Outlook)],
+) -> ElementBuilder {
+    let y = |pct: f64| {
+        CHART_PAD + (150.0 - pct.clamp(0.0, 150.0)) / 150.0 * (CHART_H - 2.0 * CHART_PAD)
+    };
+    let mut paths = vec![
+        gridline(y(150.0), true),
+        gridline(y(100.0), false),
+        gridline(y(50.0), true),
+    ];
+    let labels = vec![
+        (y(150.0), "150 %".to_string()),
+        (y(100.0), "100 %".to_string()),
+        (y(50.0), "50 %".to_string()),
+    ];
+    if k.soldiers > 0 {
+        // The smooth curve behind the rounded figures, so a small army doesn't
+        // draw a staircase.
+        let share: Vec<f64> = samples(max)
+            .map(|g| army_losses_share(k, g) as f64 * 100.0)
+            .collect();
+        let pts = |scale: f64| -> Vec<(f64, f64)> {
+            share
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (sample_x(i), y(s * scale)))
+                .collect()
+        };
+        let spread = ARMY_LOSS_SPREAD as f64;
+        paths.extend([
+            fill(
+                &area_path(&pts(1.0 + spread), &pts(1.0 - spread)),
+                "var(--q)",
+                ".2",
+            ),
+            stroke(&curve_path(pts(1.0).into_iter()), "var(--q)", "1.2"),
+        ]);
+    }
+    paths.push(stroke(
+        &curve_path(
+            curve
+                .iter()
+                .enumerate()
+                .map(|(i, (e, _))| (sample_x(i), y(*e as f64))),
+        ),
+        "var(--p)",
+        "1.8",
+    ));
+    chart_frame(channel, value, max, paths, labels)
+}
+
+/// "+1 234" / "−56" / "0", as `live_lookup_signed` prints it.
+fn delta(n: i32) -> String {
+    let sign = if n > 0 {
+        "+"
+    } else if n < 0 {
+        "−"
+    } else {
+        ""
+    };
+    format!("{sign}{}", fmt(n.abs()))
+}
+
+/// "(−33 … +154)": the spread of the draw, read back from the two tables.
+fn range(channel: u16, now: Outlook, low: &[i32], high: &[i32]) -> ElementBuilder {
+    el(El::Span)
+        .st([St::TextXs, St::TextMuted])
+        .text(" (")
+        .append([
+            el(El::Span)
+                .text(&delta(now.low))
+                .live_lookup_signed(channel, low),
+            el(El::Span).text(" … "),
+            el(El::Span)
+                .text(&delta(now.high))
+                .live_lookup_signed(channel, high),
+            el(El::Span).text(")"),
+        ])
+}
+
+/// "Nobles à la cour : +2 (0 … +4)" — the court grows with plenty and
+/// empties in a famine.
+fn nobles_outcome(channel: u16, k: &Kingdom, value: i32, max: i32) -> ElementBuilder {
+    let curve: Vec<Outlook> = samples(max).map(|g| nobles_outlook(k, g)).collect();
+    let now = nobles_outlook(k, value);
+    let expected: Vec<i32> = curve.iter().map(|o| o.expected).collect();
+    let low: Vec<i32> = curve.iter().map(|o| o.low).collect();
+    let high: Vec<i32> = curve.iter().map(|o| o.high).collect();
+    let break_even = crossing(max, |i| expected[i]);
+    let figure = |tone: St, shown: bool| {
+        hidden_unless(
+            shown,
+            el(El::Strong)
+                .st([tone, St::TabularNums])
+                .text(&delta(now.expected))
+                .live_lookup_signed(channel, &expected),
+        )
+    };
+    outcome_row(
+        &format!("Nobles à la cour · {}", fmt(k.nobles)),
+        el(El::Span).st([St::TabularNums]).append([
+            el(El::Span).live_switch(channel, &[break_even]).append([
+                figure(St::TextError, now.expected < 0),
+                figure(St::TextSuccess, now.expected >= 0),
+            ]),
+            range(channel, now, &low, &high),
+        ]),
+    )
+}
+
+fn outcome_row(label: &str, figure: ElementBuilder) -> ElementBuilder {
+    el(El::Div)
+        .st([
+            St::DisplayFlex,
+            St::JustifyBetween,
+            St::ItemsBaseline,
+            St::GapSm,
+            St::TextSm,
+        ])
+        .append([el(El::Span).st([St::TextMuted]).text(label), figure])
+}
+
+/// "Population dans un an : +61 (−33 … +154)", colored by sign.
+fn people_outcome(
+    channel: u16,
+    k: &Kingdom,
+    value: i32,
+    max: i32,
+    curve: &[Outlook],
+) -> ElementBuilder {
+    let now = people_outlook(k, value);
+    let expected: Vec<i32> = curve.iter().map(|o| o.expected).collect();
+    let low: Vec<i32> = curve.iter().map(|o| o.low).collect();
+    let high: Vec<i32> = curve.iter().map(|o| o.high).collect();
+    let break_even = crossing(max, |i| expected[i]);
+    let figure = |tone: St, shown: bool| {
+        hidden_unless(
+            shown,
+            el(El::Strong)
+                .st([tone, St::TabularNums])
+                .text(&delta(now.expected))
+                .live_lookup_signed(channel, &expected),
+        )
+    };
+    outcome_row(
+        "Population dans un an",
+        el(El::Span).st([St::TabularNums]).append([
+            el(El::Span).live_switch(channel, &[break_even]).append([
+                figure(St::TextError, now.expected < 0),
+                figure(St::TextSuccess, now.expected >= 0),
+            ]),
+            range(channel, now, &low, &high),
+        ]),
+    )
+}
+
+/// "L'ost combattra à 100 % · aucune perte" / "· 4–7 hommes perdus".
+fn ost_outcome(
+    channel: u16,
+    k: &Kingdom,
+    value: i32,
+    army: i32,
+    curve: &[(i32, Outlook)],
+) -> ElementBuilder {
+    let (efficiency, losses) = army_outlook(k, value);
+    let pct: Vec<i32> = curve.iter().map(|(e, _)| *e).collect();
+    let low: Vec<i32> = curve.iter().map(|(_, o)| o.low).collect();
+    let high: Vec<i32> = curve.iter().map(|(_, o)| o.high).collect();
+    let figure = |tone: St, shown: bool| {
+        hidden_unless(
+            shown,
+            el(El::Strong)
+                .st([tone, St::TabularNums])
+                .text(&efficiency.to_string())
+                .live_lookup(channel, &pct),
+        )
+    };
+    let full = army.max(0) as u32;
+    outcome_row(
+        "L'ost combattra à",
+        el(El::Span).st([St::TabularNums]).append([
+            el(El::Span).live_switch(channel, &[full]).append([
+                figure(St::TextError, value < army),
+                figure(St::TextSuccess, value >= army),
+            ]),
+            el(El::Span).text(" %"),
+            el(El::Span)
+                .st([St::TextXs, St::TextMuted])
+                .live_switch(channel, &[full])
+                .append([
+                    hidden_unless(
+                        value < army,
+                        el(El::Span).text(" · ").append([
+                            el(El::Span)
+                                .text(&losses.low.to_string())
+                                .live_lookup(channel, &low),
+                            el(El::Span).text("–"),
+                            el(El::Span)
+                                .text(&losses.high.to_string())
+                                .live_lookup(channel, &high),
+                            el(El::Span).text(" hommes perdus"),
+                        ]),
+                    ),
+                    hidden_unless(value >= army, el(El::Span).text(" · aucune perte")),
+                ]),
+        ]),
+    )
 }
 
 /// The sentence under a slider: one per band, thresholds ascending; the client
@@ -1991,10 +2403,16 @@ fn report_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
 
     let causes = [
         (d.births, "Naissances"),
-        (d.immigrants, "Étrangers venus s'installer"),
+        (
+            d.immigrants - d.nobles_immigrants,
+            "Étrangers venus s'installer",
+        ),
+        (d.nobles_immigrants, "Nobles venus à la cour"),
+        (d.merchants_settled, "Marchands ayant ouvert boutique"),
         (-d.disease_victims, "Morts de maladie"),
         (-d.malnutrition_victims, "Morts de faim"),
         (-d.starvation_victims, "Morts de misère"),
+        (-d.nobles_departed, "Nobles ayant fui la disette"),
         (
             -d.soldiers_starvation_victims,
             "Hommes d'armes morts d'épuisement",
@@ -2037,7 +2455,7 @@ fn report_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
         slot += 1;
     }
 
-    let efficiency = d.soldiers_efficiency * 10;
+    let efficiency = d.soldiers_efficiency;
     rows.push(ledger_row(
         slot,
         el(El::Span).text("L'ost combattra à"),
@@ -2096,7 +2514,7 @@ fn economy_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
                     )),
                     el(El::Strong)
                         .st([St::TextDefault, St::TabularNums])
-                        .text(&format!("{} %", d.soldiers_efficiency * 10)),
+                        .text(&format!("{} %", d.soldiers_efficiency)),
                 ]),
         );
     }

@@ -163,7 +163,7 @@ impl Kingdom {
             nobles: 1,
             merchants: 25,
             soldiers: 20,
-            soldiers_efficiency: 15,
+            soldiers_efficiency: 150,
             treasury: 1000,
             // Original: A(I,2)=15000+INT(RND*1000)+1 = [15001, 16000]
             grain_stocks: 15000 + random(1, 1001),
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(k.surface, 10000);
         assert_eq!(k.peasants, 2000);
         assert!((15001..=16000).contains(&k.grain_stocks));
-        assert_eq!(k.soldiers_efficiency, 15);
+        assert_eq!(k.soldiers_efficiency, 150);
         assert!(!k.is_player && !k.is_dead);
     }
 

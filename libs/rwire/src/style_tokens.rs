@@ -943,6 +943,11 @@ define_token_enum! {
         AnimateSunUp = 0x35D => "animation:rw-sun-up 2.4s ease-out both",
         /// Soft glowing disk pinned to a scene's top-right (background set inline).
         GlowDisk = 0x35E => "position:absolute;right:1.5rem;top:2rem;width:3.5rem;height:3.5rem;border-radius:50%;filter:blur(.5px);pointer-events:none",
+        /// A vertical cursor over a chart: its right edge marks the x, so a
+        /// `live_fill` width moves it with a slider.
+        ChartCursor = 0x35F => "position:absolute;top:0;bottom:0;left:0;border-right:1px solid var(--k);opacity:.7;pointer-events:none",
+        /// A tiny axis label pinned to a chart's right edge, sitting on its `top`.
+        ChartLabel = 0x360 => "position:absolute;right:2px;transform:translateY(-100%);font-size:.6rem;line-height:1.2;color:var(--j);pointer-events:none",
     }
 }
 

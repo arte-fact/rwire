@@ -115,6 +115,10 @@ pub const LIVE_SOURCE: u8 = 0x4F;
 ///   (remainder: the spent share `Σ / base`)
 /// - 2 scaled `[num, den]`: `textContent = round(v·num/den)`
 /// - 3 switch `[m, t…]`: shows child `i` only, for `t[i-1] <= v < t[i]`
+/// - 4 lookup `[m, lo, e…]`: `textContent` = the table `lo + e[i]` read at
+///   `v`'s position between the source's `min`/`max`, linearly interpolated
+///   between its `m` evenly spaced entries (`lo` zigzag-encoded, `e` ≥ 0;
+///   [`LIVE_GROUPED`] as for text, [`LIVE_SIGNED`] prefixes `+`/`−`)
 ///
 /// Varint args except the `n`/`m` counts (one byte).
 pub const LIVE_BIND: u8 = 0x50;
@@ -125,6 +129,10 @@ pub const LIVE_REMAINDER: u8 = 0x10;
 /// `LIVE_BIND` kind bit: text/scaled output is digit-grouped (`toLocaleString`
 /// in the page's language — set it with `CapsuleConfig::lang`).
 pub const LIVE_GROUPED: u8 = 0x20;
+
+/// `LIVE_BIND` kind bit: lookup output carries an explicit sign (`+12`, `−3`,
+/// `0`), for a delta.
+pub const LIVE_SIGNED: u8 = 0x40;
 
 // ============================================================================
 // Form Operations

@@ -57,10 +57,10 @@ pub fn simulate_kingdom_battle(
     let mut defender_peasants = defender.peasants;
     let defender_surface = defender.surface;
 
-    // Peasants defend when there are no soldiers (at fixed efficiency 5).
+    // Peasants defend when there are no soldiers (at fixed efficiency 50 %).
     let population_defending = defender_soldiers <= 0;
     if population_defending {
-        defending_strength = 5;
+        defending_strength = 50;
     }
 
     let mut surface_conquered = 0;
@@ -205,8 +205,8 @@ pub fn simulate_barbarian_battle(
     loop {
         let troop_unit = soldiers_sent / 15 + 1;
 
-        // Barbarians fight at fixed strength 9.
-        if random(1, attacking_strength) < random(1, 9) {
+        // Barbarians fight at fixed strength 90 %.
+        if random(1, attacking_strength) < random(1, 90) {
             attacker_soldiers -= troop_unit;
         } else {
             let land_gained = random(1, troop_unit * 26) - random(1, troop_unit + 5);
