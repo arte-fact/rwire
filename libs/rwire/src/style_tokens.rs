@@ -925,7 +925,9 @@ define_token_enum! {
         // Counts the registered `--n` from its inline start (default 0) to the inline `--to`
         // over 1.2s, rendered through `::after{content:counter(n)}` (see PSEUDO_GLOBAL_CSS),
         // then fades out so a formatted value can take its place (AnimateFadeUp + Delay).
-        CountUp = 0x355 => "animation:rw-count 1.2s cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s 1.2s ease both;counter-reset:n var(--n)",
+        // The start is the inline `--d` (default 0s), not a Delay token: a single
+        // `animation-delay` would apply to the fade-out too and cut the count short.
+        CountUp = 0x355 => "animation:rw-count 1.2s var(--d,0s) cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s calc(var(--d,0s) + 1.2s) ease both;counter-reset:n var(--n)",
         TabularNums = 0x356 => "font-variant-numeric:tabular-nums",
         H025rem = 0x357 => "height:0.25rem",
         // Ledger row: label column takes the slack, figure column hugs its content.

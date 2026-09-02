@@ -1312,6 +1312,11 @@ fn delay(slot: usize) -> St {
     DELAYS[slot.min(DELAYS.len() - 1)]
 }
 
+/// The same delay as `delay(slot)`, as a CSS time for inline `--d`.
+fn delay_secs(slot: usize) -> String {
+    format!("{:.1}s", (slot.min(DELAYS.len() - 1) + 1) as f32 * 0.3)
+}
+
 /// Wrap `inner` so it fades up into place at cascade slot `slot`.
 fn reveal(slot: usize, inner: ElementBuilder) -> ElementBuilder {
     inner.st([St::AnimateFadeUp, delay(slot)])
@@ -1333,11 +1338,12 @@ fn count_up(from: i32, to: i32, slot: usize) -> ElementBuilder {
                 .st([St::AnimateFadeUp, delay(slot + COUNT_SLOTS)])
                 .text(&fmt(to)),
             el(El::Span)
-                .st([St::PositionAbsolute, St::Inset0, St::CountUp, delay(slot)])
+                .st([St::PositionAbsolute, St::Inset0, St::CountUp])
                 .style(
                     Style::new()
                         .set("--n", &from.to_string())
-                        .set("--to", &to.to_string()),
+                        .set("--to", &to.to_string())
+                        .set("--d", &delay_secs(slot)),
                 ),
         ])
 }
