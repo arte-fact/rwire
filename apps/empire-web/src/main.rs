@@ -115,7 +115,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .root(root)
         .on_route(on_route())
         .capsule_config(
-            CapsuleConfig::new().pwa(
+            CapsuleConfig::new().lang("fr").pwa(
                 Pwa::new("Empire")
                     .short_name("Empire")
                     .description("Six royaumes, un seul empereur — jouez entre amis.")

@@ -499,9 +499,10 @@ fn journal_tab(t: T) -> ElementBuilder {
         return Text::body("Le journal est encore vierge.").muted().build();
     }
     let me = room.seat_of(t.token);
-    // Grouped by year, most recent first.
+    // Grouped by year, most recent year first; within a year the chronicle
+    // reads in order.
     let mut years: Vec<(i32, Vec<&Entry>)> = Vec::new();
-    for e in room.log.iter().rev() {
+    for e in &room.log {
         match years.last_mut() {
             Some((y, v)) if *y == e.year => v.push(e),
             _ => years.push((e.year, vec![e])),
@@ -509,7 +510,7 @@ fn journal_tab(t: T) -> ElementBuilder {
     }
     Stack::column()
         .gap(Gap::Md)
-        .children(years.into_iter().map(|(year, entries)| {
+        .children(years.into_iter().rev().map(|(year, entries)| {
             section(
                 format!("An {year}"),
                 el(El::Div).append(entries.into_iter().map(|e| journal_line(e, me))),
@@ -537,15 +538,12 @@ fn journal_line(e: &Entry, me: Option<Kingdoms>) -> ElementBuilder {
         ])
 }
 
-/// The last few journal entries, for screens where the viewer is waiting.
+/// The last few journal entries, in order, for screens where the viewer is waiting.
 fn latest_news(t: T, n: usize) -> ElementBuilder {
     let me = t.room.seat_of(t.token);
-    let lines: Vec<ElementBuilder> = t
-        .room
-        .log
+    let log = &t.room.log;
+    let lines: Vec<ElementBuilder> = log[log.len().saturating_sub(n)..]
         .iter()
-        .rev()
-        .take(n)
         .map(|e| journal_line(e, me))
         .collect();
     if lines.is_empty() {
@@ -847,54 +845,197 @@ fn lobby(t: T, me: Option<Kingdoms>) -> ElementBuilder {
         .build()
 }
 
+/// One stroke per kingdom on the land curve: `var(--…)` colors so the chart
+/// follows the theme.
+const CURVE_COLORS: [&str; 6] = [
+    "var(--U9)",
+    "var(--O9)",
+    "var(--P9)",
+    "var(--M9)",
+    "var(--n9)",
+    "var(--N9)",
+];
+
 fn over(room: &Room) -> ElementBuilder {
     let mut standing: Vec<&Kingdom> = room.game.kingdoms.iter().filter(|k| !k.is_dead).collect();
     standing.sort_by_key(|k| std::cmp::Reverse((k.surface, k.total_population())));
     let winner = standing
         .first()
-        .map(|k| format!("{} règne sur le plus vaste domaine.", k.full_title()))
+        .map(|k| format!("{} règne sur {} arpents.", k.full_title(), fmt(k.surface)))
         .unwrap_or_else(|| "Tous les royaumes sont tombés.".to_string());
     let most = standing.first().map_or(1, |k| k.surface.max(1));
-    let rows = standing.iter().enumerate().map(|(i, k)| {
-        el(El::Div).st([St::PySm, St::BorderB]).append([
-            el(El::Div)
-                .st([St::DisplayFlex, St::ItemsBaseline, St::GapSm, St::TextSm])
+    let peak = |id: Kingdoms| {
+        room.history
+            .iter()
+            .map(|h| h[id.index()])
+            .max()
+            .unwrap_or(0)
+    };
+    let row = |rank: &str, k: &Kingdom, note: &str, figures: String, bar: Option<u32>| {
+        let mut children = vec![el(El::Div)
+            .st([St::DisplayFlex, St::ItemsBaseline, St::GapSm, St::TextSm])
+            .append([
+                el(El::Span)
+                    .st([St::TextMuted, St::TabularNums, St::W1rem])
+                    .text(rank),
+                el(El::Span).st([St::Flex1, St::MinW0]).append([
+                    el(El::Strong).text(k.name()),
+                    el(El::Span)
+                        .st([St::TextMuted])
+                        .text(&format!(" · {}{note}", k.player_name)),
+                ]),
+                el(El::Span)
+                    .st([St::TextMuted, St::TabularNums, St::WhitespaceNowrap])
+                    .text(&figures),
+            ])];
+        if let Some(surface) = bar {
+            children.push(
+                Progress::new()
+                    .value(surface)
+                    .max(most as u32)
+                    .thin(true)
+                    .build()
+                    .st([St::MtXs]),
+            );
+        }
+        el(El::Div).st([St::PySm, St::BorderB]).append(children)
+    };
+    let mut rows: Vec<ElementBuilder> = standing
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            row(
+                &(i + 1).to_string(),
+                k,
+                "",
+                format!(
+                    "{} arpents · {} sujets",
+                    fmt(k.surface),
+                    fmt(k.total_population())
+                ),
+                Some(k.surface.max(0) as u32),
+            )
+        })
+        .collect();
+    rows.extend(
+        KINGDOMS
+            .into_iter()
+            .map(|id| (id, room.game.kingdom(id)))
+            .filter(|(_, k)| k.is_dead)
+            .map(|(id, k)| {
+                row(
+                    "—",
+                    k,
+                    " · annexée",
+                    format!("{} au plus haut", fmt(peak(id))),
+                    None,
+                )
+                .st([St::Opacity75])
+            }),
+    );
+    let mut children = vec![
+        Alert::success()
+            .title("Fin de la partie")
+            .message(winner)
+            .build(),
+        section("Classement", el(El::Div).append(rows)),
+    ];
+    if room.history.len() > 1 {
+        children.push(section("Terres au fil des ans", land_curve(room)));
+    }
+    Stack::column().gap(Gap::Md).children(children).build()
+}
+
+/// Every kingdom's surface year by year, one stroke each, with a legend.
+fn land_curve(room: &Room) -> ElementBuilder {
+    const W: f64 = 320.0;
+    const H: f64 = 100.0;
+    const PAD: f64 = 4.0;
+    let years = room.history.len();
+    let top = room
+        .history
+        .iter()
+        .flat_map(|h| h.iter().copied())
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
+    let x = |i: usize| (i as f64 / (years - 1).max(1) as f64) * W;
+    let y = |s: i32| H - PAD - (s.max(0) as f64 / top) * (H - 2.0 * PAD);
+    let grid = format!(
+        "M0 {a}H{W}M0 {b}H{W}M0 {c}H{W}",
+        a = y(0),
+        b = y((top / 2.0) as i32),
+        c = y(top as i32)
+    );
+    let mut svg = el(El::Svg)
+        .at_str(At::ViewBox, &format!("0 0 {W} {H}"))
+        .at_str(At::Width, "100%")
+        .st([St::DisplayBlock])
+        .append([el(El::Path)
+            .at_str(At::D, &grid)
+            .at(At::Fill, Av::None)
+            .at_str(At::Stroke, "var(--h)")
+            .at_str(At::StrokeWidth, "1")]);
+    let mut legend = Vec::new();
+    for id in KINGDOMS {
+        let i = id.index();
+        let d: String = room
+            .history
+            .iter()
+            .enumerate()
+            .map(|(n, h)| {
+                format!(
+                    "{}{:.1} {:.1}",
+                    if n == 0 { "M" } else { "L" },
+                    x(n),
+                    y(h[i])
+                )
+            })
+            .collect();
+        svg = svg.append([el(El::Path)
+            .at_str(At::D, &d)
+            .at(At::Fill, Av::None)
+            .at_str(At::Stroke, CURVE_COLORS[i])
+            .at_str(At::StrokeWidth, "2")
+            .at(At::StrokeLinejoin, Av::Round)
+            .at(At::StrokeLinecap, Av::Round)]);
+        legend.push(
+            el(El::Span)
+                .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
                 .append([
                     el(El::Span)
-                        .st([St::TextMuted, St::TabularNums, St::W1rem])
-                        .text(&(i + 1).to_string()),
-                    el(El::Span).st([St::Flex1, St::MinW0]).append([
-                        el(El::Strong).text(k.name()),
-                        el(El::Span)
-                            .st([St::TextMuted])
-                            .text(&format!(" · {}", k.player_name)),
-                    ]),
-                    el(El::Span)
-                        .st([St::TextMuted, St::TabularNums, St::WhitespaceNowrap])
-                        .text(&format!(
-                            "{} arpents · {} sujets",
-                            fmt(k.surface),
-                            fmt(k.total_population())
-                        )),
+                        .st([St::W05rem, St::H05rem, St::RoundedFull, St::FlexShrink0])
+                        .style(Style::new().background(CURVE_COLORS[i])),
+                    el(El::Span).text(id.name()),
                 ]),
-            Progress::new()
-                .value(k.surface.max(0) as u32)
-                .max(most as u32)
-                .thin(true)
-                .build()
-                .st([St::MtXs]),
+        );
+    }
+    el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapSm])
+        .append([
+            svg,
+            el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::JustifyBetween,
+                    St::TextXs,
+                    St::TextMuted,
+                    St::TabularNums,
+                ])
+                .append([
+                    el(El::Span).text("An 1"),
+                    el(El::Span).text(&format!("An {}", room.game.year)),
+                ]),
+            el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::FlexWrap,
+                    St::GapSm,
+                    St::TextXs,
+                    St::TextMuted,
+                ])
+                .append(legend),
         ])
-    });
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            Alert::success()
-                .title("Fin de la partie")
-                .message(winner)
-                .build(),
-            section("Classement", el(El::Div).append(rows)),
-        ])
-        .build()
 }
 
 fn waiting(t: T) -> ElementBuilder {
@@ -971,25 +1112,32 @@ fn waiting(t: T) -> ElementBuilder {
 fn battle_page(room: &Room, b: &Battle) -> ElementBuilder {
     let f = b.frame();
     let a = room.game.kingdom(b.attack.attacker);
-    let (defender, count, start, land) = match b.attack.target {
+    // Defender: name, headcount on the field, headcount at the start, and the land
+    // fought over ("de la Bretagne", its surface).
+    let (defender, count, start, land, foe, foe_surface) = match b.attack.target {
         Some(t) => {
             let d = room.game.kingdom(t);
-            if f.population_defending {
-                (
-                    d.full_title(),
-                    f.defender_peasants,
-                    d.peasants,
-                    Some(t.name()),
-                )
+            let (count, start, land) = if f.population_defending {
+                (f.defender_peasants, d.peasants, Some(t.name()))
             } else {
-                (d.full_title(), f.defender_soldiers, b.defender_start, None)
-            }
+                (f.defender_soldiers, b.defender_start, None)
+            };
+            (
+                d.full_title(),
+                count,
+                start,
+                land,
+                format!("de la {}", t.name()),
+                d.surface,
+            )
         }
         None => (
             "Barbares païens".to_string(),
             f.defender_soldiers,
             b.defender_start,
             None,
+            "des terres barbares".to_string(),
+            room.game.barbarians_surface,
         ),
     };
     let mut items = vec![
@@ -1017,10 +1165,59 @@ fn battle_page(room: &Room, b: &Battle) -> ElementBuilder {
     } else {
         Spinner::new().label("La bataille fait rage…").build()
     });
-    section(
-        "Bataille",
+    let mut cards = vec![section(
+        format!(
+            "Bataille · {} → {}",
+            b.attack.attacker.name(),
+            b.attack.target.map_or("Barbares", |t| t.name())
+        ),
         Stack::column().gap(Gap::Sm).children(items).build(),
-    )
+    )];
+    if b.surface_conquered() > 0 {
+        cards.push(conquest(b.surface_so_far(), &foe, foe_surface));
+    }
+    el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapMd])
+        .append(cards)
+}
+
+/// The land taken so far, as a share of the defender's ("de la Bretagne"), with the
+/// annexation mark.
+fn conquest(taken: i32, foe: &str, foe_surface: i32) -> ElementBuilder {
+    let whole = foe_surface.max(1);
+    let pct = (taken as i64 * 100 / whole as i64) as i32;
+    Card::new()
+        .padding(CardPadding::Md)
+        .children([
+            el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::JustifyBetween,
+                    St::ItemsBaseline,
+                    St::TextSm,
+                ])
+                .append([
+                    el(El::Span).st([St::TextMuted]).text("Arpents conquis"),
+                    el(El::Strong)
+                        .st([St::TextLg, St::TabularNums])
+                        .text(&fmt(taken)),
+                ]),
+            Progress::new()
+                .value(taken.max(0) as u32)
+                .max(whole as u32)
+                .thin(true)
+                .build()
+                .st([St::MtXs]),
+            Text::caption(if taken >= whole {
+                format!("La totalité {foe} : l'annexion.")
+            } else {
+                format!("{pct} % {foe} — l'annexion demande {}.", fmt(whole))
+            })
+            .muted()
+            .build()
+            .st([St::MtXs]),
+        ])
+        .build()
 }
 
 fn side(name: String, count: i32, start: i32, intent: ProgressIntent) -> ElementBuilder {
@@ -1221,11 +1418,41 @@ fn sky_gradient(weather: Weather) -> &'static str {
     }
 }
 
+/// The sun over the year's sky, rising into place: blazing (superbe), veiled
+/// (beau), low and pale through the frost (gelées), a heat-haze disk
+/// (sécheresse); hidden by the clouds and rain of the middling years.
+fn sun(weather: Weather) -> Option<ElementBuilder> {
+    let (core, halo, opacity, top) = match weather {
+        Weather::Great => ("#fff3c4", "rgba(255,243,196,.35)", St::Opacity100, None),
+        Weather::VeryGood => ("#f1d9b2", "rgba(241,217,178,.25)", St::Opacity75, None),
+        Weather::VeryBad => (
+            "#e8ecf0",
+            "rgba(232,236,240,.2)",
+            St::Opacity50,
+            Some("5.5rem"),
+        ),
+        Weather::Disastrous => ("#ffb347", "rgba(255,179,71,.4)", St::Opacity75, None),
+        Weather::Good | Weather::Bad => return None,
+    };
+    let mut style = Style::new().background(&format!(
+        "radial-gradient(circle,{core} 0 45%,{halo} 60%,transparent 70%)"
+    ));
+    if let Some(top) = top {
+        style = style.set("top", top);
+    }
+    Some(
+        el(El::Div)
+            .st([St::GlowDisk, St::AnimateSunUp, opacity])
+            .style(style),
+    )
+}
+
 /// Saison: the year's sky, then the harvest ledger line by line, verdict last.
 fn weather_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let game = &t.room.game;
     let sky = el(El::Div)
         .st([
+            St::PositionRelative,
             St::MinH12rem,
             St::RoundedLg,
             St::OverflowHidden,
@@ -1235,7 +1462,8 @@ fn weather_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             St::TextOnEmphasis,
         ])
         .style(Style::new().background(sky_gradient(game.weather)))
-        .append([el(El::Div).append([
+        .append(sun(game.weather))
+        .append([el(El::Div).st([St::PositionRelative]).append([
             reveal(
                 0,
                 el(El::Div)
@@ -1595,8 +1823,8 @@ fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
                     .append([
                         el(El::Strong)
                             .st([St::TextDefault, St::TabularNums])
-                            .text(&(stocks - given).to_string())
-                            .live_remainder(stocks as u32, &[ch_p, ch_s]),
+                            .text(&fmt(stocks - given))
+                            .live_remainder_grouped(stocks as u32, &[ch_p, ch_s]),
                         el(El::Span).text(" bx"),
                     ]),
             ]),
@@ -1657,6 +1885,7 @@ fn ration_slider(
         .name(name)
         .id(name)
         .channel(channel)
+        .grouped(fmt)
         .label(label)
         .unit("bx ·")
         .min(0)
@@ -1950,6 +2179,7 @@ fn invest_form(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
                 .name("invest_amount")
                 .id("invest_amount")
                 .channel(ch)
+                .grouped(fmt)
                 .label(capitalize(invest_fr(kind)))
                 .min(0)
                 .max(max)
@@ -1960,8 +2190,8 @@ fn invest_form(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
                         .append([
                             el(El::Span).text("· "),
                             el(El::Span)
-                                .text(&(amount * kind.cost()).to_string())
-                                .live_scaled(ch, kind.cost().max(0) as u32, 1),
+                                .text(&fmt(amount * kind.cost()))
+                                .live_scaled_grouped(ch, kind.cost().max(0) as u32, 1),
                             el(El::Span).text(&format!(" {}", k.currency())),
                         ]),
                 )
@@ -2053,6 +2283,7 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
             .name("soldiers")
             .id("soldiers")
             .channel(ch)
+            .grouped(fmt)
             .label(format!("Hommes d'armes · {} en armes", fmt(k.soldiers)))
             .unit("hommes")
             .min(1)
@@ -2199,6 +2430,7 @@ fn slider(
         .id(name)
         .label(label)
         .unit(unit)
+        .grouped(fmt)
         .min(min)
         .max(max.max(min))
         .value(value)

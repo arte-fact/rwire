@@ -123,6 +123,20 @@ impl Battle {
     pub fn finished(&self) -> bool {
         self.cursor + 1 >= self.frames.len()
     }
+
+    /// Land taken by the end of the battle (the outcome is known from the start).
+    pub fn surface_conquered(&self) -> i32 {
+        match &self.outcome {
+            Outcome::Kingdom(_, r) => r.surface_conquered,
+            Outcome::Barbarians(r) => r.surface_conquered,
+        }
+    }
+
+    /// The land taken so far in the replay: the final spoils, grown frame by frame.
+    pub fn surface_so_far(&self) -> i32 {
+        let last = (self.frames.len() - 1).max(1);
+        (self.surface_conquered() as i64 * self.cursor.min(last) as i64 / last as i64) as i32
+    }
 }
 
 /// Idle rooms are forgotten: empty lobbies after 10 minutes, anything after an hour.
@@ -210,6 +224,9 @@ pub struct Room {
     pub seats: [Seat; 6],
     pub game: EmpireGame,
     pub log: Vec<Entry>,
+    /// Every kingdom's surface at the start of each year (and once more at the
+    /// end): the land curve of the game.
+    pub history: Vec<[i32; 6]>,
     /// Index into [`KINGDOMS`] of the kingdom whose turn it is.
     pub turn: usize,
     /// Step of the active (human) player.
@@ -279,7 +296,12 @@ impl Room {
 
     // -- year & turn order ---------------------------------------------------
 
+    fn surfaces(&self) -> [i32; 6] {
+        std::array::from_fn(|i| self.game.kingdoms[i].surface)
+    }
+
     fn begin_year(&mut self) {
+        self.history.push(self.surfaces());
         let weather = self.game.random_weather();
         self.journal([], weather.sentence());
         for id in KINGDOMS {
@@ -376,6 +398,7 @@ impl Room {
         self.stage = Stage::Over;
         self.battle = None;
         self.queue.clear();
+        self.history.push(self.surfaces());
         self.journal([], "La partie est terminée.");
         true
     }
@@ -814,6 +837,7 @@ pub fn start(rooms: &mut Rooms, ctx: &EventContext) {
     if room.stage == Stage::Lobby && room.seat_of(token).is_some() {
         room.stage = Stage::Playing;
         room.log.clear();
+        room.history.clear();
         room.begin_year();
         room.start_turn();
     }
