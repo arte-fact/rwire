@@ -1709,10 +1709,19 @@ impl ConnectionState {
         // Built-in router: update CurrentRoute so the outlet re-renders the matched
         // view, then reconcile the view's renderer registrations so its stateful
         // regions stay live (and the prior view's are pruned).
+        // The runtime reports its path on every open (including `/`), so a returning
+        // session whose state still points at a previous page lands on the URL it
+        // actually loaded; when nothing changed, the swap is skipped.
         if let Some(router) = crate::router::installed_router() {
-            let update = self.render_route_view_swap(shared, router, path)?;
-            if !update.is_empty() {
-                out.push(update);
+            let same = self
+                .get_state_mut(TypeId::of::<crate::router::CurrentRoute>())
+                .and_then(|s| s.downcast_ref::<crate::router::CurrentRoute>())
+                .is_some_and(|r| r.path() == path);
+            if !same {
+                let update = self.render_route_view_swap(shared, router, path)?;
+                if !update.is_empty() {
+                    out.push(update);
+                }
             }
         }
         if let Some(handler) = route_handler {

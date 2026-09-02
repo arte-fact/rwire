@@ -109,7 +109,8 @@ pub const LIVE_SOURCE: u8 = 0x4F;
 /// The value `v` is the source element's value on `channel`, or — when the
 /// [`LIVE_REMAINDER`] bit is set — `base − Σ` of `channel` and `n` more
 /// channels, with args `[base, n, ch…]` first. Then, by `kind & 0x0F`:
-/// - 0 text: `textContent = v`
+/// - 0 text: `textContent = v` (with [`LIVE_GROUPED`]: digit-grouped per the
+///   page's `<html lang>`)
 /// - 1 fill: `width` = `v`'s position between the source's `min`/`max`
 ///   (remainder: the spent share `Σ / base`)
 /// - 2 scaled `[num, den]`: `textContent = round(v·num/den)`
@@ -120,6 +121,10 @@ pub const LIVE_BIND: u8 = 0x50;
 
 /// `LIVE_BIND` kind bit: the value is `base − Σ channels` rather than one channel.
 pub const LIVE_REMAINDER: u8 = 0x10;
+
+/// `LIVE_BIND` kind bit: text/scaled output is digit-grouped (`toLocaleString`
+/// in the page's language — set it with `CapsuleConfig::lang`).
+pub const LIVE_GROUPED: u8 = 0x20;
 
 // ============================================================================
 // Form Operations

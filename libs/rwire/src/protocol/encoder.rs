@@ -10,9 +10,9 @@ use super::opcodes::{
     BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    LIVE_BIND, LIVE_REMAINDER, LIVE_SOURCE, ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE,
-    ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS,
-    SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
+    LIVE_BIND, LIVE_GROUPED, LIVE_REMAINDER, LIVE_SOURCE, ROUTE_PUSH, ROUTE_PUSH_INLINE,
+    ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM,
+    SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
     STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
     SYMBOL_SESSION_START, WORD_TABLE,
 };
@@ -708,9 +708,9 @@ impl OpcodeBuffer {
         self.buf.put_u8(LIVE_BIND);
         write_varint(&mut self.buf, ref_idx);
         let mut kind = match bind.output {
-            LiveOutput::Text => 0,
+            LiveOutput::Text { grouped } => grouped as u8 * LIVE_GROUPED,
             LiveOutput::Fill => 1,
-            LiveOutput::Scaled { .. } => 2,
+            LiveOutput::Scaled { grouped, .. } => 2 | (grouped as u8 * LIVE_GROUPED),
             LiveOutput::Switch { .. } => 3,
         };
         let (channel, rest) = match &bind.source {
@@ -733,7 +733,7 @@ impl OpcodeBuffer {
             }
         }
         match &bind.output {
-            LiveOutput::Scaled { num, den } => {
+            LiveOutput::Scaled { num, den, .. } => {
                 write_varint(&mut self.buf, *num);
                 write_varint(&mut self.buf, *den);
             }
@@ -743,7 +743,7 @@ impl OpcodeBuffer {
                     write_varint(&mut self.buf, *t);
                 }
             }
-            LiveOutput::Text | LiveOutput::Fill => {}
+            LiveOutput::Text { .. } | LiveOutput::Fill => {}
         }
         self
     }

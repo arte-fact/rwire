@@ -462,13 +462,14 @@ pub enum LiveSource {
 /// What a live binding does with its value `v`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LiveOutput {
-    /// `textContent = v`.
-    Text,
+    /// `textContent = v`; `grouped` formats it with thousands separators in the
+    /// page's language (`CapsuleConfig::lang`).
+    Text { grouped: bool },
     /// `width` as a percentage: `v`'s position between the source's `min`/`max`
     /// for a channel, the spent share `Σ / base` for a remainder.
     Fill,
-    /// `textContent = round(v · num / den)`.
-    Scaled { num: u32, den: u32 },
+    /// `textContent = round(v · num / den)`, `grouped` as for [`Self::Text`].
+    Scaled { num: u32, den: u32, grouped: bool },
     /// Shows child `i` only, for `thresholds[i-1] <= v < thresholds[i]`
     /// (`thresholds.len() + 1` children, ascending thresholds).
     Switch { thresholds: Vec<u32> },
@@ -1216,7 +1217,19 @@ impl ElementBuilder {
 
     /// Mirror a live channel's value as this element's text.
     pub fn live_text(self, channel: u16) -> Self {
-        self.live(LiveSource::Channel(channel), LiveOutput::Text)
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Text { grouped: false },
+        )
+    }
+
+    /// [`Self::live_text`] with thousands separators in the page's language
+    /// (`CapsuleConfig::lang`), matching a server-side formatted figure.
+    pub fn live_text_grouped(self, channel: u16) -> Self {
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Text { grouped: true },
+        )
     }
 
     /// Set this element's width to the live value's position between the
@@ -1230,7 +1243,23 @@ impl ElementBuilder {
     pub fn live_scaled(self, channel: u16, num: u32, den: u32) -> Self {
         self.live(
             LiveSource::Channel(channel),
-            LiveOutput::Scaled { num, den },
+            LiveOutput::Scaled {
+                num,
+                den,
+                grouped: false,
+            },
+        )
+    }
+
+    /// [`Self::live_scaled`] with thousands separators (see [`Self::live_text_grouped`]).
+    pub fn live_scaled_grouped(self, channel: u16, num: u32, den: u32) -> Self {
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Scaled {
+                num,
+                den,
+                grouped: true,
+            },
         )
     }
 
@@ -1254,7 +1283,18 @@ impl ElementBuilder {
                 base,
                 channels: channels.to_vec(),
             },
-            LiveOutput::Text,
+            LiveOutput::Text { grouped: false },
+        )
+    }
+
+    /// [`Self::live_remainder`] with thousands separators (see [`Self::live_text_grouped`]).
+    pub fn live_remainder_grouped(self, base: u32, channels: &[u16]) -> Self {
+        self.live(
+            LiveSource::Remainder {
+                base,
+                channels: channels.to_vec(),
+            },
+            LiveOutput::Text { grouped: true },
         )
     }
 

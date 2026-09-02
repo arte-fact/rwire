@@ -41,6 +41,7 @@ pub struct Slider {
     channel: Option<u16>,
     marks: Vec<(i32, Cow<'static, str>)>,
     readout_suffix: Option<ElementBuilder>,
+    grouped: Option<fn(i32) -> String>,
 }
 
 #[rwire::component]
@@ -122,6 +123,14 @@ impl Slider {
         self
     }
 
+    /// Show the value with thousands separators: `fmt` renders the initial
+    /// figure server-side and the live readout is grouped in the page's language
+    /// (`CapsuleConfig::lang`) — pick a `fmt` that prints the same separator.
+    pub fn grouped(mut self, fmt: fn(i32) -> String) -> Self {
+        self.grouped = Some(fmt);
+        self
+    }
+
     /// Extra content after the live value and unit (e.g. a live percentage).
     pub fn readout_suffix(mut self, suffix: ElementBuilder) -> Self {
         self.readout_suffix = Some(suffix);
@@ -151,12 +160,14 @@ impl Slider {
         let fill_pct = pct(value);
 
         // Label row: label on the left, live value (+ unit) on the right.
+        let figure = el(El::Strong).st([St::TextLg]);
+        let figure = match self.grouped {
+            Some(fmt) => figure.text(&fmt(value)).live_text_grouped(channel),
+            None => figure.text(&value.to_string()).live_text(channel),
+        };
         let mut readout = el(El::Div)
             .st([St::DisplayFlex, St::ItemsBaseline, St::GapXs])
-            .append([el(El::Strong)
-                .st([St::TextLg])
-                .text(&value.to_string())
-                .live_text(channel)]);
+            .append([figure]);
         if let Some(ref unit) = self.unit {
             readout = readout.append([el(El::Span).st([St::TextSm, St::TextMuted]).text(unit)]);
         }

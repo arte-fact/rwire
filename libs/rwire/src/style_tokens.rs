@@ -936,6 +936,11 @@ define_token_enum! {
         /// Slider tick label under the track (`left` set inline).
         SliderMarkLabel = 0x35B => "position:absolute;top:0;white-space:nowrap",
         W05rem = 0x35C => "width:0.5rem",
+        /// A sun/moon rising into place over 2.4s (from below, transparent); the
+        /// element's own opacity is the resting state.
+        AnimateSunUp = 0x35D => "animation:rw-sun-up 2.4s ease-out both",
+        /// Soft glowing disk pinned to a scene's top-right (background set inline).
+        GlowDisk = 0x35E => "position:absolute;right:1.5rem;top:2rem;width:3.5rem;height:3.5rem;border-radius:50%;filter:blur(.5px);pointer-events:none",
     }
 }
 
@@ -1204,8 +1209,9 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     // `--n` must be a registered integer so the browser can interpolate it (St::CountUp).
     "@property --n{syntax:'<integer>';inherits:false;initial-value:0}",
     "@keyframes rw-count{to{--n:var(--to)}}",
+    "@keyframes rw-sun-up{from{opacity:0;transform:translateY(40px)}}",
     ".u853::after{content:counter(n)}",
-    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853{animation-duration:0s!important;animation-delay:0s!important}}"
+    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853,.u861{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
 /// Whether a utility declaration references one of the shared `rw-*` keyframes.
@@ -1416,7 +1422,12 @@ mod tests {
     fn global_css_names_the_reveal_tokens_by_code() {
         // The counter face and the reduced-motion override are written against literal
         // `.u{code}` classes; keep them in step with the enum.
-        for st in [St::AnimateFadeUp, St::AnimateGrow, St::CountUp] {
+        for st in [
+            St::AnimateFadeUp,
+            St::AnimateGrow,
+            St::CountUp,
+            St::AnimateSunUp,
+        ] {
             let class = format!(".u{}", st.as_u16());
             assert!(PSEUDO_GLOBAL_CSS.contains(&class), "{class} missing");
         }

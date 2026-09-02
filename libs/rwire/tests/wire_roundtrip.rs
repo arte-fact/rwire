@@ -56,9 +56,12 @@ fn live_bindings() -> ElementBuilder {
         el(El::Input).at(At::Type, Av::Range).live_source(a),
         el(El::Input).at(At::Type, Av::Range).live_source(b),
         el(El::Span).live_text(a),
+        el(El::Span).live_text_grouped(a),
         el(El::Div).live_fill(a),
         el(El::Span).live_scaled(a, 100, 23_340),
+        el(El::Span).live_scaled_grouped(b, 3, 1),
         el(El::Span).live_remainder(50_000, &[a, b]),
+        el(El::Span).live_remainder_grouped(50_000, &[a, b]),
         el(El::Div).live_remainder_fill(50_000, &[a, b]),
         el(El::Div)
             .live_remainder_switch(50_000, &[a, b], &[0])
