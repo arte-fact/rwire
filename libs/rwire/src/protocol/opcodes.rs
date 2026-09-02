@@ -104,10 +104,22 @@ pub const AUTO_TOGGLE: u8 = 0x4E;
 /// pushed to every element bound to `channel` (client-side only, no round-trip).
 pub const LIVE_SOURCE: u8 = 0x4F;
 
-/// Live value binding: `[ref, channel, kind]` — kind 0 mirrors the source value
-/// as text, kind 1 sets `width` to the value's position between the source's
-/// `min` and `max` (a fill bar).
+/// Live value binding: `[ref, channel, kind, args…]`.
+///
+/// The value `v` is the source element's value on `channel`, or — when the
+/// [`LIVE_REMAINDER`] bit is set — `base − Σ` of `channel` and `n` more
+/// channels, with args `[base, n, ch…]` first. Then, by `kind & 0x0F`:
+/// - 0 text: `textContent = v`
+/// - 1 fill: `width` = `v`'s position between the source's `min`/`max`
+///   (remainder: the spent share `Σ / base`)
+/// - 2 scaled `[num, den]`: `textContent = round(v·num/den)`
+/// - 3 switch `[m, t…]`: shows child `i` only, for `t[i-1] <= v < t[i]`
+///
+/// Varint args except the `n`/`m` counts (one byte).
 pub const LIVE_BIND: u8 = 0x50;
+
+/// `LIVE_BIND` kind bit: the value is `base − Σ channels` rather than one channel.
+pub const LIVE_REMAINDER: u8 = 0x10;
 
 // ============================================================================
 // Form Operations

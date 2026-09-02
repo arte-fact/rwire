@@ -72,6 +72,7 @@ mod blockquote;
 mod breadcrumb;
 mod button;
 mod card;
+pub mod catalog;
 mod checkbox;
 mod code;
 mod container;
@@ -112,7 +113,6 @@ mod theme_toggle;
 mod timeline;
 mod toast;
 mod tooltip;
-pub mod catalog;
 pub mod utils;
 
 pub use accordion::{Accordion, AccordionItem};
@@ -145,7 +145,7 @@ pub use list::{List, ListItem};
 pub use modal::{Modal, ModalSize};
 pub use nav_menu::{NavItem, NavMenu};
 pub use pagination::Pagination;
-pub use progress::Progress;
+pub use progress::{Progress, ProgressIntent};
 pub use radio::Radio;
 pub use select::{Select, SelectOption};
 pub use skeleton::{Skeleton, SkeletonShape};
@@ -153,7 +153,7 @@ pub use slider::Slider;
 pub use spacer::Spacer;
 pub use spinner::{Spinner, SpinnerSize};
 pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify};
-pub use stat::{Stat, StatTrend};
+pub use stat::{Stat, StatSize, StatTone, StatTrend};
 pub use stepper::Stepper;
 pub use switch::Switch;
 pub use table::{Table, TableRow};
@@ -167,6 +167,6 @@ pub use toast::{Toast, ToastContainer, ToastIntent};
 pub use tooltip::{Tooltip, TooltipPosition};
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
-    unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL,
-    Z_MODAL_BACKDROP, Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
+    unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL, Z_MODAL_BACKDROP,
+    Z_POPOVER, Z_STICKY, Z_TOAST, Z_TOOLTIP,
 };

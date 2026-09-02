@@ -10,12 +10,14 @@ use super::opcodes::{
     BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    LIVE_BIND, LIVE_SOURCE, ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE,
-    SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT,
-    SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP,
-    STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    LIVE_BIND, LIVE_REMAINDER, LIVE_SOURCE, ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE,
+    ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS,
+    SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE,
+    STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND,
+    SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
+use crate::builder::{LiveBind, LiveOutput, LiveSource};
 use crate::style_tokens::StyleKey;
 use std::collections::BTreeSet;
 
@@ -700,12 +702,49 @@ impl OpcodeBuffer {
         self
     }
 
-    /// Bind an element to a live value channel (kind 0 = text, 1 = fill width).
-    pub fn live_bind(&mut self, ref_idx: u32, channel: u16, kind: u8) -> &mut Self {
+    /// Bind an element to live value channel(s): `[ref, channel, kind, args…]`
+    /// (see [`LIVE_BIND`]).
+    pub fn live_bind(&mut self, ref_idx: u32, bind: &LiveBind) -> &mut Self {
         self.buf.put_u8(LIVE_BIND);
         write_varint(&mut self.buf, ref_idx);
+        let mut kind = match bind.output {
+            LiveOutput::Text => 0,
+            LiveOutput::Fill => 1,
+            LiveOutput::Scaled { .. } => 2,
+            LiveOutput::Switch { .. } => 3,
+        };
+        let (channel, rest) = match &bind.source {
+            LiveSource::Channel(c) => (*c, None),
+            LiveSource::Remainder { base, channels } => {
+                kind |= LIVE_REMAINDER;
+                let (first, rest) = channels
+                    .split_first()
+                    .map_or((0, &[][..]), |(f, r)| (*f, r));
+                (first, Some((*base, rest)))
+            }
+        };
         write_varint(&mut self.buf, channel as u32);
         self.buf.put_u8(kind);
+        if let Some((base, rest)) = rest {
+            write_varint(&mut self.buf, base);
+            self.buf.put_u8(rest.len() as u8);
+            for ch in rest {
+                write_varint(&mut self.buf, *ch as u32);
+            }
+        }
+        match &bind.output {
+            LiveOutput::Scaled { num, den } => {
+                write_varint(&mut self.buf, *num);
+                write_varint(&mut self.buf, *den);
+            }
+            LiveOutput::Switch { thresholds } => {
+                self.buf.put_u8(thresholds.len() as u8);
+                for t in thresholds {
+                    write_varint(&mut self.buf, *t);
+                }
+            }
+            LiveOutput::Text | LiveOutput::Fill => {}
+        }
         self
     }
 

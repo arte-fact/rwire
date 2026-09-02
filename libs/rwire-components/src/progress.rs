@@ -24,6 +24,27 @@ use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder, Style};
 use std::borrow::Cow;
 
+/// Semantic color of the filled part.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProgressIntent {
+    #[default]
+    Primary,
+    Success,
+    Warning,
+    Error,
+}
+
+impl ProgressIntent {
+    fn token(self) -> St {
+        match self {
+            ProgressIntent::Primary => St::BgPrimary,
+            ProgressIntent::Success => St::BgSuccess,
+            ProgressIntent::Warning => St::BgWarning,
+            ProgressIntent::Error => St::BgError,
+        }
+    }
+}
+
 /// Progress bar builder.
 #[derive(Clone, Debug)]
 pub struct Progress {
@@ -31,6 +52,9 @@ pub struct Progress {
     max: u32,
     label: Option<Cow<'static, str>>,
     extra_class: Option<Cow<'static, str>>,
+    intent: ProgressIntent,
+    thin: bool,
+    bar_tokens: Vec<St>,
 }
 
 impl Default for Progress {
@@ -40,6 +64,9 @@ impl Default for Progress {
             max: 100,
             label: None,
             extra_class: None,
+            intent: ProgressIntent::Primary,
+            thin: false,
+            bar_tokens: Vec::new(),
         }
     }
 }
@@ -75,6 +102,25 @@ impl Progress {
         self
     }
 
+    /// Color of the filled part (default: primary).
+    pub fn intent(mut self, intent: ProgressIntent) -> Self {
+        self.intent = intent;
+        self
+    }
+
+    /// A 4px track instead of 8px — for a bar that annotates a line of text.
+    pub fn thin(mut self, thin: bool) -> Self {
+        self.thin = thin;
+        self
+    }
+
+    /// Extra tokens on the filled part, e.g. `[St::AnimateGrow, St::Delay2]` to
+    /// let the bar grow into place when it appears.
+    pub fn bar_st(mut self, tokens: impl IntoIterator<Item = St>) -> Self {
+        self.bar_tokens.extend(tokens);
+        self
+    }
+
     /// Compute style tokens for the progress container.
     ///
     /// `WFull` makes the bar span its container — without it the track is auto-width and
@@ -93,7 +139,7 @@ impl Progress {
         };
 
         let mut tokens = self.compute_tokens();
-        tokens.push(St::H05rem);
+        tokens.push(if self.thin { St::H025rem } else { St::H05rem });
         let mut container = el(El::Div)
             .st(tokens)
             .at(At::Role, Av::RoleProgressbar)
@@ -114,8 +160,16 @@ impl Progress {
         // keeps a sliver visible at 0%. Rounded to one decimal so sub-percent
         // jitter does not churn the bytes pushed on every re-render — identical
         // rounded values hash-dedup to no update at all.
+        let mut bar_tokens = vec![
+            St::HFull,
+            self.intent.token(),
+            St::RoundedFull,
+            St::TransitionAll,
+            St::MinW05rem,
+        ];
+        bar_tokens.extend(self.bar_tokens);
         let bar = el(El::Div)
-            .st([St::HFull, St::BgPrimary, St::RoundedFull, St::TransitionAll, St::MinW05rem])
+            .st(bar_tokens)
             .style(Style::new().width(&format!("{percentage:.1}%")));
 
         container.append([bar])
@@ -145,13 +199,9 @@ mod tests {
 
     #[test]
     fn test_progress_with_values() {
-        let progress = Progress::new()
-            .value(50)
-            .max(100)
-            .label("Loading");
+        let progress = Progress::new().value(50).max(100).label("Loading");
         assert_eq!(progress.value, 50);
         assert_eq!(progress.max, 100);
         assert_eq!(progress.label.as_deref(), Some("Loading"));
     }
-
 }

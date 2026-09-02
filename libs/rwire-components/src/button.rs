@@ -321,6 +321,11 @@ impl Button {
         builder
     }
 
+    /// Build as the submit button of the `<form id=form_id>` it lives outside of.
+    pub fn submits(self, form_id: &str) -> ElementBuilder {
+        self.build().at_str(At::Form, form_id)
+    }
+
     /// Build with click handler.
     pub fn on_click(self, handler: HandlerSpec) -> ElementBuilder {
         self.build().on(Ev::Click, handler)

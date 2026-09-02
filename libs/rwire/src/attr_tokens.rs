@@ -65,7 +65,7 @@ define_token_enum! {
         AriaChecked = 0x2E => "aria-checked",
         AriaLabelledby = 0x2F => "aria-labelledby",
 
-        // Forms / inputs (0x50-0x5C)
+        // Forms / inputs (0x50-0x5F)
         Min = 0x50 => "min",
         Max = 0x51 => "max",
         Step = 0x52 => "step",
@@ -79,6 +79,9 @@ define_token_enum! {
         Cols = 0x5A => "cols",
         Wrap = 0x5B => "wrap",
         Autofocus = 0x5C => "autofocus",
+        Form = 0x5D => "form",
+        Hidden = 0x5E => "hidden",
+        Autocapitalize = 0x5F => "autocapitalize",
 
         // SVG (0x40-0x49)
         Xmlns = 0x40 => "xmlns",
@@ -175,7 +178,7 @@ define_token_enum! {
         V32 = 0x63 => "32",
         V48 = 0x64 => "48",
 
-        // Autocomplete + form-control values (0x70-0x77)
+        // Autocomplete + form-control values (0x70-0x78)
         Off = 0x70 => "off",
         On = 0x71 => "on",
         Username = 0x72 => "username",
@@ -184,6 +187,7 @@ define_token_enum! {
         OneTimeCode = 0x75 => "one-time-code",
         Numeric = 0x76 => "numeric",
         Decimal = 0x77 => "decimal",
+        Characters = 0x78 => "characters",
     }
 }
 

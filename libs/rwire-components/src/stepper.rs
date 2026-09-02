@@ -26,6 +26,7 @@ pub struct Stepper {
     steps: Vec<Cow<'static, str>>,
     current: usize,
     extra_class: Option<Cow<'static, str>>,
+    compact: bool,
 }
 
 #[rwire::component]
@@ -53,6 +54,13 @@ impl Stepper {
         self
     }
 
+    /// One thin segment per step and a "n/N · Label" caption instead of
+    /// numbered circles — fits any number of steps in a phone's width.
+    pub fn compact(mut self, compact: bool) -> Self {
+        self.compact = compact;
+        self
+    }
+
     /// Compute style tokens for the stepper container.
     pub fn compute_tokens() -> Vec<St> {
         vec![St::DisplayFlex, St::ItemsCenter, St::WFull]
@@ -60,6 +68,9 @@ impl Stepper {
 
     /// Build the stepper into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
+        if self.compact {
+            return self.build_compact();
+        }
         let mut container = el(El::Div).st(Self::compute_tokens());
 
         if let Some(ref extra) = self.extra_class {
@@ -94,8 +105,16 @@ impl Stepper {
                     el(El::Span)
                         .st([
                             St::TextXs,
-                            if i <= self.current { St::TextDefault } else { St::TextMuted },
-                            if i == self.current { St::FontMedium } else { St::FontNormal },
+                            if i <= self.current {
+                                St::TextDefault
+                            } else {
+                                St::TextMuted
+                            },
+                            if i == self.current {
+                                St::FontMedium
+                            } else {
+                                St::FontNormal
+                            },
                         ])
                         .text(label),
                 ]);
@@ -113,6 +132,39 @@ impl Stepper {
             }
         }
 
+        container
+    }
+
+    fn build_compact(self) -> ElementBuilder {
+        let segments = self.steps.iter().enumerate().map(|(i, _)| {
+            let bg = if i < self.current {
+                St::BgAccent
+            } else if i == self.current {
+                St::BgPrimary
+            } else {
+                St::BgMuted
+            };
+            el(El::Div).st([St::Flex1, St::H025rem, St::RoundedFull, bg])
+        });
+        let mut caption = el(El::Div).st([St::TextXs, St::TextMuted]).text(&format!(
+            "{}/{} · ",
+            self.current + 1,
+            self.steps.len()
+        ));
+        if let Some(label) = self.steps.get(self.current) {
+            caption = caption.append([el(El::Strong).st([St::TextDefault]).text(label)]);
+        }
+        let mut container = el(El::Div)
+            .st([St::DisplayFlex, St::FlexCol, St::GapXs, St::WFull])
+            .append([
+                el(El::Div)
+                    .st([St::DisplayFlex, St::GapXs, St::WFull])
+                    .append(segments),
+                caption,
+            ]);
+        if let Some(ref extra) = self.extra_class {
+            container = container.class(extra.as_ref());
+        }
         container
     }
 }
@@ -149,10 +201,7 @@ mod tests {
 
     #[test]
     fn test_stepper_labels() {
-        let stepper = Stepper::new()
-            .step("A")
-            .step("B")
-            .step("C");
+        let stepper = Stepper::new().step("A").step("B").step("C");
         assert_eq!(stepper.steps[0].as_ref(), "A");
         assert_eq!(stepper.steps[2].as_ref(), "C");
     }

@@ -38,6 +38,9 @@ pub struct Slider {
     unit: Option<Cow<'static, str>>,
     name: Option<Cow<'static, str>>,
     id: Option<Cow<'static, str>>,
+    channel: Option<u16>,
+    marks: Vec<(i32, Cow<'static, str>)>,
+    readout_suffix: Option<ElementBuilder>,
 }
 
 #[rwire::component]
@@ -105,22 +108,47 @@ impl Slider {
         self
     }
 
+    /// Use a caller-allocated live channel (from `rwire::builder::next_live_channel`)
+    /// so other elements can follow the thumb with `live_text`/`live_scaled`/…
+    pub fn channel(mut self, channel: u16) -> Self {
+        self.channel = Some(channel);
+        self
+    }
+
+    /// A tick on the track at `value`, with a small label under it. Marks
+    /// outside `min..=max` are ignored.
+    pub fn mark(mut self, value: i32, label: impl Into<Cow<'static, str>>) -> Self {
+        self.marks.push((value, label.into()));
+        self
+    }
+
+    /// Extra content after the live value and unit (e.g. a live percentage).
+    pub fn readout_suffix(mut self, suffix: ElementBuilder) -> Self {
+        self.readout_suffix = Some(suffix);
+        self
+    }
+
     pub fn compute_tokens() -> Vec<St> {
         vec![St::DisplayFlex, St::FlexCol, St::GapXs, St::WFull]
     }
 
     /// Build the slider into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        let channel = rwire::builder::next_live_channel();
+        let channel = self
+            .channel
+            .unwrap_or_else(rwire::builder::next_live_channel);
         let value = self
             .value
             .clamp(self.min.min(self.max), self.max.max(self.min));
         let range = self.max - self.min;
-        let fill_pct = if range > 0 {
-            ((value - self.min) as f64 / range as f64 * 100.0).clamp(0.0, 100.0)
-        } else {
-            0.0
+        let pct = |v: i32| {
+            if range > 0 {
+                ((v - self.min) as f64 / range as f64 * 100.0).clamp(0.0, 100.0)
+            } else {
+                0.0
+            }
         };
+        let fill_pct = pct(value);
 
         // Label row: label on the left, live value (+ unit) on the right.
         let mut readout = el(El::Div)
@@ -131,6 +159,9 @@ impl Slider {
                 .live_text(channel)]);
         if let Some(ref unit) = self.unit {
             readout = readout.append([el(El::Span).st([St::TextSm, St::TextMuted]).text(unit)]);
+        }
+        if let Some(suffix) = self.readout_suffix {
+            readout = readout.append([suffix]);
         }
         let mut header = el(El::Div).st([
             St::DisplayFlex,
@@ -153,6 +184,37 @@ impl Slider {
                 .st([St::SliderFill])
                 .attr("style", &format!("width:{fill_pct:.1}%"))
                 .live_fill(channel)]);
+
+        // Ticks over the track, labels in a row under the control box.
+        let marks: Vec<(f64, Cow<'static, str>)> = self
+            .marks
+            .into_iter()
+            .filter(|&(v, _)| v >= self.min && v <= self.max)
+            .map(|(v, label)| (pct(v), label))
+            .collect();
+        let ticks = marks.iter().map(|(p, _)| {
+            el(El::Div)
+                .st([St::SliderMark])
+                .attr("style", &format!("left:{p:.1}%"))
+        });
+        let labels = (!marks.is_empty()).then(|| {
+            el(El::Div)
+                .st([St::PositionRelative, St::H1rem, St::TextXs, St::TextMuted])
+                .append(marks.iter().map(|(p, label)| {
+                    // Keep edge labels inside the track.
+                    let shift = if *p < 5.0 {
+                        None
+                    } else if *p > 95.0 {
+                        Some(St::TranslateXNegFull)
+                    } else {
+                        Some(St::TransformCenterX)
+                    };
+                    el(El::Span)
+                        .st(std::iter::once(St::SliderMarkLabel).chain(shift))
+                        .attr("style", &format!("left:{p:.1}%"))
+                        .text(label)
+                }))
+        });
 
         // Native range input overlaid on the track: transparent, only the thumb is painted.
         let mut input = el(El::Input)
@@ -189,12 +251,17 @@ impl Slider {
             input = input.on(Ev::Change, handler);
         }
 
-        el(El::Div).st(Self::compute_tokens()).append([
-            header,
-            el(El::Div)
-                .st([St::PositionRelative, St::WFull, St::H3rem])
-                .append([track, input]),
-        ])
+        el(El::Div)
+            .st(Self::compute_tokens())
+            .append([
+                header,
+                el(El::Div)
+                    .st([St::PositionRelative, St::WFull, St::H3rem])
+                    .append([track])
+                    .append(ticks)
+                    .append([input]),
+            ])
+            .append(labels)
     }
 }
 

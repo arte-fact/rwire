@@ -63,12 +63,24 @@ impl Step {
     }
 }
 
+/// One line of a table's journal.
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub year: i32,
+    /// Kingdoms this entry concerns (empty = everyone).
+    pub about: Vec<Kingdoms>,
+    pub text: String,
+}
+
 #[derive(Clone, Default)]
 pub struct Seat {
     /// Token of the connection playing this kingdom; `None` = computer.
     pub owner: Option<u64>,
     pub demo: Option<YearDemography>,
     pub eco: Option<YearEconomy>,
+    /// Bushels eaten by the rats at the start of the year (the season report
+    /// shows the amount; the kingdom only keeps the rate).
+    pub rats: i32,
     /// Feedback from the player's last action.
     pub notice: Option<String>,
     /// Investment type currently selected in the economy form.
@@ -197,7 +209,7 @@ pub struct Room {
     pub stage: Stage,
     pub seats: [Seat; 6],
     pub game: EmpireGame,
-    pub log: Vec<String>,
+    pub log: Vec<Entry>,
     /// Index into [`KINGDOMS`] of the kingdom whose turn it is.
     pub turn: usize,
     /// Step of the active (human) player.
@@ -241,8 +253,14 @@ impl Room {
         self.seat(id).owner.is_none()
     }
 
-    pub fn journal(&mut self, line: impl Into<String>) {
-        self.log.push(line.into());
+    /// Append a journal entry; `about` names the kingdoms it concerns so the
+    /// viewer's own news can be marked.
+    pub fn journal(&mut self, about: impl IntoIterator<Item = Kingdoms>, line: impl Into<String>) {
+        self.log.push(Entry {
+            year: self.game.year,
+            about: about.into_iter().collect(),
+            text: line.into(),
+        });
         if self.log.len() > JOURNAL_LEN {
             self.log.remove(0);
         }
@@ -263,15 +281,18 @@ impl Room {
 
     fn begin_year(&mut self) {
         let weather = self.game.random_weather();
-        self.journal(format!("An {} — {}", self.game.year, weather.sentence()));
+        self.journal([], weather.sentence());
         for id in KINGDOMS {
             let k = self.game.kingdom_mut(id);
             if k.is_dead {
                 continue;
             }
             apply_seed_grain(k);
+            let before_rats = k.grain_stocks;
             apply_rat_loss_rate(k);
+            let rats = before_rats - k.grain_stocks;
             apply_grain_harvest(k, weather);
+            self.seat_mut(id).rats = rats;
         }
         self.turn = 0;
     }
@@ -324,17 +345,20 @@ impl Room {
             let title = k.full_title();
             let (plague, death) = check_random_events(k, starved);
             if plague.occurred {
-                self.journal(format!(
-                    "La peste ravage la {} : {} morts.",
-                    id.name(),
-                    plague.serfs_killed
-                        + plague.merchants_killed
-                        + plague.soldiers_killed
-                        + plague.nobles_killed
-                ));
+                self.journal(
+                    [id],
+                    format!(
+                        "La peste ravage la {} : {} morts.",
+                        id.name(),
+                        plague.serfs_killed
+                            + plague.merchants_killed
+                            + plague.soldiers_killed
+                            + plague.nobles_killed
+                    ),
+                );
             }
             if death.occurred {
-                self.journal(format!("{title} {}.", death_fr(&death.cause)));
+                self.journal([id], format!("{title} {}.", death_fr(&death.cause)));
             }
         }
         if self.check_over() {
@@ -352,7 +376,7 @@ impl Room {
         self.stage = Stage::Over;
         self.battle = None;
         self.queue.clear();
-        self.journal("La partie est terminée.");
+        self.journal([], "La partie est terminée.");
         true
     }
 
@@ -409,17 +433,23 @@ impl Room {
         let Some(id) = self.active() else { return };
         let decision = plan_ai_turn(&mut self.game, id);
         if let Some((amount, price)) = decision.grain_listed {
-            self.journal(format!(
-                "La {} met {amount} boisseaux en vente à {price} la mesure.",
-                id.name()
-            ));
+            self.journal(
+                [id],
+                format!(
+                    "La {} met {amount} boisseaux en vente à {price} la mesure.",
+                    id.name()
+                ),
+            );
         }
         if let Some((seller, amount)) = decision.grain_bought {
-            self.journal(format!(
-                "La {} achète {amount} boisseaux à la {}.",
-                id.name(),
-                seller.name()
-            ));
+            self.journal(
+                [id, seller],
+                format!(
+                    "La {} achète {amount} boisseaux à la {}.",
+                    id.name(),
+                    seller.name()
+                ),
+            );
         }
         for soldiers in decision.barbarian_attacks {
             self.queue.push_back(Attack {
@@ -552,9 +582,10 @@ impl Room {
                 }
             }
         };
-        self.journal(format!(
-            "{attacker} marche sur {foe} avec {soldiers} hommes d'armes."
-        ));
+        self.journal(
+            [attack.attacker].into_iter().chain(attack.target),
+            format!("{attacker} marche sur {foe} avec {soldiers} hommes d'armes."),
+        );
         self.battle = Some(Battle {
             attack: Attack { soldiers, ..attack },
             frames: sample(frames),
@@ -577,7 +608,7 @@ impl Room {
                 apply_barbarian_battle_result(&mut self.game, id, b.attack.soldiers, r);
             }
         }
-        self.journal(b.summary.clone());
+        self.journal([id].into_iter().chain(b.attack.target), b.summary.clone());
         if !self.is_computer(id) {
             self.note(id, b.summary);
         }
@@ -844,15 +875,19 @@ pub fn advance(rooms: &mut Rooms, ctx: &EventContext) {
     }
 }
 
+/// Buy grain from the seller named by the first extra param byte (kingdom number).
 #[handler]
 pub fn buy_grain(rooms: &mut Rooms, ctx: &EventContext) {
-    let Some((token, _, room)) = table(rooms, ctx) else {
+    let Some((token, extra, room)) = table(rooms, ctx) else {
         return;
     };
     let Some(id) = acting(room, token, Step::Trade) else {
         return;
     };
-    let Some(seller) = Kingdoms::from_number(num(ctx, "seller")) else {
+    let Some(seller) = extra
+        .first()
+        .and_then(|&n| Kingdoms::from_number(i32::from(n)))
+    else {
         return;
     };
     if seller == id {
@@ -945,11 +980,40 @@ pub fn feed(rooms: &mut Rooms, ctx: &EventContext) {
     let demo = apply_feed(k, peasants, soldiers);
     let eco = economy_report(k, weather, demo.immigrants);
     apply_economy(k, &eco);
+    let delta = population_delta(&demo);
+    room.journal(
+        [id],
+        format!(
+            "La {} a {} {} sujets taillables et corvéables à merci.",
+            id.name(),
+            delta_verb(delta),
+            delta.abs()
+        ),
+    );
     let seat = room.seat_mut(id);
     seat.demo = Some(demo);
     seat.eco = Some(eco);
     seat.notice = None;
     room.step = Step::Report;
+}
+
+/// Net change of the civilian and military headcount over the year.
+pub fn population_delta(d: &YearDemography) -> i32 {
+    d.births + d.immigrants
+        - d.disease_victims
+        - d.malnutrition_victims
+        - d.starvation_victims
+        - d.soldiers_starvation_victims
+        - d.soldiers_desertion_victims
+}
+
+/// The chronicle's verb for a population delta.
+pub fn delta_verb(delta: i32) -> &'static str {
+    match delta {
+        n if n > 0 => "gagné",
+        n if n < 0 => "perdu",
+        _ => "conservé",
+    }
 }
 
 #[handler]

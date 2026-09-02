@@ -28,6 +28,37 @@ pub enum StatTrend {
     Neutral,
 }
 
+/// Value size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StatSize {
+    /// Compact figure (2xl) for dense dashboards and phone grids.
+    Sm,
+    /// Headline figure (4xl).
+    #[default]
+    Lg,
+}
+
+/// Semantic color of the value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StatTone {
+    #[default]
+    Default,
+    Success,
+    Warning,
+    Error,
+}
+
+impl StatTone {
+    fn token(self) -> St {
+        match self {
+            StatTone::Default => St::TextDefault,
+            StatTone::Success => St::TextSuccess,
+            StatTone::Warning => St::TextWarning,
+            StatTone::Error => St::TextError,
+        }
+    }
+}
+
 /// Stat builder.
 #[derive(Clone, Default)]
 pub struct Stat {
@@ -37,6 +68,8 @@ pub struct Stat {
     trend_dir: Option<StatTrend>,
     trend_text: Option<Cow<'static, str>>,
     extra_class: Option<Cow<'static, str>>,
+    size: StatSize,
+    tone: StatTone,
 }
 
 #[rwire::component]
@@ -74,6 +107,18 @@ impl Stat {
         self
     }
 
+    /// Value size (default: `Lg`).
+    pub fn size(mut self, size: StatSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Color the value semantically (e.g. a deficit in error red).
+    pub fn tone(mut self, tone: StatTone) -> Self {
+        self.tone = tone;
+        self
+    }
+
     /// Compute style tokens for the container.
     pub fn compute_tokens() -> Vec<St> {
         vec![St::DisplayFlex, St::FlexCol, St::GapXs]
@@ -87,18 +132,21 @@ impl Stat {
             container = container.class(extra.as_ref());
         }
 
+        let (label_size, value_size) = match self.size {
+            StatSize::Sm => (St::TextXs, St::Text2xl),
+            StatSize::Lg => (St::TextSm, St::Text4xl),
+        };
+
         // Label (above value)
         if let Some(label) = self.label {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextSm, St::TextMuted, St::FontMedium])
-                    .text(&label),
-            ]);
+            container = container.append([el(El::Div)
+                .st([label_size, St::TextMuted, St::FontMedium])
+                .text(&label)]);
         }
 
         // Value row with optional trend
         let value_el = el(El::Div)
-            .st([St::Text4xl, St::FontBold, St::TextDefault])
+            .st([value_size, St::FontBold, self.tone.token(), St::TabularNums])
             .text(&self.value);
 
         if let (Some(dir), Some(trend_text)) = (self.trend_dir, self.trend_text) {
@@ -109,7 +157,7 @@ impl Stat {
             };
 
             let arrow = match dir {
-                StatTrend::Up => "\u{2191} ", // ↑
+                StatTrend::Up => "\u{2191} ",   // ↑
                 StatTrend::Down => "\u{2193} ", // ↓
                 StatTrend::Neutral => "",
             };
@@ -118,22 +166,18 @@ impl Stat {
                 .st(trend_tokens)
                 .text(&format!("{arrow}{trend_text}"));
 
-            container = container.append([
-                el(El::Div)
-                    .st([St::DisplayFlex, St::ItemsBaseline, St::GapSm])
-                    .append([value_el, trend_el]),
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::DisplayFlex, St::ItemsBaseline, St::GapSm])
+                .append([value_el, trend_el])]);
         } else {
             container = container.append([value_el]);
         }
 
         // Description
         if let Some(description) = self.description {
-            container = container.append([
-                el(El::Div)
-                    .st([St::TextSm, St::TextMuted])
-                    .text(&description),
-            ]);
+            container = container.append([el(El::Div)
+                .st([St::TextSm, St::TextMuted])
+                .text(&description)]);
         }
 
         container

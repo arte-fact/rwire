@@ -81,6 +81,8 @@ pub struct Input {
     max: Option<Cow<'static, str>>,
     step: Option<Cow<'static, str>>,
     pattern: Option<Cow<'static, str>>,
+    maxlength: Option<u32>,
+    autocapitalize: Option<Av>,
     autofocus: bool,
     extra_class: Option<Cow<'static, str>>,
 }
@@ -192,6 +194,19 @@ impl Input {
     /// Set the `spellcheck` attribute.
     pub fn spellcheck(mut self, on: bool) -> Self {
         self.spellcheck = Some(on);
+        self
+    }
+
+    /// Maximum number of characters (`maxlength`).
+    pub fn maxlength(mut self, n: u32) -> Self {
+        self.maxlength = Some(n);
+        self
+    }
+
+    /// Virtual-keyboard capitalisation (`autocapitalize`): `Av::Off`,
+    /// `Av::Characters`, ...
+    pub fn autocapitalize(mut self, mode: Av) -> Self {
+        self.autocapitalize = Some(mode);
         self
     }
 
@@ -335,6 +350,12 @@ impl Input {
         }
         if let Some(ref max) = self.max {
             builder = builder.at_str(At::Max, max);
+        }
+        if let Some(n) = self.maxlength {
+            builder = builder.at_str(At::Maxlength, &n.to_string());
+        }
+        if let Some(mode) = self.autocapitalize {
+            builder = builder.at(At::Autocapitalize, mode);
         }
         if let Some(ref step) = self.step {
             builder = builder.at_str(At::Step, step);

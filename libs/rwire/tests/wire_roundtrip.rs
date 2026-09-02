@@ -46,6 +46,34 @@ fn clamp_card() -> ElementBuilder {
             .text("Some clamped body text that overflows past two lines and is ellipsized.")])
 }
 
+/// Every `LIVE_BIND` output × source with its arguments, over two sliders.
+fn live_bindings() -> ElementBuilder {
+    let (a, b) = (
+        rwire::builder::next_live_channel(),
+        rwire::builder::next_live_channel(),
+    );
+    el(El::Div).append([
+        el(El::Input).at(At::Type, Av::Range).live_source(a),
+        el(El::Input).at(At::Type, Av::Range).live_source(b),
+        el(El::Span).live_text(a),
+        el(El::Div).live_fill(a),
+        el(El::Span).live_scaled(a, 100, 23_340),
+        el(El::Span).live_remainder(50_000, &[a, b]),
+        el(El::Div).live_remainder_fill(50_000, &[a, b]),
+        el(El::Div)
+            .live_remainder_switch(50_000, &[a, b], &[0])
+            .append([el(El::Span).text("trop"), el(El::Span).text("ok")]),
+        el(El::Div)
+            .live_switch(a, &[23_340, 35_010, 46_680])
+            .append([
+                el(El::Span).text("famine"),
+                el(El::Span).bool_attr(At::Hidden).text("nourri"),
+                el(El::Span).bool_attr(At::Hidden).text("bien nourri"),
+                el(El::Span).bool_attr(At::Hidden).text("repu"),
+            ]),
+    ])
+}
+
 /// Exercises the in-flight tokens (new St codes 0x343+ via STYLE_DEF, new At/Av via MAP_DEF).
 fn new_tokens() -> ElementBuilder {
     el(El::Div)
@@ -107,7 +135,9 @@ fn card_list() -> ElementBuilder {
         list = list.append([el(El::Div)
             .st([St::BgSurface, St::PMd, St::RoundedMd, St::FontInheritAll])
             .append([
-                el(El::H3).st([St::TextLg, St::FontSemibold]).text("Card title"),
+                el(El::H3)
+                    .st([St::TextLg, St::FontSemibold])
+                    .text("Card title"),
                 el(El::P)
                     .style(
                         Style::new()
@@ -116,7 +146,11 @@ fn card_list() -> ElementBuilder {
                             .set("-webkit-box-orient", "vertical")
                             .set("overflow", "hidden"),
                     )
-                    .text(if i % 2 == 0 { "even card body" } else { "odd card body, longer" }),
+                    .text(if i % 2 == 0 {
+                        "even card body"
+                    } else {
+                        "odd card body, longer"
+                    }),
             ])]);
     }
     list
@@ -134,11 +168,20 @@ struct CardState {
 struct CardRenderer;
 impl SyncedRenderer for CardRenderer {
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
-        let v = state.downcast_ref::<CardState>().map(|s| s.variant).unwrap_or(0);
+        let v = state
+            .downcast_ref::<CardState>()
+            .map(|s| s.variant)
+            .unwrap_or(0);
         let (clamp, text): (&str, &str) = match v {
             0 => ("2", "first card body"),
-            1 => ("3", "second card body, noticeably longer so it clamps differently"),
-            _ => ("4", "third card body — different again, with more distinct content here"),
+            1 => (
+                "3",
+                "second card body, noticeably longer so it clamps differently",
+            ),
+            _ => (
+                "4",
+                "third card body — different again, with more distinct content here",
+            ),
         };
         Some(
             el(El::Div)
@@ -216,6 +259,7 @@ fn wire_streams_parse_cleanly() {
     let fixtures: Vec<(&str, Vec<u8>)> = vec![
         ("clamp_card", emit_initial(&clamp_card())),
         ("new_tokens", emit_initial(&new_tokens())),
+        ("live_bindings", emit_initial(&live_bindings())),
         ("long_style", emit_initial(&long_style())),
         ("card_list", emit_initial(&card_list())),
         ("large_tree", emit_initial(&large_tree())),
@@ -232,7 +276,11 @@ fn wire_streams_parse_cleanly() {
     }
 
     let harness = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/wire_roundtrip.mjs");
-    let out = match std::process::Command::new("node").arg(harness).arg(&dir).output() {
+    let out = match std::process::Command::new("node")
+        .arg(harness)
+        .arg(&dir)
+        .output()
+    {
         Ok(o) => o,
         Err(e) => {
             // Node is the harness runtime; without it we can't parse. Don't fail CI

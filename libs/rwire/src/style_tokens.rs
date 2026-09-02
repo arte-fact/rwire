@@ -910,6 +910,32 @@ define_token_enum! {
         TranslateYPosFull = 0x348 => "transform:translateY(100%)",
         MaxH85Dvh = 0x349 => "max-height:85dvh",
         RoundedTLg = 0x34A => "border-top-left-radius:var(--R3);border-top-right-radius:var(--R3)",
+        // Reveal choreography: `both` fill keeps the from-state while an `animation-delay`
+        // (Delay1..Delay8, .3s steps) holds the element, so a cascade is pure CSS.
+        AnimateFadeUp = 0x34B => "animation:rw-fade-up .5s ease-out both",
+        AnimateGrow = 0x34C => "transform-origin:left;animation:rw-grow .6s ease-out both",
+        Delay1 = 0x34D => "animation-delay:.3s",
+        Delay2 = 0x34E => "animation-delay:.6s",
+        Delay3 = 0x34F => "animation-delay:.9s",
+        Delay4 = 0x350 => "animation-delay:1.2s",
+        Delay5 = 0x351 => "animation-delay:1.5s",
+        Delay6 = 0x352 => "animation-delay:1.8s",
+        Delay7 = 0x353 => "animation-delay:2.1s",
+        Delay8 = 0x354 => "animation-delay:2.4s",
+        // Counts the registered `--n` from its inline start (default 0) to the inline `--to`
+        // over 1.2s, rendered through `::after{content:counter(n)}` (see PSEUDO_GLOBAL_CSS),
+        // then fades out so a formatted value can take its place (AnimateFadeUp + Delay).
+        CountUp = 0x355 => "animation:rw-count 1.2s cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s 1.2s ease both;counter-reset:n var(--n)",
+        TabularNums = 0x356 => "font-variant-numeric:tabular-nums",
+        H025rem = 0x357 => "height:0.25rem",
+        // Ledger row: label column takes the slack, figure column hugs its content.
+        GridColsFrAuto = 0x358 => "grid-template-columns:minmax(0,1fr) auto",
+        MinH12rem = 0x359 => "min-height:12rem",
+        /// Slider tick on the track (`left` set inline, see `Slider::mark`).
+        SliderMark = 0x35A => "position:absolute;top:50%;width:2px;height:1.125rem;transform:translate(-50%,-50%);background:var(--l);opacity:.45;pointer-events:none",
+        /// Slider tick label under the track (`left` set inline).
+        SliderMarkLabel = 0x35B => "position:absolute;top:0;white-space:nowrap",
+        W05rem = 0x35C => "width:0.5rem",
     }
 }
 
@@ -1165,7 +1191,27 @@ define_token_enum! {
 }
 
 /// Global CSS rules injected alongside pseudo tokens (e.g., @keyframes).
-pub const PSEUDO_GLOBAL_CSS: &str = "@keyframes rw-spin{to{transform:rotate(360deg)}}@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}@keyframes rw-slide-in{from{transform:translateY(1rem);opacity:0}to{transform:translateY(0);opacity:1}}@keyframes rw-ping{75%,100%{transform:scale(2);opacity:0}}@keyframes rw-pulse{50%{opacity:.5}}@keyframes rw-bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}";
+pub const PSEUDO_GLOBAL_CSS: &str = concat!(
+    "@keyframes rw-spin{to{transform:rotate(360deg)}}",
+    "@keyframes rw-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}",
+    "@keyframes rw-slide-in{from{transform:translateY(1rem);opacity:0}to{transform:translateY(0);opacity:1}}",
+    "@keyframes rw-ping{75%,100%{transform:scale(2);opacity:0}}",
+    "@keyframes rw-pulse{50%{opacity:.5}}",
+    "@keyframes rw-bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}",
+    "@keyframes rw-fade-up{from{opacity:0;transform:translateY(8px)}}",
+    "@keyframes rw-fade-out{to{opacity:0}}",
+    "@keyframes rw-grow{from{transform:scaleX(0)}}",
+    // `--n` must be a registered integer so the browser can interpolate it (St::CountUp).
+    "@property --n{syntax:'<integer>';inherits:false;initial-value:0}",
+    "@keyframes rw-count{to{--n:var(--to)}}",
+    ".u853::after{content:counter(n)}",
+    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853{animation-duration:0s!important;animation-delay:0s!important}}"
+);
+
+/// Whether a utility declaration references one of the shared `rw-*` keyframes.
+fn uses_global_keyframes(declaration: &str) -> bool {
+    declaration.contains("rw-")
+}
 
 // ============================================================================
 // CSS Generation Functions
@@ -1182,13 +1228,7 @@ pub fn generate_utility_css(used: &std::collections::HashSet<u16>) -> String {
         if used.contains(&code) {
             use std::fmt::Write;
             let _ = write!(css, ".u{}{{{}}}", code, declaration);
-            if declaration.contains("rw-spin")
-                || declaration.contains("rw-shimmer")
-                || declaration.contains("rw-slide-in")
-                || declaration.contains("rw-ping")
-                || declaration.contains("rw-pulse")
-                || declaration.contains("rw-bounce")
-            {
+            if uses_global_keyframes(declaration) {
                 needs_global_keyframes = true;
             }
         }
@@ -1230,13 +1270,7 @@ pub fn generate_pseudo_css(used: &std::collections::HashSet<(u8, u16)>) -> Strin
                 ".h{}u{}{}{{{}}}",
                 pc_code, st_code, selector, declaration
             );
-            if declaration.contains("rw-spin")
-                || declaration.contains("rw-shimmer")
-                || declaration.contains("rw-slide-in")
-                || declaration.contains("rw-ping")
-                || declaration.contains("rw-pulse")
-                || declaration.contains("rw-bounce")
-            {
+            if uses_global_keyframes(declaration) {
                 needs_spin_keyframes = true;
             }
         }
@@ -1377,6 +1411,19 @@ impl StyleKey {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn global_css_names_the_reveal_tokens_by_code() {
+        // The counter face and the reduced-motion override are written against literal
+        // `.u{code}` classes; keep them in step with the enum.
+        for st in [St::AnimateFadeUp, St::AnimateGrow, St::CountUp] {
+            let class = format!(".u{}", st.as_u16());
+            assert!(PSEUDO_GLOBAL_CSS.contains(&class), "{class} missing");
+        }
+        assert!(PSEUDO_GLOBAL_CSS.contains(&format!(".u{}::after", St::CountUp.as_u16())));
+        let css = generate_utility_css(&HashSet::from([St::CountUp.as_u16()]));
+        assert!(css.contains("@keyframes rw-count"));
+    }
 
     #[test]
     fn test_no_duplicate_codes() {

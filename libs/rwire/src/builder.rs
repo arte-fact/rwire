@@ -438,8 +438,40 @@ pub struct ElementBuilder {
     auto_toggles: Vec<AutoToggle>,
     /// Live value channel this element feeds (client-side, on `input`).
     live_source: Option<u16>,
-    /// Live value channels this element follows: `(channel, kind)`.
-    live_binds: Vec<(u16, u8)>,
+    /// Live value channels this element follows.
+    live_binds: Vec<LiveBind>,
+}
+
+/// A client-side binding of an element to live value channel(s) (see
+/// [`ElementBuilder::live_source`]): what the value is, and what it drives.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LiveBind {
+    pub source: LiveSource,
+    pub output: LiveOutput,
+}
+
+/// Where a live binding's value comes from.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LiveSource {
+    /// The source element's value on `channel`.
+    Channel(u16),
+    /// `base − Σ values` of every channel (what is left of a budget).
+    Remainder { base: u32, channels: Vec<u16> },
+}
+
+/// What a live binding does with its value `v`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LiveOutput {
+    /// `textContent = v`.
+    Text,
+    /// `width` as a percentage: `v`'s position between the source's `min`/`max`
+    /// for a channel, the spent share `Σ / base` for a remainder.
+    Fill,
+    /// `textContent = round(v · num / den)`.
+    Scaled { num: u32, den: u32 },
+    /// Shows child `i` only, for `thresholds[i-1] <= v < thresholds[i]`
+    /// (`thresholds.len() + 1` children, ascending thresholds).
+    Switch { thresholds: Vec<u32> },
 }
 
 impl ElementBuilder {
@@ -1177,17 +1209,79 @@ impl ElementBuilder {
         self
     }
 
-    /// Mirror a live channel's value as this element's text.
-    pub fn live_text(mut self, channel: u16) -> Self {
-        self.live_binds.push((channel, 0));
+    fn live(mut self, source: LiveSource, output: LiveOutput) -> Self {
+        self.live_binds.push(LiveBind { source, output });
         self
+    }
+
+    /// Mirror a live channel's value as this element's text.
+    pub fn live_text(self, channel: u16) -> Self {
+        self.live(LiveSource::Channel(channel), LiveOutput::Text)
     }
 
     /// Set this element's width to the live value's position between the
     /// source's `min` and `max` (a fill bar).
-    pub fn live_fill(mut self, channel: u16) -> Self {
-        self.live_binds.push((channel, 1));
-        self
+    pub fn live_fill(self, channel: u16) -> Self {
+        self.live(LiveSource::Channel(channel), LiveOutput::Fill)
+    }
+
+    /// Text = `round(value · num / den)` — e.g. the value as a percentage of a
+    /// reference (`num = 100`, `den = reference`).
+    pub fn live_scaled(self, channel: u16, num: u32, den: u32) -> Self {
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Scaled { num, den },
+        )
+    }
+
+    /// Show only the child whose band contains the value: child `i` for
+    /// `thresholds[i-1] <= value < thresholds[i]` (`thresholds.len() + 1`
+    /// children, ascending thresholds). Render the initial state yourself with
+    /// `At::Hidden` on the other children.
+    pub fn live_switch(self, channel: u16, thresholds: &[u32]) -> Self {
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Switch {
+                thresholds: thresholds.to_vec(),
+            },
+        )
+    }
+
+    /// Text = `base − Σ values` of the given channels (what is left of a budget).
+    pub fn live_remainder(self, base: u32, channels: &[u16]) -> Self {
+        self.live(
+            LiveSource::Remainder {
+                base,
+                channels: channels.to_vec(),
+            },
+            LiveOutput::Text,
+        )
+    }
+
+    /// Width = `Σ values / base` of the given channels, as a percentage (a
+    /// budget gauge).
+    pub fn live_remainder_fill(self, base: u32, channels: &[u16]) -> Self {
+        self.live(
+            LiveSource::Remainder {
+                base,
+                channels: channels.to_vec(),
+            },
+            LiveOutput::Fill,
+        )
+    }
+
+    /// [`Self::live_switch`] on `base − Σ values` of the given channels (e.g. a
+    /// warning shown while a budget is exceeded: `thresholds = [0]`).
+    pub fn live_remainder_switch(self, base: u32, channels: &[u16], thresholds: &[u32]) -> Self {
+        self.live(
+            LiveSource::Remainder {
+                base,
+                channels: channels.to_vec(),
+            },
+            LiveOutput::Switch {
+                thresholds: thresholds.to_vec(),
+            },
+        )
     }
 
     /// Bind an event handler to this element.
@@ -2647,8 +2741,8 @@ fn emit_live_bindings(buf: &mut OpcodeBuffer, ref_idx: u32, el: &ElementBuilder)
     if let Some(ch) = el.live_source {
         buf.live_source(ref_idx, ch);
     }
-    for &(ch, kind) in &el.live_binds {
-        buf.live_bind(ref_idx, ch, kind);
+    for bind in &el.live_binds {
+        buf.live_bind(ref_idx, bind);
     }
 }
 

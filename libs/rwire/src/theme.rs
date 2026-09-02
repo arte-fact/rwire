@@ -235,6 +235,8 @@ pub struct Theme {
     pub style: ThemeStyle,
     /// Custom color palette (private — use builder methods)
     palette: Option<ColorPalette>,
+    /// Root font size in px below / from the `sm` breakpoint (see [`Theme::base_font_size`]).
+    base_font: Option<(u8, u8)>,
 }
 
 // Theme implements State manually (can't use derive macro from within rwire crate).
@@ -372,6 +374,14 @@ impl Theme {
     /// Get a reference to the palette, if set.
     pub fn palette_ref(&self) -> Option<&ColorPalette> {
         self.palette.as_ref()
+    }
+
+    /// Root font size: `mobile_px` on narrow screens, `desktop_px` from the `sm`
+    /// breakpoint (640px). Every `rem`-based token scales with it, so a dense
+    /// mobile app can run at 14px without touching a single component.
+    pub fn base_font_size(mut self, mobile_px: u8, desktop_px: u8) -> Self {
+        self.base_font = Some((mobile_px, desktop_px));
+        self
     }
 }
 
@@ -634,6 +644,14 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     }
 
     css.push_str("}\n");
+
+    if let Some((mobile, desktop)) = theme.base_font {
+        use std::fmt::Write;
+        let _ = writeln!(
+            css,
+            "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
+        );
+    }
     css
 }
 
@@ -703,6 +721,14 @@ mod tests {
         assert_eq!(theme.radius, RadiusScale::Medium);
         assert_eq!(theme.style, ThemeStyle::soft());
         assert!(theme.palette_ref().is_none());
+    }
+
+    #[test]
+    fn base_font_size_emits_root_rule_only_when_set() {
+        assert!(!generate_theme_css(&Theme::dark()).contains("html{font-size"));
+        let css = generate_theme_css(&Theme::dark().base_font_size(14, 16));
+        assert!(css.contains("html{font-size:14px}"));
+        assert!(css.contains("@media(min-width:640px){html{font-size:16px}}"));
     }
 
     #[test]

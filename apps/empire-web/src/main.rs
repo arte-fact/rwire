@@ -69,14 +69,15 @@ fn on_route(me: &mut Me, ctx: &EventContext) {
     me.tab = 0;
 }
 
-/// Open the bottom sheet for an action; params: `[action, step, year_lo, year_hi]`.
+/// Open the bottom sheet for an action; params: `[action, step, year_lo, year_hi, arg]`.
 #[handler]
 fn open_sheet(me: &mut Me, ctx: &EventContext) {
     let p = ctx.param_bytes();
-    me.sheet = (p.len() >= 4).then(|| ui::Sheet {
+    me.sheet = (p.len() >= 5).then(|| ui::Sheet {
         action: p[0],
         step: p[1],
         year: u16::from_le_bytes([p[2], p[3]]),
+        arg: p[4],
     });
 }
 
@@ -103,7 +104,9 @@ fn root(me: &Me) -> ElementBuilder {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::dark().palette(palettes::gruvbox())
+    Theme::dark()
+        .palette(palettes::gruvbox())
+        .base_font_size(14, 16)
 }
 
 #[async_std::main]
