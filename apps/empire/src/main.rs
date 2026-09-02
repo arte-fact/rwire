@@ -7,7 +7,7 @@ mod assets;
 mod pages;
 mod ui;
 
-use empire_lib::demography::apply_feed;
+use empire_lib::demography::{apply_feed, Council};
 use empire_lib::economy::{apply_economy, economy_report};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::trade::apply_trade;
@@ -71,7 +71,14 @@ fn kingdom_turn(game: &mut EmpireGame, id: Kingdoms) {
     let grain_for_peasants = prompt_grain_for_peasants(game, id);
 
     let kingdom = game.kingdom_mut(id);
-    let demographic_report = apply_feed(kingdom, grain_for_peasants, grain_for_soldiers);
+    let demographic_report = apply_feed(
+        kingdom,
+        Council {
+            grain_for_peasants,
+            grain_for_soldiers,
+            taxes: kingdom.taxes(),
+        },
+    );
     display_demographic_report(kingdom, year, &demographic_report);
 
     let economic_report = economy_report(kingdom, weather, demographic_report.immigrants);

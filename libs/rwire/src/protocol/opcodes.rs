@@ -119,6 +119,11 @@ pub const LIVE_SOURCE: u8 = 0x4F;
 ///   `v`'s position between the source's `min`/`max`, linearly interpolated
 ///   between its `m` evenly spaced entries (`lo` zigzag-encoded, `e` ≥ 0;
 ///   [`LIVE_GROUPED`] as for text, [`LIVE_SIGNED`] prefixes `+`/`−`)
+/// - 5 sum `[base, n, (ch, m, lo, e…)…]`: `textContent` = `base` plus `n`
+///   lookup tables, each read at its own channel's source position (a figure
+///   that depends on several sliders; `base` zigzag-encoded); with
+///   [`LIVE_RANGE`] a second `[base, n, …]` follows and the text is
+///   `low … high`, or the one figure when both agree
 ///
 /// Varint args except the `n`/`m` counts (one byte).
 pub const LIVE_BIND: u8 = 0x50;
@@ -133,6 +138,10 @@ pub const LIVE_GROUPED: u8 = 0x20;
 /// `LIVE_BIND` kind bit: lookup output carries an explicit sign (`+12`, `−3`,
 /// `0`), for a delta.
 pub const LIVE_SIGNED: u8 = 0x40;
+
+/// `LIVE_BIND` kind bit: a sum carries a second table set (its high bound) and
+/// prints the range.
+pub const LIVE_RANGE: u8 = 0x80;
 
 // ============================================================================
 // Form Operations

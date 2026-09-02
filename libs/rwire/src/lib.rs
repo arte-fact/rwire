@@ -79,7 +79,7 @@ pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 // Builder API exports
-pub use builder::{el, ElementBuilder, LiveBind, LiveOutput, LiveSource};
+pub use builder::{el, ElementBuilder, LiveBind, LiveOutput, LiveSource, LiveSum};
 
 // Item reference exports
 pub use item_ref::{ItemRef, IterWithRef};

@@ -482,6 +482,25 @@ pub enum LiveOutput {
         grouped: bool,
         signed: bool,
     },
+    /// `textContent` = `low` (see [`LiveSum`]), or `low … high` when `high` is
+    /// given (the one figure when both agree); digit-grouped, `signed`
+    /// prefixes `+`/`−`.
+    Sum {
+        low: LiveSum,
+        high: Option<LiveSum>,
+        signed: bool,
+    },
+}
+
+/// A figure that depends on several sliders: `base + Σ tables`, each table
+/// read at its own channel's position (see [`ElementBuilder::live_lookup`]).
+/// Centre every table on the sliders' current values (`table(value) = 0`, so
+/// `base` is the figure now) and the sum is exact while one thumb moves at a
+/// time; re-render after a round-trip to re-centre.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LiveSum {
+    pub base: i32,
+    pub terms: Vec<(u16, Vec<i32>)>,
 }
 
 impl ElementBuilder {
@@ -1309,6 +1328,36 @@ impl ElementBuilder {
                 grouped: true,
                 signed: true,
             },
+        )
+    }
+
+    /// Text = a [`LiveSum`]: a figure driven by several sliders, with
+    /// thousands separators (see [`Self::live_text_grouped`]).
+    pub fn live_sum(self, sum: LiveSum) -> Self {
+        self.live_sum_with(sum, None, false)
+    }
+
+    /// [`Self::live_sum`] for a delta: an explicit `+`/`−` sign.
+    pub fn live_sum_signed(self, sum: LiveSum) -> Self {
+        self.live_sum_with(sum, None, true)
+    }
+
+    /// Text = `low … high`, two [`LiveSum`]s bounding a figure (one figure
+    /// when they agree), with thousands separators.
+    pub fn live_range(self, low: LiveSum, high: LiveSum) -> Self {
+        self.live_sum_with(low, Some(high), false)
+    }
+
+    /// [`Self::live_range`] for a delta: explicit `+`/`−` signs.
+    pub fn live_range_signed(self, low: LiveSum, high: LiveSum) -> Self {
+        self.live_sum_with(low, Some(high), true)
+    }
+
+    fn live_sum_with(self, low: LiveSum, high: Option<LiveSum>, signed: bool) -> Self {
+        let channel = low.terms.first().map_or(0, |(ch, _)| *ch);
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Sum { low, high, signed },
         )
     }
 

@@ -3,22 +3,23 @@
 
 use std::borrow::Cow;
 
-use empire_lib::demography::{
-    army_losses_share, army_outlook, nobles_outlook, people_outlook, Outlook, ARMY_LOSS_SPREAD,
-};
+use empire_lib::demography::{army_losses_share, demography_outlook, DemographyOutlook, Outlook};
+use empire_lib::economy::{economy_outlook, EconomyOutlook, Taxes};
 use empire_lib::investments::InvestmentType;
 use empire_lib::trade::{max_land_sale, LAND_SELL_PRICE, MAX_GRAIN_PRICE};
 use empire_lib::{Kingdom, Kingdoms, PlayerTitle, Weather, KINGDOMS};
 use rwire::attr_tokens::{At, Av};
+use rwire::builder::LiveSum;
 use rwire::{el, El, ElementBuilder, Ev, HandlerSpec, Icon, St, Style};
 use rwire_components::{
     Alert, Badge, Button, ButtonIntent, ButtonSize, Card, CardPadding, CopyButton, Drawer,
     DrawerPosition, Gap, Grid, GridColumns, Input, Link, Progress, ProgressIntent, Radio, Slider,
-    Spinner, Stack, StackJustify, Stat, StatSize, StatTone, Stepper, Table, TableRow, Text,
-    TextVariant,
+    Spinner, Stack, StackJustify, Stat, StatSize, StatTone, Stepper, Text, TextVariant,
 };
 
-use crate::room::{self, by, invest_fr, Battle, Entry, Room, Rooms, Seat, Stage, Step};
+use crate::room::{
+    self, by, invest_fr, Battle, Draft, Entry, Field, Room, Rooms, Seat, Stage, Step,
+};
 
 type Label = Cow<'static, str>;
 
@@ -45,8 +46,6 @@ enum Action {
     Buy,
     Sell,
     Land,
-    Taxes,
-    Invest,
 }
 
 impl Action {
@@ -56,8 +55,6 @@ impl Action {
             2 => Action::Buy,
             3 => Action::Sell,
             4 => Action::Land,
-            5 => Action::Taxes,
-            6 => Action::Invest,
             _ => return None,
         })
     }
@@ -68,8 +65,6 @@ impl Action {
             Action::Buy => "Acheter du grain",
             Action::Sell => "Vendre du grain",
             Action::Land => "Vendre des terres",
-            Action::Taxes => "Taux d'imposition",
-            Action::Invest => "Investissements",
         }
     }
 
@@ -78,7 +73,6 @@ impl Action {
         Some(match self {
             Action::Rename => return None,
             Action::Buy | Action::Sell | Action::Land => Step::Trade,
-            Action::Taxes | Action::Invest => Step::Economy,
         })
     }
 }
@@ -113,8 +107,10 @@ pub fn page(
 /// App shell: the root is exactly one dynamic viewport tall and never scrolls;
 /// `main` is the scroll container and the bar sits in normal flow below it. No
 /// `position: fixed`, so a collapsing mobile address bar can't hide or jolt it.
+/// `panel` sits between the header and `main`, out of the scroll.
 fn shell(
     header: ElementBuilder,
+    panel: Option<ElementBuilder>,
     content: ElementBuilder,
     bar: ElementBuilder,
     overlay: Option<ElementBuilder>,
@@ -130,6 +126,7 @@ fn shell(
         ])
         .append([
             header,
+            panel.unwrap_or_else(|| el(El::Div)),
             el(El::Main)
                 .st([St::Flex1, St::MinH0, St::OverflowYAuto, St::WFull])
                 .append([el(El::Div)
@@ -250,9 +247,13 @@ fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
 fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
     let me = t.room.seat_of(t.token);
     let open = sheet.and_then(|sh| open_action(t, me, sh).map(|(id, act)| (id, act, sh.arg)));
-    let (content, action) = match tab {
-        1 => (kingdoms_tab(t), None),
-        2 => (journal_tab(t), None),
+    let View {
+        body,
+        action,
+        panel,
+    } = match tab {
+        1 => View::new(kingdoms_tab(t), None),
+        2 => View::new(journal_tab(t), None),
         _ => partie(t, me, open.is_some()),
     };
     let overlay = open.map(|(id, act, arg)| {
@@ -270,7 +271,13 @@ fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
             .build()
     });
     let tabs = (t.room.stage != Stage::Lobby).then_some(tab);
-    shell(header(t, me), content, bottom_bar(action, tabs), overlay)
+    shell(
+        header(t, me),
+        panel,
+        body,
+        bottom_bar(action, tabs),
+        overlay,
+    )
 }
 
 /// The sheet's action if it is still valid for this viewer at this moment.
@@ -326,8 +333,6 @@ fn sheet_form(t: T, id: Kingdoms, act: Action, arg: u8) -> ElementBuilder {
         Action::Buy => buy_form(t, id, arg),
         Action::Sell => sell_form(t, k),
         Action::Land => land_form(t, k),
-        Action::Taxes => taxes_form(t, k),
-        Action::Invest => invest_form(t, k, t.room.seat(id)),
     }
 }
 
@@ -667,26 +672,42 @@ fn kingdom_card(room: &Room, id: Kingdoms, mine: bool, most: i32) -> ElementBuil
 // Partie tab
 // ---------------------------------------------------------------------------
 
-type View = (ElementBuilder, Option<ElementBuilder>);
+/// What a tab shows: the scrolling body, the bottom bar's primary action and
+/// an optional panel pinned under the header.
+struct View {
+    body: ElementBuilder,
+    action: Option<ElementBuilder>,
+    panel: Option<ElementBuilder>,
+}
+
+impl View {
+    fn new(body: ElementBuilder, action: Option<ElementBuilder>) -> View {
+        View {
+            body,
+            action,
+            panel: None,
+        }
+    }
+}
 
 fn partie(t: T, me: Option<Kingdoms>, sheet_open: bool) -> View {
     let room = t.room;
     match room.stage {
-        Stage::Lobby => (
+        Stage::Lobby => View::new(
             lobby(t, me),
             me.map(|_| primary("Commencer la partie", t.act(room::start()))),
         ),
-        Stage::Over => (
+        Stage::Over => View::new(
             over(room),
             me.map(|_| primary("Nouvelle partie", t.act(room::new_game()))),
         ),
         Stage::Playing => {
             if let Some(b) = &room.battle {
-                return (battle_page(room, b), None);
+                return View::new(battle_page(room, b), None);
             }
             match me {
                 Some(id) if room.active() == Some(id) => turn(t, id, sheet_open),
-                Some(id) if room.game.kingdom(id).is_dead => (
+                Some(id) if room.game.kingdom(id).is_dead => View::new(
                     Stack::column()
                         .gap(Gap::Md)
                         .children([
@@ -701,8 +722,8 @@ fn partie(t: T, me: Option<Kingdoms>, sheet_open: bool) -> View {
                 ),
                 // Seated players simply wait; only unseated viewers (a lost
                 // session, a spectator) are offered the seat-recovery list.
-                Some(_) => (waiting(t), None),
-                None => (
+                Some(_) => View::new(waiting(t), None),
+                None => View::new(
                     Stack::column()
                         .gap(Gap::Md)
                         .children([reclaim_section(t), waiting(t)])
@@ -1253,34 +1274,73 @@ fn turn(t: T, id: Kingdoms, sheet_open: bool) -> View {
     let room = t.room;
     let k = room.game.kingdom(id);
     let seat = room.seat(id);
-    let mut items = vec![stepper(room.step)];
-    if let (Some(notice), false) = (&seat.notice, sheet_open) {
-        items.push(Alert::info().message(notice.clone()).build());
-    }
-    let (body, action) = match room.step {
-        Step::Weather => (weather_step(t, k, seat), Some(next("Au marché", t))),
-        Step::Trade => (trade_step(t, id), Some(next("Passer à l'intendance", t))),
-        Step::Feed => (
-            feed_step(t, k),
-            Some(
-                Button::primary("Nourrir le royaume")
-                    .size(ButtonSize::Lg)
-                    .full_width(true)
-                    .submits(FEED_FORM),
-            ),
-        ),
-        Step::Report => (
-            report_step(t, k, seat),
-            Some(next("Passer à l'économie", t)),
-        ),
-        Step::Economy => (
-            economy_step(t, k, seat),
-            Some(next("Passer à la guerre", t)),
-        ),
-        Step::War => (war_step(t, id), Some(end_turn(t, id))),
+    let notice = match (&seat.notice, sheet_open) {
+        (Some(notice), false) => Some(Alert::info().message(notice.clone()).build()),
+        _ => None,
     };
+    // The council's forecast is pinned under the header, with the stepper
+    // above it; every other step scrolls the stepper with the body.
+    let (body, action, panel) = match room.step {
+        Step::Weather => (weather_step(t, k, seat), Some(next("Au marché", t)), None),
+        Step::Trade => (trade_step(t, id), Some(next("Réunir le conseil", t)), None),
+        Step::Council => {
+            let (body, forecast) = council_step(t, id);
+            (
+                body,
+                Some(
+                    Button::primary("Promulguer")
+                        .size(ButtonSize::Lg)
+                        .full_width(true)
+                        .submits(FEED_FORM),
+                ),
+                Some(forecast),
+            )
+        }
+        Step::Report => (report_step(k, seat), Some(next("Continuer", t)), None),
+        Step::Treasury => (treasury_step(k, seat), Some(next("Continuer", t)), None),
+        Step::Invest => (
+            invest_step(t, k, seat),
+            Some(next("Passer à la guerre", t)),
+            None,
+        ),
+        Step::War => (war_step(t, id), Some(end_turn(t, id)), None),
+    };
+    let mut items = Vec::new();
+    if panel.is_none() {
+        items.push(stepper(room.step));
+    }
+    items.extend(notice);
     items.push(body);
-    (Stack::column().gap(Gap::Md).children(items).build(), action)
+    View {
+        body: Stack::column().gap(Gap::Md).children(items).build(),
+        action,
+        panel: panel.map(|forecast| pinned(stepper(room.step), forecast)),
+    }
+}
+
+/// The chrome strip under the header: flat, on the surface colour, with a
+/// shadow over whatever scrolls beneath.
+fn pinned(stepper: ElementBuilder, forecast: ElementBuilder) -> ElementBuilder {
+    el(El::Div)
+        .st([
+            St::FlexShrink0,
+            St::PositionRelative,
+            St::Z10,
+            St::BgSurface,
+            St::BorderB,
+            St::ShadowMd,
+        ])
+        .append([el(El::Div)
+            .st([
+                St::MaxWMd,
+                St::MxAuto,
+                St::PxMd,
+                St::PySm,
+                St::DisplayFlex,
+                St::FlexCol,
+                St::GapSm,
+            ])
+            .append([stepper, forecast])])
 }
 
 fn stepper(step: Step) -> ElementBuilder {
@@ -1762,152 +1822,712 @@ fn rename_form(t: T, k: &Kingdom) -> ElementBuilder {
 
 const FEED_FORM: &str = "feed";
 
-/// Intendance: both sliders in the page, with the 100/150/200 % marks that
-/// decide the year, a consequence sentence under each, and the budget line.
-/// The bottom-bar CTA submits this form.
-fn feed_step(t: T, k: &Kingdom) -> ElementBuilder {
-    let stocks = k.grain_stocks.max(0);
+// ---------------------------------------------------------------------------
+// Conseil: rations and rates decided together under a forecast in hard
+// bounds. Every figure is `now + Σ (along each slider − now)` with the tables
+// centred on the drafts, so it follows the thumb client-side and is exact
+// while one thumb moves; a release round-trips (`room::draft`) and the view
+// re-centres and redraws the curves.
+// ---------------------------------------------------------------------------
+
+/// Everything the council's decision changes, in bounds.
+#[derive(Clone, Copy)]
+struct Prospect {
+    demo: DemographyOutlook,
+    eco: EconomyOutlook,
+    /// What the gabelle costs the trade (fairs, mills, shipyards) against a nil
+    /// rate — the same dice on both sides, so the bounds are tight.
+    trade_drag: Outlook,
+    /// What the taille costs the cradles against a nil rate, likewise.
+    births_drag: Outlook,
+}
+
+fn prospect(k: &Kingdom, weather: Weather, draft: Draft) -> Prospect {
+    let council = draft.council();
+    let demo = demography_outlook(k, council);
+    let eco = economy_outlook(k, weather, demo.immigrants, council.taxes);
+    let trade = |e: &EconomyOutlook| (e.marketplaces + e.grain_mills).plus(e.shipyards);
+    let free_trade = trade(&economy_outlook(
+        k,
+        weather,
+        demo.immigrants,
+        Taxes {
+            sales: 0,
+            ..council.taxes
+        },
+    ));
+    let free_births = demography_outlook(k, Draft { income: 0, ..draft }.council()).births;
+    Prospect {
+        demo,
+        eco,
+        trade_drag: drag(trade(&eco), free_trade),
+        births_drag: drag(demo.births, free_births),
+    }
+}
+
+/// `taxed − free` when both come from the same draw: the bounds pair up
+/// extreme with extreme.
+fn drag(taxed: Outlook, free: Outlook) -> Outlook {
+    let (a, b) = (taxed.high - free.high, taxed.low - free.low);
+    Outlook {
+        low: a.min(b),
+        expected: taxed.expected - free.expected,
+        high: a.max(b),
+    }
+}
+
+/// One slider: its channel, run and the prospects along it, the other four
+/// held at their drafts. Grain axes are sampled like the curves, rate axes at
+/// every point.
+struct Axis {
+    channel: u16,
+    max: i32,
+    curve: Vec<Prospect>,
+}
+
+/// The council's table: the drafts, the prospect now and every axis.
+struct Board<'a> {
+    k: &'a Kingdom,
+    draft: Draft,
+    now: Prospect,
+    axes: [Axis; 5],
+}
+
+impl Board<'_> {
+    fn new(k: &Kingdom, weather: Weather, draft: Draft) -> Board<'_> {
+        let (peasants_max, soldiers_max) = Draft::bounds(k);
+        let axes = Field::ALL.map(|field| {
+            let (max, values): (i32, Vec<i32>) = match field {
+                Field::Peasants => (peasants_max, samples(peasants_max).collect()),
+                Field::Soldiers => (soldiers_max, samples(soldiers_max).collect()),
+                Field::Customs => (Taxes::MAX_CUSTOMS, (0..=Taxes::MAX_CUSTOMS).collect()),
+                Field::Sales => (Taxes::MAX_SALES, (0..=Taxes::MAX_SALES).collect()),
+                Field::Income => (Taxes::MAX_INCOME, (0..=Taxes::MAX_INCOME).collect()),
+            };
+            let curve = values
+                .into_iter()
+                .map(|v| {
+                    let mut d = draft;
+                    d.set(field, v);
+                    prospect(k, weather, d)
+                })
+                .collect();
+            Axis {
+                channel: rwire::builder::next_live_channel(),
+                max,
+                curve,
+            }
+        });
+        Board {
+            k,
+            draft,
+            now: prospect(k, weather, draft),
+            axes,
+        }
+    }
+
+    fn axis(&self, field: Field) -> &Axis {
+        &self.axes[field as usize]
+    }
+
+    fn channel(&self, field: Field) -> u16 {
+        self.axis(field).channel
+    }
+
+    /// The figure now plus its deviation along every slider it depends on.
+    fn sum(&self, figure: impl Fn(&Prospect) -> i32) -> LiveSum {
+        let base = figure(&self.now);
+        let terms = self
+            .axes
+            .iter()
+            .filter_map(|a| {
+                let table: Vec<i32> = a.curve.iter().map(|p| figure(p) - base).collect();
+                table.iter().any(|&d| d != 0).then_some((a.channel, table))
+            })
+            .collect();
+        LiveSum { base, terms }
+    }
+
+    /// A bounded figure: its bounds now and the sums that follow the thumbs.
+    fn bounds(&self, figure: impl Fn(&Prospect) -> Outlook) -> Bounds {
+        Bounds {
+            now: figure(&self.now),
+            low: self.sum(|p| figure(p).low),
+            high: self.sum(|p| figure(p).high),
+        }
+    }
+
+    /// The slider value where `test` first holds along `field`'s axis (a
+    /// `live_switch` threshold), or past the end if it never does.
+    fn first(&self, field: Field, test: impl Fn(&Prospect) -> bool) -> u32 {
+        let axis = self.axis(field);
+        match axis.curve.iter().position(test) {
+            Some(i)
+                if field == Field::Customs || field == Field::Sales || field == Field::Income =>
+            {
+                i as u32
+            }
+            Some(i) => samples(axis.max).nth(i).unwrap_or(axis.max) as u32,
+            None => axis.max as u32 + 1,
+        }
+    }
+}
+
+/// A figure between two sums.
+struct Bounds {
+    now: Outlook,
+    low: LiveSum,
+    high: LiveSum,
+}
+
+impl Bounds {
+    /// `low … high` (one figure when they agree), coloured by where the range
+    /// sits: green when it can't be negative, red when it can't be positive,
+    /// amber when it may go either way. Deltas print their sign.
+    fn figure(self, signed: bool) -> ElementBuilder {
+        let tone = tone(self.now);
+        self.render(signed, el(El::Strong).st([tone]))
+    }
+
+    /// The same, quietly (a note).
+    fn plain(self, signed: bool) -> ElementBuilder {
+        self.render(signed, el(El::Span))
+    }
+
+    fn render(self, signed: bool, e: ElementBuilder) -> ElementBuilder {
+        let show = |n: i32| if signed { delta(n) } else { fmt(n) };
+        let text = if self.now.low == self.now.high {
+            show(self.now.low)
+        } else {
+            format!("{} … {}", show(self.now.low), show(self.now.high))
+        };
+        let e = e.st([St::TabularNums]).text(&text);
+        if self.low.terms.is_empty() && self.high.terms.is_empty() {
+            e
+        } else if signed {
+            e.live_range_signed(self.low, self.high)
+        } else {
+            e.live_range(self.low, self.high)
+        }
+    }
+}
+
+fn tone(o: Outlook) -> St {
+    if o.low > 0 {
+        St::TextSuccess
+    } else if o.high < 0 {
+        St::TextError
+    } else if o.low < 0 && o.high > 0 {
+        St::TextWarning
+    } else {
+        St::TextDefault
+    }
+}
+
+/// A muted note after a figure (" · 12 à la cour").
+fn note(children: impl IntoIterator<Item = ElementBuilder>) -> ElementBuilder {
+    el(El::Span)
+        .st([St::TextXs, St::TextMuted, St::TabularNums])
+        .append(children)
+}
+
+fn txt(s: &str) -> ElementBuilder {
+    el(El::Span).text(s)
+}
+
+/// Conseil: the five cards (people, ost, customs, gabelle, taille), each a
+/// slider with its outcome lines, curve and sentence, in one form the
+/// bottom-bar CTA submits; and the forecast to pin above them.
+fn council_step(t: T, id: Kingdoms) -> (ElementBuilder, ElementBuilder) {
+    let k = t.room.game.kingdom(id);
+    let b = Board::new(k, t.room.game.weather, t.room.draft(id));
+    let cards = [
+        people_card(t, &b),
+        ost_card(t, &b),
+        tax_card(t, &b, Field::Customs),
+        tax_card(t, &b, Field::Sales),
+        tax_card(t, &b, Field::Income),
+    ];
+    let body = form(t.act(room::feed()), cards)
+        .at_str(At::Id, FEED_FORM)
+        .st([St::GapMd]);
+    (body, forecast(&b, t.room.game.year + 1))
+}
+
+/// The register: five lines in bounds and the grain left after the rations.
+fn forecast(b: &Board, year: i32) -> ElementBuilder {
+    let k = b.k;
+    let d = b.draft;
     let needs = k.peasants_grain_needs();
     let army = k.soldiers_grain_needs();
-    // Beyond 2× the people's needs immigration barely grows; beyond 1.5× the
-    // army's needs efficiency is already maxed — so the sliders stop there.
-    let peasants_max = (needs * 2).min(stocks).max(0);
-    let soldiers_max = (army * 3 / 2).min(stocks).max(0);
-    let peasants = needs.min(peasants_max);
-    let soldiers = army.min(soldiers_max);
-    let (ch_p, ch_s) = (
-        rwire::builder::next_live_channel(),
-        rwire::builder::next_live_channel(),
-    );
-
-    let people_curve: Vec<Outlook> = samples(peasants_max)
-        .map(|g| people_outlook(k, g))
-        .collect();
-    let people = Card::new().padding(CardPadding::Md).children([
-        ration_slider(
-            "peasants",
-            ch_p,
-            format!("Peuple · {} habitants", fmt(k.population())),
-            peasants_max,
-            peasants,
-            needs,
-            &[
-                (needs, "100 %"),
-                (needs * 3 / 2, "150 %"),
-                (needs * 2, "200 %"),
-            ],
-            vec![
-                people_outcome(ch_p, k, peasants, peasants_max, &people_curve),
-                nobles_outcome(ch_p, k, peasants, peasants_max),
-                people_chart(ch_p, peasants, peasants_max, &people_curve),
-            ],
-        ),
-        consequences(
-            ch_p,
-            peasants,
-            &[needs / 2, needs, needs * 3 / 2 + 1],
-            &[
-                "Famine : des sujets meurent de faim, les naissances s'effondrent.",
-                "Mal nourri : la faim fait des victimes, les naissances baissent.",
-                "Nourri : le peuple survit, personne n'immigre.",
-                "Bien nourri : les étrangers immigrent, des nobles s'installent.",
-            ],
-        ),
-    ]);
-
-    let ost_curve: Vec<(i32, Outlook)> =
-        samples(soldiers_max).map(|g| army_outlook(k, g)).collect();
-    let ost = Card::new().padding(CardPadding::Md).children([
-        ration_slider(
-            "soldiers",
-            ch_s,
-            format!("Ost · {} hommes", fmt(k.soldiers)),
-            soldiers_max,
-            soldiers,
-            army,
-            &[(army, "100 %"), (army * 3 / 2, "150 %")],
-            vec![
-                ost_outcome(ch_s, k, soldiers, army, &ost_curve),
-                ost_chart(ch_s, k, soldiers, soldiers_max, &ost_curve),
-            ],
-        ),
-        consequences(
-            ch_s,
-            soldiers,
-            &[army / 2, army, army * 3 / 2],
-            &[
-                "Affamé, l'ost perd des hommes et déserte.",
-                "Rations réduites : des hommes désertent, la force chute vite.",
-                "L'ost combattra à pleine force ; mieux encore à 150 %.",
-                "L'ost combattra à 150 %, son maximum.",
-            ],
-        ),
-    ]);
-
-    let given = peasants + soldiers;
-    let budget = Card::new().padding(CardPadding::Md).children([
-        el(El::Div)
-            .st([St::DisplayFlex, St::JustifyBetween, St::TextSm])
-            .append([
-                el(El::Span).st([St::TextMuted]).text("Distribué"),
+    let stocks = k.grain_stocks.max(0);
+    let (ch_p, ch_s) = (b.channel(Field::Peasants), b.channel(Field::Soldiers));
+    let rate = |field: Field| {
+        el(El::Span)
+            .text(&d.get(field).to_string())
+            .live_text(b.channel(field))
+    };
+    let pct = if needs > 0 {
+        d.peasants * 100 / needs
+    } else {
+        0
+    };
+    let title = el(El::Div)
+        .st([
+            St::DisplayFlex,
+            St::JustifyBetween,
+            St::ItemsBaseline,
+            St::GapSm,
+            St::TextXs,
+            St::TextMuted,
+            St::TextUppercase,
+            St::TrackingWider,
+        ])
+        .append([
+            txt("Prévisionnel"),
+            el(El::Span).st([St::TabularNums]).append([
+                txt(&format!("an {year} · ration ")),
                 el(El::Span)
-                    .st([St::TextMuted])
-                    .text("Reste en réserve ")
-                    .append([
-                        el(El::Strong)
-                            .st([St::TextDefault, St::TabularNums])
-                            .text(&fmt(stocks - given))
-                            .live_remainder_grouped(stocks as u32, &[ch_p, ch_s]),
-                        el(El::Span).text(" bx"),
-                    ]),
+                    .text(&pct.to_string())
+                    .live_scaled(ch_p, 100, needs.max(1) as u32),
+                txt(" % · impôts "),
+                rate(Field::Customs),
+                txt("·"),
+                rate(Field::Sales),
+                txt("·"),
+                rate(Field::Income),
+                txt(" %"),
             ]),
+        ]);
+
+    let row = |label: &str, figure: ElementBuilder, aside: ElementBuilder| {
         el(El::Div)
             .st([
-                St::WFull,
-                St::H05rem,
-                St::RoundedFull,
-                St::BgMuted,
-                St::OverflowHidden,
-                St::MtSm,
+                St::DisplayGrid,
+                St::GridColsAutoFrAuto,
+                St::ItemsBaseline,
+                St::GapSm,
+                St::PyXs,
+                St::TextSm,
             ])
-            .append([el(El::Div)
-                .st([St::HFull, St::BgAccent, St::RoundedFull])
-                .style(Style::new().width(&format!(
-                    "{:.1}%",
-                    if stocks > 0 {
-                        given as f64 / stocks as f64 * 100.0
-                    } else {
-                        0.0
-                    }
-                )))
-                .live_remainder_fill(stocks as u32, &[ch_p, ch_s])]),
-        el(El::P)
-            .st([St::TextSm, St::MtXs])
-            .live_remainder_switch(stocks as u32, &[ch_p, ch_s], &[0])
             .append([
-                hidden_unless(
-                    given > stocks,
-                    el(El::Span)
-                        .st([St::TextError])
-                        .text("Plus de grain que de réserves : l'ost sera servi en dernier."),
-                ),
-                hidden_unless(given <= stocks, el(El::Span)),
-            ]),
-    ]);
+                el(El::Span).st([St::TextMuted]).text(label),
+                figure,
+                aside.st([St::TextXs, St::TextMuted, St::TabularNums, St::TextRight]),
+            ])
+    };
+    let cur = k.currency();
+    let full = army.max(0) as u32;
+    let people = row(
+        "Peuple",
+        el(El::Span).append([b.bounds(|p| p.demo.people).figure(true), txt(" sujets")]),
+        el(El::Span).append([
+            txt(&format!("{} → ", fmt(k.population()))),
+            b.bounds(|p| p.demo.people.plus(k.population()))
+                .plain(false),
+        ]),
+    );
+    let nobles = row(
+        "Nobles",
+        b.bounds(|p| p.demo.nobles).figure(true),
+        el(El::Span).append([
+            txt(&format!("{} → ", fmt(k.nobles))),
+            b.bounds(|p| p.demo.nobles.plus(k.nobles)).plain(false),
+        ]),
+    );
+    let merchants = row(
+        "Marchands",
+        b.bounds(|p| p.demo.merchants).figure(true),
+        el(El::Span).append([
+            txt(&format!("{} → ", fmt(k.merchants))),
+            b.bounds(|p| p.demo.merchants.plus(k.merchants))
+                .plain(false),
+        ]),
+    );
+    let ost = row(
+        "Ost",
+        el(El::Span).append([efficiency(b), txt(" %")]),
+        el(El::Span).live_switch(ch_s, &[full]).append([
+            hidden_unless(
+                d.soldiers < army,
+                el(El::Span).append([
+                    b.bounds(|p| p.demo.army_losses).plain(false),
+                    txt(" hommes perdus"),
+                ]),
+            ),
+            hidden_unless(d.soldiers >= army, txt("aucune perte")),
+        ]),
+    );
+    let treasury = row(
+        "Trésor",
+        el(El::Span).append([
+            b.bounds(|p| p.eco.net()).figure(true),
+            txt(&format!(" {cur}")),
+        ]),
+        el(El::Span).append([
+            txt("au moins "),
+            b.bounds(|p| Outlook::sure(k.treasury + p.eco.net().low))
+                .plain(false),
+            txt(&format!(" {cur}")),
+        ]),
+    );
 
-    form(
-        t.act(room::feed()),
-        [people.build(), ost.build(), budget.build()],
-    )
-    .at_str(At::Id, FEED_FORM)
-    .st([St::GapMd])
+    let given = d.peasants + d.soldiers;
+    let reserve = el(El::Div)
+        .st([St::DisplayFlex, St::JustifyBetween, St::TextSm, St::PtXs])
+        .append([
+            el(El::Span).st([St::TextMuted]).text("Réserve après"),
+            el(El::Span).append([
+                el(El::Strong)
+                    .st([St::TabularNums])
+                    .text(&fmt(stocks - given))
+                    .live_remainder_grouped(stocks as u32, &[ch_p, ch_s]),
+                txt(" bx"),
+            ]),
+        ]);
+    let bar = el(El::Div)
+        .st([
+            St::WFull,
+            St::H05rem,
+            St::RoundedFull,
+            St::BgMuted,
+            St::OverflowHidden,
+            St::MtXs,
+        ])
+        .append([el(El::Div)
+            .st([St::HFull, St::BgAccent, St::RoundedFull])
+            .style(Style::new().width(&format!(
+                "{:.1}%",
+                if stocks > 0 {
+                    given as f64 / stocks as f64 * 100.0
+                } else {
+                    0.0
+                }
+            )))
+            .live_remainder_fill(stocks as u32, &[ch_p, ch_s])]);
+    let overflow = el(El::P)
+        .st([St::TextXs, St::MtXs])
+        .live_remainder_switch(stocks as u32, &[ch_p, ch_s], &[0])
+        .append([
+            hidden_unless(
+                given > stocks,
+                el(El::Span)
+                    .st([St::TextError])
+                    .text("Plus de grain que de réserves : l'ost sera servi en dernier."),
+            ),
+            hidden_unless(given <= stocks, el(El::Span)),
+        ]);
+
+    el(El::Div).append([
+        title,
+        el(El::Div)
+            .st([St::MtXs])
+            .append([people, nobles, merchants, ost, treasury]),
+        reserve,
+        bar,
+        overflow,
+    ])
+}
+
+/// The army's efficiency, red under full rations.
+fn efficiency(b: &Board) -> ElementBuilder {
+    let k = b.k;
+    let army = k.soldiers_grain_needs();
+    let pct: Vec<i32> = b
+        .axis(Field::Soldiers)
+        .curve
+        .iter()
+        .map(|p| p.demo.soldiers_efficiency)
+        .collect();
+    let now = b.now.demo.soldiers_efficiency;
+    let figure = |tone: St, shown: bool| {
+        hidden_unless(
+            shown,
+            el(El::Strong)
+                .st([tone, St::TabularNums])
+                .text(&now.to_string())
+                .live_lookup(b.channel(Field::Soldiers), &pct),
+        )
+    };
+    el(El::Span)
+        .live_switch(b.channel(Field::Soldiers), &[army.max(0) as u32])
+        .append([
+            figure(St::TextError, b.draft.soldiers < army),
+            figure(St::TextSuccess, b.draft.soldiers >= army),
+        ])
+}
+
+/// Peuple: ration, population and court in a year, the headcount curve.
+fn people_card(t: T, b: &Board) -> ElementBuilder {
+    let k = b.k;
+    let needs = k.peasants_grain_needs();
+    let axis = b.axis(Field::Peasants);
+    let value = b.draft.peasants;
+    let curve: Vec<Outlook> = axis.curve.iter().map(|p| p.demo.people).collect();
+    Card::new()
+        .padding(CardPadding::Md)
+        .children([
+            ration_slider(
+                t,
+                Field::Peasants,
+                axis.channel,
+                format!("Peuple · {} habitants", fmt(k.population())),
+                axis.max,
+                value,
+                needs,
+                &[
+                    (needs, "100 %"),
+                    (needs * 3 / 2, "150 %"),
+                    (needs * 2, "200 %"),
+                ],
+                vec![
+                    outcome_row(
+                        "Population dans un an",
+                        b.bounds(|p| p.demo.people).figure(true),
+                    ),
+                    outcome_row(
+                        "Nobles",
+                        el(El::Span).append([
+                            b.bounds(|p| p.demo.nobles).figure(true),
+                            note([txt(&format!(" · {} à la cour", fmt(k.nobles)))]),
+                        ]),
+                    ),
+                    people_chart(axis.channel, value, axis.max, &curve),
+                ],
+            ),
+            consequences(
+                axis.channel,
+                value,
+                &[needs / 2, needs, needs * 5 / 4],
+                &[
+                    "Famine : des sujets meurent de faim, les naissances s'effondrent, la cour se disperse.",
+                    "Mal nourri : la faim fait des victimes, les naissances baissent.",
+                    "Nourri : le peuple survit, personne n'immigre — la douane n'a rien à percevoir.",
+                    "Bien nourri : les étrangers immigrent, des nobles s'installent, la douane rapporte.",
+                ],
+            ),
+        ])
+        .build()
+}
+
+/// Ost: ration, fighting strength and losses, the efficiency curve.
+fn ost_card(t: T, b: &Board) -> ElementBuilder {
+    let k = b.k;
+    let army = k.soldiers_grain_needs();
+    let axis = b.axis(Field::Soldiers);
+    let value = b.draft.soldiers;
+    let curve: Vec<(i32, Outlook)> = axis
+        .curve
+        .iter()
+        .map(|p| (p.demo.soldiers_efficiency, p.demo.army_losses))
+        .collect();
+    let full = army.max(0) as u32;
+    let outcome = outcome_row(
+        "L'ost combattra à",
+        el(El::Span).st([St::TabularNums]).append([
+            efficiency(b),
+            txt(" %"),
+            note([el(El::Span).live_switch(axis.channel, &[full]).append([
+                hidden_unless(
+                    value < army,
+                    el(El::Span).append([
+                        txt(" · "),
+                        b.bounds(|p| p.demo.army_losses).plain(false),
+                        txt(" hommes perdus"),
+                    ]),
+                ),
+                hidden_unless(value >= army, txt(" · aucune perte")),
+            ])]),
+        ]),
+    );
+    Card::new()
+        .padding(CardPadding::Md)
+        .children([
+            ration_slider(
+                t,
+                Field::Soldiers,
+                axis.channel,
+                format!("Ost · {} hommes", fmt(k.soldiers)),
+                axis.max,
+                value,
+                army,
+                &[(army, "100 %"), (army * 3 / 2, "150 %")],
+                vec![outcome, ost_chart(axis.channel, k, value, axis.max, &curve)],
+            ),
+            consequences(
+                axis.channel,
+                value,
+                &[army / 2, army, army * 3 / 2],
+                &[
+                    "Affamé, l'ost perd des hommes et déserte.",
+                    "Rations réduites : des hommes désertent, la force chute vite.",
+                    "L'ost combattra à pleine force ; mieux encore à 150 %.",
+                    "L'ost combattra à 150 %, son maximum.",
+                ],
+            ),
+        ])
+        .build()
+}
+
+/// What a tax card says, per tax.
+struct TaxCopy {
+    label: &'static str,
+    revenue: fn(&Prospect) -> Outlook,
+    marks: &'static [(i32, &'static str)],
+    thresholds: [i32; 3],
+    sentences: [&'static str; 4],
+}
+
+const CUSTOMS: TaxCopy = TaxCopy {
+    label: "Droits de douane",
+    revenue: |p| p.eco.immigration_taxes,
+    marks: &[(25, "25 %"), (50, "50 %")],
+    thresholds: [10, 30, 45],
+    sentences: [
+        "Frontières ouvertes : presque tous entrent, la douane rapporte peu.",
+        "Péage raisonnable : la recette monte plus vite que les entrées ne baissent.",
+        "Au-delà du pic : chaque point coûte plus d'immigrants qu'il ne rapporte.",
+        "Frontière fermée : plus personne n'entre, plus rien à percevoir.",
+    ],
+};
+
+const SALES: TaxCopy = TaxCopy {
+    label: "Gabelle · foires, moulins, marchands",
+    revenue: |p| p.eco.commercial_taxes,
+    marks: &[(10, "10 %"), (20, "20 %")],
+    thresholds: [5, 12, 17],
+    sentences: [
+        "Marchands choyés : les boutiques s'ouvrent, la gabelle rapporte peu.",
+        "Gabelle modérée : le commerce ralentit un peu, la recette suit.",
+        "Le commerce s'étiole : des marchands ferment boutique.",
+        "Les marchands fuient la gabelle, les foires se vident.",
+    ],
+};
+
+const INCOME: TaxCopy = TaxCopy {
+    label: "Taille · paysans, nobles, domaines",
+    revenue: |p| Outlook::sure(p.eco.income_taxes),
+    marks: &[(20, "20 %"), (35, "35 %")],
+    thresholds: [12, 24, 30],
+    sentences: [
+        "Taille légère : le peuple prospère, le trésor moins.",
+        "Taille ordinaire : la cour reste, les naissances fléchissent un peu.",
+        "Taille lourde : les nobles quittent la cour, les berceaux se vident.",
+        "Taille écrasante : la fraude ronge la recette, la cour se vide.",
+    ],
+};
+
+/// A tax: its rate, the revenue and what it costs, the revenue curve.
+fn tax_card(t: T, b: &Board, field: Field) -> ElementBuilder {
+    let cur = b.k.currency();
+    let axis = b.axis(field);
+    let ch = axis.channel;
+    let value = b.draft.get(field);
+    let copy = match field {
+        Field::Customs => CUSTOMS,
+        Field::Sales => SALES,
+        Field::Income => INCOME,
+        Field::Peasants | Field::Soldiers => unreachable!("grain sliders have their own cards"),
+    };
+    // What the tax costs: the entries, the trade or the cradles.
+    let cost = match field {
+        Field::Customs => {
+            // Nobody enters under a plain ration, whatever the rate.
+            let open = b.first(Field::Peasants, |p| p.demo.immigrants.high > 0);
+            let closed = b.now.demo.immigrants.high == 0;
+            outcome_row(
+                "Immigrants",
+                el(El::Span).append([
+                    b.bounds(|p| p.demo.immigrants).figure(false),
+                    note([el(El::Span)
+                        .live_switch(b.channel(Field::Peasants), &[open])
+                        .append([
+                            hidden_unless(closed, txt(" · personne n'entre")),
+                            hidden_unless(
+                                !closed,
+                                el(El::Span).append([
+                                    txt(" · dont "),
+                                    b.bounds(|p| p.demo.nobles_immigrants).plain(false),
+                                    txt(" nobles"),
+                                ]),
+                            ),
+                        ])]),
+                ]),
+            )
+        }
+        Field::Sales => outcome_row(
+            "Commerce",
+            el(El::Span).append([
+                b.bounds(|p| p.trade_drag).figure(true),
+                txt(&format!(" {cur}")),
+                note([
+                    txt(" · marchands "),
+                    b.bounds(|p| p.demo.merchants).plain(true),
+                ]),
+            ]),
+        ),
+        _ => {
+            let flight = b.first(Field::Income, |p| p.demo.nobles_departed.high > 0);
+            let stays = b.now.demo.nobles_departed.high == 0;
+            outcome_row(
+                "Naissances",
+                el(El::Span).append([
+                    b.bounds(|p| p.births_drag).figure(true),
+                    note([el(El::Span).live_switch(ch, &[flight]).append([
+                        hidden_unless(stays, txt(" · la cour reste")),
+                        hidden_unless(
+                            !stays,
+                            el(El::Span).append([
+                                txt(" · "),
+                                b.bounds(|p| p.demo.nobles_departed).plain(false),
+                                txt(" nobles partent"),
+                            ]),
+                        ),
+                    ])]),
+                ]),
+            )
+        }
+    };
+    let revenue = outcome_row(
+        "Recette",
+        el(El::Span).append([
+            b.bounds(copy.revenue).figure(false),
+            txt(&format!(" {cur}")),
+            note([hidden_unless(field == Field::Income, txt(" · sûr"))]),
+        ]),
+    );
+    let curve: Vec<Outlook> = axis.curve.iter().map(copy.revenue).collect();
+    let mut slider = Slider::new()
+        .name(field.name())
+        .id(field.name())
+        .channel(ch)
+        .label(copy.label)
+        .unit("%")
+        .min(0)
+        .max(axis.max)
+        .value(value)
+        .on_change(by(room::draft(), t.token, t.code, &[field as u8]))
+        .above_track(revenue)
+        .above_track(cost)
+        .above_track(revenue_chart(ch, value, axis.max, &curve));
+    for &(at, label) in copy.marks {
+        slider = slider.mark(at, label);
+    }
+    Card::new()
+        .padding(CardPadding::Md)
+        .children([
+            slider.build(),
+            consequences(ch, value, &copy.thresholds, &copy.sentences),
+        ])
+        .build()
 }
 
 /// A grain slider whose readout also shows the value as a percentage of `needs`,
-/// with `above_track` content (outcome line, chart) between readout and track.
+/// with `above_track` content (outcome lines, chart) between readout and track.
 #[allow(clippy::too_many_arguments)]
 fn ration_slider(
-    name: &'static str,
+    t: T,
+    field: Field,
     channel: u16,
     label: String,
     max: i32,
@@ -1918,8 +2538,8 @@ fn ration_slider(
 ) -> ElementBuilder {
     let pct = if needs > 0 { value * 100 / needs } else { 0 };
     let mut s = Slider::new()
-        .name(name)
-        .id(name)
+        .name(field.name())
+        .id(field.name())
         .channel(channel)
         .grouped(fmt)
         .label(label)
@@ -1927,6 +2547,7 @@ fn ration_slider(
         .min(0)
         .max(max)
         .value(value)
+        .on_change(by(room::draft(), t.token, t.code, &[field as u8]))
         .readout_suffix(
             el(El::Span)
                 .st([St::TextSm, St::TextMuted, St::TabularNums])
@@ -1964,24 +2585,6 @@ fn samples(max: i32) -> impl Iterator<Item = i32> {
 
 fn sample_x(i: usize) -> f64 {
     i as f64 / (CURVE_SAMPLES - 1) as f64 * CHART_W
-}
-
-/// The slider value where `f` first reaches zero or more, interpolated between
-/// samples (a `live_switch` threshold), or `max` if it never does.
-fn crossing(max: i32, values: impl Fn(usize) -> i32) -> u32 {
-    for i in 1..CURVE_SAMPLES {
-        let (a, b) = (values(i - 1), values(i));
-        if b >= 0 {
-            let step = max as f64 / (CURVE_SAMPLES - 1) as f64;
-            let t = if b > a {
-                -a as f64 / (b - a) as f64
-            } else {
-                0.0
-            };
-            return ((i - 1) as f64 * step + t.clamp(0.0, 1.0) * step).round() as u32;
-        }
-    }
-    max.max(0) as u32
 }
 
 fn curve_path(points: impl Iterator<Item = (f64, f64)>) -> String {
@@ -2142,9 +2745,12 @@ fn ost_chart(
     if k.soldiers > 0 {
         // The smooth curve behind the rounded figures, so a small army doesn't
         // draw a staircase.
-        let share: Vec<f64> = samples(max)
-            .map(|g| army_losses_share(k, g) as f64 * 100.0)
-            .collect();
+        let (share, spread): (Vec<f64>, Vec<f64>) = samples(max)
+            .map(|g| {
+                let (s, spread) = army_losses_share(k, g);
+                (s as f64 * 100.0, spread as f64)
+            })
+            .unzip();
         let pts = |scale: f64| -> Vec<(f64, f64)> {
             share
                 .iter()
@@ -2152,7 +2758,7 @@ fn ost_chart(
                 .map(|(i, s)| (sample_x(i), y(s * scale)))
                 .collect()
         };
-        let spread = ARMY_LOSS_SPREAD as f64;
+        let spread = spread.first().copied().unwrap_or(0.0);
         paths.extend([
             fill(
                 &area_path(&pts(1.0 + spread), &pts(1.0 - spread)),
@@ -2187,51 +2793,43 @@ fn delta(n: i32) -> String {
     format!("{sign}{}", fmt(n.abs()))
 }
 
-/// "(−33 … +154)": the spread of the draw, read back from the two tables.
-fn range(channel: u16, now: Outlook, low: &[i32], high: &[i32]) -> ElementBuilder {
-    el(El::Span)
-        .st([St::TextXs, St::TextMuted])
-        .text(" (")
-        .append([
-            el(El::Span)
-                .text(&delta(now.low))
-                .live_lookup_signed(channel, low),
-            el(El::Span).text(" … "),
-            el(El::Span)
-                .text(&delta(now.high))
-                .live_lookup_signed(channel, high),
-            el(El::Span).text(")"),
-        ])
-}
-
-/// "Nobles à la cour : +2 (0 … +4)" — the court grows with plenty and
-/// empties in a famine.
-fn nobles_outcome(channel: u16, k: &Kingdom, value: i32, max: i32) -> ElementBuilder {
-    let curve: Vec<Outlook> = samples(max).map(|g| nobles_outlook(k, g)).collect();
-    let now = nobles_outlook(k, value);
-    let expected: Vec<i32> = curve.iter().map(|o| o.expected).collect();
-    let low: Vec<i32> = curve.iter().map(|o| o.low).collect();
-    let high: Vec<i32> = curve.iter().map(|o| o.high).collect();
-    let break_even = crossing(max, |i| expected[i]);
-    let figure = |tone: St, shown: bool| {
-        hidden_unless(
-            shown,
-            el(El::Strong)
-                .st([tone, St::TabularNums])
-                .text(&delta(now.expected))
-                .live_lookup_signed(channel, &expected),
-        )
+/// A tax's revenue band, from nothing to the best it can bring in.
+fn revenue_chart(channel: u16, value: i32, max: i32, curve: &[Outlook]) -> ElementBuilder {
+    let top = curve.iter().map(|o| o.high).max().unwrap_or(0).max(1) as f64;
+    let y =
+        |v: i32| CHART_PAD + (top - v as f64).clamp(0.0, top) / top * (CHART_H - 2.0 * CHART_PAD);
+    let x = |i: usize| {
+        CHART_PAD + i as f64 / (curve.len() - 1).max(1) as f64 * (CHART_W - 2.0 * CHART_PAD)
     };
-    outcome_row(
-        &format!("Nobles à la cour · {}", fmt(k.nobles)),
-        el(El::Span).st([St::TabularNums]).append([
-            el(El::Span).live_switch(channel, &[break_even]).append([
-                figure(St::TextError, now.expected < 0),
-                figure(St::TextSuccess, now.expected >= 0),
-            ]),
-            range(channel, now, &low, &high),
-        ]),
-    )
+    let pts = |pick: fn(&Outlook) -> i32| -> Vec<(f64, f64)> {
+        curve
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (x(i), y(pick(o))))
+            .collect()
+    };
+    let half = (top / 2.0).round() as i32;
+    let paths = vec![
+        gridline(y(top as i32), true),
+        gridline(y(half), true),
+        gridline(y(0), false),
+        fill(
+            &area_path(&pts(|o| o.high), &pts(|o| o.low)),
+            "var(--k)",
+            ".12",
+        ),
+        stroke(
+            &curve_path(pts(|o| o.expected).into_iter()),
+            "var(--k)",
+            "1.8",
+        ),
+    ];
+    let labels = vec![
+        (y(top as i32), fmt(top as i32)),
+        (y(half), fmt(half)),
+        (y(0), "0".to_string()),
+    ];
+    chart_frame(channel, value, max, paths, labels)
 }
 
 fn outcome_row(label: &str, figure: ElementBuilder) -> ElementBuilder {
@@ -2244,93 +2842,6 @@ fn outcome_row(label: &str, figure: ElementBuilder) -> ElementBuilder {
             St::TextSm,
         ])
         .append([el(El::Span).st([St::TextMuted]).text(label), figure])
-}
-
-/// "Population dans un an : +61 (−33 … +154)", colored by sign.
-fn people_outcome(
-    channel: u16,
-    k: &Kingdom,
-    value: i32,
-    max: i32,
-    curve: &[Outlook],
-) -> ElementBuilder {
-    let now = people_outlook(k, value);
-    let expected: Vec<i32> = curve.iter().map(|o| o.expected).collect();
-    let low: Vec<i32> = curve.iter().map(|o| o.low).collect();
-    let high: Vec<i32> = curve.iter().map(|o| o.high).collect();
-    let break_even = crossing(max, |i| expected[i]);
-    let figure = |tone: St, shown: bool| {
-        hidden_unless(
-            shown,
-            el(El::Strong)
-                .st([tone, St::TabularNums])
-                .text(&delta(now.expected))
-                .live_lookup_signed(channel, &expected),
-        )
-    };
-    outcome_row(
-        "Population dans un an",
-        el(El::Span).st([St::TabularNums]).append([
-            el(El::Span).live_switch(channel, &[break_even]).append([
-                figure(St::TextError, now.expected < 0),
-                figure(St::TextSuccess, now.expected >= 0),
-            ]),
-            range(channel, now, &low, &high),
-        ]),
-    )
-}
-
-/// "L'ost combattra à 100 % · aucune perte" / "· 4–7 hommes perdus".
-fn ost_outcome(
-    channel: u16,
-    k: &Kingdom,
-    value: i32,
-    army: i32,
-    curve: &[(i32, Outlook)],
-) -> ElementBuilder {
-    let (efficiency, losses) = army_outlook(k, value);
-    let pct: Vec<i32> = curve.iter().map(|(e, _)| *e).collect();
-    let low: Vec<i32> = curve.iter().map(|(_, o)| o.low).collect();
-    let high: Vec<i32> = curve.iter().map(|(_, o)| o.high).collect();
-    let figure = |tone: St, shown: bool| {
-        hidden_unless(
-            shown,
-            el(El::Strong)
-                .st([tone, St::TabularNums])
-                .text(&efficiency.to_string())
-                .live_lookup(channel, &pct),
-        )
-    };
-    let full = army.max(0) as u32;
-    outcome_row(
-        "L'ost combattra à",
-        el(El::Span).st([St::TabularNums]).append([
-            el(El::Span).live_switch(channel, &[full]).append([
-                figure(St::TextError, value < army),
-                figure(St::TextSuccess, value >= army),
-            ]),
-            el(El::Span).text(" %"),
-            el(El::Span)
-                .st([St::TextXs, St::TextMuted])
-                .live_switch(channel, &[full])
-                .append([
-                    hidden_unless(
-                        value < army,
-                        el(El::Span).text(" · ").append([
-                            el(El::Span)
-                                .text(&losses.low.to_string())
-                                .live_lookup(channel, &low),
-                            el(El::Span).text("–"),
-                            el(El::Span)
-                                .text(&losses.high.to_string())
-                                .live_lookup(channel, &high),
-                            el(El::Span).text(" hommes perdus"),
-                        ]),
-                    ),
-                    hidden_unless(value >= army, el(El::Span).text(" · aucune perte")),
-                ]),
-        ]),
-    )
 }
 
 /// The sentence under a slider: one per band, thresholds ascending; the client
@@ -2363,15 +2874,14 @@ fn hidden_unless(shown: bool, e: ElementBuilder) -> ElementBuilder {
 }
 
 /// Peuple: the census counts from last year's headcount to this year's while
-/// the causes appear one by one, each with a bar; the ost closes with its
-/// efficiency gauge and the chronicle sentence stays, in italics.
-fn report_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
+/// the causes appear one by one, each with a bar.
+fn report_step(k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let Some(d) = &seat.demo else {
         return el(El::Div);
     };
-    let delta = room::population_delta(d);
-    let after = k.total_population();
-    let before = after - delta;
+    let change = d.population_delta();
+    let after = k.population();
+    let before = after - change;
 
     let census = el(El::Div)
         .st([St::TextCenter, St::PtMd, St::PbSm])
@@ -2392,7 +2902,7 @@ fn report_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
                 .append([count_up(before, after, 0)]),
             reveal(
                 COUNT_SLOTS,
-                el(El::Div).st([St::MtSm]).append([match delta {
+                el(El::Div).st([St::MtSm]).append([match change {
                     n if n > 0 => Badge::success(format!("+{} sujets", fmt(n))),
                     n if n < 0 => Badge::error(format!("−{} sujets", fmt(-n))),
                     _ => Badge::default_badge("population stable"),
@@ -2404,15 +2914,17 @@ fn report_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let causes = [
         (d.births, "Naissances"),
         (
-            d.immigrants - d.nobles_immigrants,
+            d.immigrants - d.nobles_immigrants - d.merchants_immigrants,
             "Étrangers venus s'installer",
         ),
         (d.nobles_immigrants, "Nobles venus à la cour"),
-        (d.merchants_settled, "Marchands ayant ouvert boutique"),
+        (d.merchants_immigrants, "Marchands venus d'ailleurs"),
+        (d.merchants_settled, "Serfs devenus marchands"),
         (-d.disease_victims, "Morts de maladie"),
         (-d.malnutrition_victims, "Morts de faim"),
         (-d.starvation_victims, "Morts de misère"),
-        (-d.nobles_departed, "Nobles ayant fui la disette"),
+        (-d.nobles_departed, "Nobles ayant quitté la cour"),
+        (-d.merchants_departed, "Marchands ayant fermé boutique"),
         (
             -d.soldiers_starvation_victims,
             "Hommes d'armes morts d'épuisement",
@@ -2483,155 +2995,384 @@ fn report_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             ])
             .text(&format!(
                 "Vous avez {} {} sujets taillables et corvéables à merci.",
-                room::delta_verb(delta),
-                fmt(delta.abs())
+                room::delta_verb(change),
+                fmt(change.abs())
             )),
     ));
 
-    tap_through(
-        t,
-        "Touchez l'écran pour passer à l'économie",
-        slot + 1,
-        vec![census, el(El::Div).st([St::PxXs]).append(rows)],
-    )
+    Stack::column()
+        .gap(Gap::Md)
+        .children([census, el(El::Div).st([St::PxXs]).append(rows)])
+        .build()
 }
 
-/// Économie: one-line reminder of the census, the year's income in five
-/// lines (the three taxes share one), then Investir and the tax rates.
-fn economy_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
-    let mut items = Vec::new();
-    if let Some(d) = &seat.demo {
-        let delta = room::population_delta(d);
-        items.push(
-            el(El::P)
-                .st([St::TextSm, St::TextMuted])
-                .text("Peuple ")
-                .append([
-                    signed(delta).st([St::FontSemibold, St::TabularNums]),
-                    el(El::Span).text(&format!(
-                        " sujets · {} habitants · ost à ",
-                        fmt(k.total_population())
-                    )),
-                    el(El::Strong)
-                        .st([St::TextDefault, St::TabularNums])
-                        .text(&format!("{} %", d.soldiers_efficiency)),
-                ]),
-        );
-    }
-    if let Some(e) = &seat.eco {
-        let mut rows = vec![
-            (
-                "Champs de foire",
-                fmt(k.marketplaces),
-                e.marketplaces_profits,
-            ),
-            ("Moulins", fmt(k.grain_mills), e.grain_mills_profits),
-            ("Fonderies", fmt(k.foundries), e.foundries_profits),
-        ];
-        if k.shipyards > 0 {
-            rows.push(("Chantiers navals", fmt(k.shipyards), e.shipyards_profits));
-        }
-        rows.push(("Hommes d'armes", fmt(k.soldiers), -e.soldiers_maintenance));
-        rows.push((
-            "Taxes",
-            format!(
-                "{} · {} · {} %",
-                k.immigration_taxes, k.commercial_taxes, k.income_taxes
-            ),
-            e.immigration_taxes_profits + e.commercial_taxes_profits + e.income_taxes_profits,
-        ));
-        let mut tbl = Table::new()
-            .headers(["Poste", "Nb", "Profit"])
-            .striped(true);
-        for (label, count, profit) in rows {
-            tbl = tbl.row(TableRow::new().cells([label.to_string(), count, fmt(profit)]));
-        }
-        items.push(section(
-            format!("Revenus · {} {}", fmt(e.net()), k.currency()),
-            tbl.build(),
-        ));
-    }
-    items.push(two(
-        opener(t, Action::Invest, "Investir", false, true),
-        opener(t, Action::Taxes, "Taux d'imposition", false, false),
-    ));
-    Stack::column().gap(Gap::Md).children(items).build()
-}
+/// Trésor: the same mould as the census — the treasury counts from last
+/// year's balance to this year's, then every source of income appears in
+/// turn, the largest first, the cost of the ost last.
+fn treasury_step(k: &Kingdom, seat: &Seat) -> ElementBuilder {
+    let Some(e) = &seat.eco else {
+        return el(El::Div);
+    };
+    let change = e.net();
+    let after = k.treasury;
+    let before = after - change;
+    let cur = k.currency();
 
-fn taxes_form(t: T, k: &Kingdom) -> ElementBuilder {
-    form(
-        t.act(room::set_taxes()),
-        [
-            slider(
-                "customs",
-                "Droits de douane",
+    let kpi = el(El::Div)
+        .st([St::TextCenter, St::PtMd, St::PbSm])
+        .append([
+            reveal(
                 0,
-                50,
-                k.immigration_taxes,
-                "%",
+                el(El::Div)
+                    .st([
+                        St::TextXs,
+                        St::TextMuted,
+                        St::TextUppercase,
+                        St::TrackingWider,
+                    ])
+                    .text("Trésor"),
             ),
-            slider("sales", "Taxe commerciale", 0, 20, k.commercial_taxes, "%"),
-            slider("income", "Impôts directs", 0, 35, k.income_taxes, "%"),
-            Button::primary("Promulguer").full_width(true).build(),
-        ],
-    )
+            el(El::Div)
+                .st([St::Text4xl, St::FontBold, St::LeadingNone, St::MtXs])
+                .append([count_up(before, after, 0)]),
+            reveal(
+                COUNT_SLOTS,
+                el(El::Div).st([St::MtSm]).append([match change {
+                    n if n > 0 => Badge::success(format!("+{} {cur}", fmt(n))),
+                    n if n < 0 => Badge::error(format!("−{} {cur}", fmt(-n))),
+                    _ => Badge::default_badge("trésor inchangé"),
+                }
+                .build()]),
+            ),
+        ]);
+
+    let rate = |r: i32| format!("{r} %");
+    let mut sources = vec![
+        (
+            "Champs de foire",
+            fmt(k.marketplaces),
+            e.marketplaces_profits,
+        ),
+        ("Moulins à grain", fmt(k.grain_mills), e.grain_mills_profits),
+        ("Fonderies", fmt(k.foundries), e.foundries_profits),
+        ("Chantiers navals", fmt(k.shipyards), e.shipyards_profits),
+        (
+            "Droits de douane",
+            rate(k.immigration_taxes),
+            e.immigration_taxes_profits,
+        ),
+        (
+            "Gabelle",
+            rate(k.commercial_taxes),
+            e.commercial_taxes_profits,
+        ),
+        ("Taille", rate(k.income_taxes), e.income_taxes_profits),
+        (
+            "Solde de l'ost",
+            format!("{} hommes", fmt(k.soldiers)),
+            -e.soldiers_maintenance,
+        ),
+    ];
+    sources.retain(|(_, _, n)| *n != 0);
+    sources.sort_by_key(|(_, _, n)| (*n < 0, -n.abs()));
+    let largest = sources
+        .iter()
+        .map(|(_, _, n)| n.abs())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let mut slot = 1;
+    let mut rows: Vec<ElementBuilder> = sources
+        .iter()
+        .map(|(label, note, n)| {
+            let intent = if *n > 0 {
+                ProgressIntent::Success
+            } else {
+                ProgressIntent::Error
+            };
+            let bar = Progress::new()
+                .value(n.unsigned_abs())
+                .max(largest as u32)
+                .intent(intent)
+                .thin(true)
+                .bar_st([St::AnimateGrow, delay(slot)])
+                .build();
+            let row = ledger_row(
+                slot,
+                aside(label, &format!("· {note}")),
+                signed(*n),
+                Some(bar),
+            );
+            slot += 1;
+            row
+        })
+        .collect();
+    if rows.is_empty() {
+        rows.push(reveal(
+            slot,
+            Text::body("Pas un sou n'est entré ni sorti.")
+                .muted()
+                .build(),
+        ));
+        slot += 1;
+    }
+    rows.push(reveal(
+        slot,
+        el(El::P)
+            .st([
+                St::Italic,
+                St::TextMuted,
+                St::TextSm,
+                St::TextCenter,
+                St::PtMd,
+            ])
+            .text(&match change {
+                n if n > 0 => format!("Le trésor s'est enrichi de {} {cur} cette année.", fmt(n)),
+                n if n < 0 => format!("Le trésor s'est appauvri de {} {cur} cette année.", fmt(-n)),
+                _ => "Le trésor n'a pas bougé cette année.".to_string(),
+            }),
+    ));
+
+    Stack::column()
+        .gap(Gap::Md)
+        .children([kpi, el(El::Div).st([St::PxXs]).append(rows)])
+        .build()
 }
 
-fn invest_form(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
+/// Achats: the six things money buys, as one flat list — what the kingdom
+/// owns, what it brought in this year, the price and how many it can afford;
+/// then a quantity and one outlined button. The list re-renders after each
+/// purchase, so a player can buy several times before going to war.
+fn invest_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let kind = seat.invest_kind.unwrap_or(InvestmentType::Marketplaces);
     let max = kind.max_investment(k).max(0);
+    let cur = k.currency();
+    let e = seat.eco.as_ref();
+    let cost = kind.cost();
     let ch = rwire::builder::next_live_channel();
-    let kinds = (1..=6)
+
+    let title = el(El::Div)
+        .st([St::DisplayFlex, St::JustifyBetween, St::ItemsBaseline])
+        .append([
+            Text::new()
+                .variant(TextVariant::Heading3)
+                .content("Investir")
+                .build(),
+            el(El::Span)
+                .st([St::TextSm, St::TextMuted, St::TabularNums])
+                .append([
+                    txt("trésor "),
+                    el(El::Strong).st([St::TextDefault]).text(&fmt(k.treasury)),
+                    txt(&format!(" {cur}")),
+                ]),
+        ]);
+
+    let rows = (1..=6)
         .filter_map(|n| InvestmentType::from_number(n).map(|k| (n, k)))
         .map(|(n, other)| {
             let cap = other.max_investment(k).max(0);
-            choice(
+            let owned = match other {
+                InvestmentType::Marketplaces => k.marketplaces,
+                InvestmentType::GrainMills => k.grain_mills,
+                InvestmentType::Foundries => k.foundries,
+                InvestmentType::Shipyards => k.shipyards,
+                InvestmentType::Soldiers => k.soldiers,
+                InvestmentType::Palaces => k.palaces,
+            };
+            let earned = e.map(|e| match other {
+                InvestmentType::Marketplaces => e.marketplaces_profits,
+                InvestmentType::GrainMills => e.grain_mills_profits,
+                InvestmentType::Foundries => e.foundries_profits,
+                InvestmentType::Shipyards => e.shipyards_profits,
+                InvestmentType::Soldiers => -e.soldiers_maintenance,
+                InvestmentType::Palaces => 0,
+            });
+            let stock = match (other, owned) {
+                (_, 0) => "aucun".to_string(),
+                (InvestmentType::Soldiers, n) => format!("{} en armes", fmt(n)),
+                (InvestmentType::Palaces, n) if n <= 10 => format!("{n} sur 10"),
+                (InvestmentType::Palaces, n) => format!("{n} dixièmes"),
+                (_, n) => format!("{} en activité", fmt(n)),
+            };
+            let mut note = vec![el(El::Span).text(&stock)];
+            if let Some(earned) = earned.filter(|&n| n != 0) {
+                note.push(txt(" · "));
+                note.push(signed(earned).st([St::FontMedium]));
+                note.push(txt(&format!(" {cur}")));
+            }
+            pick_row(
                 Radio::new()
                     .name("kind")
                     .value(n.to_string())
                     .checked(other == kind)
+                    .disabled(cap < 1 && other != kind)
                     .on_change(t.act(room::pick_investment())),
                 &capitalize(invest_fr(other)),
-                None,
-                format!("{} {} · max {}", fmt(other.cost()), k.currency(), fmt(cap)),
-                cap > 0,
+                note,
+                &fmt(other.cost()),
+                &format!("max {}", fmt(cap)),
+                other == kind,
+                cap > 0 || other == kind,
             )
         });
+
     let amount = 1.min(max);
+    // The share of the treasury the whole slider spans: the fill inside it
+    // follows the thumb, so the bar reads spending against the treasury.
+    let span = if k.treasury > 0 {
+        (max * cost) as f64 / k.treasury as f64 * 100.0
+    } else {
+        0.0
+    };
+    let remainder = LiveSum {
+        base: k.treasury - amount * cost,
+        terms: vec![(ch, vec![amount * cost, (amount - max) * cost])],
+    };
+    let quantity = el(El::Div).st([St::PtSm]).append([
+        Slider::new()
+            .name("invest_amount")
+            .id("invest_amount")
+            .channel(ch)
+            .grouped(fmt)
+            .label(capitalize(invest_fr(kind)))
+            .min(0)
+            .max(max)
+            .value(amount)
+            .readout_suffix(
+                el(El::Span)
+                    .st([St::TextSm, St::TextMuted, St::TabularNums])
+                    .append([
+                        txt("· "),
+                        el(El::Span).text(&fmt(amount * cost)).live_scaled_grouped(
+                            ch,
+                            cost.max(0) as u32,
+                            1,
+                        ),
+                        txt(&format!(" {cur}")),
+                    ]),
+            )
+            .build(),
+        el(El::Div)
+            .st([St::DisplayFlex, St::JustifyBetween, St::TextSm, St::PtXs])
+            .append([
+                el(El::Span).st([St::TextMuted]).text("Reste au trésor"),
+                el(El::Span).append([
+                    el(El::Strong)
+                        .st([St::TabularNums])
+                        .text(&fmt(k.treasury - amount * cost))
+                        .live_sum(remainder),
+                    txt(&format!(" {cur}")),
+                ]),
+            ]),
+        el(El::Div)
+            .st([
+                St::WFull,
+                St::H05rem,
+                St::RoundedFull,
+                St::BgMuted,
+                St::OverflowHidden,
+                St::MtXs,
+            ])
+            .append([el(El::Div)
+                .st([St::HFull])
+                .style(Style::new().width(&format!("{span:.1}%")))
+                .append([el(El::Div)
+                    .st([St::HFull, St::BgAccent, St::RoundedFull])
+                    .style(Style::new().width(&format!(
+                        "{:.1}%",
+                        if max > 0 {
+                            amount as f64 / max as f64 * 100.0
+                        } else {
+                            0.0
+                        }
+                    )))
+                    .live_fill(ch)])]),
+        // Nothing to buy at zero: the button swaps for a disabled twin (each
+        // wrapped, as the button's own display class would beat `hidden`).
+        el(El::Div).st([St::PtXs]).live_switch(ch, &[1]).append([
+            hidden_unless(
+                amount < 1,
+                el(El::Div).append([
+                    Button::secondary(format!("Acheter des {}", invest_fr(kind)))
+                        .full_width(true)
+                        .disabled(true)
+                        .build(),
+                ]),
+            ),
+            hidden_unless(
+                amount >= 1,
+                el(El::Div).append([Button::new()
+                    .intent(ButtonIntent::Secondary)
+                    .full_width(true)
+                    .build()
+                    .append([el(El::Span).append([
+                        txt("Acheter "),
+                        el(El::Span).text(&fmt(amount)).live_text_grouped(ch),
+                        txt(&format!(" {} · ", invest_fr(kind))),
+                        el(El::Span).text(&fmt(amount * cost)).live_scaled_grouped(
+                            ch,
+                            cost.max(0) as u32,
+                            1,
+                        ),
+                        txt(&format!(" {cur}")),
+                    ])])]),
+            ),
+        ]),
+    ]);
+
     form(
         t.act(room::invest()),
-        [
-            Text::caption(format!("Trésor : {} {}", fmt(k.treasury), k.currency()))
-                .muted()
-                .build(),
-            el(El::Div).append(kinds),
-            Slider::new()
-                .name("invest_amount")
-                .id("invest_amount")
-                .channel(ch)
-                .grouped(fmt)
-                .label(capitalize(invest_fr(kind)))
-                .min(0)
-                .max(max)
-                .value(amount)
-                .readout_suffix(
-                    el(El::Span)
-                        .st([St::TextSm, St::TextMuted, St::TabularNums])
-                        .append([
-                            el(El::Span).text("· "),
-                            el(El::Span)
-                                .text(&fmt(amount * kind.cost()))
-                                .live_scaled_grouped(ch, kind.cost().max(0) as u32, 1),
-                            el(El::Span).text(&format!(" {}", k.currency())),
-                        ]),
-                )
-                .build(),
-            Button::primary("Investir")
-                .full_width(true)
-                .disabled(max < 1)
-                .build(),
-        ],
+        [title, el(El::Div).append(rows), quantity],
     )
+}
+
+/// One line of the purchase list: radio, name over a muted note, price over
+/// the affordable maximum. The chosen line carries an accent left border.
+fn pick_row(
+    radio: ElementBuilder,
+    label: &str,
+    note: Vec<ElementBuilder>,
+    price: &str,
+    max: &str,
+    chosen: bool,
+    enabled: bool,
+) -> ElementBuilder {
+    el(El::Label)
+        .st([
+            St::DisplayGrid,
+            St::GridColsAutoFrAuto,
+            St::GapXSm,
+            St::ItemsCenter,
+            St::PyXs,
+            St::PlSm,
+            St::BorderB,
+            St::TextSm,
+        ])
+        .st(if chosen {
+            [St::BorderL3Accent, St::BgSubtle]
+        } else {
+            [St::BorderL3Transparent, St::BgTransparent]
+        })
+        .st(if enabled {
+            [St::CursorPointer]
+        } else {
+            [St::Opacity50]
+        })
+        .append([
+            radio,
+            el(El::Span).st([St::MinW0]).append([
+                el(El::Strong).st([St::DisplayBlock]).text(label),
+                el(El::Span)
+                    .st([St::DisplayBlock, St::TextXs, St::TextMuted, St::TabularNums])
+                    .append(note),
+            ]),
+            el(El::Span)
+                .st([St::TextRight, St::TabularNums, St::WhitespaceNowrap])
+                .append([
+                    el(El::Strong).st([St::DisplayBlock]).text(price),
+                    el(El::Span).st([St::TextXs, St::TextMuted]).text(max),
+                ]),
+        ])
 }
 
 /// "champs de foire" → "Champs de foire"
@@ -2894,7 +3635,7 @@ fn next(label: &'static str, t: T) -> ElementBuilder {
 }
 
 /// 12345 → "12 345"
-fn fmt(n: i32) -> String {
+pub fn fmt(n: i32) -> String {
     let digits: Vec<char> = n.abs().to_string().chars().collect();
     let mut out = String::new();
     for (i, c) in digits.iter().enumerate() {

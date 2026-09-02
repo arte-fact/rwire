@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use rwire::attr_tokens::{At, Av};
 use rwire::builder::{
-    build_synced_update_with_known_symbols, BuildContext, SyncedElement, SyncedRenderer,
+    build_synced_update_with_known_symbols, BuildContext, LiveSum, SyncedElement, SyncedRenderer,
 };
 use rwire::state::{ChangeSet, RendererDeps};
 use rwire::style::Style;
@@ -62,6 +62,20 @@ fn live_bindings() -> ElementBuilder {
         el(El::Span).live_scaled_grouped(b, 3, 1),
         el(El::Span).live_lookup(a, &[0, 50, 100, 150]),
         el(El::Span).live_lookup_signed(b, &[-1_640, -359, 0, 61, 12_345]),
+        el(El::Span).live_sum(LiveSum {
+            base: -120,
+            terms: vec![(a, vec![-40, 0, 55, 300]), (b, vec![0, 7])],
+        }),
+        el(El::Span).live_range_signed(
+            LiveSum {
+                base: 12,
+                terms: vec![(a, vec![-1_640, 0, 61])],
+            },
+            LiveSum {
+                base: 227,
+                terms: vec![(a, vec![-900, 0, 12_345]), (b, vec![-3, 0, 4])],
+            },
+        ),
         el(El::Span).live_remainder(50_000, &[a, b]),
         el(El::Span).live_remainder_grouped(50_000, &[a, b]),
         el(El::Div).live_remainder_fill(50_000, &[a, b]),

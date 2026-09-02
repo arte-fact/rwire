@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::economy::Taxes;
 use crate::random::random;
 
 pub const KINGDOMS: [Kingdoms; 6] = [
@@ -177,8 +178,16 @@ impl Kingdom {
             shipyards: 0,
             palaces: 0,
             immigration_taxes: 20,
-            commercial_taxes: 5,
-            income_taxes: 35,
+            commercial_taxes: 8,
+            income_taxes: 20,
+        }
+    }
+
+    pub fn taxes(&self) -> Taxes {
+        Taxes {
+            customs: self.immigration_taxes,
+            sales: self.commercial_taxes,
+            income: self.income_taxes,
         }
     }
 

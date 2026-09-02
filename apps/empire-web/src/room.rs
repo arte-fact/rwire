@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use empire_lib::demography::{apply_feed, YearDemography};
-use empire_lib::economy::{apply_economy, apply_tax_change, economy_report, TaxType, YearEconomy};
+use empire_lib::demography::{apply_feed, Council, YearDemography};
+use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, YearEconomy};
 use empire_lib::events::{check_random_events, RulerDeathCause};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::ia::plan_ai_turn;
@@ -13,9 +13,11 @@ use empire_lib::war::{
     apply_barbarian_battle_result, apply_kingdom_battle_result, simulate_barbarian_battle,
     simulate_kingdom_battle, BarbarianBattleResult, BattleProgress, BattleResult,
 };
-use empire_lib::{EmpireGame, Kingdoms, KINGDOMS};
+use empire_lib::{EmpireGame, Kingdom, Kingdoms, KINGDOMS};
 use rand::Rng;
 use rwire::{handler, EventContext, HandlerSpec, State};
+
+use crate::ui::fmt;
 
 /// Ticker period; battle frames and computer pauses are counted in ticks.
 pub const TICK_MS: u64 = 100;
@@ -38,20 +40,20 @@ pub enum Step {
     #[default]
     Weather,
     Trade,
-    Feed,
+    /// Grain rations and tax rates, decided together.
+    Council,
+    /// Census: how the people fared this year.
     Report,
-    Economy,
+    /// The treasury's ledger: what each source brought in.
+    Treasury,
+    /// Purchases: buildings, soldiers, palaces.
+    Invest,
     War,
 }
 
 impl Step {
-    pub const LABELS: [&'static str; 6] = [
-        "Saison",
-        "Commerce",
-        "Intendance",
-        "Peuple",
-        "Économie",
-        "Guerre",
+    pub const LABELS: [&'static str; 7] = [
+        "Saison", "Commerce", "Conseil", "Peuple", "Trésor", "Achats", "Guerre",
     ];
 
     pub fn index(self) -> usize {
@@ -72,10 +74,133 @@ pub struct Entry {
     pub text: String,
 }
 
+/// One of the council's five sliders.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Peasants,
+    Soldiers,
+    Customs,
+    Sales,
+    Income,
+}
+
+impl Field {
+    pub const ALL: [Field; 5] = [
+        Field::Peasants,
+        Field::Soldiers,
+        Field::Customs,
+        Field::Sales,
+        Field::Income,
+    ];
+
+    pub fn from_u8(n: u8) -> Option<Field> {
+        Self::ALL.get(n as usize).copied()
+    }
+
+    /// The form field (and element id) of the slider.
+    pub fn name(self) -> &'static str {
+        match self {
+            Field::Peasants => "peasants",
+            Field::Soldiers => "soldiers",
+            Field::Customs => "customs",
+            Field::Sales => "sales",
+            Field::Income => "income",
+        }
+    }
+}
+
+/// The council's decision as the sliders currently stand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Draft {
+    pub peasants: i32,
+    pub soldiers: i32,
+    pub customs: i32,
+    pub sales: i32,
+    pub income: i32,
+}
+
+impl Draft {
+    /// The grain sliders' upper bounds: beyond 2× the people's needs
+    /// immigration barely grows; beyond 1.5× the army's needs efficiency is
+    /// already maxed — so the sliders stop there.
+    pub fn bounds(k: &Kingdom) -> (i32, i32) {
+        let stocks = k.grain_stocks.max(0);
+        (
+            (k.peasants_grain_needs() * 2).min(stocks).max(0),
+            (k.soldiers_grain_needs() * 3 / 2).min(stocks).max(0),
+        )
+    }
+
+    /// Where the sliders start: full rations and last year's rates.
+    pub fn initial(k: &Kingdom) -> Draft {
+        let (peasants_max, soldiers_max) = Self::bounds(k);
+        let t = k.taxes();
+        Draft {
+            peasants: k.peasants_grain_needs().min(peasants_max),
+            soldiers: k.soldiers_grain_needs().min(soldiers_max),
+            customs: t.customs,
+            sales: t.sales,
+            income: t.income,
+        }
+    }
+
+    pub fn get(self, field: Field) -> i32 {
+        match field {
+            Field::Peasants => self.peasants,
+            Field::Soldiers => self.soldiers,
+            Field::Customs => self.customs,
+            Field::Sales => self.sales,
+            Field::Income => self.income,
+        }
+    }
+
+    pub fn set(&mut self, field: Field, value: i32) {
+        match field {
+            Field::Peasants => self.peasants = value,
+            Field::Soldiers => self.soldiers = value,
+            Field::Customs => self.customs = value,
+            Field::Sales => self.sales = value,
+            Field::Income => self.income = value,
+        }
+    }
+
+    /// Inside the stocks (the army is served last) and the tax caps.
+    pub fn clamped(self, k: &Kingdom) -> Draft {
+        let stocks = k.grain_stocks.max(0);
+        let peasants = self.peasants.clamp(0, stocks);
+        let t = self.taxes().clamped();
+        Draft {
+            peasants,
+            soldiers: self.soldiers.clamp(0, stocks - peasants),
+            customs: t.customs,
+            sales: t.sales,
+            income: t.income,
+        }
+    }
+
+    pub fn taxes(self) -> Taxes {
+        Taxes {
+            customs: self.customs,
+            sales: self.sales,
+            income: self.income,
+        }
+    }
+
+    pub fn council(self) -> Council {
+        Council {
+            grain_for_peasants: self.peasants,
+            grain_for_soldiers: self.soldiers,
+            taxes: self.taxes(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Seat {
     /// Token of the connection playing this kingdom; `None` = computer.
     pub owner: Option<u64>,
+    /// The council's sliders as last released; `None` = untouched this turn.
+    pub draft: Option<Draft>,
     pub demo: Option<YearDemography>,
     pub eco: Option<YearEconomy>,
     /// Bushels eaten by the rats at the start of the year (the season report
@@ -83,7 +208,7 @@ pub struct Seat {
     pub rats: i32,
     /// Feedback from the player's last action.
     pub notice: Option<String>,
-    /// Investment type currently selected in the economy form.
+    /// Investment type currently selected in the investment form.
     pub invest_kind: Option<InvestmentType>,
     /// Expeditions left this turn (original rule: nobles / 4 + 1).
     pub attacks_left: i32,
@@ -270,6 +395,13 @@ impl Room {
         self.seat(id).owner.is_none()
     }
 
+    /// The council's sliders for `id`, as last released or where they start.
+    pub fn draft(&self, id: Kingdoms) -> Draft {
+        self.seat(id)
+            .draft
+            .unwrap_or_else(|| Draft::initial(self.game.kingdom(id)))
+    }
+
     /// Append a journal entry; `about` names the kingdoms it concerns so the
     /// viewer's own news can be marked.
     pub fn journal(&mut self, about: impl IntoIterator<Item = Kingdoms>, line: impl Into<String>) {
@@ -339,6 +471,7 @@ impl Room {
             } else {
                 let attacks = self.game.kingdom(id).nobles / 4 + 1;
                 let seat = self.seat_mut(id);
+                seat.draft = None;
                 seat.demo = None;
                 seat.eco = None;
                 seat.notice = None;
@@ -891,10 +1024,11 @@ pub fn advance(rooms: &mut Rooms, ctx: &EventContext) {
     room.seat_mut(id).notice = None;
     match room.step {
         Step::Weather => room.step = Step::Trade,
-        Step::Trade => room.step = Step::Feed,
-        Step::Feed => {} // only the feed form advances this step
-        Step::Report => room.step = Step::Economy,
-        Step::Economy => room.step = Step::War,
+        Step::Trade => room.step = Step::Council,
+        Step::Council => {} // only the council form advances this step
+        Step::Report => room.step = Step::Treasury,
+        Step::Treasury => room.step = Step::Invest,
+        Step::Invest => room.step = Step::War,
         Step::War => room.next_turn(),
     }
 }
@@ -988,23 +1122,52 @@ pub fn sell_land(rooms: &mut Rooms, ctx: &EventContext) {
     room.note(id, format!("{arpents} arpents vendus aux Barbares."));
 }
 
+/// A council slider released: keep its value so the forecast re-centres on
+/// it. The first extra param byte names the slider ([`Field`]).
+#[handler]
+pub fn draft(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, extra, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::Council) else {
+        return;
+    };
+    let Some(field) = extra.first().and_then(|&f| Field::from_u8(f)) else {
+        return;
+    };
+    let Some(value) = ctx.text().and_then(|v| v.trim().parse::<i32>().ok()) else {
+        return;
+    };
+    let mut draft = room.draft(id);
+    draft.set(field, value);
+    let draft = draft.clamped(room.game.kingdom(id));
+    room.seat_mut(id).draft = Some(draft);
+}
+
+/// Promulgate the council's decision: rations and rates for the year.
 #[handler]
 pub fn feed(rooms: &mut Rooms, ctx: &EventContext) {
     let Some((token, _, room)) = table(rooms, ctx) else {
         return;
     };
-    let Some(id) = acting(room, token, Step::Feed) else {
+    let Some(id) = acting(room, token, Step::Council) else {
         return;
     };
     let weather = room.game.weather;
+    let mut draft = room.draft(id);
+    for field in Field::ALL {
+        if let Some(v) = ctx.field(field.name()).and_then(|v| v.trim().parse().ok()) {
+            draft.set(field, v);
+        }
+    }
+    let k = room.game.kingdom(id);
+    let council = draft.clamped(k).council();
     let k = room.game.kingdom_mut(id);
-    let stocks = k.grain_stocks.max(0);
-    let peasants = num(ctx, "peasants").clamp(0, stocks);
-    let soldiers = num(ctx, "soldiers").clamp(0, stocks - peasants);
-    let demo = apply_feed(k, peasants, soldiers);
+    apply_taxes(k, council.taxes);
+    let demo = apply_feed(k, council);
     let eco = economy_report(k, weather, demo.immigrants);
     apply_economy(k, &eco);
-    let delta = population_delta(&demo);
+    let delta = demo.population_delta();
     room.journal(
         [id],
         format!(
@@ -1015,21 +1178,11 @@ pub fn feed(rooms: &mut Rooms, ctx: &EventContext) {
         ),
     );
     let seat = room.seat_mut(id);
+    seat.draft = None;
     seat.demo = Some(demo);
     seat.eco = Some(eco);
     seat.notice = None;
     room.step = Step::Report;
-}
-
-/// Net change of the civilian and military headcount over the year.
-pub fn population_delta(d: &YearDemography) -> i32 {
-    d.births + d.immigrants + d.merchants_settled
-        - d.disease_victims
-        - d.nobles_departed
-        - d.malnutrition_victims
-        - d.starvation_victims
-        - d.soldiers_starvation_victims
-        - d.soldiers_desertion_victims
 }
 
 /// The chronicle's verb for a population delta.
@@ -1039,21 +1192,6 @@ pub fn delta_verb(delta: i32) -> &'static str {
         n if n < 0 => "perdu",
         _ => "conservé",
     }
-}
-
-#[handler]
-pub fn set_taxes(rooms: &mut Rooms, ctx: &EventContext) {
-    let Some((token, _, room)) = table(rooms, ctx) else {
-        return;
-    };
-    let Some(id) = acting(room, token, Step::Economy) else {
-        return;
-    };
-    let k = room.game.kingdom_mut(id);
-    apply_tax_change(k, TaxType::Immigration, num(ctx, "customs"));
-    apply_tax_change(k, TaxType::Commercial, num(ctx, "sales"));
-    apply_tax_change(k, TaxType::Income, num(ctx, "income"));
-    room.note(id, "Nouveaux taux promulgués.");
 }
 
 /// The investment type picked in the economy form (drives the quantity slider).
@@ -1077,7 +1215,7 @@ pub fn invest(rooms: &mut Rooms, ctx: &EventContext) {
     let Some((token, _, room)) = table(rooms, ctx) else {
         return;
     };
-    let Some(id) = acting(room, token, Step::Economy) else {
+    let Some(id) = acting(room, token, Step::Invest) else {
         return;
     };
     let Some(kind) = InvestmentType::from_number(num(ctx, "kind")) else {
@@ -1090,9 +1228,10 @@ pub fn invest(rooms: &mut Rooms, ctx: &EventContext) {
         None => {
             let fx = result.side_effects;
             let mut m = format!(
-                "{amount} × {} pour {} {}.",
+                "{} × {} pour {} {}.",
+                fmt(amount),
                 invest_fr(kind),
-                result.total_cost,
+                fmt(result.total_cost),
                 id.currency()
             );
             if fx.merchants_attracted > 0 {

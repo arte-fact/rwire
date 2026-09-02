@@ -948,6 +948,10 @@ define_token_enum! {
         ChartCursor = 0x35F => "position:absolute;top:0;bottom:0;left:0;border-right:1px solid var(--k);opacity:.7;pointer-events:none",
         /// A tiny axis label pinned to a chart's right edge, sitting on its `top`.
         ChartLabel = 0x360 => "position:absolute;right:2px;transform:translateY(-100%);font-size:.6rem;line-height:1.2;color:var(--j);pointer-events:none",
+        /// Selectable line: radio, name, then price pushed to the right edge.
+        GridColsAutoFrAuto = 0x361 => "grid-template-columns:auto minmax(0,1fr) auto",
+        /// The unchosen twin of [`St::BorderL3Accent`], keeping the same width.
+        BorderL3Transparent = 0x362 => "border-left:3px solid transparent",
     }
 }
 

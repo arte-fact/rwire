@@ -10,7 +10,7 @@ use super::opcodes::{
     BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
     COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
     FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    LIVE_BIND, LIVE_GROUPED, LIVE_REMAINDER, LIVE_SIGNED, LIVE_SOURCE, ROUTE_PUSH,
+    LIVE_BIND, LIVE_GROUPED, LIVE_RANGE, LIVE_REMAINDER, LIVE_SIGNED, LIVE_SOURCE, ROUTE_PUSH,
     ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM,
     SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
     STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
@@ -707,14 +707,19 @@ impl OpcodeBuffer {
     pub fn live_bind(&mut self, ref_idx: u32, bind: &LiveBind) -> &mut Self {
         self.buf.put_u8(LIVE_BIND);
         write_varint(&mut self.buf, ref_idx);
-        let mut kind = match bind.output {
-            LiveOutput::Text { grouped } => grouped as u8 * LIVE_GROUPED,
+        let mut kind = match &bind.output {
+            &LiveOutput::Text { grouped } => grouped as u8 * LIVE_GROUPED,
             LiveOutput::Fill => 1,
-            LiveOutput::Scaled { grouped, .. } => 2 | (grouped as u8 * LIVE_GROUPED),
+            &LiveOutput::Scaled { grouped, .. } => 2 | (grouped as u8 * LIVE_GROUPED),
             LiveOutput::Switch { .. } => 3,
-            LiveOutput::Lookup {
+            &LiveOutput::Lookup {
                 grouped, signed, ..
             } => 4 | (grouped as u8 * LIVE_GROUPED) | (signed as u8 * LIVE_SIGNED),
+            LiveOutput::Sum { high, signed, .. } => {
+                5 | LIVE_GROUPED
+                    | (*signed as u8 * LIVE_SIGNED)
+                    | (high.is_some() as u8 * LIVE_RANGE)
+            }
         };
         let (channel, rest) = match &bind.source {
             LiveSource::Channel(c) => (*c, None),
@@ -746,17 +751,31 @@ impl OpcodeBuffer {
                     write_varint(&mut self.buf, *t);
                 }
             }
-            LiveOutput::Lookup { table, .. } => {
-                let lo = table.iter().copied().min().unwrap_or(0);
-                self.buf.put_u8(table.len() as u8);
-                write_varint(&mut self.buf, ((lo << 1) ^ (lo >> 31)) as u32);
-                for v in table {
-                    write_varint(&mut self.buf, (v - lo) as u32);
+            LiveOutput::Lookup { table, .. } => self.live_table(table),
+            LiveOutput::Sum { low, high, .. } => {
+                for sum in std::iter::once(low).chain(high.as_ref()) {
+                    write_varint(&mut self.buf, zigzag(sum.base));
+                    self.buf.put_u8(sum.terms.len() as u8);
+                    for (ch, table) in &sum.terms {
+                        write_varint(&mut self.buf, *ch as u32);
+                        self.live_table(table);
+                    }
                 }
             }
             LiveOutput::Text { .. } | LiveOutput::Fill => {}
         }
         self
+    }
+
+    /// A lookup table: `[m, lo, e…]` — `lo` zigzag-encoded, entries as
+    /// offsets from it.
+    fn live_table(&mut self, table: &[i32]) {
+        let lo = table.iter().copied().min().unwrap_or(0);
+        self.buf.put_u8(table.len() as u8);
+        write_varint(&mut self.buf, zigzag(lo));
+        for v in table {
+            write_varint(&mut self.buf, (v - lo) as u32);
+        }
     }
 
     /// End the batch.
@@ -790,6 +809,11 @@ impl Default for OpcodeBuffer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Zigzag-encode a signed value for a varint.
+fn zigzag(v: i32) -> u32 {
+    ((v << 1) ^ (v >> 31)) as u32
 }
 
 #[cfg(test)]
