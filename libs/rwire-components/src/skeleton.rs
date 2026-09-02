@@ -109,7 +109,8 @@ impl Skeleton {
             // Multi-line: wrap in a full-width flex column. `WFull` is required so the
             // `WFull` lines have a width to fill — without it the column is auto-width and
             // collapses to nothing in a shrink-to-fit (e.g. flex-centered) context.
-            let mut container = el(El::Div).st([St::WFull, St::DisplayFlex, St::FlexCol, St::GapSm]);
+            let mut container =
+                el(El::Div).st([St::WFull, St::DisplayFlex, St::FlexCol, St::GapSm]);
 
             if let Some(ref extra) = self.extra_class {
                 container = container.class(extra.as_ref());

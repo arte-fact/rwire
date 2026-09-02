@@ -109,12 +109,7 @@ impl Footer {
 
     /// Build the footer into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        let mut footer = el(El::Footer).st([
-            St::BgSubtle,
-            St::BorderT,
-            St::PyXl,
-            St::PxLg,
-        ]);
+        let mut footer = el(El::Footer).st([St::BgSubtle, St::BorderT, St::PyXl, St::PxLg]);
 
         // Top section: logo/tagline + link columns
         let mut top = el(El::Div).st([
@@ -132,27 +127,21 @@ impl Footer {
                 brand = brand.append([logo]);
             }
             if let Some(ref tagline) = self.tagline {
-                brand = brand.append([
-                    el(El::P).st([St::TextSm, St::TextMuted]).text(tagline),
-                ]);
+                brand = brand.append([el(El::P).st([St::TextSm, St::TextMuted]).text(tagline)]);
             }
             top = top.append([brand]);
         }
 
         // Link columns
         if !self.columns.is_empty() {
-            let mut cols = el(El::Div).st([
-                St::DisplayFlex,
-                St::FlexWrap,
-                St::GapXl,
-            ]);
+            let mut cols = el(El::Div).st([St::DisplayFlex, St::FlexWrap, St::GapXl]);
 
             for col in &self.columns {
                 let mut column = el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapSm]);
 
-                column = column.append([
-                    el(El::Div).st([St::TextSm, St::FontSemibold, St::TextHigh]).text(&col.title),
-                ]);
+                column = column.append([el(El::Div)
+                    .st([St::TextSm, St::FontSemibold, St::TextHigh])
+                    .text(&col.title)]);
 
                 for link in &col.links {
                     let link_el = if link.external {
@@ -160,12 +149,22 @@ impl Footer {
                             .attr("href", &link.href)
                             .attr("target", "_blank")
                             .attr("rel", "noopener noreferrer")
-                            .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                            .st([
+                                St::TextSm,
+                                St::TextMuted,
+                                St::NoDecoration,
+                                St::CursorPointer,
+                            ])
                             .hover([St::TextDefault])
                             .text(&link.label)
                     } else {
                         Link::to(&link.href, &link.label)
-                            .st([St::TextSm, St::TextMuted, St::NoDecoration, St::CursorPointer])
+                            .st([
+                                St::TextSm,
+                                St::TextMuted,
+                                St::NoDecoration,
+                                St::CursorPointer,
+                            ])
                             .hover([St::TextDefault])
                     };
                     column = column.append([link_el]);
@@ -181,13 +180,9 @@ impl Footer {
 
         // Copyright line
         if let Some(ref copyright) = self.copyright {
-            footer = footer.append([
-                el(El::Div)
-                    .st([St::BorderT, St::PtMd, St::TextSm, St::TextMuted])
-                    .append([
-                        el(El::P).text(copyright),
-                    ]),
-            ]);
+            footer = footer.append([el(El::Div)
+                .st([St::BorderT, St::PtMd, St::TextSm, St::TextMuted])
+                .append([el(El::P).text(copyright)])]);
         }
 
         footer

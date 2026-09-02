@@ -93,7 +93,12 @@ impl Table {
 
     /// Compute style tokens for the table container.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::WFull, St::BorderSubtle, St::RoundedMd, St::OverflowHidden]
+        vec![
+            St::WFull,
+            St::BorderSubtle,
+            St::RoundedMd,
+            St::OverflowHidden,
+        ]
     }
 
     /// Build the table into an ElementBuilder.
@@ -106,15 +111,12 @@ impl Table {
 
         // Add header row if headers are provided
         if !self.headers.is_empty() {
-            let mut header_row = el(El::Tr)
-                .st([St::BgMuted, St::FontMedium]);
+            let mut header_row = el(El::Tr).st([St::BgMuted, St::FontMedium]);
 
             for header in &self.headers {
-                header_row = header_row.append([
-                    el(El::Th)
-                        .st([St::TextSm, St::TextHigh, St::PSp3, St::TextLeft])
-                        .text(header)
-                ]);
+                header_row = header_row.append([el(El::Th)
+                    .st([St::TextSm, St::TextHigh, St::PSp3, St::TextLeft])
+                    .text(header)]);
             }
 
             table = table.append([el(El::Thead).append([header_row])]);
@@ -122,24 +124,25 @@ impl Table {
 
         // Add data rows
         if !self.rows.is_empty() {
-            let body_children: Vec<ElementBuilder> = self.rows.into_iter().map(|row| {
-                let mut row_el = el(El::Tr)
-                    .not_last_child([St::BorderBSubtle]);
+            let body_children: Vec<ElementBuilder> = self
+                .rows
+                .into_iter()
+                .map(|row| {
+                    let mut row_el = el(El::Tr).not_last_child([St::BorderBSubtle]);
 
-                if self.striped {
-                    row_el = row_el.nth_even([St::BgSubtle]);
-                }
+                    if self.striped {
+                        row_el = row_el.nth_even([St::BgSubtle]);
+                    }
 
-                for cell in row.cells {
-                    row_el = row_el.append([
-                        el(El::Td)
+                    for cell in row.cells {
+                        row_el = row_el.append([el(El::Td)
                             .st([St::TextSm, St::TextHigh, St::PSp3])
-                            .text(&cell)
-                    ]);
-                }
+                            .text(&cell)]);
+                    }
 
-                row_el
-            }).collect();
+                    row_el
+                })
+                .collect();
 
             table = table.append([el(El::Tbody).append(body_children)]);
         }

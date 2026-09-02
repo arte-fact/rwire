@@ -128,5 +128,4 @@ mod tests {
         let link = Link::external("https://example.com");
         assert!(link.external);
     }
-
 }

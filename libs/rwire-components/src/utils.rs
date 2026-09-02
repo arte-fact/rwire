@@ -102,9 +102,7 @@ pub fn aria_live(politeness: &str, relevant: &str) -> String {
 /// let label = sr_only("Loading...");
 /// ```
 pub fn sr_only(text: &str) -> ElementBuilder {
-    el(El::Span)
-        .st([St::SrOnly])
-        .text(text)
+    el(El::Span).st([St::SrOnly]).text(text)
 }
 
 /// Helper to apply common ARIA attributes to a builder.
@@ -155,7 +153,10 @@ impl AriaAttrs for ElementBuilder {
     }
 
     fn aria_expanded(self, expanded: bool) -> Self {
-        self.at(At::AriaExpanded, if expanded { Av::True } else { Av::False })
+        self.at(
+            At::AriaExpanded,
+            if expanded { Av::True } else { Av::False },
+        )
     }
 
     fn aria_controls(self, id: &str) -> Self {
@@ -295,9 +296,13 @@ pub mod keys {
 /// let portal = portal_container("rw-portal");
 /// ```
 pub fn portal_container(id: &str) -> ElementBuilder {
-    el(El::Div)
-        .at_str(At::Id, id)
-        .st([St::PositionFixed, St::Top0, St::Left0, St::Z9999, St::PointerEventsNone])
+    el(El::Div).at_str(At::Id, id).st([
+        St::PositionFixed,
+        St::Top0,
+        St::Left0,
+        St::Z9999,
+        St::PointerEventsNone,
+    ])
 }
 
 // ============================================================================
@@ -343,7 +348,11 @@ pub fn combine_classes(classes: &[&str]) -> String {
 /// // Returns ""
 /// ```
 pub fn class_if(class: &str, condition: bool) -> &str {
-    if condition { class } else { "" }
+    if condition {
+        class
+    } else {
+        ""
+    }
 }
 
 #[cfg(test)]
@@ -360,18 +369,9 @@ mod tests {
 
     #[test]
     fn test_combine_classes() {
-        assert_eq!(
-            combine_classes(&["a", "b", "c"]),
-            "a b c"
-        );
-        assert_eq!(
-            combine_classes(&["a", "", "c"]),
-            "a c"
-        );
-        assert_eq!(
-            combine_classes(&[]),
-            ""
-        );
+        assert_eq!(combine_classes(&["a", "b", "c"]), "a b c");
+        assert_eq!(combine_classes(&["a", "", "c"]), "a c");
+        assert_eq!(combine_classes(&[]), "");
     }
 
     #[test]
@@ -390,10 +390,7 @@ mod tests {
             transition_class("modal", TransitionState::Leave),
             "modal modal-leave"
         );
-        assert_eq!(
-            transition_class("modal", TransitionState::Idle),
-            "modal"
-        );
+        assert_eq!(transition_class("modal", TransitionState::Idle), "modal");
     }
 
     #[test]

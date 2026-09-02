@@ -39,9 +39,7 @@
 
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{
-    el, El, ElementBuilder, HandlerSpec,
-};
+use rwire::{el, El, ElementBuilder, HandlerSpec};
 
 /// Modal/Dialog builder.
 #[derive(Clone)]
@@ -132,9 +130,15 @@ impl Modal {
     /// Compute style tokens for the modal inner panel.
     pub fn compute_tokens(&self) -> Vec<St> {
         vec![
-            St::BgSurfaceRaised, St::RoundedLg, St::ShadowTheme, St::DisplayFlex,
-            St::FlexCol, St::PointerEventsAuto, St::OverflowHidden,
-            St::BackdropTheme, St::OpacityTheme,
+            St::BgSurfaceRaised,
+            St::RoundedLg,
+            St::ShadowTheme,
+            St::DisplayFlex,
+            St::FlexCol,
+            St::PointerEventsAuto,
+            St::OverflowHidden,
+            St::BackdropTheme,
+            St::OpacityTheme,
         ]
     }
 
@@ -145,7 +149,13 @@ impl Modal {
             ModalSize::Md => vec![St::W600px, St::MaxWFull],
             ModalSize::Lg => vec![St::W800px, St::MaxWFull],
             ModalSize::Xl => vec![St::W1000px, St::MaxWFull],
-            ModalSize::Full => vec![St::WFull, St::HFull, St::MaxWFull, St::MaxHFull, St::Rounded0],
+            ModalSize::Full => vec![
+                St::WFull,
+                St::HFull,
+                St::MaxWFull,
+                St::MaxHFull,
+                St::Rounded0,
+            ],
         }
     }
 
@@ -171,7 +181,7 @@ impl Modal {
             modal_children.push(
                 el(El::Div)
                     .st([St::OverflowYAuto, St::TextDefault, St::Flex1, St::PMd])
-                    .append([content])
+                    .append([content]),
             );
         }
 
@@ -179,8 +189,15 @@ impl Modal {
         if let Some(footer) = self.footer {
             modal_children.push(
                 el(El::Div)
-                    .st([St::DisplayFlex, St::ItemsCenter, St::JustifyEnd, St::GapSm, St::PMd, St::BorderT])
-                    .append([footer])
+                    .st([
+                        St::DisplayFlex,
+                        St::ItemsCenter,
+                        St::JustifyEnd,
+                        St::GapSm,
+                        St::PMd,
+                        St::BorderT,
+                    ])
+                    .append([footer]),
             );
         }
 
@@ -196,9 +213,13 @@ impl Modal {
         }
 
         // Backdrop — always present, visibility toggled
-        let mut backdrop = el(El::Div)
-            .st([St::PositionFixed, St::Inset0, St::Z1300, St::BgOverlay50,
-                 St::TransitionOpacity]);
+        let mut backdrop = el(El::Div).st([
+            St::PositionFixed,
+            St::Inset0,
+            St::Z1300,
+            St::BgOverlay50,
+            St::TransitionOpacity,
+        ]);
 
         if !self.open {
             backdrop = backdrop.st([St::Opacity0, St::PointerEventsNone]);
@@ -212,7 +233,10 @@ impl Modal {
 
         // Outer container — always present, visibility toggled
         let mut container_tokens = vec![
-            St::PositionFixed, St::Inset0, St::Z1400, St::TransitionOpacity,
+            St::PositionFixed,
+            St::Inset0,
+            St::Z1400,
+            St::TransitionOpacity,
         ];
 
         if self.open {
@@ -221,17 +245,24 @@ impl Modal {
             container_tokens.extend([St::Opacity0, St::PointerEventsNone]);
         }
 
-        el(El::Div)
-            .st(container_tokens)
-            .append([
-                backdrop,
-                // Panel wrapper sits above the backdrop within the container's stacking
-                // context (Z1400 > backdrop Z1300); without an explicit z-index the
-                // positioned backdrop would paint over the panel and dim it.
-                el(El::Div)
-                    .st([St::PositionFixed, St::Inset0, St::Z1400, St::DisplayFlex, St::ItemsCenter, St::JustifyCenter, St::PointerEventsNone, St::PMd])
-                    .append([modal_inner])
-            ])
+        el(El::Div).st(container_tokens).append([
+            backdrop,
+            // Panel wrapper sits above the backdrop within the container's stacking
+            // context (Z1400 > backdrop Z1300); without an explicit z-index the
+            // positioned backdrop would paint over the panel and dim it.
+            el(El::Div)
+                .st([
+                    St::PositionFixed,
+                    St::Inset0,
+                    St::Z1400,
+                    St::DisplayFlex,
+                    St::ItemsCenter,
+                    St::JustifyCenter,
+                    St::PointerEventsNone,
+                    St::PMd,
+                ])
+                .append([modal_inner]),
+        ])
     }
 
     fn build_header(&self) -> ElementBuilder {
@@ -243,7 +274,7 @@ impl Modal {
                 el(El::H2)
                     .st([St::M0, St::FontMedium, St::TextLg])
                     .at_str(At::Id, "modal-title")
-                    .text(title)
+                    .text(title),
             );
         }
 
@@ -253,21 +284,35 @@ impl Modal {
             header_children.push(
                 el(El::Button)
                     .st([
-                        St::DisplayFlex, St::ItemsCenter, St::JustifyCenter,
-                        St::BgTransparent, St::BorderNone, St::RoundedSm,
-                        St::TextMuted, St::CursorPointer, St::TransitionColors,
-                        St::W2rem, St::H2rem, St::P0,
+                        St::DisplayFlex,
+                        St::ItemsCenter,
+                        St::JustifyCenter,
+                        St::BgTransparent,
+                        St::BorderNone,
+                        St::RoundedSm,
+                        St::TextMuted,
+                        St::CursorPointer,
+                        St::TransitionColors,
+                        St::W2rem,
+                        St::H2rem,
+                        St::P0,
                     ])
                     .hover([St::BgHover])
                     .at(At::Type, Av::Button)
                     .at_str(At::AriaLabel, "Close")
                     .on(rwire::Ev::Click, handler)
-                    .append([icon(Icon::Close)])
+                    .append([icon(Icon::Close)]),
             );
         }
 
         el(El::Div)
-            .st([St::DisplayFlex, St::ItemsCenter, St::JustifyBetween, St::PMd, St::BorderBDefault])
+            .st([
+                St::DisplayFlex,
+                St::ItemsCenter,
+                St::JustifyBetween,
+                St::PMd,
+                St::BorderBDefault,
+            ])
             .append(header_children)
     }
 }

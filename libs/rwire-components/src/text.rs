@@ -278,5 +278,4 @@ mod tests {
         assert_eq!(Text::body("").element(), El::P);
         assert_eq!(Text::label("").element(), El::Span);
     }
-
 }

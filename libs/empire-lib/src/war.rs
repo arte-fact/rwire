@@ -333,7 +333,10 @@ mod tests {
         game.kingdom_mut(Kingdoms::Spain).soldiers = 5; // tiny army, huge land
         for _ in 0..30 {
             let r = simulate_kingdom_battle(&game, Kingdoms::France, Kingdoms::Spain, 5000, |p| {
-                assert!(!p.population_defending, "serfs must not take over mid-battle");
+                assert!(
+                    !p.population_defending,
+                    "serfs must not take over mid-battle"
+                );
             });
             if r.attacker_won && !r.defender_conquered {
                 assert_eq!(r.defender_remaining_soldiers, 0);

@@ -112,8 +112,7 @@ impl Avatar {
     pub fn build(self) -> ElementBuilder {
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size.size_tokens());
-        let mut container = el(El::Div)
-            .st(tokens);
+        let mut container = el(El::Div).st(tokens);
 
         if let Some(ref extra) = self.extra_class {
             container = container.class(extra.as_ref());
@@ -130,11 +129,9 @@ impl Avatar {
 
             container.append([img_div])
         } else if let Some(fallback_text) = self.fallback {
-            container.append([
-                el(El::Span)
-                    .st([St::TextSm, St::FontMedium, St::TextHigh])
-                    .text(&fallback_text)
-            ])
+            container.append([el(El::Span)
+                .st([St::TextSm, St::FontMedium, St::TextHigh])
+                .text(&fallback_text)])
         } else {
             container
         }
@@ -169,5 +166,4 @@ mod tests {
         assert_eq!(AvatarSize::Md.size_tokens(), vec![St::W2_5rem, St::H2_5rem]);
         assert_eq!(AvatarSize::Lg.size_tokens(), vec![St::W3rem, St::H3rem]);
     }
-
 }

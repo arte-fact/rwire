@@ -53,7 +53,13 @@ impl Label {
 
     /// Compute style tokens for the label.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::DisplayBlock, St::TextSm, St::FontMedium, St::TextHigh, St::MbXs]
+        vec![
+            St::DisplayBlock,
+            St::TextSm,
+            St::FontMedium,
+            St::TextHigh,
+            St::MbXs,
+        ]
     }
 
     /// Build the label into an ElementBuilder.
@@ -113,5 +119,4 @@ mod tests {
         let groups = label.get_pseudo_groups();
         assert!(groups.is_empty());
     }
-
 }

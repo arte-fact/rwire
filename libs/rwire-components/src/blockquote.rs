@@ -84,9 +84,7 @@ impl Blockquote {
         }
 
         if !self.content.is_empty() {
-            bq = bq.append([
-                el(El::P).st([St::M0]).text(&self.content)
-            ]);
+            bq = bq.append([el(El::P).st([St::M0]).text(&self.content)]);
         }
 
         for child in self.children {

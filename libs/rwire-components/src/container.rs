@@ -160,9 +160,7 @@ mod tests {
 
     #[test]
     fn test_container_no_center_no_padding() {
-        let container = Container::new()
-            .centered(false)
-            .padding(false);
+        let container = Container::new().centered(false).padding(false);
 
         let tokens = container.compute_tokens();
         assert!(tokens.contains(&St::WFull));
@@ -172,11 +170,25 @@ mod tests {
 
     #[test]
     fn test_container_max_width_token() {
-        assert_eq!(Container::new().size(ContainerSize::Sm).max_width_token(), Some(St::MaxW40rem));
-        assert_eq!(Container::new().size(ContainerSize::Md).max_width_token(), Some(St::MaxW48rem));
-        assert_eq!(Container::new().size(ContainerSize::Lg).max_width_token(), Some(St::MaxW64rem));
-        assert_eq!(Container::new().size(ContainerSize::Xl).max_width_token(), Some(St::MaxW80rem));
-        assert_eq!(Container::new().size(ContainerSize::Full).max_width_token(), None);
+        assert_eq!(
+            Container::new().size(ContainerSize::Sm).max_width_token(),
+            Some(St::MaxW40rem)
+        );
+        assert_eq!(
+            Container::new().size(ContainerSize::Md).max_width_token(),
+            Some(St::MaxW48rem)
+        );
+        assert_eq!(
+            Container::new().size(ContainerSize::Lg).max_width_token(),
+            Some(St::MaxW64rem)
+        );
+        assert_eq!(
+            Container::new().size(ContainerSize::Xl).max_width_token(),
+            Some(St::MaxW80rem)
+        );
+        assert_eq!(
+            Container::new().size(ContainerSize::Full).max_width_token(),
+            None
+        );
     }
-
 }

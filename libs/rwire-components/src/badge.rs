@@ -169,5 +169,4 @@ mod tests {
         assert!(tokens.contains(&St::BgGreen4));
         assert!(tokens.contains(&St::TextGreen11));
     }
-
 }

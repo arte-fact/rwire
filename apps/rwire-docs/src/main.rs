@@ -106,8 +106,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // renderer re-renders the page from it. (No `Router`/`outlet()` here — installing
     // a router would route navigation through the outlet swap instead, which this
     // app has no outlet for, freezing the page.)
-    let capsule_config = CapsuleConfig::new()
-        .font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
+    let capsule_config =
+        CapsuleConfig::new().font(FontFace::google("Quicksand", &[300, 400, 600, 700]));
 
     Server::bind(&config.bind_addr)?
         .root(root)
@@ -165,14 +165,12 @@ fn root(state: &DocsState) -> ElementBuilder {
         )
         .append([sidebar]);
 
-    let body = el(El::Div)
-        .st([St::DisplayFlex, St::MinHScreen])
-        .append([
-            desktop_sidebar,
-            el(El::Main)
-                .st([St::Flex1, St::MinW0, St::PMd])
-                .append([main_content]),
-        ]);
+    let body = el(El::Div).st([St::DisplayFlex, St::MinHScreen]).append([
+        desktop_sidebar,
+        el(El::Main)
+            .st([St::Flex1, St::MinW0, St::PMd])
+            .append([main_content]),
+    ]);
 
     el(El::Div)
         .st([St::BgApp, St::TextDefault, St::MinHScreen])

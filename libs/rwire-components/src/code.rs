@@ -137,9 +137,7 @@ impl Code {
                         .st([St::TextXs, St::TextMuted, St::DisplayBlock, St::MbXs])
                         .text(lang.as_ref());
 
-                    el(El::Div)
-                        .st([St::PositionRelative])
-                        .append([label, pre])
+                    el(El::Div).st([St::PositionRelative]).append([label, pre])
                 } else {
                     pre
                 }

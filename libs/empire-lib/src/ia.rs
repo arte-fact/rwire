@@ -135,12 +135,10 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
     if !humans.is_empty() {
         let n = humans.len() as i32;
         // Q3/Q4: human averages with noise (±1000 bushels, ±1 on the price).
-        let q3 = (humans.iter().map(|h| h.0).sum::<i32>() / n + random(1, 1001)
-            - random(1, 1001))
-        .max(0);
-        let mut q4 = (humans.iter().map(|h| h.1).sum::<i32>() / n + random(0, 2)
-            - random(0, 2))
-        .clamp(0, MAX_GRAIN_PRICE);
+        let q3 = (humans.iter().map(|h| h.0).sum::<i32>() / n + random(1, 1001) - random(1, 1001))
+            .max(0);
+        let mut q4 = (humans.iter().map(|h| h.1).sum::<i32>() / n + random(0, 2) - random(0, 2))
+            .clamp(0, MAX_GRAIN_PRICE);
         // Bad years push the asking price up (original: +RND/1.5 when NW<3).
         if game.weather.value() < 3 {
             q4 = (q4 + 1).min(MAX_GRAIN_PRICE);

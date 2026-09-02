@@ -141,5 +141,4 @@ mod tests {
         assert!(tokens.contains(&St::BorderLSubtle));
         assert!(tokens.contains(&St::MyLg));
     }
-
 }

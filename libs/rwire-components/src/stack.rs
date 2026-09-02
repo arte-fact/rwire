@@ -294,5 +294,4 @@ mod tests {
         assert_eq!(stack.align, StackAlign::Center);
         assert!(stack.compute_tokens().contains(&St::ItemsCenter));
     }
-
 }

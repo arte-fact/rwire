@@ -135,5 +135,4 @@ mod tests {
         assert_eq!(Spacer::lg().horizontal().compute_token(), St::WSp6);
         assert_eq!(Spacer::xl().horizontal().compute_token(), St::WSp8);
     }
-
 }

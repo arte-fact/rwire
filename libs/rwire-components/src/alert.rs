@@ -143,19 +143,13 @@ impl Alert {
         }
 
         if let Some(title_text) = self.title {
-            alert = alert.append([
-                el(El::Span)
-                    .st([St::FontMedium, St::TextHigh])
-                    .text(&title_text)
-            ]);
+            alert = alert.append([el(El::Span)
+                .st([St::FontMedium, St::TextHigh])
+                .text(&title_text)]);
         }
 
         if let Some(message_text) = self.message {
-            alert = alert.append([
-                el(El::P)
-                    .st([St::M0, St::TextDefault])
-                    .text(&message_text)
-            ]);
+            alert = alert.append([el(El::P).st([St::M0, St::TextDefault]).text(&message_text)]);
         }
 
         alert
@@ -191,5 +185,4 @@ mod tests {
         assert!(tokens.contains(&St::BgErrorSubtle));
         assert!(tokens.contains(&St::BorderRed8));
     }
-
 }

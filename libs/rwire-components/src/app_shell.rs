@@ -180,9 +180,7 @@ mod tests {
 
     #[test]
     fn test_app_shell_custom_dimensions() {
-        let shell = AppShell::new()
-            .sidebar_width(280)
-            .header_height(64);
+        let shell = AppShell::new().sidebar_width(280).header_height(64);
         assert_eq!(shell.sidebar_width, 280);
         assert_eq!(shell.header_height, 64);
     }
