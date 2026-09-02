@@ -1447,10 +1447,10 @@ fn sun(weather: Weather) -> Option<ElementBuilder> {
     )
 }
 
-/// Saison: the year's sky, then the harvest ledger line by line, verdict last.
-fn weather_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
-    let game = &t.room.game;
-    let sky = el(El::Div)
+/// The Saison header: the year's sky and sun, the year and the weather's sentence
+/// rising over it.
+fn sky(weather: Weather, year: i32) -> ElementBuilder {
+    el(El::Div)
         .st([
             St::PositionRelative,
             St::MinH12rem,
@@ -1461,22 +1461,28 @@ fn weather_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             St::PMd,
             St::TextOnEmphasis,
         ])
-        .style(Style::new().background(sky_gradient(game.weather)))
-        .append(sun(game.weather))
+        .style(Style::new().background(sky_gradient(weather)))
+        .append(sun(weather))
         .append([el(El::Div).st([St::PositionRelative]).append([
             reveal(
                 0,
                 el(El::Div)
                     .st([St::Text4xl, St::FontBold, St::LeadingNone])
-                    .text(&format!("An {}", game.year)),
+                    .text(&format!("An {year}")),
             ),
             reveal(
                 1,
                 el(El::Div)
                     .st([St::TextLg, St::MtSm])
-                    .text(game.weather.sentence()),
+                    .text(weather.sentence()),
             ),
-        ])]);
+        ])])
+}
+
+/// Saison: the year's sky, then the harvest ledger line by line, verdict last.
+fn weather_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
+    let game = &t.room.game;
+    let sky = sky(game.weather, game.year);
 
     let needs = k.peasants_grain_needs() + k.soldiers_grain_needs();
     let balance = k.grain_stocks - needs;
@@ -2478,3 +2484,4 @@ fn fmt(n: i32) -> String {
     }
     out
 }
+
