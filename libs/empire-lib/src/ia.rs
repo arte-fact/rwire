@@ -49,7 +49,6 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
 
     let weather_ratio = game.weather.value() as f32 / 6.0;
     let year = game.year;
-    let barbarians_surface = game.barbarians_surface;
     let enemies: Vec<Kingdoms> = game
         .alive_kingdoms()
         .into_iter()
@@ -196,9 +195,6 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
         }
 
         if year < 3 {
-            if barbarians_surface <= 0 {
-                break;
-            }
             decision.barbarian_attacks.push(random(1, soldiers).max(1));
         } else {
             if enemies.is_empty() {
@@ -369,6 +365,5 @@ mod tests {
             assert!(k.soldiers >= 0, "{:?}", k);
             assert!(k.surface >= 0, "{:?}", k);
         }
-        assert!(game.barbarians_surface >= 0);
     }
 }

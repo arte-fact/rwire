@@ -34,8 +34,7 @@ pub enum Trade {
         amount: i32,
         price: i32,
     },
-    /// Sell `arpents` of land to the barbarians (capped by [`max_land_sale`]);
-    /// the barbarians' lands grow by as much.
+    /// Sell `arpents` of land to the barbarians (capped by [`max_land_sale`]).
     SellLand {
         arpents: i32,
     },
@@ -76,7 +75,6 @@ pub fn apply_trade(game: &mut EmpireGame, buyer: Kingdoms, trade: Trade) {
             let arpents = arpents.clamp(0, max_land_sale(k.surface));
             k.surface -= arpents;
             k.treasury += arpents * LAND_SELL_PRICE;
-            game.barbarians_surface += arpents;
         }
         Trade::None => {}
     }
@@ -188,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn selling_land_pays_and_hands_it_to_the_barbarians() {
+    fn selling_land_pays() {
         let mut game = EmpireGame::default();
         apply_trade(
             &mut game,
@@ -198,7 +196,6 @@ mod tests {
         let k = game.kingdom(Kingdoms::France);
         assert_eq!(k.surface, 9900);
         assert_eq!(k.treasury, 1000 + 100 * LAND_SELL_PRICE);
-        assert_eq!(game.barbarians_surface, 6100);
     }
 
     #[test]

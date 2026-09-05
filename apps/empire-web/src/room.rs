@@ -1063,9 +1063,6 @@ impl Room {
             return Err("Vos nobles ne peuvent mener davantage d'expéditions cette année.".into());
         }
         match e.target {
-            None if self.game.barbarians_surface <= 0 => {
-                return Err("Toutes les terres barbares ont déjà été conquises.".into());
-            }
             Some(t) if t == id || self.game.kingdom(t).is_dead => {
                 return Err("Ce royaume n'est plus.".into());
             }
@@ -1161,12 +1158,6 @@ impl Room {
                     },
                 ),
             }
-        } else if let Some(by) = annexed {
-            let by = self.game.kingdom(by).titled_name();
-            self.journal(
-                audience.iter().copied(),
-                format!("{by} conquiert les dernières terres barbares ; les survivants ont fui."),
-            );
         }
         self.check_over();
     }

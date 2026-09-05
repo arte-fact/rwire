@@ -693,9 +693,14 @@ fn kingdoms_tab(t: T) -> ElementBuilder {
         .columns(GridColumns::Fixed2)
         .gap(Gap::Sm)
         .children([
-            Stat::new(fmt(room.game.barbarians_surface))
-                .label("Terres barbares")
-                .build(),
+            Stat::new(fmt(room
+                .game
+                .kingdoms
+                .iter()
+                .map(|k| k.surface)
+                .sum::<i32>()))
+            .label("Terres tenues")
+            .build(),
             Stat::new(room.game.alive_kingdoms().len().to_string())
                 .label("Royaumes en lice")
                 .build(),
@@ -5025,7 +5030,7 @@ fn war_step(t: T, id: Kingdoms, seat: &Seat) -> ElementBuilder {
             vec![txt(
                 "sans seigneur · des bandes à la mesure de l'ost envoyé",
             )],
-            &fmt(room.game.barbarians_surface),
+            "∞",
             "arpents",
             chosen == 0,
             ready,

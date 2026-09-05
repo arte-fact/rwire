@@ -327,8 +327,13 @@ fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) ->
                     ),
             );
         }
-        let land: i32 = r.armies.iter().map(|a| a.line.arpents).sum();
-        lines.push(el(El::Span).text(&format!("{} arpents", fmt(land))));
+        lines.push(el(El::Span).text(&match target {
+            Some(_) => format!(
+                "{} arpents",
+                fmt(r.armies.iter().map(|a| a.line.arpents).sum::<i32>())
+            ),
+            None => "terres sans fin".to_string(),
+        }));
         if let Some(by) = annexed {
             lines.push(verdict(format!("annexée par la {}", by.name()), true));
         }
@@ -701,8 +706,14 @@ fn battle(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
 fn march(room: &Room, b: &Battle, round: &Round) -> ElementBuilder {
     let r = &b.fought.result;
     let target = b.fought.target;
-    let land: i32 = r.armies.iter().map(|a| a.line.arpents).sum();
     let taken: i32 = round.armies.iter().map(|s| s.advance).sum();
+    let total = match target {
+        Some(_) => format!(
+            "{} arpents · ",
+            fmt(r.armies.iter().map(|a| a.line.arpents).sum::<i32>())
+        ),
+        None => String::new(),
+    };
     let header = el(El::Div)
         .st([
             St::DisplayFlex,
@@ -719,14 +730,14 @@ fn march(room: &Room, b: &Battle, round: &Round) -> ElementBuilder {
                 } else {
                     "Terres barbares".to_string()
                 }),
-            mono(&format!("{} arpents · {} pris", fmt(land), fmt(taken))),
+            mono(&format!("{total}{} pris", fmt(taken))),
         ]);
     let n = r.armies.len();
     let armies = r
         .armies
         .iter()
         .zip(&round.armies)
-        .map(|(a, s)| army_march(room, a, s, n));
+        .map(|(a, s)| army_march(room, a, s, n, target.is_some()));
     el(El::Div)
         .st([St::DisplayFlex, St::FlexCol, St::GapSm])
         .append([header])
@@ -734,16 +745,19 @@ fn march(room: &Room, b: &Battle, round: &Round) -> ElementBuilder {
 }
 
 /// One army's march: its share of the realm as a bar filling with the
-/// arpents taken, and under it what it took — goods, people, buildings.
-fn army_march(room: &Room, a: &Army, s: &Stand, n: usize) -> ElementBuilder {
+/// arpents taken, and under it what it took — goods, people, buildings. On
+/// the barbarians' endless lands the bar spans what the band was worth and
+/// no total is named.
+fn army_march(room: &Room, a: &Army, s: &Stand, n: usize, bounded: bool) -> ElementBuilder {
     let len = a.line.arpents.max(1) as i64;
     let x = s.advance.clamp(0, a.line.arpents) as i64;
-    let share = match n {
-        1 => String::new(),
-        2 => "½ · ".to_string(),
-        3 => "⅓ · ".to_string(),
-        4 => "¼ · ".to_string(),
-        n => format!("1/{n} · "),
+    let share = match (bounded, n) {
+        (false, _) => String::new(),
+        (true, 1) => format!("{} arpents · ", fmt(a.line.arpents)),
+        (true, 2) => format!("½ · {} arpents · ", fmt(a.line.arpents)),
+        (true, 3) => format!("⅓ · {} arpents · ", fmt(a.line.arpents)),
+        (true, 4) => format!("¼ · {} arpents · ", fmt(a.line.arpents)),
+        (true, n) => format!("1/{n} · {} arpents · ", fmt(a.line.arpents)),
     };
     let header = el(El::Div)
         .st([
@@ -760,7 +774,7 @@ fn army_march(room: &Room, a: &Army, s: &Stand, n: usize) -> ElementBuilder {
             el(El::Span)
                 .st([St::FontMono, St::TextMuted, St::TabularNums])
                 .append([
-                    txt(&format!("{share}{} arpents · ", fmt(a.line.arpents))),
+                    txt(&share),
                     el(El::Span)
                         .st([St::TextParty])
                         .text(&format!("{} pris", fmt(x as i32))),
@@ -818,10 +832,7 @@ fn verdict(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
     let (big, sub, tone) = match (annexed, r.garrison_fell()) {
         (Some(_), _) => (
             "Annexion",
-            match target {
-                Some(_) => format!("{} n'est plus", party_the(target)),
-                None => "les dernières terres barbares sont prises".to_string(),
-            },
+            format!("{} n'est plus", party_the(target)),
             St::TextWarning,
         ),
         (None, true) => (
@@ -1014,10 +1025,7 @@ fn defender_verdict(room: &Room, b: &Battle) -> ElementBuilder {
         }
         None => {
             parts.push(format!("{} de la bande tombés", fmt(r.garrison_fallen())));
-            parts.push(format!(
-                "{} arpents barbares restants",
-                fmt(room.game.barbarians_surface)
-            ));
+            parts.push("les terres barbares sont sans fin".to_string());
         }
     }
     el(El::Div)

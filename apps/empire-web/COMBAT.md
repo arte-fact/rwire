@@ -312,8 +312,10 @@ Le schéma A complet, tous les traits éteints, les verdicts sous chaque armée 
 - **Annexion** : le reste du royaume (ce qu'aucune ligne n'a franchi) va à l'armée victorieuse la
   plus avancée (puis la plus nombreuse) ; les serfs répartis sur les lignes sont les survivants.
 - **Ligne entièrement franchie** : l'armée cesse de combattre (elle a tout pris de sa part).
-- **Barbares** : chaque expédition est son propre front (règle inchangée, plafond courant sur la
-  surface barbare) ; la ligne barbare est nue (ni biens ni bâtiments).
+- **Barbares** : chaque expédition est son propre front (règle inchangée) sur des **terres sans
+  fin** — plus de surface barbare dans l'état du jeu, on y prend autant d'arpents qu'on en gagne,
+  jamais d'annexion. La ligne barbare est nue (ni biens ni bâtiments) ; sa longueur ne sert qu'à
+  la barre : ce que la bande valait au mieux (coups nécessaires × gain maximal d'un coup).
 - **Rythme** : batailles rejouées l'une après l'autre, 25 à 50 frames par front (100 ms),
   schéma 2 s, verdict 3 s + 1 s par armée supplémentaire ; aucun bouton avant le dernier
   schéma (`Staging::Done` → « Continuer »).

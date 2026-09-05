@@ -2,7 +2,8 @@
 //! fought at once. The men leave their garrisons first, so each front meets
 //! the defender as it then stands. All the armies marching on one realm fight
 //! it together, as one front (see [`crate::front`]); each expedition against
-//! the barbarians is a front of its own, fought by the old rule.
+//! the barbarians is a front of its own, fought by the old rule, on lands
+//! without end.
 
 use crate::front::{apply_front, simulate_front, Army, FrontResult, Line, People, Round, Stand};
 use crate::game::EmpireGame;
@@ -55,8 +56,8 @@ impl Fought {
 /// The armies march: the men leave their garrisons (no more than the realm
 /// has), then every front is fought against the realms as they now stand, in
 /// the order the targets were first named. Expeditions that make no sense (a
-/// fallen realm on either side, a realm marching on itself, no barbarian land
-/// left, no men) are dropped.
+/// fallen realm on either side, a realm marching on itself, no men) are
+/// dropped.
 pub fn march(
     game: &mut EmpireGame,
     expeditions: impl IntoIterator<Item = Expedition>,
@@ -67,7 +68,7 @@ pub fn march(
         let sensible = !a.is_dead
             && match e.target {
                 Some(t) => t != e.attacker && !game.kingdom(t).is_dead,
-                None => game.barbarians_surface > 0,
+                None => true,
             };
         e.soldiers = e.soldiers.min(a.soldiers);
         if !sensible || e.soldiers < 1 {
@@ -80,7 +81,6 @@ pub fn march(
         }
     }
     let field = game.clone();
-    let mut barbarian_land = field.barbarians_surface;
     let mut fought = Vec::new();
     for (target, armies) in fronts {
         match target {
@@ -92,23 +92,20 @@ pub fn march(
                     result: simulate_front(&field, t, &armies),
                 });
             }
-            // Every barbarian expedition is its own front, taking at most
-            // what the ones before left.
-            None => {
-                for e in armies {
-                    let result = raid(&field, e, barbarian_land);
-                    barbarian_land -= result.spoils().arpents;
-                    fought.push(Fought { target, result });
-                }
-            }
+            // Every barbarian expedition is its own front.
+            None => fought.extend(armies.into_iter().map(|e| Fought {
+                target,
+                result: raid(&field, e),
+            })),
         }
     }
     fought
 }
 
-/// An expedition against the barbarians, told as a front with one army and
-/// a bare line of `land` arpents.
-fn raid(field: &EmpireGame, e: Expedition, land: i32) -> FrontResult {
+/// An expedition against the barbarians, told as a front with one army on a
+/// bare line as long as the band was worth at best: the most land one blow
+/// yields, times the blows it takes to fell the band.
+fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
     let mut frames = Vec::new();
     let r = simulate_barbarian_battle(field, e.attacker, e.soldiers, |p| frames.push(p.clone()));
     let band = frames
@@ -116,8 +113,10 @@ fn raid(field: &EmpireGame, e: Expedition, land: i32) -> FrontResult {
         .map(|f| f.defender_soldiers)
         .max()
         .unwrap_or(0);
+    let tu = e.soldiers / 15 + 1;
+    let worth = (band + tu - 1) / tu * (tu * 26 - 2);
     let advance = if r.attacker_won {
-        r.surface_conquered.min(land)
+        r.surface_conquered
     } else {
         0
     };
@@ -148,14 +147,14 @@ fn raid(field: &EmpireGame, e: Expedition, land: i32) -> FrontResult {
             rallied: People::default(),
             killed: People::default(),
             line: Line {
-                arpents: land,
+                arpents: worth.max(advance),
                 ..Line::default()
             },
         }],
         rounds,
         garrison_start: band,
         garrison_left: band_left,
-        annexed_by: (advance >= land && land > 0).then_some(0),
+        annexed_by: None,
     }
 }
 
@@ -166,12 +165,10 @@ pub fn apply_battle(game: &mut EmpireGame, b: &Fought) {
         Some(t) => apply_front(game, t, &b.result),
         None => {
             let a = &b.result.armies[0];
-            let arpents = a.spoils().arpents.min(game.barbarians_surface);
-            game.barbarians_surface -= arpents;
             // The men have left already: only the survivors come home.
             let k = game.kingdom_mut(a.attacker);
             if !k.is_dead {
-                k.surface += arpents;
+                k.surface += a.spoils().arpents;
                 k.soldiers += a.men;
             }
         }
@@ -274,11 +271,8 @@ mod tests {
     }
 
     #[test]
-    fn barbarian_raids_take_at_most_the_land_there_is() {
-        let mut game = EmpireGame {
-            barbarians_surface: 40,
-            ..Default::default()
-        };
+    fn barbarian_raids_are_fronts_of_their_own_on_lands_without_end() {
+        let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 5000;
         game.kingdom_mut(Kingdoms::Germany).soldiers = 5000;
         let fought = march(
@@ -289,11 +283,10 @@ mod tests {
             ],
         );
         assert_eq!(fought.len(), 2);
-        let taken: i32 = fought.iter().map(|f| f.result.spoils().arpents).sum();
-        assert!(taken <= 40);
-        let conquered = fought.iter().filter(|f| f.annexed_by().is_some()).count();
-        assert!(conquered <= 1);
+        assert!(fought.iter().all(|f| f.annexed_by().is_none()));
         for f in &fought {
+            let a = &f.result.armies[0];
+            assert!(a.advance <= a.line.arpents);
             assert_eq!(f.result.rounds[0].armies[0].men, 5000);
             assert!(f
                 .result
@@ -302,7 +295,6 @@ mod tests {
                 .all(|w| w[0].armies[0].advance <= w[1].armies[0].advance));
             apply_battle(&mut game, f);
         }
-        assert_eq!(game.barbarians_surface, 40 - taken);
         let f = game.kingdom(Kingdoms::France);
         assert_eq!(f.surface, 10_000 + fought[0].result.spoils().arpents);
         assert_eq!(f.soldiers, fought[0].armies()[0].men);

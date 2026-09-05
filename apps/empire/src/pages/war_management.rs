@@ -110,13 +110,7 @@ fn display_barbarian_battle_result(
     clear_screen();
     print_at(5, 20, "Expédition terminée");
 
-    if result.all_barbarians_conquered {
-        print_at(
-            7,
-            10,
-            "Toutes les terres barbares ont été conquises. Les barbares restants ont fui.",
-        );
-    } else if result.attacker_won {
+    if result.attacker_won {
         print_at(7, 16, &format!("{} gagne.", attacker_title));
         print_at(
             8,
@@ -241,10 +235,6 @@ fn prompt_kingdom_to_attack(game: &EmpireGame, id: Kingdoms) -> Option<Attack> {
         }
 
         if number == 1 {
-            if game.barbarians_surface <= 0 {
-                print_at(20, 16, "Tous les pays barbares ont été conquis.");
-                continue;
-            }
             return Some(Attack {
                 soldiers: prompt_number_of_soldiers_to_send(game, soldiers),
                 defender: AttackDefender::Barbarians,
@@ -321,11 +311,7 @@ fn print_page(game: &EmpireGame) {
     clear_screen();
     print_at(4, 16, &black_on_gray(" Terres vassales "));
     print_at(6, 16, "1) Barbares");
-    print_at(
-        6,
-        40,
-        &format!("{:>6}", large_number(game.barbarians_surface)),
-    );
+    print_at(6, 40, "sans fin");
 
     for (index, id) in game.alive_kingdoms().into_iter().enumerate() {
         print_at(7 + index, 16, &format!("{}) {}", index + 2, id.name()));

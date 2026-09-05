@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::kingdom::{Kingdom, Kingdoms, KINGDOMS};
 use crate::weather::Weather;
 
-/// Complete state of one Empire game: the calendar, the barbarian lands, the
+/// Complete state of one Empire game: the calendar, the
 /// current weather and the six kingdoms.
 ///
 /// Derives `rwire::State` (memory storage) so an rwire app can take it as
@@ -13,7 +13,6 @@ use crate::weather::Weather;
 #[storage(memory)]
 pub struct EmpireGame {
     pub year: i32,
-    pub barbarians_surface: i32,
     pub weather: Weather,
     pub kingdoms: [Kingdom; 6],
 }
@@ -22,7 +21,6 @@ impl Default for EmpireGame {
     fn default() -> Self {
         EmpireGame {
             year: 1,
-            barbarians_surface: 6000,
             weather: Weather::default(),
             kingdoms: KINGDOMS.map(Kingdom::new),
         }
@@ -74,7 +72,6 @@ mod tests {
     fn default_game_matches_original_setup() {
         let game = EmpireGame::default();
         assert_eq!(game.year, 1);
-        assert_eq!(game.barbarians_surface, 6000);
         assert_eq!(game.alive_kingdoms(), KINGDOMS.to_vec());
         for id in KINGDOMS {
             assert_eq!(game.kingdom(id).id, id);
