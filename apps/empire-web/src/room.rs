@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use empire_lib::campaign::{apply_battle, march, Expedition, Fought};
+use empire_lib::campaign::{apply_battle, forecast, march, Expedition, Fought};
 use empire_lib::demography::{apply_feed, Council, YearDemography};
 use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, YearEconomy};
 use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
-use empire_lib::front::{Army, BuildingKind, FrontResult, Round, Spoils};
+use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Round, Spoils};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::ia::plan_ai_turn;
 use empire_lib::investments::{apply_investment, InvestmentType};
@@ -257,6 +257,20 @@ impl Draft {
     }
 }
 
+/// The war sheet's forecast for one target: the men sent, sampled evenly
+/// from 1 to `max`, and what each sample brings back over [`FORECAST_DRAWS`]
+/// fights. The sheet's slider reads it by interpolation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WarForecast {
+    pub target: Option<Kingdoms>,
+    pub max: i32,
+    pub sent: Vec<i32>,
+    pub rows: Vec<Forecast>,
+}
+
+pub const FORECAST_DRAWS: usize = 24;
+const FORECAST_POINTS: i32 = 16;
+
 #[derive(Clone, Default)]
 pub struct Seat {
     /// Token of the connection playing this kingdom; `None` = computer.
@@ -292,8 +306,10 @@ pub struct Seat {
     /// re-centre on them; `None` = the sheet's defaults.
     pub deal_amount: Option<i32>,
     pub deal_price: Option<i32>,
-    /// The target picked on the war step (kingdom number, 0 = barbarians).
+    /// The target whose war sheet is open (kingdom number, 0 = barbarians).
     pub target: Option<u8>,
+    /// What the open war sheet foretells, computed as it opens.
+    pub forecast: Option<WarForecast>,
     /// The title held at the last year's end, so a change can be announced;
     /// `None` until the first year opens.
     pub title: Option<PlayerTitle>,
@@ -563,6 +579,51 @@ impl Room {
         self.game.kingdom(id).soldiers - ordered
     }
 
+    /// The expedition `id` has ordered on `target`, with its place in the orders.
+    pub fn planned_on(
+        &self,
+        id: Kingdoms,
+        target: Option<Kingdoms>,
+    ) -> Option<(usize, &Expedition)> {
+        self.seat(id)
+            .planned
+            .iter()
+            .enumerate()
+            .find(|(_, e)| e.target == target)
+    }
+
+    /// Men `id` may send on `target`: the garrison, plus the army already
+    /// ordered there (settling the target again replaces it).
+    pub fn available(&self, id: Kingdoms, target: Option<Kingdoms>) -> i32 {
+        self.garrison(id) + self.planned_on(id, target).map_or(0, |(_, e)| e.soldiers)
+    }
+
+    /// Foretell what `id` would bring back from `target`, for every size of
+    /// army it can send.
+    pub fn war_forecast(&self, id: Kingdoms, target: Option<Kingdoms>) -> WarForecast {
+        let max = self.available(id, target).max(1);
+        let points = max.min(FORECAST_POINTS);
+        let sent: Vec<i32> = (0..points)
+            .map(|i| {
+                if points == 1 {
+                    max
+                } else {
+                    1 + (i64::from(i) * i64::from(max - 1) / i64::from(points - 1)) as i32
+                }
+            })
+            .collect();
+        let rows = sent
+            .iter()
+            .map(|&n| forecast(&self.game, target, id, n, FORECAST_DRAWS))
+            .collect();
+        WarForecast {
+            target,
+            max,
+            sent,
+            rows,
+        }
+    }
+
     /// Whether `id` may act on `step` right now.
     pub fn may_act(&self, id: Kingdoms, step: Step) -> bool {
         self.playing(id) && self.seat(id).step == step
@@ -590,10 +651,6 @@ impl Room {
         if self.log.len() > JOURNAL_LEN {
             self.log.remove(0);
         }
-    }
-
-    fn note(&mut self, id: Kingdoms, msg: impl Into<String>) {
-        self.note_at(id, Spot::Top, msg);
     }
 
     fn note_at(&mut self, id: Kingdoms, spot: Spot, msg: impl Into<String>) {
@@ -698,6 +755,7 @@ impl Room {
                 seat.deal_amount = None;
                 seat.deal_price = None;
                 seat.target = None;
+                seat.forecast = None;
                 seat.planned.clear();
             }
         }
@@ -726,6 +784,7 @@ impl Room {
             seat.ready = false;
             seat.notice = None;
             seat.target = None;
+            seat.forecast = None;
             seat.planned.clear();
         }
         self.try_march();
@@ -1741,19 +1800,22 @@ pub fn delta_verb(delta: i32) -> &'static str {
     }
 }
 
-/// The target picked in the war list (kingdom number, 0 = barbarians).
+/// A target's tile touched: its war sheet opens (the extra param byte is the
+/// kingdom number, 0 = the barbarians) or, with 0xFF, closes.
 #[handler]
 pub fn pick_target(rooms: &mut Rooms, ctx: &EventContext) {
-    let Some((token, _, room)) = table(rooms, ctx) else {
+    let Some((token, extra, room)) = table(rooms, ctx) else {
         return;
     };
-    let Some(id) = room.seat_of(token) else {
+    let Some(id) = acting(room, token, Step::War) else {
         return;
     };
-    room.seat_mut(id).target = ctx
-        .text()
-        .and_then(|v| v.trim().parse::<u8>().ok())
-        .filter(|&n| n <= 6);
+    let picked = extra.first().copied().filter(|&n| n <= 6);
+    let forecast = picked.map(|n| room.war_forecast(id, Kingdoms::from_number(i32::from(n))));
+    let seat = room.seat_mut(id);
+    seat.target = picked;
+    seat.forecast = forecast;
+    seat.notice = None;
 }
 
 /// A purchase sheet validated: the kind is the first extra param byte (its
@@ -1806,23 +1868,42 @@ pub fn invest(rooms: &mut Rooms, ctx: &EventContext) {
     conclude(room, id, Spot::Purchases, outcome);
 }
 
-/// The war form validated: one more expedition on the orders.
+/// The war sheet validated: the army on its target (the extra param byte)
+/// is settled, replacing the one ordered there before, and the sheet closes.
 #[handler]
 pub fn attack(rooms: &mut Rooms, ctx: &EventContext) {
-    let Some((token, _, room)) = table(rooms, ctx) else {
+    let Some((token, extra, room)) = table(rooms, ctx) else {
         return;
     };
     let Some(id) = acting(room, token, Step::War) else {
         return;
     };
+    let Some(target) = extra.first().filter(|&&n| n <= 6) else {
+        return;
+    };
+    let target = Kingdoms::from_number(i32::from(*target));
+    let was = room.planned_on(id, target).map(|(i, e)| (i, *e));
+    if let Some((i, _)) = was {
+        room.seat_mut(id).planned.remove(i);
+    }
     let e = Expedition {
         attacker: id,
-        target: Kingdoms::from_number(num(ctx, "target")),
+        target,
         soldiers: num(ctx, "soldiers"),
     };
     room.seat_mut(id).notice = None;
-    if let Err(msg) = room.order(e) {
-        room.note(id, msg);
+    match room.order(e) {
+        Ok(()) => {
+            let seat = room.seat_mut(id);
+            seat.target = None;
+            seat.forecast = None;
+        }
+        Err(msg) => {
+            if let Some((i, e)) = was {
+                room.seat_mut(id).planned.insert(i, e);
+            }
+            room.note_at(id, Spot::Sheet, msg);
+        }
     }
 }
 
@@ -1842,6 +1923,8 @@ pub fn withdraw(rooms: &mut Rooms, ctx: &EventContext) {
     {
         seat.planned.remove(i as usize);
         seat.notice = None;
+        seat.target = None;
+        seat.forecast = None;
     }
 }
 

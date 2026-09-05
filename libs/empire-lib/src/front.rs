@@ -343,6 +343,60 @@ pub fn simulate_front(
     defender: Kingdoms,
     armies: &[(Kingdoms, i32)],
 ) -> FrontResult {
+    fight(game, defender, armies, true)
+}
+
+/// The outcome of one army sent alone against `defender`, fought `draws`
+/// times: what it would take and lose, as bands from the first to the ninth
+/// decile, and how often the garrison fell.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Forecast {
+    pub arpents: (i32, i32),
+    pub lost: (i32, i32),
+    pub victories: i32,
+}
+
+/// Deciles of `v` (sorted in place): the first and the ninth.
+pub(crate) fn deciles(v: &mut [i32]) -> (i32, i32) {
+    if v.is_empty() {
+        return (0, 0);
+    }
+    v.sort_unstable();
+    let last = v.len() - 1;
+    (v[last / 10], v[last - last / 10])
+}
+
+pub fn forecast_front(
+    game: &EmpireGame,
+    defender: Kingdoms,
+    attacker: Kingdoms,
+    sent: i32,
+    draws: usize,
+) -> Forecast {
+    let mut arpents = Vec::with_capacity(draws);
+    let mut lost = Vec::with_capacity(draws);
+    let mut victories = 0;
+    for _ in 0..draws {
+        let r = fight(game, defender, &[(attacker, sent)], false);
+        let a = &r.armies[0];
+        arpents.push(a.advance);
+        lost.push(a.lost());
+        victories += i32::from(a.victory);
+    }
+    Forecast {
+        arpents: deciles(&mut arpents),
+        lost: deciles(&mut lost),
+        victories,
+    }
+}
+
+/// The fight itself; `record` keeps every round for the replay.
+fn fight(
+    game: &EmpireGame,
+    defender: Kingdoms,
+    armies: &[(Kingdoms, i32)],
+    record: bool,
+) -> FrontResult {
     let d = game.kingdom(defender);
     let n = armies.len();
     let lines = lay_out(d, n);
@@ -383,10 +437,12 @@ pub fn simulate_front(
             } else {
                 stands[i].men = max(0, stands[i].men - units[i]);
             }
-            rounds.push(Round {
-                garrison,
-                armies: stands.clone(),
-            });
+            if record {
+                rounds.push(Round {
+                    garrison,
+                    armies: stands.clone(),
+                });
+            }
         }
     }
 
@@ -423,10 +479,12 @@ pub fn simulate_front(
                 }
             }
             stands[i].advance = reached;
-            rounds.push(Round {
-                garrison,
-                armies: stands.clone(),
-            });
+            if record {
+                rounds.push(Round {
+                    garrison,
+                    armies: stands.clone(),
+                });
+            }
         }
     }
 

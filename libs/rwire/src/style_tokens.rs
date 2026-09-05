@@ -1003,6 +1003,13 @@ define_token_enum! {
         W34Pct = 0x381 => "width:34%",
         /// Bleed into a `PMd` parent's side padding (pair with `PxMd` to realign).
         MxNegMd = 0x382 => "margin-inline:calc(-1 * var(--S4))",
+        /// A party's colour as a thick rule on top (the inline `--kc`).
+        BorderT3Party = 0x383 => "border-top:3px solid var(--kc)",
+        /// A stacked bar: a flat strip whose segments ([`St::BarSeg`]) set `left`/`width`.
+        Bar = 0x384 => "position:relative;height:8px;border-radius:2px;overflow:hidden;background:var(--c)",
+        BarSeg = 0x385 => "position:absolute;top:0;bottom:0",
+        /// Hatched fill for what is held back (a garrison, a reserve).
+        BgHatched = 0x386 => "background:repeating-linear-gradient(135deg,var(--l) 0 2px,transparent 2px 5px);opacity:.6",
     }
 }
 

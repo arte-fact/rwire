@@ -5,7 +5,10 @@
 //! the barbarians is a front of its own, fought by the old rule, on lands
 //! without end.
 
-use crate::front::{apply_front, simulate_front, Army, FrontResult, Line, People, Round, Stand};
+use crate::front::{
+    apply_front, deciles, forecast_front, simulate_front, Army, Forecast, FrontResult, Line,
+    People, Round, Stand,
+};
 use crate::game::EmpireGame;
 use crate::kingdom::Kingdoms;
 use crate::war::simulate_barbarian_battle;
@@ -155,6 +158,40 @@ fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
         garrison_start: band,
         garrison_left: band_left,
         annexed_by: None,
+    }
+}
+
+/// What `sent` men of `attacker` may bring back from `target` (`None` = the
+/// barbarians), over `draws` fights.
+pub fn forecast(
+    game: &EmpireGame,
+    target: Option<Kingdoms>,
+    attacker: Kingdoms,
+    sent: i32,
+    draws: usize,
+) -> Forecast {
+    match target {
+        Some(t) => forecast_front(game, t, attacker, sent, draws),
+        None => {
+            let mut arpents = Vec::with_capacity(draws);
+            let mut lost = Vec::with_capacity(draws);
+            let mut victories = 0;
+            for _ in 0..draws {
+                let r = simulate_barbarian_battle(game, attacker, sent, |_| {});
+                arpents.push(if r.attacker_won {
+                    r.surface_conquered
+                } else {
+                    0
+                });
+                lost.push(sent - r.attacker_remaining_soldiers.max(0));
+                victories += i32::from(r.attacker_won);
+            }
+            Forecast {
+                arpents: deciles(&mut arpents),
+                lost: deciles(&mut lost),
+                victories,
+            }
+        }
     }
 }
 

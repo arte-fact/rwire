@@ -17,8 +17,8 @@ use rwire::builder::LiveSum;
 use rwire::{el, icon_sized, El, ElementBuilder, Ev, HandlerSpec, Icon, St, Style};
 use rwire_components::{
     Alert, Badge, Button, ButtonIntent, ButtonSize, CopyButton, Drawer, DrawerPosition, Gap, Grid,
-    GridColumns, Input, Link, Progress, ProgressIntent, Radio, Slider, Stack, StackJustify, Stat,
-    Stepper, Text, TextVariant,
+    GridColumns, Input, Link, Progress, ProgressIntent, Slider, Stack, StackJustify, Stat, Stepper,
+    Text, TextVariant,
 };
 
 use crate::room::{
@@ -299,28 +299,54 @@ fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
 fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
     let me = t.room.seat_of(t.token);
     let open = sheet.and_then(|sh| open_action(t, me, sh));
+    let war = war_target(t, me);
     let View { body, action } = match tab {
         1 => View::new(kingdoms_tab(t), None),
         2 => View::new(journal_tab(t), None),
-        _ => partie(t, me, open.is_some()),
+        _ => partie(t, me, open.is_some() || war.is_some()),
     };
-    let overlay = open.map(|(id, act)| {
-        let mut body = Vec::new();
-        let seat = t.room.seat(id);
-        if let (Some(notice), Spot::Sheet) = (&seat.notice, seat.notice_spot) {
-            body.push(Alert::info().message(notice.clone()).build());
-        }
-        body.push(sheet_form(t, id, act));
-        Drawer::new()
-            .position(DrawerPosition::Bottom)
-            .open(true)
-            .title(act.title())
-            .on_close(crate::close_sheet())
-            .content(Stack::column().gap(Gap::Md).children(body).build())
-            .build()
-    });
+    let overlay = match (open, war) {
+        (Some((id, act)), _) => Some(drawer(
+            t,
+            id,
+            act.title(),
+            crate::close_sheet(),
+            sheet_form(t, id, act),
+        )),
+        (None, Some((id, target))) => Some(drawer(
+            t,
+            id,
+            campaign::party_name(target).to_string(),
+            by(room::pick_target(), t.token, t.code, &[0xFF]),
+            war_sheet(t, id, target),
+        )),
+        (None, None) => None,
+    };
     let tabs = (t.room.stage != Stage::Lobby).then_some(tab);
     shell(header(t, me), body, bottom_bar(action, tabs), overlay)
+}
+
+/// The bottom sheet: the seat's notice for it, if any, over `form`.
+fn drawer(
+    t: T,
+    id: Kingdoms,
+    title: String,
+    on_close: HandlerSpec,
+    form: ElementBuilder,
+) -> ElementBuilder {
+    let mut body = Vec::new();
+    let seat = t.room.seat(id);
+    if let (Some(notice), Spot::Sheet) = (&seat.notice, seat.notice_spot) {
+        body.push(Alert::info().message(notice.clone()).build());
+    }
+    body.push(form);
+    Drawer::new()
+        .position(DrawerPosition::Bottom)
+        .open(true)
+        .title(title)
+        .on_close(on_close)
+        .content(Stack::column().gap(Gap::Md).children(body).build())
+        .build()
 }
 
 /// The sheet's action if it is still valid for this viewer at this moment.
@@ -1392,7 +1418,7 @@ fn turn(t: T, id: Kingdoms, sheet_open: bool) -> View {
         Step::Report => (report_step(seat), Some(next("Continuer", t))),
         Step::Treasury => (treasury_step(k, seat), Some(next("Continuer", t))),
         Step::Intendance => (intendance_step(t, id), None),
-        Step::War => (war_step(t, id, seat), Some(end_turn(t, id))),
+        Step::War => (war_step(t, id), Some(end_turn(t, id))),
     };
     let mut items = vec![stepper(seat.step)];
     items.extend(notice);
@@ -4908,55 +4934,6 @@ fn tile(t: T, k: &Kingdom, kind: InvestmentType) -> ElementBuilder {
         ])
 }
 
-/// One line of the purchase list: radio, name over a muted note, price over
-/// the affordable maximum. The chosen line carries an accent left border.
-fn pick_row(
-    radio: ElementBuilder,
-    label: &str,
-    note: Vec<ElementBuilder>,
-    price: &str,
-    max: &str,
-    chosen: bool,
-    enabled: bool,
-) -> ElementBuilder {
-    el(El::Label)
-        .st([
-            St::DisplayGrid,
-            St::GridColsAutoFrAuto,
-            St::GapXSm,
-            St::ItemsCenter,
-            St::PyXs,
-            St::PlSm,
-            St::BorderB,
-            St::TextSm,
-        ])
-        .st(if chosen {
-            [St::BorderL3Accent, St::BgSubtle]
-        } else {
-            [St::BorderL3Transparent, St::BgTransparent]
-        })
-        .st(if enabled {
-            [St::CursorPointer]
-        } else {
-            [St::Opacity50]
-        })
-        .append([
-            radio,
-            el(El::Span).st([St::MinW0]).append([
-                el(El::Strong).st([St::DisplayBlock]).text(label),
-                el(El::Span)
-                    .st([St::DisplayBlock, St::TextXs, St::TextMuted, St::TabularNums])
-                    .append(note),
-            ]),
-            el(El::Span)
-                .st([St::TextRight, St::TabularNums, St::WhitespaceNowrap])
-                .append([
-                    el(El::Strong).st([St::DisplayBlock]).text(price),
-                    el(El::Span).st([St::TextXs, St::TextMuted]).text(max),
-                ]),
-        ])
-}
-
 /// "champs de foire" → "Champs de foire"
 fn capitalize(s: &str) -> String {
     let mut c = s.chars();
@@ -4966,43 +4943,23 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-const WAR_FORM: &str = "war";
-
-/// The war step is one form: the vassal-lands list doubles as the target
-/// selector (a line per realm, like the purchase list), the troop slider sits
-/// under it and the red button adds the expedition to the orders, listed
-/// above. Nothing left to send → the lists alone. The armies march once
+/// The war step: the ost as a stacked bar (what marches where, what stays),
+/// then the targets as tiles, the barbarians first. Touching a tile opens
+/// that target's sheet ([`war_sheet`]); a tile whose army is ordered says so
+/// and reopens its sheet to settle or withdraw it. The armies march once
 /// every seigneur has given their orders.
-fn war_step(t: T, id: Kingdoms, seat: &Seat) -> ElementBuilder {
+fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     let room = t.room;
     let k = room.game.kingdom(id);
     let left = room.expeditions_left(id);
     let garrison = room.garrison(id);
     let year = room.game.year;
-    let ready = left > 0 && garrison > 0;
     let others: Vec<Kingdoms> = room
         .game
         .alive_kingdoms()
         .into_iter()
         .filter(|&o| o != id)
         .collect();
-    // The picked target, back to the barbarians once a realm is no longer one.
-    let chosen = seat
-        .target
-        .filter(|&n| {
-            n == 0
-                || (year >= 3
-                    && Kingdoms::from_number(i32::from(n)).is_some_and(|o| others.contains(&o)))
-        })
-        .unwrap_or(0);
-    let radio = |n: u8, enabled: bool| {
-        Radio::new()
-            .name("target")
-            .value(n.to_string())
-            .checked(chosen == n && enabled)
-            .disabled(!enabled)
-            .on_change(t.act(room::pick_target()))
-    };
 
     let title = el(El::Div)
         .st([St::DisplayFlex, St::JustifyBetween, St::ItemsBaseline])
@@ -5014,113 +4971,622 @@ fn war_step(t: T, id: Kingdoms, seat: &Seat) -> ElementBuilder {
             el(El::Span)
                 .st([St::TextSm, St::TextMuted, St::TabularNums])
                 .append([
-                    el(El::Strong).st([St::TextDefault]).text(&left.to_string()),
+                    el(El::Strong)
+                        .st([St::TextDefault])
+                        .text(&left.max(0).to_string()),
                     txt(if left == 1 {
-                        " expédition · "
+                        " expédition encore · "
                     } else {
-                        " expéditions · "
+                        " expéditions encore · "
                     }),
                     el(El::Strong).st([St::TextDefault]).text(&fmt(garrison)),
-                    txt(" hommes en garnison"),
+                    txt(" en garnison"),
                 ]),
         ]);
 
-    let mut rows = vec![
-        eyebrow("Terres vassales").st([St::PlSm]),
-        pick_row(
-            radio(0, ready),
-            "Barbares",
-            vec![txt(
-                "sans seigneur · des bandes à la mesure de l'ost envoyé",
-            )],
-            "∞",
-            "arpents",
-            chosen == 0,
-            ready,
-        ),
-    ];
-    rows.extend(others.iter().map(|&other| {
-        let o = room.game.kingdom(other);
-        let enabled = ready && year >= 3;
-        let n = (other.index() + 1) as u8;
-        let note = if year < 3 {
-            format!("{} · dès l'an 3", o.player_name)
-        } else {
-            format!("{} · {} soldats", o.player_name, fmt(o.soldiers))
-        };
-        pick_row(
-            radio(n, enabled),
-            o.name(),
-            vec![txt(&note)],
-            &fmt(o.surface),
-            "arpents",
-            chosen == n,
-            enabled,
-        )
-    }));
-    let note = if year < 3 {
-        "Les autres royaumes ne peuvent être attaqués qu'à partir de la 3ème année."
-    } else {
-        "Conquérir toutes les terres d'un royaume l'annexe : ses serfs deviennent les vôtres."
-    };
-    rows.push(Text::caption(note).muted().build().st([St::PtSm]));
-
-    let status = if k.soldiers < 1 {
+    let tiles = [None]
+        .into_iter()
+        .chain(others.iter().map(|&o| Some(o)))
+        .map(|target| target_tile(t, id, target));
+    let hint = if k.soldiers < 1 {
         "Vous n'avez plus d'hommes d'armes."
+    } else if year < 3 && left > 0 && garrison > 0 {
+        "Une expédition par tranche de 4 nobles, plus une. Les autres royaumes ne peuvent être attaqués qu'à partir de la 3ème année."
     } else if garrison < 1 {
-        "Tous vos hommes d'armes sont déjà en campagne."
+        "Tous vos hommes d'armes sont déjà en campagne. Toucher une armée rouvre son ordre."
     } else if left < 1 {
-        "Vos nobles ne peuvent mener davantage d'expéditions cette année."
+        "Vos nobles ne peuvent mener davantage d'expéditions cette année. Toucher une armée rouvre son ordre."
     } else {
-        "Une expédition par tranche de 4 nobles, plus une. Les armées marcheront toutes ensemble."
+        "Une expédition par tranche de 4 nobles, plus une. Toucher une cible règle son armée ; les armées marcheront toutes ensemble."
     };
-    let troops = if ready {
-        let ch = rwire::builder::next_live_channel();
-        let sent = (garrison / 2).max(1);
-        el(El::Div).st([St::PtSm]).append([
-            Slider::new()
-                .name("soldiers")
-                .id("soldiers")
-                .channel(ch)
-                .grouped(fmt)
-                .label("Hommes d'armes")
-                .unit("hommes")
-                .min(1)
-                .max(garrison)
-                .value(sent)
-                .mark(garrison / 2, "½")
-                .build(),
+    Stack::column()
+        .gap(Gap::Md)
+        .children([
+            title,
+            ost_bar(t, id, None),
+            section(
+                "Cibles",
+                el(El::Div)
+                    .st([St::DisplayGrid, St::GridCols3, St::GapSm])
+                    .append(tiles),
+            ),
+            Text::caption(hint).muted().build(),
+        ])
+        .build()
+}
+
+/// The wire byte naming a target: 0 = the barbarians, else the kingdom number.
+fn target_byte(target: Option<Kingdoms>) -> u8 {
+    target.map_or(0, |o| o.index() as u8 + 1)
+}
+
+/// The target the viewer's war sheet is open on, if it still may be.
+fn war_target(t: T, me: Option<Kingdoms>) -> Option<(Kingdoms, Option<Kingdoms>)> {
+    let id = me?;
+    let room = t.room;
+    if !room.may_act(id, Step::War) {
+        return None;
+    }
+    let n = room.seat(id).target?;
+    let target = match n {
+        0 => None,
+        n => {
+            let o = Kingdoms::from_number(i32::from(n))?;
+            (o != id && !room.game.kingdom(o).is_dead).then_some(o)?;
+            Some(o)
+        }
+    };
+    Some((id, target))
+}
+
+/// A target's tile: the party's colour on top, the garrison it holds (or the
+/// army ordered on it), its name and its lands. Dimmed once no more army can
+/// be ordered, unless one already is.
+fn target_tile(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
+    let room = t.room;
+    let year = room.game.year;
+    let planned = room.planned_on(id, target).map(|(_, e)| e.soldiers);
+    let enabled = planned.is_some()
+        || (room.expeditions_left(id) > 0
+            && room.garrison(id) > 0
+            && (target.is_none() || year >= 3));
+    let (name, badge, sub) = match target {
+        None => (
+            "Barbares",
+            planned.map_or_else(|| "∞".to_string(), hommes),
+            "terres sans fin".to_string(),
+        ),
+        Some(o) => {
+            let k = room.game.kingdom(o);
+            (
+                o.name(),
+                planned.map_or_else(|| format!("{} ⚔", fmt(k.soldiers)), hommes),
+                if year < 3 {
+                    "dès l'an 3".to_string()
+                } else {
+                    format!("{} arp.", fmt(k.surface))
+                },
+            )
+        }
+    };
+    let badge = if planned.is_some() {
+        Badge::primary(format!("{badge} ✓"))
+    } else {
+        Badge::new().text(badge)
+    };
+    let mut tokens = vec![
+        St::DisplayFlex,
+        St::FlexCol,
+        St::ItemsCenter,
+        St::GapXs,
+        St::PSm,
+        St::RoundedMd,
+        St::TextCenter,
+        St::BgSurface,
+        St::TextDefault,
+        St::FontInheritAll,
+        St::BorderT3Party,
+    ];
+    tokens.push(if planned.is_some() {
+        St::BorderAccent
+    } else {
+        St::BorderDefault
+    });
+    tokens.push(if enabled {
+        St::CursorPointer
+    } else {
+        St::Opacity50
+    });
+    let mut tile = el(El::Button)
+        .st(tokens)
+        .style(Style::new().set("--kc", campaign::party_color(target)))
+        .at(At::Type, Av::Button)
+        .append([
+            badge.build(),
             el(El::Div)
-                .st([St::DisplayFlex, St::JustifyBetween, St::TextSm, St::PtXs])
+                .st([St::TextSm, St::FontSemibold, St::LeadingTight])
+                .text(name),
+            el(El::Div)
+                .st([St::TextXs, St::TextMuted, St::TabularNums])
+                .text(&sub),
+        ]);
+    if enabled {
+        tile = tile.on(
+            Ev::Click,
+            by(room::pick_target(), t.token, t.code, &[target_byte(target)]),
+        );
+    } else {
+        tile = tile.bool_attr(At::Disabled);
+    }
+    tile
+}
+
+/// The ost as a stacked bar over every man of arms: one segment per army
+/// ordered, in its target's colour, the garrison hatched. With `live`, the
+/// segment of the target being settled follows the sheet's slider (its
+/// channel, the men it stands at, its maximum).
+fn ost_bar(t: T, id: Kingdoms, live: Option<(Option<Kingdoms>, u16, i32, i32)>) -> ElementBuilder {
+    let room = t.room;
+    let total = room.game.kingdom(id).soldiers.max(1);
+    let fixed: Vec<(Option<Kingdoms>, i32)> = room
+        .seat(id)
+        .planned
+        .iter()
+        .filter(|e| live.is_none_or(|(target, ..)| e.target != target))
+        .map(|e| (e.target, e.soldiers))
+        .collect();
+    let others: i32 = fixed.iter().map(|&(_, n)| n).sum();
+    let value = live.map_or(0, |(_, _, v, _)| v);
+    let marching = others + value;
+    let seg = |left: i32, width: i32, target: Option<Kingdoms>| {
+        Style::new()
+            .set("left", &pct_of(left, total))
+            .width(&pct_of(width, total))
+            .set("--kc", campaign::party_color(target))
+    };
+    let square = |target: Option<Kingdoms>| {
+        el(El::Span)
+            .st([
+                St::DisplayInlineBlock,
+                St::W05rem,
+                St::H05rem,
+                St::RoundedSm,
+                St::BgParty,
+            ])
+            .style(Style::new().set("--kc", campaign::party_color(target)))
+    };
+
+    let mut segments = Vec::new();
+    let mut legend = Vec::new();
+    let mut at = 0;
+    for &(target, n) in &fixed {
+        segments.push(
+            el(El::Div)
+                .st([St::BarSeg, St::BgParty])
+                .style(seg(at, n, target)),
+        );
+        legend.push(
+            el(El::Span)
+                .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
                 .append([
-                    el(El::Span).st([St::TextMuted]).text("Restent en garnison"),
-                    el(El::Span).append([
-                        el(El::Strong)
-                            .st([St::TabularNums])
-                            .text(&fmt(garrison - sent))
-                            .live_remainder_grouped(garrison as u32, &[ch]),
-                        txt(" hommes"),
+                    square(target),
+                    txt(&format!("{} {}", fmt(n), campaign::party_name(target))),
+                ]),
+        );
+        at += n;
+    }
+    let (partent, restent) = match live {
+        Some((target, ch, v, max)) => {
+            let sum = along(ch, v, 1, max, &|n| others + n);
+            segments.push(
+                el(El::Div)
+                    .st([St::BarSeg, St::BgParty])
+                    .style(seg(at, v, target))
+                    .live_span(
+                        LiveSum {
+                            base: others,
+                            terms: Vec::new(),
+                        },
+                        sum.clone(),
+                        (0, total),
+                        (0, total),
+                    ),
+            );
+            segments.push(
+                el(El::Div)
+                    .st([St::BarSeg, St::BgHatched])
+                    .style(seg(marching, total - marching, None))
+                    .live_span(
+                        sum.clone(),
+                        LiveSum {
+                            base: total,
+                            terms: Vec::new(),
+                        },
+                        (0, total),
+                        (0, total),
+                    ),
+            );
+            legend.push(
+                el(El::Span)
+                    .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
+                    .append([
+                        square(target),
+                        el(El::Span).text(&fmt(v)).live_text_grouped(ch),
+                        txt(&format!(" {}", campaign::party_name(target))),
+                    ]),
+            );
+            (
+                el(El::Span).text(&fmt(marching)).live_sum(sum),
+                el(El::Span)
+                    .text(&fmt(total - marching))
+                    .live_remainder_grouped((total - others) as u32, &[ch]),
+            )
+        }
+        None => {
+            segments.push(el(El::Div).st([St::BarSeg, St::BgHatched]).style(seg(
+                marching,
+                total - marching,
+                None,
+            )));
+            (
+                el(El::Span).text(&fmt(marching)),
+                el(El::Span).text(&fmt(total - marching)),
+            )
+        }
+    };
+    legend.push(
+        el(El::Span)
+            .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
+            .append([
+                el(El::Span).st([
+                    St::DisplayInlineBlock,
+                    St::W05rem,
+                    St::H05rem,
+                    St::RoundedSm,
+                    St::BgHatched,
+                ]),
+                match live {
+                    Some((_, ch, ..)) => el(El::Span)
+                        .text(&fmt(total - marching))
+                        .live_remainder_grouped((total - others) as u32, &[ch]),
+                    None => el(El::Span).text(&fmt(total - marching)),
+                },
+                txt(" garnison"),
+            ]),
+    );
+    el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapXs])
+        .append([
+            el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::JustifyBetween,
+                    St::ItemsBaseline,
+                    St::TextSm,
+                ])
+                .append([
+                    el(El::Strong).text("Votre ost"),
+                    el(El::Span).st([St::TextMuted, St::TabularNums]).append([
+                        partent,
+                        txt(" partent · "),
+                        restent,
+                        txt(" restent"),
                     ]),
                 ]),
-            el(El::Div).st([St::PtXs]).append([Button::destructive("")
+            el(El::Div).st([St::Bar]).append(segments),
+            el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::FlexWrap,
+                    St::GapXSm,
+                    St::GapYSm,
+                    St::TextXs,
+                    St::TextMuted,
+                    St::TabularNums,
+                ])
+                .append(legend),
+        ])
+}
+
+/// One cell of the war sheet's register: a small-caps label over a figure,
+/// and a gauge when the figure has one.
+fn war_cell(
+    label: &str,
+    figure: Vec<ElementBuilder>,
+    gauge: Option<ElementBuilder>,
+) -> ElementBuilder {
+    let mut lines = vec![
+        el(El::Div)
+            .st([
+                St::TextXs,
+                St::TextUppercase,
+                St::TrackingWider,
+                St::FontSemibold,
+                St::TextMuted,
+                St::WhitespaceNowrap,
+            ])
+            .text(label),
+        el(El::Div)
+            .st([
+                St::TextSm,
+                St::FontBold,
+                St::LeadingTight,
+                St::TrackingTight,
+                St::TabularNums,
+                St::WhitespaceNowrap,
+                St::OverflowHidden,
+            ])
+            .append(figure),
+    ];
+    lines.extend(gauge.map(|g| g.st([St::MtXs, St::MbXs])));
+    el(El::Div).st([St::MinW0]).append(lines)
+}
+
+/// The war sheet of one target: who holds it, the rule of the fight, the ost
+/// bar and a register of what the army would take and lose — all following
+/// the slider — then the red verb. An army already ordered there reopens
+/// with its men, to be settled again or withdrawn.
+fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
+    let room = t.room;
+    let seat = room.seat(id);
+    let k = room.game.kingdom(id);
+    let total = k.soldiers.max(1);
+    let planned = room.planned_on(id, target);
+    let max = room.available(id, target);
+    let fc = seat
+        .forecast
+        .as_ref()
+        .filter(|f| f.target == target && f.max == max.max(1))
+        .cloned()
+        .unwrap_or_else(|| room.war_forecast(id, target));
+    let ch = rwire::builder::next_live_channel();
+    let value = planned
+        .map(|(_, e)| e.soldiers)
+        .unwrap_or((max / 2).max(1))
+        .clamp(1, max.max(1));
+
+    let (sub, rule, chips): (String, &str, Vec<String>) = match target {
+        None => (
+            "sans seigneur · des bandes à la mesure de l'ost envoyé".to_string(),
+            "Les bandes se lèvent à la mesure de l'ost envoyé et se battent à 90 d'efficacité ; chaque coup porté gagne des terres, sans fin ni seigneur à renverser.",
+            vec!["terres sans fin".to_string(), "efficacité 90".to_string()],
+        ),
+        Some(o) => {
+            let d = room.game.kingdom(o);
+            (
+                format!(
+                    "{} · garnison {} ⚔ · efficacité {} · {} arpents",
+                    d.player_name,
+                    fmt(d.soldiers),
+                    d.soldiers_efficiency,
+                    fmt(d.surface)
+                ),
+                "L'armée force la garnison, puis marche le long des terres : les gens rencontrés se rallient une fois sur trois et se battent sinon. Prendre toutes les terres annexe le royaume.",
+                vec![
+                    format!("garnison {}", fmt(d.soldiers)),
+                    format!("annexion à {}", fmt(d.surface)),
+                    "brûle 1 bâtiment sur 3".to_string(),
+                ],
+            )
+        }
+    };
+    let mut body = vec![
+        subtitle(vec![txt(&sub)]),
+        intro(rule),
+        el(El::Div)
+            .st([St::DisplayFlex, St::FlexWrap, St::GapXs])
+            .append(chips.iter().map(|c| Badge::new().text(c.clone()).build())),
+    ];
+    if max < 1 {
+        body.extend(refused(
+            "Vous n'avez plus d'hommes d'armes à envoyer.",
+            "Envoyer",
+        ));
+        return Stack::column().gap(Gap::Sm).children(body).build();
+    }
+    body.push(ost_bar(t, id, Some((target, ch, value, max))));
+
+    // The register: the tables follow the slider by interpolation.
+    let lookup = |f: &dyn Fn(&empire_lib::front::Forecast) -> i32| -> Vec<i32> {
+        fc.rows.iter().map(f).collect()
+    };
+    let at = |table: &[i32]| -> i32 {
+        // The table's value at the slider's initial position.
+        let i = fc
+            .sent
+            .iter()
+            .position(|&n| n >= value)
+            .unwrap_or(fc.sent.len() - 1);
+        table[i]
+    };
+    let arp_lo = lookup(&|r| r.arpents.0);
+    let arp_hi = lookup(&|r| r.arpents.1);
+    let lost_lo = lookup(&|r| -r.lost.0);
+    let lost_hi = lookup(&|r| -r.lost.1);
+    let wins = lookup(&|r| r.victories * 100 / room::FORECAST_DRAWS as i32);
+    let range = |lo: &[i32], hi: &[i32], signed: bool, unit: &str| {
+        let span = |table: &[i32]| {
+            let e = el(El::Span).text(&if signed {
+                delta(at(table))
+            } else {
+                fmt(at(table))
+            });
+            if signed {
+                e.live_lookup_signed(ch, table)
+            } else {
+                e.live_lookup(ch, table)
+            }
+        };
+        vec![txt("≈ "), span(lo), txt(" … "), span(hi), txt(unit)]
+    };
+    let forces = match target {
+        Some(o) => {
+            let d = room.game.kingdom(o).soldiers.max(0);
+            let axis = max.max(d).max(1);
+            war_cell(
+                "Forces",
+                vec![
+                    el(El::Span).text(&fmt(value)).live_text_grouped(ch),
+                    txt(&format!(" contre {}", fmt(d))),
+                ],
+                Some(gauge([
+                    gauge_tick(d as f64 / axis as f64),
+                    el(El::Div)
+                        .st([St::GaugeSpan, St::BgAccent])
+                        .style(Style::new().set("left", "0").width(&pct_of(value, axis)))
+                        .live_span(
+                            LiveSum {
+                                base: 0,
+                                terms: Vec::new(),
+                            },
+                            along(ch, value, 1, max, &|n| n),
+                            (0, axis),
+                            (0, axis),
+                        ),
+                ])),
+            )
+        }
+        None => war_cell(
+            "Forces",
+            vec![
+                el(El::Span).text(&fmt(value)).live_text_grouped(ch),
+                txt(" contre des bandes"),
+            ],
+            None,
+        ),
+    };
+    let after = war_cell(
+        "Garnison après",
+        vec![
+            el(El::Span)
+                .text(&fmt(max - value))
+                .live_remainder_grouped(max as u32, &[ch]),
+            txt(" hommes"),
+        ],
+        Some(gauge([el(El::Div)
+            .st([St::GaugeSpan, St::BgWarning])
+            .style(
+                Style::new()
+                    .set("left", "0")
+                    .width(&pct_of(max - value, total)),
+            )
+            .live_span(
+                LiveSum {
+                    base: 0,
+                    terms: Vec::new(),
+                },
+                along(ch, value, 1, max, &|n| max - n),
+                (0, total),
+                (0, total),
+            )])),
+    );
+    let last = match target {
+        Some(o) => {
+            let surface = room.game.kingdom(o).surface;
+            let reach = fc
+                .sent
+                .iter()
+                .zip(&arp_hi)
+                .find(|(_, &hi)| hi >= surface)
+                .map(|(&n, _)| n);
+            let figure = match reach {
+                Some(n) => vec![el(El::Span).live_switch(ch, &[n as u32]).append([
+                    hidden_unless(value < n, el(El::Span).text("hors de portée")),
+                    hidden_unless(value >= n, el(El::Span).text("à portée")),
+                ])],
+                None => vec![txt("hors de portée")],
+            };
+            war_cell("Annexion", figure, None)
+        }
+        None => war_cell("Butin", vec![txt("terres seules")], None),
+    };
+    body.push(
+        el(El::Div)
+            .st([
+                St::DisplayGrid,
+                St::GridCols3,
+                St::GapXMd,
+                St::GapYSm,
+                St::PtSm,
+                St::BorderT,
+            ])
+            .append([
+                forces,
+                war_cell("Terres prises", range(&arp_lo, &arp_hi, false, ""), None),
+                war_cell("Hommes perdus", range(&lost_lo, &lost_hi, true, ""), None),
+                after,
+                war_cell(
+                    "Victoire",
+                    vec![
+                        txt("≈ "),
+                        el(El::Span)
+                            .text(&at(&wins).to_string())
+                            .live_lookup(ch, &wins),
+                        txt(" %"),
+                    ],
+                    None,
+                ),
+                last,
+            ]),
+    );
+
+    let foe = match target {
+        None => "contre les Barbares".to_string(),
+        Some(o) => format!("sur la {}", o.name()),
+    };
+    body.push(
+        Slider::new()
+            .name("soldiers")
+            .id("soldiers")
+            .channel(ch)
+            .grouped(fmt)
+            .label("Hommes d'armes")
+            .min(1)
+            .max(max)
+            .value(value)
+            .mark(max / 2, "½")
+            .readout_suffix(
+                el(El::Span)
+                    .st([St::TextSm, St::TextMuted, St::TabularNums])
+                    .append([
+                        txt("· restent "),
+                        el(El::Span)
+                            .text(&fmt(max - value))
+                            .live_remainder_grouped(max as u32, &[ch]),
+                        txt(&format!(" · max {}", fmt(max))),
+                    ]),
+            )
+            .build(),
+    );
+    body.push(
+        Button::destructive("")
+            .size(ButtonSize::Lg)
+            .full_width(true)
+            .build()
+            // One child so the button's flex gap doesn't split the sentence.
+            .append([el(El::Span).append([
+                txt(if planned.is_some() {
+                    "Régler à "
+                } else {
+                    "Envoyer "
+                }),
+                el(El::Span).text(&fmt(value)).live_text_grouped(ch),
+                txt(&format!(" hommes {foe}")),
+            ])]),
+    );
+    if let Some((i, _)) = planned {
+        body.push(
+            Button::ghost("Retirer l'armée")
                 .full_width(true)
                 .build()
-                // One child so the button's flex gap doesn't split the sentence.
-                .append([el(El::Span).append([
-                    txt("Envoyer "),
-                    el(El::Span).text(&fmt(sent)).live_text_grouped(ch),
-                    txt(" hommes"),
-                ])])]),
-            Text::caption(status).muted().build().st([St::PtXs]),
-        ])
-    } else {
-        Text::caption(status).muted().build().st([St::PtSm])
-    };
+                .at(At::Type, Av::Button)
+                .on(Ev::Click, by(room::withdraw(), t.token, t.code, &[i as u8])),
+        );
+    }
     form(
-        t.act(room::attack()),
-        [title, orders(t, id, true), el(El::Div).append(rows), troops],
+        by(room::attack(), t.token, t.code, &[target_byte(target)]),
+        body,
     )
-    .at_str(At::Id, WAR_FORM)
 }
 
 // ---------------------------------------------------------------------------

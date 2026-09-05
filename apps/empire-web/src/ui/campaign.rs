@@ -13,11 +13,11 @@ use crate::room::{buildings_fr, goods_fr, people_fr, Side, Staging};
 type Party = Option<Kingdoms>;
 
 /// The colour a party keeps throughout the app (the land curve's).
-fn party_color(p: Party) -> &'static str {
+pub(super) fn party_color(p: Party) -> &'static str {
     p.map_or("var(--j)", |k| CURVE_COLORS[k.index()])
 }
 
-fn party_name(p: Party) -> &'static str {
+pub(super) fn party_name(p: Party) -> &'static str {
     p.map_or("Barbares", Kingdoms::name)
 }
 
