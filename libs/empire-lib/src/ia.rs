@@ -7,6 +7,9 @@ use crate::war::{
     simulate_kingdom_battle,
 };
 
+/// The computer trades by the hundred: no one-bushel stalls or purchases.
+const MIN_LOT: i32 = 100;
+
 /// What the AI decided to do.
 #[derive(Debug, Clone, Default)]
 pub struct AiTurnDecision {
@@ -134,25 +137,28 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
         .collect();
     if !humans.is_empty() {
         let n = humans.len() as i32;
-        // Q3/Q4: human averages with noise (±1000 bushels, ±1 on the price).
+        // Q3/Q4: human averages with noise (±1000 bushels, ±5 on the price
+        // of the hundred — the original's ±1 on the bushel).
         let q3 = (humans.iter().map(|h| h.0).sum::<i32>() / n + random(1, 1001) - random(1, 1001))
             .max(0);
-        let mut q4 = (humans.iter().map(|h| h.1).sum::<i32>() / n + random(0, 2) - random(0, 2))
+        let mut q4 = (humans.iter().map(|h| h.1).sum::<i32>() / n + random(0, 6) - random(0, 6))
             .clamp(0, MAX_GRAIN_PRICE);
         // Bad years push the asking price up (original: +RND/1.5 when NW<3).
         if game.weather.value() < 3 {
-            q4 = (q4 + 1).min(MAX_GRAIN_PRICE);
+            q4 = (q4 + 10).min(MAX_GRAIN_PRICE);
         }
         let k = game.kingdom_mut(id);
-        // 1-in-3 years it matches the humans' volume (bounded by real stocks).
-        if q3 > k.grain_to_sell && random(1, 10) > 6 {
-            let add = (q3 - k.grain_to_sell).min(k.grain_stocks.max(0));
+        // 1-in-3 years it matches the humans' volume (bounded by real stocks);
+        // like theirs, the listing reaches the stall next year.
+        let listed = k.grain_to_sell + k.listing.map_or(0, |(amount, _)| amount);
+        if q3 > listed && random(1, 10) > 6 {
+            let add = (q3 - listed).min(k.grain_stocks.max(0)) / MIN_LOT * MIN_LOT;
             if add > 0 {
-                k.grain_to_sell += add;
-                k.grain_stocks -= add;
+                k.list_grain(add, q4.max(1));
                 decision.grain_listed = Some((add, q4.max(1)));
             }
         }
+        // Grain already on the stall follows the market's price.
         k.grain_price = if k.grain_to_sell > 0 { q4.max(1) } else { q4 };
     }
 
@@ -169,9 +175,9 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
             let s = game.kingdom(seller);
             (s.grain_to_sell, s.grain_price.min(MAX_GRAIN_PRICE))
         };
-        if on_sale > 0 && price > 0 {
+        if on_sale >= MIN_LOT && price > 0 {
             for _ in 0..3 {
-                let amount = random(1, on_sale + 1).max(1);
+                let amount = (random(MIN_LOT, on_sale + 1) / MIN_LOT * MIN_LOT).max(MIN_LOT);
                 if calculate_buy_cost(amount, price) <= game.kingdom(id).treasury {
                     apply_trade(game, id, Trade::Buy { amount, seller });
                     decision.grain_bought = Some((seller, amount));
@@ -239,6 +245,7 @@ pub fn execute_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trade::grain_value;
 
     #[test]
     fn players_and_dead_kingdoms_do_nothing() {
@@ -281,7 +288,7 @@ mod tests {
         let h = game.kingdom_mut(Kingdoms::France);
         h.is_player = true;
         h.grain_to_sell = 5000;
-        h.grain_price = 8;
+        h.grain_price = 30;
         let mut listed = false;
         for _ in 0..60 {
             let before = game.kingdom(Kingdoms::Germany).clone();
@@ -289,10 +296,14 @@ mod tests {
             if let Some((amount, price)) = d.grain_listed {
                 listed = true;
                 let k = game.kingdom(Kingdoms::Germany);
-                assert!(amount > 0);
+                assert!(amount >= MIN_LOT && amount % MIN_LOT == 0, "{amount}");
                 assert!((1..=MAX_GRAIN_PRICE).contains(&price));
-                // Honest books: the listing came out of real stocks.
-                assert_eq!(k.grain_to_sell, before.grain_to_sell + amount);
+                // The listing waits for next year's market.
+                assert_eq!(k.grain_to_sell, before.grain_to_sell);
+                assert_eq!(
+                    k.listing.map(|l| l.0),
+                    Some(before.listing.map_or(0, |l| l.0) + amount)
+                );
             }
         }
         assert!(listed, "the computer never matched the human market");
@@ -304,7 +315,7 @@ mod tests {
         let h = game.kingdom_mut(Kingdoms::France);
         h.is_player = true;
         h.grain_to_sell = 2000;
-        h.grain_price = 3;
+        h.grain_price = 20;
         let mut bought = false;
         for _ in 0..40 {
             game.kingdom_mut(Kingdoms::Germany).treasury = 50_000;
@@ -313,9 +324,13 @@ mod tests {
             if let Some((seller, amount)) = d.grain_bought {
                 if seller == Kingdoms::France {
                     bought = true;
+                    assert!(amount >= MIN_LOT && amount % MIN_LOT == 0, "{amount}");
                     let f = game.kingdom(Kingdoms::France);
                     assert_eq!(f.grain_to_sell, before.grain_to_sell - amount);
-                    assert_eq!(f.treasury, before.treasury + amount * before.grain_price);
+                    assert_eq!(
+                        f.treasury,
+                        before.treasury + grain_value(amount, before.grain_price)
+                    );
                     break;
                 }
             }

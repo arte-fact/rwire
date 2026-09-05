@@ -6,9 +6,11 @@
 //! such as the terminal `empire` app. The rule modules are pure functions over
 //! `&EmpireGame` / `&mut EmpireGame` (or a single `&mut Kingdom`).
 
+pub mod campaign;
 pub mod demography;
 pub mod economy;
 pub mod events;
+pub mod front;
 pub mod game;
 pub mod harvests;
 pub mod ia;
@@ -20,5 +22,5 @@ pub mod war;
 pub mod weather;
 
 pub use game::EmpireGame;
-pub use kingdom::{Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
+pub use kingdom::{Criterion, Fate, Kingdom, Kingdoms, PlayerTitle, Requirement, KINGDOMS};
 pub use weather::Weather;

@@ -2,7 +2,7 @@ use std::cmp::max;
 use std::ops::{Add, Sub};
 
 use crate::economy::Taxes;
-use crate::kingdom::Kingdom;
+use crate::kingdom::{Kingdom, GRAIN_PER_MOUTH, GRAIN_PER_SOLDIER, RATION_SCALE};
 use crate::random::random;
 
 #[derive(Debug, Clone)]
@@ -134,21 +134,58 @@ impl Sub for Outlook {
     }
 }
 
-/// The council's decision for the year: the two grain allocations and the
-/// three tax rates.
+/// The council's decision for the year: the two rations and the three tax
+/// rates. Rations are per head, in tenths of a bushel ([`RATION_SCALE`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Council {
-    pub grain_for_peasants: i32,
-    pub grain_for_soldiers: i32,
+    /// Bushels per mouth for the people, in tenths (50 = the full 5 bx).
+    pub peasants_ration: i32,
+    /// Bushels per man for the army, in tenths (80 = the full 8 bx).
+    pub soldiers_ration: i32,
     pub taxes: Taxes,
+}
+
+impl Council {
+    /// The full ration of the people, in tenths of a bushel per mouth.
+    pub const PEASANTS_FULL: i32 = GRAIN_PER_MOUTH * RATION_SCALE;
+    /// The full ration of the army, in tenths of a bushel per man.
+    pub const SOLDIERS_FULL: i32 = GRAIN_PER_SOLDIER * RATION_SCALE;
+
+    /// The council that hands out `peasants` and `soldiers` bushels in all,
+    /// rounded down to a tenth per head; an empty army keeps the ration it
+    /// was last on.
+    pub fn from_grain(kingdom: &Kingdom, peasants: i32, soldiers: i32, taxes: Taxes) -> Self {
+        let per_head = |grain: i32, heads: i32| grain.max(0) * RATION_SCALE / heads;
+        Council {
+            peasants_ration: match kingdom.mouths() {
+                0 => Self::PEASANTS_FULL,
+                mouths => per_head(peasants, mouths),
+            },
+            soldiers_ration: match kingdom.soldiers {
+                0 => kingdom.soldiers_ration,
+                men => per_head(soldiers, men),
+            },
+            taxes,
+        }
+    }
+
+    /// Bushels the people's ration comes to.
+    pub fn grain_for_peasants(&self, kingdom: &Kingdom) -> i32 {
+        self.peasants_ration * kingdom.mouths() / RATION_SCALE
+    }
+
+    /// Bushels the army's ration comes to.
+    pub fn grain_for_soldiers(&self, kingdom: &Kingdom) -> i32 {
+        self.soldiers_ration * kingdom.soldiers / RATION_SCALE
+    }
 }
 
 // The curves. `r` is the ration: grain given over grain needed. The original
 // BASIC drew every figure uniformly from 1 to a linear cap, so feeding the
 // people just over half their needs still grew the population (births beat the
 // extra deaths); these keep the births falling with the ration and make the
-// hunger toll convex, so a short ration costs a little and half a ration is a
-// famine. `x`, `y`, `z` are the customs, sales and income tax rates over their
+// hunger toll convex, so a short ration costs almost nothing and half a ration
+// is a hard year rather than a massacre. `x`, `y`, `z` are the customs, sales and income tax rates over their
 // caps (see [`Taxes`]).
 
 /// Births: 5.3 % of the population a year, falling with the ration, and a
@@ -157,9 +194,10 @@ const BIRTH_RATE: f32 = 0.053;
 const BIRTH_EXP: f32 = 0.7;
 const BIRTH_TAILLE: f32 = 0.35;
 const BIRTH_SPREAD: f32 = 0.8;
-/// Hunger deaths: 80 % of the population with no grain at all, convex.
-const HUNGER_RATE: f32 = 0.8;
-const HUNGER_EXP: f32 = 1.6;
+/// Hunger deaths: 60 % of the population with no grain at all, convex enough
+/// that three quarters of a ration costs under 3 % and half a ration 13 %.
+const HUNGER_RATE: f32 = 0.6;
+const HUNGER_EXP: f32 = 2.2;
 const HUNGER_SPREAD: f32 = 0.2;
 /// Below half a ration the extra toll is counted as starvation ("misère").
 const STARVATION_RATION: f32 = 0.5;
@@ -188,18 +226,15 @@ const NOBLE_FLIGHT_SPREAD: f32 = 0.4;
 const NOBLE_TAILLE_RATE: f32 = 0.25;
 const NOBLE_TAILLE_MID: f32 = 0.75;
 const NOBLE_TAILLE_WIDTH: f32 = 0.05;
-/// Army losses: 90 % of the men with no grain at all.
-const ARMY_LOSS_RATE: f32 = 0.9;
-const ARMY_LOSS_EXP: f32 = 1.5;
+/// Army losses: 70 % of the men with no grain at all, 17 % on half rations.
+const ARMY_LOSS_RATE: f32 = 0.7;
+const ARMY_LOSS_EXP: f32 = 2.0;
 /// The draw's spread around the expected losses, ±30 %.
 const ARMY_LOSS_SPREAD: f32 = 0.3;
 
-fn ration(given: i32, needs: i32) -> f32 {
-    if needs <= 0 {
-        1.0
-    } else {
-        given.max(0) as f32 / needs as f32
-    }
+/// A ration in tenths of a bushel per head as a share of the full one.
+fn ration(tenths: i32, full: i32) -> f32 {
+    tenths.max(0) as f32 / full as f32
 }
 
 fn births_expected(pop: i32, r: f32, z: f32) -> f32 {
@@ -274,13 +309,8 @@ fn merchants_among(immigrants: i32, y: f32) -> i32 {
 /// Efficiency in per cent (50–150): logarithmic in the ration, so extra
 /// rations pay less and less while short rations cost fast — 150 % at one and
 /// a half rations, 50 % at two thirds of one (¾ of a ration → 65 %).
-fn army_efficiency(kingdom: &Kingdom, grain_for_soldiers: i32) -> i32 {
-    // No soldiers but grain given → max efficiency (preparing a future army);
-    // no soldiers and no grain → default 100 %.
-    if kingdom.soldiers == 0 {
-        return if grain_for_soldiers > 0 { 150 } else { 100 };
-    }
-    let r = ration(grain_for_soldiers, kingdom.soldiers_grain_needs());
+fn army_efficiency(soldiers_ration: i32) -> i32 {
+    let r = ration(soldiers_ration, Council::SOLDIERS_FULL);
     if r <= 0.0 {
         return 50;
     }
@@ -308,9 +338,9 @@ struct Draws {
 fn draws(kingdom: &Kingdom, council: Council) -> Draws {
     let pop = kingdom.population();
     let (x, y, z) = council.taxes.shares();
-    let r = ration(council.grain_for_peasants, kingdom.peasants_grain_needs());
+    let r = ration(council.peasants_ration, Council::PEASANTS_FULL);
     let (malnutrition, starvation) = hunger_split(pop, r);
-    let ra = ration(council.grain_for_soldiers, kingdom.soldiers_grain_needs());
+    let ra = ration(council.soldiers_ration, Council::SOLDIERS_FULL);
     let (desertion, army_starvation) = army_losses_split(kingdom.soldiers, ra);
     let immigrants = Outlook::around(immigrants_expected(pop, r, x), IMMIGRATION_SPREAD);
     // Original: DD=INT(RND*PO/22+1) where PO = serfs + merchants + nobles
@@ -349,7 +379,7 @@ fn draws(kingdom: &Kingdom, council: Council) -> Draws {
             .plus(nobles_taxed_away(kingdom.nobles, z))
             .at_most(kingdom.nobles),
         merchants_departed: merchants_departed(kingdom.merchants, y),
-        soldiers_efficiency: army_efficiency(kingdom, council.grain_for_soldiers),
+        soldiers_efficiency: army_efficiency(council.soldiers_ration),
         desertion: Outlook::around(desertion, ARMY_LOSS_SPREAD),
         army_starvation: Outlook::around(army_starvation, ARMY_LOSS_SPREAD),
     }
@@ -436,20 +466,24 @@ pub fn demography_outlook(kingdom: &Kingdom, council: Council) -> DemographyOutl
     }
 }
 
-/// The share of the army expected to be lost for `grain` bushels (0–0.9), the
-/// smooth curve behind the outlook's rounded figures.
-pub fn army_losses_share(kingdom: &Kingdom, grain: i32) -> (f32, f32) {
-    let r = ration(grain, kingdom.soldiers_grain_needs());
+/// The share of the army expected to be lost on `soldiers_ration` tenths of a
+/// bushel per man (0–0.9), the smooth curve behind the outlook's rounded
+/// figures, and the draw's spread around it.
+pub fn army_losses_share(soldiers_ration: i32) -> (f32, f32) {
+    let r = ration(soldiers_ration, Council::SOLDIERS_FULL);
     let share = shortfall(1, r, ARMY_LOSS_RATE, ARMY_LOSS_EXP);
     (share, ARMY_LOSS_SPREAD)
 }
 
-/// Feed the population and the army for the year: consumes both grain
-/// allocations and applies births, deaths, immigration and army morale.
+/// Feed the population and the army for the year: consumes both rations and
+/// applies births, deaths, immigration and army morale. The army's ration
+/// sticks to the kingdom: recruits are fed at that rate when hired.
 pub fn apply_feed(kingdom: &mut Kingdom, council: Council) -> YearDemography {
     let report = demography_report(kingdom, council);
 
-    kingdom.grain_stocks -= council.grain_for_peasants + council.grain_for_soldiers;
+    kingdom.grain_stocks -=
+        council.grain_for_peasants(kingdom) + council.grain_for_soldiers(kingdom);
+    kingdom.soldiers_ration = council.soldiers_ration.max(0);
 
     // The nobles and merchants among the immigrants join their own ranks.
     let peasant_change = report.births + report.immigrants
@@ -482,24 +516,22 @@ mod tests {
     use super::*;
     use crate::kingdom::Kingdoms;
 
+    /// A council handing out `peasants` and `soldiers` bushels in all.
     fn council(k: &Kingdom, peasants: i32, soldiers: i32) -> Council {
-        Council {
-            grain_for_peasants: peasants,
-            grain_for_soldiers: soldiers,
-            taxes: k.taxes(),
-        }
+        Council::from_grain(k, peasants, soldiers, k.taxes())
     }
 
     fn taxed(k: &Kingdom, peasants: i32, customs: i32, sales: i32, income: i32) -> Council {
-        Council {
-            grain_for_peasants: peasants,
-            grain_for_soldiers: k.soldiers_grain_needs(),
-            taxes: Taxes {
+        Council::from_grain(
+            k,
+            peasants,
+            k.soldiers_grain_needs(),
+            Taxes {
                 customs,
                 sales,
                 income,
             },
-        }
+        )
     }
 
     #[test]
@@ -549,14 +581,35 @@ mod tests {
     }
 
     #[test]
-    fn efficiency_is_clamped_and_handles_empty_army() {
+    fn efficiency_is_clamped_and_follows_the_rate_without_an_army() {
         let mut k = Kingdom::new(Kingdoms::France);
         let eff = |k: &Kingdom, g: i32| demography_report(k, council(k, 0, g)).soldiers_efficiency;
         assert_eq!(eff(&k, 1_000_000), 150);
         assert_eq!(eff(&k, 0), 50);
+        // No men to feed: the rate still sets the strength of the recruits.
         k.soldiers = 0;
-        assert_eq!(eff(&k, 10), 150);
-        assert_eq!(eff(&k, 0), 100);
+        k.soldiers_ration = Council::SOLDIERS_FULL * 3 / 2;
+        assert_eq!(eff(&k, 0), 150);
+        k.soldiers_ration = 0;
+        assert_eq!(eff(&k, 0), 50);
+    }
+
+    #[test]
+    fn from_grain_rounds_down_to_a_tenth_per_head() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        let c = council(&k, k.peasants_grain_needs(), k.soldiers_grain_needs());
+        assert_eq!(c.peasants_ration, Council::PEASANTS_FULL);
+        assert_eq!(c.soldiers_ration, Council::SOLDIERS_FULL);
+        assert_eq!(c.grain_for_peasants(&k), k.peasants_grain_needs());
+        assert_eq!(c.grain_for_soldiers(&k), k.soldiers_grain_needs());
+        let c = council(&k, k.peasants_grain_needs() / 2 + 1, -5);
+        assert_eq!(c.peasants_ration, Council::PEASANTS_FULL / 2);
+        assert_eq!(c.soldiers_ration, 0);
+        k.soldiers = 0;
+        k.soldiers_ration = 120;
+        let c = council(&k, 0, 0);
+        assert_eq!(c.soldiers_ration, 120);
+        assert_eq!(c.grain_for_soldiers(&k), 0);
     }
 
     #[test]
@@ -577,13 +630,15 @@ mod tests {
         let needs = k.peasants_grain_needs();
         let people = |g: i32| demography_outlook(&k, council(&k, g, 0)).people;
         assert!(people(needs).expected > 0);
-        assert!(people(needs * 85 / 100).expected < 0);
-        // Feeding just over half the needs used to grow the population.
+        // Three quarters of a ration about holds the population; less shrinks it.
+        assert!(people(needs * 70 / 100).expected < 0);
+        // Half a ration loses about an eighth of the people, none about six in ten.
         let half = people(needs * 51 / 100);
         assert!(half.high < 0);
-        assert!(half.expected < -(k.population() / 5));
+        assert!(half.expected < -(k.population() / 10));
+        assert!(half.expected > -(k.population() / 5));
         let none = people(0);
-        assert!(none.expected < -(k.population() * 3 / 4));
+        assert!(none.expected < -(k.population() / 2));
         assert!(none.low >= -k.population());
     }
 
@@ -683,18 +738,17 @@ mod tests {
         k.peasants = 2400;
         k.soldiers = 80;
         let needs = k.peasants_grain_needs();
-        let army = k.soldiers_grain_needs();
         let cases = [
             taxed(&k, needs * 3 / 2, 20, 8, 20),
             taxed(&k, needs * 2, 0, 0, 0),
             taxed(&k, needs * 7 / 10, 50, 20, 35),
             taxed(&k, needs / 3, 27, 15, 30),
             Council {
-                grain_for_soldiers: army / 2,
+                soldiers_ration: Council::SOLDIERS_FULL / 2,
                 ..taxed(&k, needs, 20, 8, 20)
             },
             Council {
-                grain_for_soldiers: 0,
+                soldiers_ration: 0,
                 ..taxed(&k, 0, 10, 4, 10)
             },
         ];
@@ -729,8 +783,13 @@ mod tests {
     fn apply_feed_consumes_grain_once_and_seats_the_newcomers() {
         let mut k = Kingdom::new(Kingdoms::France);
         let before = k.clone();
-        let r = apply_feed(&mut k, council(&before, 1000, 200));
-        assert_eq!(k.grain_stocks, before.grain_stocks - 1200);
+        let c = council(&before, 1000, 200);
+        let r = apply_feed(&mut k, c);
+        assert_eq!(
+            k.grain_stocks,
+            before.grain_stocks - c.grain_for_peasants(&before) - c.grain_for_soldiers(&before)
+        );
+        assert_eq!(k.soldiers_ration, c.soldiers_ration);
         assert!(k.peasants >= 0 && k.soldiers >= 0);
         assert_eq!(
             k.nobles,

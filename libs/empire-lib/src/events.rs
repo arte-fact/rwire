@@ -4,10 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::kingdom::Kingdom;
+use crate::kingdom::{Fate, Kingdom};
 use crate::random::random;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlagueEvent {
     pub occurred: bool,
     pub serfs_killed: i32,
@@ -22,7 +22,7 @@ pub struct RulerDeathEvent {
     pub cause: RulerDeathCause,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RulerDeathCause {
     #[default]
     None,
@@ -111,7 +111,7 @@ fn kill_ruler(kingdom: &mut Kingdom, starvation_occurred: bool) -> RulerDeathEve
             _ => RulerDeathCause::NaturalCauses,
         }
     };
-    kingdom.is_dead = true;
+    kingdom.fall(Fate::RulerDied(cause));
     RulerDeathEvent {
         occurred: true,
         cause,
@@ -154,6 +154,7 @@ mod tests {
         let e = kill_ruler(&mut k, true);
         assert!(k.is_dead);
         assert_eq!(e.cause, RulerDeathCause::StarvationAssassination);
+        assert_eq!(k.fate, Some(Fate::RulerDied(e.cause)));
 
         let mut k = Kingdom::new(Kingdoms::France);
         let e = kill_ruler(&mut k, false);

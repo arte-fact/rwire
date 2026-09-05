@@ -61,7 +61,7 @@ fn draw_resource_management_page(game: &EmpireGame, id: Kingdoms) {
         "╚═══════════════╧═══════════════╧═══════════════╧═══════════════╧═════════════╝",
     );
     print_at(11, 15, "* * * Grain à vendre :");
-    print_at(12, 29, &black_on_gray("Pays            Boisseaux    Prix"));
+    print_at(12, 29, &black_on_gray("Pays            Boisseaux  Le cent"));
     for (i, seller) in KINGDOMS.iter().enumerate() {
         let s = game.kingdom(*seller);
         print_at(
@@ -155,7 +155,7 @@ fn prompt_grain_to_sell(game: &EmpireGame, id: Kingdoms) -> Trade {
             game.kingdom(id).grain_stocks.max(1),
         ),
         price: bottom_input_number_with_range(
-            Some("A quel prix le boisseau ?"),
+            Some("A quel prix le cent de boisseaux ?"),
             1,
             MAX_GRAIN_PRICE,
         ),
@@ -170,7 +170,11 @@ fn prompt_grain_to_buy(game: &EmpireGame, id: Kingdoms) -> Option<Trade> {
         KINGDOMS.len() as i32,
     ))?;
     Some(Trade::Buy {
-        amount: bottom_input_number_with_range(Some("Combien de boisseaux achetez-vous ?"), 1, 500),
+        amount: bottom_input_number_with_range(
+            Some("Combien de boisseaux achetez-vous ?"),
+            1,
+            game.kingdom(seller).grain_to_sell.max(1),
+        ),
         seller,
     })
 }

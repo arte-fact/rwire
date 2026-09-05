@@ -1,7 +1,7 @@
 use std::cmp::max;
 
 use crate::game::EmpireGame;
-use crate::kingdom::{Kingdom, Kingdoms};
+use crate::kingdom::{Fate, Kingdom, Kingdoms};
 use crate::random::random;
 
 /// Result of a battle between kingdoms.
@@ -17,7 +17,7 @@ pub struct BattleResult {
     pub collateral_damage: Option<CollateralDamage>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollateralDamage {
     pub peasants_killed: i32,
     pub marketplaces_destroyed: i32,
@@ -262,7 +262,7 @@ pub fn apply_kingdom_battle_result(
         d.surface = 0;
         d.treasury = 0;
         d.soldiers = 0;
-        d.is_dead = true;
+        d.fall(Fate::Annexed(attacker));
 
         let a = game.kingdom_mut(attacker);
         if result.defender_remaining_peasants > 0 {
@@ -285,14 +285,14 @@ pub fn apply_kingdom_battle_result(
     }
 }
 
-fn apply_collateral_damage(kingdom: &mut Kingdom, damage: &CollateralDamage) {
-    kingdom.peasants -= damage.peasants_killed;
-    kingdom.marketplaces -= damage.marketplaces_destroyed;
-    kingdom.grain_stocks -= damage.grain_destroyed;
-    kingdom.grain_mills -= damage.grain_mills_destroyed;
-    kingdom.foundries -= damage.foundries_destroyed;
-    kingdom.shipyards -= damage.shipyards_destroyed;
-    kingdom.nobles -= damage.nobles_killed;
+pub(crate) fn apply_collateral_damage(kingdom: &mut Kingdom, damage: &CollateralDamage) {
+    kingdom.peasants = (kingdom.peasants - damage.peasants_killed).max(0);
+    kingdom.marketplaces = (kingdom.marketplaces - damage.marketplaces_destroyed).max(0);
+    kingdom.grain_stocks = (kingdom.grain_stocks - damage.grain_destroyed).max(0);
+    kingdom.grain_mills = (kingdom.grain_mills - damage.grain_mills_destroyed).max(0);
+    kingdom.foundries = (kingdom.foundries - damage.foundries_destroyed).max(0);
+    kingdom.shipyards = (kingdom.shipyards - damage.shipyards_destroyed).max(0);
+    kingdom.nobles = (kingdom.nobles - damage.nobles_killed).max(0);
 }
 
 /// Apply the result of a barbarian expedition to the game state.
@@ -388,6 +388,7 @@ mod tests {
         assert_eq!(a.treasury, 2000);
         assert_eq!(a.peasants, 2500);
         assert!(d.is_dead);
+        assert_eq!(d.fate, Some(Fate::Annexed(Kingdoms::France)));
         assert_eq!(d.surface, 0);
         assert_eq!(game.alive_kingdoms().len(), 5);
     }

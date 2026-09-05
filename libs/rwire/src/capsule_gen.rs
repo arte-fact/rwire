@@ -32,10 +32,15 @@ use crate::theme::Theme;
 /// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
 /// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
 /// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
+///
+/// Reconnect: `rc` (backoff exponent) is reset only when a batch is applied
+/// end-to-end (BATCH_END), never on `onopen`. A connection that opens, receives
+/// the initial DOM and dies on a parse error therefore escalates to
+/// `location.reload()` after two failed attempts instead of looping forever.
 const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,LS:0x4F,LB:0x50,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,MD:0x88,PD:0x89,BP:0x8A,E:0xFF};
 let lv={},lb={};function ls(e,c){e.__lc=c;lv[c]=e;if(!e.__ls){e.__ls=1;e.addEventListener('input',()=>{if(e.__lc!==undefined){lv[e.__lc]=e;ul(e.__lc)}})}}
 function ul(c){let s=lv[c];if(!s)return;for(let b of lb[c]||[]){let e=b.e,k=b.k&15,v,p;if(!e)continue;if(b.k&16){v=b.b-b.c.reduce((a,h)=>a+(lv[h]?+lv[h].value||0:0),0);p=b.b>0?(b.b-v)/b.b:0}else{v=+s.value;let mn=+s.min||0,mx=+s.max;p=mx>mn?(v-mn)/(mx-mn):0}
-let f=b.k&32?n=>n.toLocaleString(document.documentElement.lang||undefined):String,sg=y=>b.k&64?(y>0?'+':y<0?'\u2212':'')+f(Math.abs(y)):f(y);if(k===1)e.style.width=Math.min(100,Math.max(0,p*100))+'%';else if(k===2)e.textContent=f(b.d?Math.round(v*b.n/b.d):0);else if(k===3){let i=0;while(i<b.t.length&&v>=b.t[i])i++;for(let j=0;j<e.children.length;j++)e.children[j].hidden=j!==i}else if(k===4)e.textContent=sg(Math.round(b.o+ip(b.t,p)));else if(k===5){let g=a=>Math.round(a.b+a.s.reduce((z,t)=>{let x=lv[t.c];if(!x)return z;let mn=+x.min||0,mx=+x.max;return z+t.o+ip(t.t,mx>mn?(+x.value-mn)/(mx-mn):0)},0)),y=g(b.l),z=b.h?g(b.h):y;e.textContent=y===z?sg(y):sg(y)+' \u2026 '+sg(z)}else e.textContent=f(v)}}
+let f=b.k&32?n=>n.toLocaleString(document.documentElement.lang||undefined):String,sg=y=>b.k&64?(y>0?'+':y<0?'\u2212':'')+f(Math.abs(y)):f(y);if(k===1)e.style.width=Math.min(100,Math.max(0,p*100))+'%';else if(k===2)e.textContent=f(b.d?Math.round(v*b.n/b.d):0);else if(k===3){let i=0;while(i<b.t.length&&v>=b.t[i])i++;for(let j=0;j<e.children.length;j++)e.children[j].hidden=j!==i}else if(k===4)e.textContent=sg(Math.round(b.o+ip(b.t,p)));else if(k===7)e.textContent=(v/10**b.p).toLocaleString(document.documentElement.lang||undefined,{minimumFractionDigits:b.p,maximumFractionDigits:b.p});else if(k===5||k===6){let g=a=>Math.round(a.b+a.s.reduce((z,t)=>{let x=lv[t.c];if(!x)return z;let mn=+x.min||0,mx=+x.max;return z+t.o+ip(t.t,mx>mn?(+x.value-mn)/(mx-mn):0)},0)),y=g(b.l),z=b.h?g(b.h):y;if(k===6){let cl=n=>Math.min(b.w1,Math.max(b.w0,n)),w=b.a1-b.a0||1;y=cl(y);z=cl(z);e.style.left=(y-b.a0)/w*100+'%';e.style.width=Math.max(0,z-y)/w*100+'%'}else e.textContent=y===z?sg(y):sg(y)+' \u2026 '+sg(z)}else e.textContent=f(v)}}
 function ip(t,p){let q=Math.min(1,Math.max(0,p))*(t.length-1),j=Math.floor(q);return t[j]+(t[Math.min(j+1,t.length-1)]-t[j])*(q-j)}
 const A={4:'id'};
 let s={},wt=[],w,sc=0,K={},DS,pm=null;
@@ -58,11 +63,15 @@ function snd(fn,e,el){if(e.type==='input'){if(el.__t)clearTimeout(el.__t);el.__t
 // (__hk) is unchanged — its existing listener stays valid via stable handler ids;
 // when the binding changed, the freshly-built node (with its new listener) is
 // swapped in instead, so listeners are never stale and never leak.
+// A `value`/`checked` attribute the server changed is pushed onto the live
+// property too: once the user has touched a control, setAttribute alone no
+// longer moves it (the dirty flag), and a re-rendered slider would keep its old
+// position. The focused control still gets its typed value back at BATCH_END.
 function me(a,b){
 if(a.nodeType===3){if(a.nodeValue!==b.nodeValue)a.nodeValue=b.nodeValue;return}
 if(a.nodeType!==1)return;
-let ba=b.attributes;for(let k=0;k<ba.length;k++){let n=ba[k].name;if(a.getAttribute(n)!==ba[k].value)a.setAttribute(n,ba[k].value)}
-let aa=a.attributes;for(let k=aa.length-1;k>=0;k--){let n=aa[k].name;if(!b.hasAttribute(n))a.removeAttribute(n)}
+let ba=b.attributes;for(let k=0;k<ba.length;k++){let n=ba[k].name,v=ba[k].value;if(a.getAttribute(n)!==v){a.setAttribute(n,v);if(n==='value'&&'value' in a)a.value=v;else if(n==='checked'&&'checked' in a)a.checked=true}}
+let aa=a.attributes;for(let k=aa.length-1;k>=0;k--){let n=aa[k].name;if(!b.hasAttribute(n)){a.removeAttribute(n);if(n==='checked'&&'checked' in a)a.checked=false}}
 a.__hk=b.__hk;
 if(a.__lb)for(let x of a.__lb)x.e=null;if(a.__lb=b.__lb)for(let x of a.__lb)x.e=a;if(a.__lc!==undefined&&a.__lc!==b.__lc&&lv[a.__lc]===a)delete lv[a.__lc];if(b.__lc!==undefined)ls(a,b.__lc);else a.__lc=undefined;
 if(typeof a.id==='string'&&a.id.indexOf('__synced_')===0)return; // nested region: its own update owns it (guard non-string id so the morph never throws and freezes the stream)
@@ -132,8 +141,8 @@ else if(o===O.SS2){let[f,l]=rv(d,i);i+=l;let t=d[i++],si=d[i++],sv=d[i++];if(typ
 else if(o===O.TT){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);fl2[ti]=true;uf2(ti);tm=setTimeout(()=>{fl2[ti]=false;uf2(ti)},ms)})}}
 else if(o===O.AT2){let ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){setTimeout(()=>{fl2[ti]=!fl2[ti];uf2(ti)},ms)}}
 else if(o===O.LS){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;ls(r[f],c)}
-else if(o===O.LB){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;let k=d[i++],b={e:r[f],k:k},n,nl;if(k&16){[b.b,nl]=rv(d,i);i+=nl;n=d[i++];b.c=[c];while(n--){let[h,hl]=rv(d,i);i+=hl;b.c.push(h)}}if((k&15)===2){[b.n,nl]=rv(d,i);i+=nl;[b.d,nl]=rv(d,i);i+=nl}else if((k&15)===3){n=d[i++];b.t=[];while(n--){let[h,hl]=rv(d,i);i+=hl;b.t.push(h)}}else if((k&15)===4){n=d[i++];[b.o,nl]=rv(d,i);i+=nl;b.o=(b.o>>>1)^-(b.o&1);b.t=[];while(n--){let[h,hl]=rv(d,i);i+=hl;b.t.push(h)}}else if((k&15)===5){let rt=()=>{let[q,ql]=rv(d,i);i+=ql;let a={b:(q>>>1)^-(q&1),s:[]},m=d[i++];while(m--){let[h,hl]=rv(d,i);i+=hl;let z=d[i++],[o,ol]=rv(d,i);i+=ol;let t=[];while(z--){let[x,xl]=rv(d,i);i+=xl;t.push(x)}a.s.push({c:h,o:(o>>>1)^-(o&1),t:t})}return a};b.l=rt();if(k&128)b.h=rt();b.c=[...new Set(b.l.s.concat(b.h?b.h.s:[]).map(x=>x.c))]}(r[f].__lb||(r[f].__lb=[])).push(b);for(let h of b.c||[c])(lb[h]||(lb[h]=[])).push(b)}
-else if(o===O.E){fm();document.querySelectorAll('[data-autoscroll]').forEach(e=>{e.scrollTop=e.scrollHeight});if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}
+else if(o===O.LB){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;let k=d[i++],b={e:r[f],k:k},n,nl;if(k&16){[b.b,nl]=rv(d,i);i+=nl;n=d[i++];b.c=[c];while(n--){let[h,hl]=rv(d,i);i+=hl;b.c.push(h)}}if((k&15)===2){[b.n,nl]=rv(d,i);i+=nl;[b.d,nl]=rv(d,i);i+=nl}else if((k&15)===7)b.p=d[i++];else if((k&15)===3){n=d[i++];b.t=[];while(n--){let[h,hl]=rv(d,i);i+=hl;b.t.push(h)}}else if((k&15)===4){n=d[i++];[b.o,nl]=rv(d,i);i+=nl;b.o=(b.o>>>1)^-(b.o&1);b.t=[];while(n--){let[h,hl]=rv(d,i);i+=hl;b.t.push(h)}}else if((k&15)===5||(k&15)===6){let rt=()=>{let[q,ql]=rv(d,i);i+=ql;let a={b:(q>>>1)^-(q&1),s:[]},m=d[i++];while(m--){let[h,hl]=rv(d,i);i+=hl;let z=d[i++],[o,ol]=rv(d,i);i+=ol;let t=[];while(z--){let[x,xl]=rv(d,i);i+=xl;t.push(x)}a.s.push({c:h,o:(o>>>1)^-(o&1),t:t})}return a};b.l=rt();if(k&128)b.h=rt();if((k&15)===6)for(let q of['a0','a1','w0','w1']){let[x,xl]=rv(d,i);i+=xl;b[q]=(x>>>1)^-(x&1)}b.c=[...new Set(b.l.s.concat(b.h?b.h.s:[]).map(x=>x.c))]}(r[f].__lb||(r[f].__lb=[])).push(b);for(let h of b.c||[c])(lb[h]||(lb[h]=[])).push(b)}
+else if(o===O.E){rc=0;fm();document.querySelectorAll('[data-autoscroll]').forEach(e=>{e.scrollTop=e.scrollHeight});if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}
 for(let c in lb){lb[c]=lb[c].filter(x=>x.e&&x.e.isConnected);if(!lb[c].length)delete lb[c]}for(let c in lv){if(lv[c].isConnected)ul(c);else delete lv[c]}return}
 else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
 }}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '));try{w.close()}catch(_){}}}
@@ -146,8 +155,8 @@ w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
 w.binaryType='arraybuffer';
 w.onopen=()=>{
 clearTimeout(ot);ov(false);
-if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;if(typeof ls!=='undefined'){ls={};lh={}}lv={};lb={};if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
-rn=false;rc=0;op=true;
+if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;lv={};lb={};if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
+rn=false;op=true;
 w.send('R'+location.pathname);
 if(location.hash)sh(location.hash)};
 w.onmessage=e=>x(new Uint8Array(e.data));
@@ -708,7 +717,8 @@ mod tests {
         assert!(capsule.contains("const E={},V={}"));
         assert!(!capsule.contains("0:'div'"));
         assert!(capsule.contains("<!DOCTYPE html>"));
-        assert!(!capsule.contains("let ls={},lh={}"));
+        // `ls` is the live-source registrar; the reconnect reset must not clobber it.
+        assert!(!capsule.contains("ls={}"));
     }
 
     #[test]

@@ -99,6 +99,31 @@ pub enum Icon {
     Activity,
     FileText,
     Folder,
+
+    // Rank (heraldic crowns, lowest first)
+    Circlet,
+    Coronet,
+    Crown,
+    ImperialCrown,
+
+    // Chronicle (war, plague, trade, the map, a realm's fall)
+    Swords,
+    Skull,
+    Scale,
+    Map,
+    BrokenBanner,
+
+    // Intendance (granaries, market, purchases, rations, taxes)
+    Wheat,
+    Sack,
+    Tent,
+    Mill,
+    Anvil,
+    Ship,
+    Helmet,
+    Castle,
+    Bowl,
+    Coins,
 }
 
 impl Icon {
@@ -181,6 +206,33 @@ impl Icon {
             Icon::Activity => "M22 12h-4l-3 9L9 3l-3 9H2",
             Icon::FileText => "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8",
             Icon::Folder => "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
+
+            // Rank: a bare circlet with one pearl, a circlet with three
+            // fleurons, an open five-point crown, a closed crown with the orb.
+            Icon::Circlet => "M4 14h16v4.5H4z M12 9.5m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0",
+            Icon::Coronet => "M4 14h16v4.5H4z M6.5 14v-4 M12 14V7 M17.5 14v-4 M6.5 9.5m-.5 0a.5.5 0 1 0 1 0a.5.5 0 1 0-1 0 M12 6.5m-.5 0a.5.5 0 1 0 1 0a.5.5 0 1 0-1 0 M17.5 9.5m-.5 0a.5.5 0 1 0 1 0a.5.5 0 1 0-1 0",
+            Icon::Crown => "M3.5 18.5V8l4.2 3.6L12 5.5l4.3 6.1L20.5 8v10.5z M3.5 15.5h17",
+            Icon::ImperialCrown => "M3.5 19V9.5l4.2 3 4.3-4.5 4.3 4.5 4.2-3V19z M5 9.5C7 5.5 17 5.5 19 9.5 M12 8V4.5 M10.3 6h3.4 M3.5 16h17",
+
+            // Chronicle: crossed swords, a skull, a merchant's scale, a
+            // folded map, a torn banner on its pole.
+            Icon::Swords => "M4 4l11 11 M20 4L9 15 M4 20l4-4 M20 20l-4-4 M6 15l3 3 M18 15l-3 3",
+            Icon::Skull => "M12 3a7 7 0 0 0-7 7c0 2.4 1.2 4.3 3 5.5V19h8v-3.5c1.8-1.2 3-3.1 3-5.5a7 7 0 0 0-7-7z M9.3 10.5m-1.2 0a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0 M14.7 10.5m-1.2 0a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0 M10 19v2 M14 19v2",
+            Icon::Scale => "M12 4v16 M5 20h14 M12 6l6 2 M12 6L6 8 M3 14l3-6 3 6a3 3 0 0 1-6 0z M15 14l3-6 3 6a3 3 0 0 1-6 0z",
+            Icon::Map => "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z M9 4v14 M15 6v14",
+            Icon::BrokenBanner => "M6 3v18 M6 4h11l-3 4 3 4H6 M14 15l6 6 M20 15l-6 6",
+
+            // Intendance
+            Icon::Wheat => "M12 22V8 M12 8c-3 0-5-2-5-5 3 0 5 2 5 5z M12 8c3 0 5-2 5-5-3 0-5 2-5 5z M12 13c-3 0-5-2-5-5 3 0 5 2 5 5z M12 13c3 0 5-2 5-5-3 0-5 2-5 5z M12 18c-3 0-5-2-5-5 3 0 5 2 5 5z M12 18c3 0 5-2 5-5-3 0-5 2-5 5z",
+            Icon::Sack => "M9 3h6l-1 3h-4z M10 6c-4 2-6 5-6 9a8 8 0 0 0 16 0c0-4-2-7-6-9 M8 6h8",
+            Icon::Tent => "M12 4L3 20h18z M12 4v16 M8 20l4-7 4 7",
+            Icon::Mill => "M9 21l1.5-9h3L15 21z M12 12L5 5 M12 12l7-7 M12 12l-7 7 M12 12l7 7",
+            Icon::Anvil => "M4 8h14a3 3 0 0 1 0 6h-2l-3 3H9l-3-3H4z M7 17h10v3H7z",
+            Icon::Ship => "M4 16h16l-2 4H6z M12 4v12 M12 4c4 2 5 5 5 8h-5 M12 6c-3 2-4 4-4 6h4",
+            Icon::Helmet => "M5 14v-3a7 7 0 0 1 14 0v3 M5 14h14v2a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z M12 4V2 M10 14v4 M14 14v4",
+            Icon::Castle => "M4 21V9h3V6h3v3h4V6h3v3h3v12z M10 21v-5h4v5",
+            Icon::Bowl => "M3 11h18a9 9 0 0 1-18 0z M7 20h10 M9 4c0 2 2 2 2 4 M13 4c0 2 2 2 2 4",
+            Icon::Coins => "M3 8a5 3 0 1 0 10 0a5 3 0 1 0-10 0 M3 8v4c0 1.7 2.2 3 5 3s5-1.3 5-3V8 M13 11c3 .3 5 1.5 5 3v4c0 1.7-2.2 3-5 3s-5-1.3-5-3v-3",
         }
     }
 
@@ -374,6 +426,25 @@ mod tests {
             Icon::Activity,
             Icon::FileText,
             Icon::Folder,
+            Icon::Circlet,
+            Icon::Coronet,
+            Icon::Crown,
+            Icon::ImperialCrown,
+            Icon::Swords,
+            Icon::Skull,
+            Icon::Scale,
+            Icon::Map,
+            Icon::BrokenBanner,
+            Icon::Wheat,
+            Icon::Sack,
+            Icon::Tent,
+            Icon::Mill,
+            Icon::Anvil,
+            Icon::Ship,
+            Icon::Helmet,
+            Icon::Castle,
+            Icon::Bowl,
+            Icon::Coins,
         ];
 
         for icon in &icons {

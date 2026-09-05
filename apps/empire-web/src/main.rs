@@ -10,7 +10,7 @@
 //! state, threaded into the shared view through a closure region and attached
 //! to every handler call as param bytes.
 //!
-//! Run with: `cargo run -p empire-web` — open http://127.0.0.1:7782, create a
+//! Run with: `cargo run -p empire-web` (`PORT=…` to move it) — open http://127.0.0.1:7782, create a
 //! table and share its link.
 
 mod room;
@@ -69,15 +69,16 @@ fn on_route(me: &mut Me, ctx: &EventContext) {
     me.tab = 0;
 }
 
-/// Open the bottom sheet for an action; params: `[action, step, year_lo, year_hi, arg]`.
+/// Open the bottom sheet for an action; params:
+/// `[action, step, year_lo, year_hi, gen_lo, gen_hi]`.
 #[handler]
 fn open_sheet(me: &mut Me, ctx: &EventContext) {
     let p = ctx.param_bytes();
-    me.sheet = (p.len() >= 5).then(|| ui::Sheet {
+    me.sheet = (p.len() >= 6).then(|| ui::Sheet {
         action: p[0],
         step: p[1],
         year: u16::from_le_bytes([p[2], p[3]]),
-        arg: p[4],
+        gen: u16::from_le_bytes([p[4], p[5]]),
     });
 }
 
@@ -111,7 +112,8 @@ fn app_theme() -> Theme {
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut server = Server::bind("0.0.0.0:7782")?
+    let port = std::env::var("PORT").unwrap_or_else(|_| "7782".to_string());
+    let mut server = Server::bind(&format!("0.0.0.0:{port}"))?
         .root(root)
         .on_route(on_route())
         .capsule_config(

@@ -17,7 +17,7 @@ use super::opcodes::{
     STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
-use crate::builder::{LiveBind, LiveOutput, LiveSource};
+use crate::builder::{LiveBind, LiveOutput, LiveSource, LiveSum};
 use crate::style_tokens::StyleKey;
 use std::collections::BTreeSet;
 
@@ -720,6 +720,8 @@ impl OpcodeBuffer {
                     | (*signed as u8 * LIVE_SIGNED)
                     | (high.is_some() as u8 * LIVE_RANGE)
             }
+            LiveOutput::Span { .. } => 6 | LIVE_RANGE,
+            LiveOutput::Decimal { .. } => 7,
         };
         let (channel, rest) = match &bind.source {
             LiveSource::Channel(c) => (*c, None),
@@ -754,17 +756,37 @@ impl OpcodeBuffer {
             LiveOutput::Lookup { table, .. } => self.live_table(table),
             LiveOutput::Sum { low, high, .. } => {
                 for sum in std::iter::once(low).chain(high.as_ref()) {
-                    write_varint(&mut self.buf, zigzag(sum.base));
-                    self.buf.put_u8(sum.terms.len() as u8);
-                    for (ch, table) in &sum.terms {
-                        write_varint(&mut self.buf, *ch as u32);
-                        self.live_table(table);
-                    }
+                    self.live_sum(sum);
                 }
+            }
+            LiveOutput::Span {
+                low,
+                high,
+                axis,
+                window,
+            } => {
+                self.live_sum(low);
+                self.live_sum(high);
+                for v in [axis.0, axis.1, window.0, window.1] {
+                    write_varint(&mut self.buf, zigzag(v));
+                }
+            }
+            LiveOutput::Decimal { digits } => {
+                self.buf.put_u8(*digits);
             }
             LiveOutput::Text { .. } | LiveOutput::Fill => {}
         }
         self
+    }
+
+    /// A sum's table set: `[base, n, (ch, table)…]`, `base` zigzag-encoded.
+    fn live_sum(&mut self, sum: &LiveSum) {
+        write_varint(&mut self.buf, zigzag(sum.base));
+        self.buf.put_u8(sum.terms.len() as u8);
+        for (ch, table) in &sum.terms {
+            write_varint(&mut self.buf, *ch as u32);
+            self.live_table(table);
+        }
     }
 
     /// A lookup table: `[m, lo, e…]` — `lo` zigzag-encoded, entries as

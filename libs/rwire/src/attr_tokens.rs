@@ -94,6 +94,8 @@ define_token_enum! {
         D = 0x47 => "d",
         Width = 0x48 => "width",
         Height = 0x49 => "height",
+        PreserveAspectRatio = 0x60 => "preserveAspectRatio",
+        VectorEffect = 0x61 => "vector-effect",
     }
 }
 
@@ -188,6 +190,8 @@ define_token_enum! {
         Numeric = 0x76 => "numeric",
         Decimal = 0x77 => "decimal",
         Characters = 0x78 => "characters",
+        RoleImg = 0x79 => "img",
+        NonScalingStroke = 0x7A => "non-scaling-stroke",
     }
 }
 

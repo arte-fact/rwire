@@ -56,6 +56,14 @@ impl EmpireGame {
     pub fn increment_year(&mut self) {
         self.year += 1;
     }
+
+    /// Put last year's listings on the stalls; called once at the start of a
+    /// year, before anyone trades.
+    pub fn open_market(&mut self) {
+        for k in &mut self.kingdoms {
+            k.open_market();
+        }
+    }
 }
 
 #[cfg(test)]

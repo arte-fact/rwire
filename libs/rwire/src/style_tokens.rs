@@ -911,7 +911,7 @@ define_token_enum! {
         MaxH85Dvh = 0x349 => "max-height:85dvh",
         RoundedTLg = 0x34A => "border-top-left-radius:var(--R3);border-top-right-radius:var(--R3)",
         // Reveal choreography: `both` fill keeps the from-state while an `animation-delay`
-        // (Delay1..Delay8, .3s steps) holds the element, so a cascade is pure CSS.
+        // (Delay1..Delay12, .3s steps) holds the element, so a cascade is pure CSS.
         AnimateFadeUp = 0x34B => "animation:rw-fade-up .5s ease-out both",
         AnimateGrow = 0x34C => "transform-origin:left;animation:rw-grow .6s ease-out both",
         Delay1 = 0x34D => "animation-delay:.3s",
@@ -952,6 +952,55 @@ define_token_enum! {
         GridColsAutoFrAuto = 0x361 => "grid-template-columns:auto minmax(0,1fr) auto",
         /// The unchosen twin of [`St::BorderL3Accent`], keeping the same width.
         BorderL3Transparent = 0x362 => "border-left:3px solid transparent",
+        /// Rain over a scene: two layers of slanted streaks falling forever
+        /// (overlay; the scene is `position:relative` + `overflow:hidden`).
+        Rain = 0x363 => "position:absolute;inset:-20% -10% 0;pointer-events:none;opacity:.6;transform:skewX(-12deg);background-image:radial-gradient(.7px 8px at 50% 50%,rgba(255,255,255,.7) 0 90%,transparent 100%),radial-gradient(.6px 6px at 50% 50%,rgba(255,255,255,.45) 0 90%,transparent 100%);background-size:19px 44px,31px 58px;background-position:0 0,9px 20px;animation:rw-rain .5s linear infinite",
+        /// Snow over a scene: two layers of flakes drifting down slowly.
+        Snow = 0x364 => "position:absolute;inset:0;pointer-events:none;opacity:.85;background-image:radial-gradient(circle,rgba(255,255,255,.95) 0 1.4px,transparent 2px),radial-gradient(circle,rgba(255,255,255,.7) 0 1px,transparent 1.5px),radial-gradient(circle,rgba(255,255,255,.5) 0 .8px,transparent 1.2px);background-size:37px 41px,53px 59px,29px 67px;background-position:7px 3px,31px 22px,14px 40px;animation:rw-snow 9s linear infinite",
+        /// A ledger's total line, ruled above in the accent.
+        BorderTAccent = 0x365 => "border-top:1px solid var(--n9)",
+        Pr0 = 0x366 => "padding-right:0",
+        /// A range gauge: a 10px strip holding an axis, a tick and spans.
+        Gauge = 0x367 => "position:relative;height:10px",
+        /// The gauge's axis line, across the strip at mid-height.
+        GaugeAxis = 0x368 => "position:absolute;left:0;right:0;top:4px;height:2px;border-radius:1px;background:var(--c)",
+        /// A vertical tick on the gauge (the zero, a landmark); set `left`.
+        GaugeTick = 0x369 => "position:absolute;top:0;width:1px;height:10px;background:var(--l)",
+        /// A segment on the gauge; set `left`/`width` (or bind `live_span`) and a background.
+        GaugeSpan = 0x36A => "position:absolute;top:2px;height:6px;border-radius:3px",
+        Delay9 = 0x36B => "animation-delay:2.7s",
+        Delay10 = 0x36C => "animation-delay:3s",
+        Delay11 = 0x36D => "animation-delay:3.3s",
+        Delay12 = 0x36E => "animation-delay:3.6s",
+        /// A small square medallion centring an icon or two letters.
+        Pill = 0x36F => "display:grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:var(--R2);flex-shrink:0",
+        /// The dot of a dial: a value on a gauge (set `left`).
+        GaugeDot = 0x370 => "position:absolute;top:1px;width:8px;height:8px;border-radius:50%;background:var(--n9);transform:translateX(-50%)",
+        /// Party colour hooks: the inline `--kc` paints a text, a fill or a dimmed fill.
+        TextParty = 0x371 => "color:var(--kc)",
+        BgParty = 0x372 => "background:var(--kc)",
+        BgPartyDim = 0x373 => "background:color-mix(in oklab,var(--kc) 38%,var(--c))",
+        /// A name sliding into place from its side (start in the inline `--d`).
+        AnimateInLeft = 0x374 => "animation:rw-in-l .45s var(--d,0s) cubic-bezier(.2,.8,.2,1) both",
+        AnimateInRight = 0x375 => "animation:rw-in-r .45s var(--d,0s) cubic-bezier(.2,.8,.2,1) both",
+        /// An SVG path drawing itself end to end (paths under 1000 units; start in `--d`).
+        PathDraw = 0x376 => "stroke-dasharray:1000;stroke-dashoffset:1000;animation:rw-draw 1.1s var(--d,0s) ease-out forwards",
+        /// An SVG path of marching dashes, fading in once a drawn base is in place.
+        PathMarch = 0x377 => "stroke-dasharray:3 9;animation:rw-march 1.2s linear infinite,rw-fade-in .3s 1.4s both",
+        /// An SVG path left as a faint dotted trace.
+        PathDead = 0x378 => "stroke-dasharray:2 6;opacity:.25",
+        Blink = 0x379 => "animation:rw-blink .8s ease-in-out infinite",
+        /// A rubber stamp slapped on a card's top-right corner, in `currentColor`.
+        Stamp = 0x37A => "position:absolute;right:.75rem;top:.6rem;transform:rotate(-6deg);text-transform:uppercase;font-weight:800;font-size:.75rem;letter-spacing:.06em;line-height:1.4;border:2px solid currentColor;border-radius:4px;padding:0 .4rem;animation:rw-stamp .35s cubic-bezier(.2,1.4,.4,1) both",
+        TransitionWidth = 0x37B => "transition:width .35s ease-out",
+        /// A bar's fill anchored to its right/left edge (set `width`).
+        FillRight = 0x37C => "position:absolute;top:0;bottom:0;right:0",
+        FillLeft = 0x37D => "position:absolute;top:0;bottom:0;left:0",
+        FontExtrabold = 0x37E => "font-weight:800",
+        H4_5rem = 0x37F => "height:4.5rem",
+        /// Three columns: the outer two share the width, the middle is a fixed slot.
+        GridColsFrAutoFr = 0x380 => "grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)",
+        W34Pct = 0x381 => "width:34%",
     }
 }
 
@@ -1217,12 +1266,21 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@keyframes rw-fade-up{from{opacity:0;transform:translateY(8px)}}",
     "@keyframes rw-fade-out{to{opacity:0}}",
     "@keyframes rw-grow{from{transform:scaleX(0)}}",
+    "@keyframes rw-fade-in{from{opacity:0}}",
+    "@keyframes rw-in-l{from{opacity:0;transform:translateX(-14px)}}",
+    "@keyframes rw-in-r{from{opacity:0;transform:translateX(14px)}}",
+    "@keyframes rw-draw{to{stroke-dashoffset:0}}",
+    "@keyframes rw-march{to{stroke-dashoffset:-12}}",
+    "@keyframes rw-blink{0%,100%{opacity:.25}50%{opacity:1}}",
+    "@keyframes rw-stamp{from{opacity:0;transform:rotate(-6deg) scale(1.6)}}",
     // `--n` must be a registered integer so the browser can interpolate it (St::CountUp).
     "@property --n{syntax:'<integer>';inherits:false;initial-value:0}",
     "@keyframes rw-count{to{--n:var(--to)}}",
     "@keyframes rw-sun-up{from{opacity:0;transform:translateY(40px)}}",
+    "@keyframes rw-rain{to{background-position:0 44px,9px 78px}}",
+    "@keyframes rw-snow{to{background-position:44px 85px,-22px 140px,43px 174px}}",
     ".u853::after{content:counter(n)}",
-    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853,.u861{animation-duration:0s!important;animation-delay:0s!important}}"
+    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853,.u861,.u867,.u868,.u884,.u885,.u886,.u887,.u889,.u890{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
 /// Whether a utility declaration references one of the shared `rw-*` keyframes.
@@ -1438,6 +1496,14 @@ mod tests {
             St::AnimateGrow,
             St::CountUp,
             St::AnimateSunUp,
+            St::Rain,
+            St::Snow,
+            St::AnimateInLeft,
+            St::AnimateInRight,
+            St::PathDraw,
+            St::PathMarch,
+            St::Blink,
+            St::Stamp,
         ] {
             let class = format!(".u{}", st.as_u16());
             assert!(PSEUDO_GLOBAL_CSS.contains(&class), "{class} missing");

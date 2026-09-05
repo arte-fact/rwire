@@ -40,6 +40,7 @@ fn main() {
 
 fn game_loop(game: &mut EmpireGame) {
     game.random_weather();
+    game.open_market();
     weather_page(game);
     for id in KINGDOMS {
         kingdom_turn(game, id);
@@ -71,14 +72,13 @@ fn kingdom_turn(game: &mut EmpireGame, id: Kingdoms) {
     let grain_for_peasants = prompt_grain_for_peasants(game, id);
 
     let kingdom = game.kingdom_mut(id);
-    let demographic_report = apply_feed(
+    let council = Council::from_grain(
         kingdom,
-        Council {
-            grain_for_peasants,
-            grain_for_soldiers,
-            taxes: kingdom.taxes(),
-        },
+        grain_for_peasants,
+        grain_for_soldiers,
+        kingdom.taxes(),
     );
+    let demographic_report = apply_feed(kingdom, council);
     display_demographic_report(kingdom, year, &demographic_report);
 
     let economic_report = economy_report(kingdom, weather, demographic_report.immigrants);

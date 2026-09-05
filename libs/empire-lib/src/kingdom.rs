@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::events::RulerDeathCause;
+
 use crate::economy::Taxes;
 use crate::random::random;
 
@@ -112,12 +114,154 @@ impl Kingdoms {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PlayerTitle {
     Duke,
     Prince,
     King,
     Emperor,
+}
+
+impl PlayerTitle {
+    /// The four ranks, lowest first.
+    pub const ALL: [PlayerTitle; 4] = [
+        PlayerTitle::Duke,
+        PlayerTitle::Prince,
+        PlayerTitle::King,
+        PlayerTitle::Emperor,
+    ];
+
+    /// The rank above this one; `None` for the Emperor.
+    pub fn next(self) -> Option<PlayerTitle> {
+        Self::ALL.get(self as usize + 1).copied()
+    }
+
+    /// What a kingdom must reach to hold this title; `None` for the lowest
+    /// rank, which every seigneur holds by birth.
+    pub fn requirements(self) -> Option<&'static Requirements> {
+        match self {
+            PlayerTitle::Duke => None,
+            PlayerTitle::Prince => Some(&REQUIREMENTS[0]),
+            PlayerTitle::King => Some(&REQUIREMENTS[1]),
+            PlayerTitle::Emperor => Some(&REQUIREMENTS[2]),
+        }
+    }
+}
+
+/// What a rank demands of a kingdom, per the original Empire.bas. The land
+/// ratio (arpents per serf) and the palace are in tenths; the ratio must be
+/// exceeded, every other figure reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Requirements {
+    pub peasants: i32,
+    pub land_ratio: i32,
+    pub nobles: i32,
+    pub grain_mills: i32,
+    pub marketplaces: i32,
+    pub foundries: i32,
+    pub palaces: i32,
+}
+
+/// Prince, King and Emperor, in that order.
+const REQUIREMENTS: [Requirements; 3] = [
+    Requirements {
+        peasants: 2300,
+        land_ratio: 48,
+        nobles: 10,
+        grain_mills: 4,
+        marketplaces: 8,
+        foundries: 0,
+        palaces: 2,
+    },
+    Requirements {
+        peasants: 2600,
+        land_ratio: 50,
+        nobles: 25,
+        grain_mills: 6,
+        marketplaces: 14,
+        foundries: 1,
+        palaces: 6,
+    },
+    Requirements {
+        peasants: 3100,
+        land_ratio: 50,
+        nobles: 40,
+        grain_mills: 6,
+        marketplaces: 14,
+        foundries: 1,
+        palaces: 10,
+    },
+];
+
+/// One of the figures a title is judged on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Requirement {
+    Peasants,
+    /// Arpents per serf, in tenths; the only figure that must be exceeded.
+    LandRatio,
+    Nobles,
+    GrainMills,
+    Marketplaces,
+    Foundries,
+    /// Tenths of the palace built.
+    Palaces,
+}
+
+impl Requirement {
+    pub const ALL: [Requirement; 7] = [
+        Requirement::Peasants,
+        Requirement::LandRatio,
+        Requirement::Nobles,
+        Requirement::GrainMills,
+        Requirement::Marketplaces,
+        Requirement::Foundries,
+        Requirement::Palaces,
+    ];
+
+    fn need(self, r: &Requirements) -> i32 {
+        match self {
+            Requirement::Peasants => r.peasants,
+            Requirement::LandRatio => r.land_ratio,
+            Requirement::Nobles => r.nobles,
+            Requirement::GrainMills => r.grain_mills,
+            Requirement::Marketplaces => r.marketplaces,
+            Requirement::Foundries => r.foundries,
+            Requirement::Palaces => r.palaces,
+        }
+    }
+}
+
+/// Where a kingdom stands on one requirement of a title.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Criterion {
+    pub what: Requirement,
+    pub have: i32,
+    pub need: i32,
+}
+
+impl Criterion {
+    pub fn met(&self) -> bool {
+        match self.what {
+            Requirement::LandRatio => self.have > self.need,
+            _ => self.have >= self.need,
+        }
+    }
+}
+
+/// Bushels a mouth eats in a year on a full ration.
+pub const GRAIN_PER_MOUTH: i32 = 5;
+/// Bushels a soldier eats in a year on a full ration.
+pub const GRAIN_PER_SOLDIER: i32 = 8;
+/// Rations are set per head in tenths of a bushel: this many tenths make one.
+pub const RATION_SCALE: i32 = 10;
+
+/// How a fallen kingdom fell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Fate {
+    /// The ruler died and the realm broke up.
+    RulerDied(RulerDeathCause),
+    /// Its last arpent taken by another realm.
+    Annexed(Kingdoms),
 }
 
 /// Full state of one kingdom.
@@ -127,18 +271,33 @@ pub struct Kingdom {
     pub player_name: String,
     pub is_player: bool,
     pub is_dead: bool,
+    /// Why `is_dead`, once it is.
+    #[serde(default)]
+    pub fate: Option<Fate>,
+    /// Crowned for uniting the map — the last realm standing — whatever the
+    /// judged rank says.
+    #[serde(default)]
+    pub crowned: bool,
     pub surface: i32,
     pub peasants: i32,
     pub nobles: i32,
     pub merchants: i32,
     pub soldiers: i32,
-    /// 5..=15, displayed as 50%..150%.
+    /// 50..=150, in per cent.
     pub soldiers_efficiency: i32,
+    /// Bushels per man the army was last put on, in tenths (80 = 8 bx): what
+    /// recruits eat when hired and the default of the next council.
+    pub soldiers_ration: i32,
     pub treasury: i32,
     pub grain_stocks: i32,
     pub grain_harvest: i32,
+    /// Price of the hundred bushels on the stall.
     pub grain_price: i32,
+    /// Bushels on the stall, buyable now.
     pub grain_to_sell: i32,
+    /// Bushels listed this year with their price: they leave the stocks at once
+    /// but only reach the stall at [`Kingdom::open_market`], next year.
+    pub listing: Option<(i32, i32)>,
     pub rats_loss_rate: i32,
     pub marketplaces: i32,
     pub grain_mills: i32,
@@ -151,6 +310,18 @@ pub struct Kingdom {
     pub income_taxes: i32,
 }
 
+/// `amount` bushels at `price` added to a `(bushels, price)` lot: the price
+/// becomes the average weighted by volume.
+fn merge_lot((have, have_price): (i32, i32), amount: i32, price: i32) -> (i32, i32) {
+    let total = have + amount;
+    let avg = if total > 0 {
+        (have_price * have + price * amount) / total
+    } else {
+        price
+    };
+    (total, avg)
+}
+
 impl Kingdom {
     /// A fresh kingdom with the original Empire.bas starting values.
     pub fn new(id: Kingdoms) -> Self {
@@ -159,18 +330,22 @@ impl Kingdom {
             player_name: id.default_king_name().to_string(),
             is_player: false,
             is_dead: false,
+            fate: None,
+            crowned: false,
             surface: 10000,
             peasants: 2000,
             nobles: 1,
             merchants: 25,
             soldiers: 20,
             soldiers_efficiency: 150,
+            soldiers_ration: GRAIN_PER_SOLDIER * RATION_SCALE,
             treasury: 1000,
             // Original: A(I,2)=15000+INT(RND*1000)+1 = [15001, 16000]
             grain_stocks: 15000 + random(1, 1001),
             grain_harvest: 0,
             grain_price: 0,
             grain_to_sell: 0,
+            listing: None,
             rats_loss_rate: 10,
             marketplaces: 0,
             grain_mills: 0,
@@ -180,6 +355,24 @@ impl Kingdom {
             immigration_taxes: 20,
             commercial_taxes: 8,
             income_taxes: 20,
+        }
+    }
+
+    /// Take `amount` bushels out of the stocks and add them to this year's
+    /// listing at `price` the hundred (weighted-average price if some grain was
+    /// already listed).
+    pub fn list_grain(&mut self, amount: i32, price: i32) {
+        self.grain_stocks -= amount;
+        self.listing = Some(merge_lot(self.listing.unwrap_or((0, price)), amount, price));
+    }
+
+    /// Move the year's listing onto the stall — original formula
+    /// A(K,6)=(A(K,6)*A(K,5)+H1*H2)/(A(K,5)+H1), a weighted-average price.
+    pub fn open_market(&mut self) {
+        if let Some((amount, price)) = self.listing.take() {
+            let (total, avg) = merge_lot((self.grain_to_sell, self.grain_price), amount, price);
+            self.grain_to_sell = total;
+            self.grain_price = avg;
         }
     }
 
@@ -199,51 +392,63 @@ impl Kingdom {
         self.id.currency()
     }
 
-    /// Current title per original Empire.bas requirements:
-    /// - Prince: marketplaces >= 8, mills >= 4, palace >= 20%, land/serfs > 4.8, nobles >= 10, serfs >= 2,300
-    /// - King: marketplaces >= 14, mills >= 6, foundries >= 1, palace >= 60%, land/serfs > 5.0, nobles >= 25, serfs >= 2,600
-    /// - Emperor: all King requirements + palace 100%, nobles >= 40, serfs >= 3,100
-    pub fn title(&self) -> PlayerTitle {
-        // Land/serfs ratio x10 for integer precision.
-        let land_ratio = if self.peasants > 0 {
+    /// Arpents per serf, in tenths.
+    pub fn land_ratio(&self) -> i32 {
+        if self.peasants > 0 {
             self.surface * 10 / self.peasants
         } else {
             0
-        };
+        }
+    }
 
-        if self.peasants >= 3100
-            && land_ratio > 50
-            && self.nobles >= 40
-            && self.grain_mills >= 6
-            && self.marketplaces >= 14
-            && self.foundries >= 1
-            && self.palaces >= 10
-        {
+    fn have(&self, what: Requirement) -> i32 {
+        match what {
+            Requirement::Peasants => self.peasants,
+            Requirement::LandRatio => self.land_ratio(),
+            Requirement::Nobles => self.nobles,
+            Requirement::GrainMills => self.grain_mills,
+            Requirement::Marketplaces => self.marketplaces,
+            Requirement::Foundries => self.foundries,
+            Requirement::Palaces => self.palaces,
+        }
+    }
+
+    /// The kingdom against each requirement of `title`, in a fixed order,
+    /// skipping the figures the rank does not ask for. Empty for the lowest
+    /// rank.
+    pub fn progress(&self, title: PlayerTitle) -> Vec<Criterion> {
+        let Some(r) = title.requirements() else {
+            return Vec::new();
+        };
+        Requirement::ALL
+            .into_iter()
+            .map(|what| Criterion {
+                what,
+                have: self.have(what),
+                need: what.need(r),
+            })
+            .filter(|c| c.need > 0)
+            .collect()
+    }
+
+    /// The realm falls: no land, no people, no ruler.
+    pub fn fall(&mut self, fate: Fate) {
+        self.is_dead = true;
+        self.fate = Some(fate);
+    }
+
+    /// Current title: the highest rank whose every requirement is met. It is
+    /// judged afresh each time, so a title can be lost — unless the crown of
+    /// the whole map was won.
+    pub fn title(&self) -> PlayerTitle {
+        if self.crowned {
             return PlayerTitle::Emperor;
         }
-
-        if self.peasants >= 2600
-            && land_ratio > 50
-            && self.nobles >= 25
-            && self.grain_mills >= 6
-            && self.marketplaces >= 14
-            && self.foundries >= 1
-            && self.palaces >= 6
-        {
-            return PlayerTitle::King;
-        }
-
-        if self.peasants >= 2300
-            && land_ratio > 48
-            && self.nobles >= 10
-            && self.grain_mills >= 4
-            && self.marketplaces >= 8
-            && self.palaces >= 2
-        {
-            return PlayerTitle::Prince;
-        }
-
-        PlayerTitle::Duke
+        PlayerTitle::ALL
+            .into_iter()
+            .rev()
+            .find(|&t| self.progress(t).iter().all(Criterion::met))
+            .unwrap_or(PlayerTitle::Duke)
     }
 
     pub fn title_name(&self) -> &'static str {
@@ -265,12 +470,17 @@ impl Kingdom {
         )
     }
 
+    /// Mouths to feed among the people: a noble eats for three.
+    pub fn mouths(&self) -> i32 {
+        self.peasants + self.merchants + self.nobles * 3
+    }
+
     pub fn peasants_grain_needs(&self) -> i32 {
-        (self.peasants + self.merchants + self.nobles * 3) * 5
+        self.mouths() * GRAIN_PER_MOUTH
     }
 
     pub fn soldiers_grain_needs(&self) -> i32 {
-        self.soldiers * 8
+        self.soldiers * GRAIN_PER_SOLDIER
     }
 
     pub fn total_population(&self) -> i32 {
@@ -347,6 +557,92 @@ mod tests {
         k.palaces = 10;
         assert_eq!(k.title(), PlayerTitle::Emperor);
         assert_eq!(k.titled_name(), "Empereur Hugues");
+        assert_eq!(k.progress(PlayerTitle::Emperor).len(), 7);
+        assert!(k.progress(PlayerTitle::Emperor).iter().all(Criterion::met));
+    }
+
+    #[test]
+    fn ranks_climb_and_end_at_the_emperor() {
+        assert_eq!(PlayerTitle::Duke.next(), Some(PlayerTitle::Prince));
+        assert_eq!(PlayerTitle::King.next(), Some(PlayerTitle::Emperor));
+        assert_eq!(PlayerTitle::Emperor.next(), None);
+        assert!(PlayerTitle::Duke < PlayerTitle::Emperor);
+        assert!(PlayerTitle::Duke.requirements().is_none());
+    }
+
+    #[test]
+    fn the_crown_of_the_map_outranks_the_judged_title() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        assert_eq!(k.title(), PlayerTitle::Duke);
+        k.crowned = true;
+        assert_eq!(k.title(), PlayerTitle::Emperor);
+        assert_eq!(k.title_name(), "Empereur");
+    }
+
+    #[test]
+    fn a_fallen_realm_keeps_its_fate() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        assert_eq!(k.fate, None);
+        k.fall(Fate::Annexed(Kingdoms::Spain));
+        assert!(k.is_dead);
+        assert_eq!(k.fate, Some(Fate::Annexed(Kingdoms::Spain)));
+    }
+
+    #[test]
+    fn progress_shows_what_is_missing() {
+        let k = Kingdom::new(Kingdoms::France);
+        assert!(k.progress(PlayerTitle::Duke).is_empty());
+        let p = k.progress(PlayerTitle::Prince);
+        // The Prince asks nothing of the foundry.
+        assert_eq!(p.len(), 6);
+        assert!(!p.iter().any(|c| c.what == Requirement::Foundries));
+        let serfs = p.iter().find(|c| c.what == Requirement::Peasants).unwrap();
+        assert_eq!((serfs.have, serfs.need, serfs.met()), (2000, 2300, false));
+        let ratio = p.iter().find(|c| c.what == Requirement::LandRatio).unwrap();
+        assert_eq!((ratio.have, ratio.need), (k.land_ratio(), 48));
+        // The land ratio must be exceeded, not merely reached.
+        assert!(!Criterion {
+            what: Requirement::LandRatio,
+            have: 48,
+            need: 48
+        }
+        .met());
+        assert!(Criterion {
+            what: Requirement::LandRatio,
+            have: 49,
+            need: 48
+        }
+        .met());
+        assert!(Criterion {
+            what: Requirement::Nobles,
+            have: 10,
+            need: 10
+        }
+        .met());
+    }
+
+    #[test]
+    fn a_title_is_the_rank_whose_every_criterion_is_met() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        k.peasants = 2600;
+        k.surface = 2600 * 6;
+        k.nobles = 25;
+        k.grain_mills = 6;
+        k.marketplaces = 14;
+        k.foundries = 1;
+        k.palaces = 6;
+        assert_eq!(k.title(), PlayerTitle::King);
+        // One criterion lapsing takes the title away.
+        k.foundries = 0;
+        assert_eq!(k.title(), PlayerTitle::Prince);
+        assert_eq!(
+            k.progress(PlayerTitle::King)
+                .iter()
+                .filter(|c| !c.met())
+                .map(|c| c.what)
+                .collect::<Vec<_>>(),
+            [Requirement::Foundries]
+        );
     }
 
     #[test]

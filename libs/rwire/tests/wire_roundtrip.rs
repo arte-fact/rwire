@@ -60,6 +60,7 @@ fn live_bindings() -> ElementBuilder {
         el(El::Div).live_fill(a),
         el(El::Span).live_scaled(a, 100, 23_340),
         el(El::Span).live_scaled_grouped(b, 3, 1),
+        el(El::Span).live_decimal(a, 1),
         el(El::Span).live_lookup(a, &[0, 50, 100, 150]),
         el(El::Span).live_lookup_signed(b, &[-1_640, -359, 0, 61, 12_345]),
         el(El::Span).live_sum(LiveSum {
@@ -75,6 +76,18 @@ fn live_bindings() -> ElementBuilder {
                 base: 227,
                 terms: vec![(a, vec![-900, 0, 12_345]), (b, vec![-3, 0, 4])],
             },
+        ),
+        el(El::Div).st([St::GaugeSpan]).live_span(
+            LiveSum {
+                base: -72,
+                terms: vec![(a, vec![-300, 0, 61])],
+            },
+            LiveSum {
+                base: 175,
+                terms: vec![(a, vec![-900, 0, 12_345]), (b, vec![-3, 0, 4])],
+            },
+            (-1_000, 13_000),
+            (-1_000, 0),
         ),
         el(El::Span).live_remainder(50_000, &[a, b]),
         el(El::Span).live_remainder_grouped(50_000, &[a, b]),

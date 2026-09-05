@@ -157,16 +157,19 @@ impl Progress {
 
         // Progress bar inner element. The width is data-driven so it uses the
         // typed `Style` value builder (not a raw `style` attr); a min-width token
-        // keeps a sliver visible at 0%. Rounded to one decimal so sub-percent
-        // jitter does not churn the bytes pushed on every re-render — identical
-        // rounded values hash-dedup to no update at all.
+        // keeps a sliver visible for any non-zero value, while zero shows an
+        // empty track (a nub at 0 reads as "something left"). Rounded to one
+        // decimal so sub-percent jitter does not churn the bytes pushed on every
+        // re-render — identical rounded values hash-dedup to no update at all.
         let mut bar_tokens = vec![
             St::HFull,
             self.intent.token(),
             St::RoundedFull,
             St::TransitionAll,
-            St::MinW05rem,
         ];
+        if self.value > 0 {
+            bar_tokens.push(St::MinW05rem);
+        }
         bar_tokens.extend(self.bar_tokens);
         let bar = el(El::Div)
             .st(bar_tokens)
@@ -203,5 +206,15 @@ mod tests {
         assert_eq!(progress.value, 50);
         assert_eq!(progress.max, 100);
         assert_eq!(progress.label.as_deref(), Some("Loading"));
+    }
+
+    #[test]
+    fn zero_shows_an_empty_track() {
+        let bar = |value: u32| {
+            let built = Progress::new().value(value).max(10).build();
+            built.children()[0].get_style_utils().to_vec()
+        };
+        assert!(!bar(0).contains(&(St::MinW05rem as u16)));
+        assert!(bar(1).contains(&(St::MinW05rem as u16)));
     }
 }

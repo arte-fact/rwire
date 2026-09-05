@@ -124,8 +124,14 @@ pub const LIVE_SOURCE: u8 = 0x4F;
 ///   that depends on several sliders; `base` zigzag-encoded); with
 ///   [`LIVE_RANGE`] a second `[base, n, …]` follows and the text is
 ///   `low … high`, or the one figure when both agree
+/// - 6 span `[low, high, a0, a1, w0, w1]`: two sum table sets as above (the
+///   [`LIVE_RANGE`] bit is set) then four zigzag-encoded bounds; `left` and
+///   `width` = the segment `low … high` clipped to `w0 … w1`, as percentages
+///   of the axis `a0 … a1` (a range gauge)
+/// - 7 decimal `[p]`: `textContent = v / 10^p` with `p` fraction digits,
+///   digit-grouped per the page's `<html lang>` (a slider in tenths)
 ///
-/// Varint args except the `n`/`m` counts (one byte).
+/// Varint args except the `n`/`m` counts and `p` (one byte).
 pub const LIVE_BIND: u8 = 0x50;
 
 /// `LIVE_BIND` kind bit: the value is `base − Σ channels` rather than one channel.

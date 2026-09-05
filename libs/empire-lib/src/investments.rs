@@ -38,7 +38,9 @@ impl InvestmentType {
         }
     }
 
-    /// Maximum amount the kingdom can afford (and, for soldiers, command).
+    /// Maximum amount the kingdom can afford (and, for soldiers, command:
+    /// twenty men a noble). Recruits eat nothing when hired; the council
+    /// feeds them with the rest of the army.
     pub fn max_investment(self, kingdom: &Kingdom) -> i32 {
         let max_by_treasury = kingdom.treasury / self.cost();
         match self {
@@ -75,31 +77,27 @@ pub fn validate_investment(
     amount: i32,
 ) -> InvestmentResult {
     let total_cost = amount * investment_type.cost();
+    let failed = |error: String| InvestmentResult {
+        amount,
+        total_cost,
+        error: Some(error),
+        ..Default::default()
+    };
 
     if total_cost > kingdom.treasury {
-        return InvestmentResult {
-            amount,
-            total_cost,
-            error: Some(format!(
-                "Insufficient funds: need {} but only have {}",
-                total_cost, kingdom.treasury
-            )),
-            ..Default::default()
-        };
+        return failed(format!(
+            "Insufficient funds: need {} but only have {}",
+            total_cost, kingdom.treasury
+        ));
     }
 
     if investment_type == InvestmentType::Soldiers {
         let max_soldiers = kingdom.nobles * 20;
         if kingdom.soldiers + amount > max_soldiers {
-            return InvestmentResult {
-                amount,
-                total_cost,
-                error: Some(format!(
-                    "Your {} nobles can only command up to {} soldiers",
-                    kingdom.nobles, max_soldiers
-                )),
-                ..Default::default()
-            };
+            return failed(format!(
+                "Your {} nobles can only command up to {} soldiers",
+                kingdom.nobles, max_soldiers
+            ));
         }
     }
 
@@ -157,41 +155,6 @@ pub fn apply_investment(
     }
 }
 
-/// Recruit soldiers from the peasantry, paying the per-soldier cost.
-pub fn recruit_soldiers(kingdom: &mut Kingdom, count: i32) -> Result<(), String> {
-    if count <= 0 {
-        return Ok(());
-    }
-
-    let cost = InvestmentType::Soldiers.cost() * count;
-    if kingdom.treasury < cost {
-        return Err(format!(
-            "Insufficient treasury: need {} but only have {}",
-            cost, kingdom.treasury
-        ));
-    }
-
-    let max_soldiers = kingdom.nobles * 20;
-    if kingdom.soldiers + count > max_soldiers {
-        return Err(format!(
-            "Your {} nobles can only command up to {} soldiers (currently have {})",
-            kingdom.nobles, max_soldiers, kingdom.soldiers
-        ));
-    }
-
-    if kingdom.peasants < count {
-        return Err(format!(
-            "Not enough peasants to recruit: need {} but only have {}",
-            count, kingdom.peasants
-        ));
-    }
-
-    kingdom.treasury -= cost;
-    kingdom.peasants -= count;
-    kingdom.soldiers += count;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,15 +194,17 @@ mod tests {
     }
 
     #[test]
-    fn recruit_soldiers_validates_and_applies() {
+    fn recruits_cost_money_only_and_are_led_by_the_nobles() {
         let mut k = Kingdom::new(Kingdoms::France);
         k.nobles = 5;
-        assert!(recruit_soldiers(&mut k, 0).is_ok());
-        assert!(recruit_soldiers(&mut k, 1000).is_err()); // cost 8000 > 1000
-        assert!(recruit_soldiers(&mut k, 100).is_err()); // 120 > 5*20
-        recruit_soldiers(&mut k, 50).unwrap();
-        assert_eq!(k.soldiers, 70);
-        assert_eq!(k.peasants, 1950);
-        assert_eq!(k.treasury, 600);
+        k.soldiers_ration = 120;
+        k.grain_stocks = 500;
+        // 1000 francs buy 125 men; the nobles command 80 more; grain is no bar.
+        assert_eq!(InvestmentType::Soldiers.max_investment(&k), 80);
+        let r = apply_investment(&mut k, InvestmentType::Soldiers, 40);
+        assert!(r.success);
+        assert_eq!(k.soldiers, 60);
+        assert_eq!(k.treasury, 680);
+        assert_eq!(k.grain_stocks, 500);
     }
 }

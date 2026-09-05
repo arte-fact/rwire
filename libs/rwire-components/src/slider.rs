@@ -42,7 +42,18 @@ pub struct Slider {
     marks: Vec<(i32, Cow<'static, str>)>,
     readout_suffix: Option<ElementBuilder>,
     above_track: Vec<ElementBuilder>,
-    grouped: Option<fn(i32) -> String>,
+    readout: Readout,
+}
+
+/// How the slider's figure is printed: `fmt` renders the initial figure
+/// server-side, the live readout follows the page's language.
+#[derive(Clone, Copy, Default)]
+enum Readout {
+    #[default]
+    Plain,
+    Grouped(fn(i32) -> String),
+    /// The value is in `10^digits`ths of the unit shown.
+    Decimal(u8, fn(i32) -> String),
 }
 
 #[rwire::component]
@@ -128,7 +139,15 @@ impl Slider {
     /// figure server-side and the live readout is grouped in the page's language
     /// (`CapsuleConfig::lang`) — pick a `fmt` that prints the same separator.
     pub fn grouped(mut self, fmt: fn(i32) -> String) -> Self {
-        self.grouped = Some(fmt);
+        self.readout = Readout::Grouped(fmt);
+        self
+    }
+
+    /// The value counts in `10^digits`ths of the unit shown (tenths for a
+    /// slider stepping by `0,1`): `fmt` renders the initial figure server-side
+    /// and the live readout prints `digits` decimals in the page's language.
+    pub fn decimals(mut self, digits: u8, fmt: fn(i32) -> String) -> Self {
+        self.readout = Readout::Decimal(digits, fmt);
         self
     }
 
@@ -169,9 +188,10 @@ impl Slider {
 
         // Label row: label on the left, live value (+ unit) on the right.
         let figure = el(El::Strong).st([St::TextLg]);
-        let figure = match self.grouped {
-            Some(fmt) => figure.text(&fmt(value)).live_text_grouped(channel),
-            None => figure.text(&value.to_string()).live_text(channel),
+        let figure = match self.readout {
+            Readout::Plain => figure.text(&value.to_string()).live_text(channel),
+            Readout::Grouped(fmt) => figure.text(&fmt(value)).live_text_grouped(channel),
+            Readout::Decimal(digits, fmt) => figure.text(&fmt(value)).live_decimal(channel, digits),
         };
         let mut readout = el(El::Div)
             .st([St::DisplayFlex, St::ItemsBaseline, St::GapXs])

@@ -490,6 +490,18 @@ pub enum LiveOutput {
         high: Option<LiveSum>,
         signed: bool,
     },
+    /// `left`/`width` as percentages: the segment `low … high` (two
+    /// [`LiveSum`]s) clipped to `window`, placed on an axis running from
+    /// `axis.0` to `axis.1` (a range gauge).
+    Span {
+        low: LiveSum,
+        high: LiveSum,
+        axis: (i32, i32),
+        window: (i32, i32),
+    },
+    /// `textContent = v / 10^digits` with that many fraction digits, in the
+    /// page's language (a slider counting in tenths).
+    Decimal { digits: u8 },
 }
 
 /// A figure that depends on several sliders: `base + Σ tables`, each table
@@ -1279,6 +1291,13 @@ impl ElementBuilder {
         )
     }
 
+    /// Show the value on `channel` divided by `10^digits`, with `digits`
+    /// fraction digits in the page's language — a slider counting in tenths
+    /// reads `5,0`.
+    pub fn live_decimal(self, channel: u16, digits: u8) -> Self {
+        self.live(LiveSource::Channel(channel), LiveOutput::Decimal { digits })
+    }
+
     /// [`Self::live_scaled`] with thousands separators (see [`Self::live_text_grouped`]).
     pub fn live_scaled_grouped(self, channel: u16, num: u32, den: u32) -> Self {
         self.live(
@@ -1358,6 +1377,32 @@ impl ElementBuilder {
         self.live(
             LiveSource::Channel(channel),
             LiveOutput::Sum { low, high, signed },
+        )
+    }
+
+    /// `left` and `width` = the segment `low … high` (two [`LiveSum`]s) clipped
+    /// to `window`, as percentages of the `axis` run: a range gauge. Set the
+    /// initial `left`/`width` yourself; give the element `St::GaugeSpan`.
+    pub fn live_span(
+        self,
+        low: LiveSum,
+        high: LiveSum,
+        axis: (i32, i32),
+        window: (i32, i32),
+    ) -> Self {
+        let channel = low
+            .terms
+            .first()
+            .or(high.terms.first())
+            .map_or(0, |(ch, _)| *ch);
+        self.live(
+            LiveSource::Channel(channel),
+            LiveOutput::Span {
+                low,
+                high,
+                axis,
+                window,
+            },
         )
     }
 
