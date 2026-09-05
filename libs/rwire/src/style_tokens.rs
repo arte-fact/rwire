@@ -1001,6 +1001,8 @@ define_token_enum! {
         /// Three columns: the outer two share the width, the middle is a fixed slot.
         GridColsFrAutoFr = 0x380 => "grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)",
         W34Pct = 0x381 => "width:34%",
+        /// Bleed into a `PMd` parent's side padding (pair with `PxMd` to realign).
+        MxNegMd = 0x382 => "margin-inline:calc(-1 * var(--S4))",
     }
 }
 

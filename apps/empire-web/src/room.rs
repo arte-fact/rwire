@@ -72,15 +72,18 @@ pub enum Staging {
     Done,
 }
 
-/// A player's position inside the year: three screens telling the year
-/// that ended, then the roll where everything is decided at once.
+/// A player's position inside the year: the screens telling the year that
+/// ended and the season that opens, then the roll where everything is
+/// decided at once, then the reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Step {
     /// The Chronique: the year's facts since the last council.
     #[default]
     Chronicle,
-    /// The roll: granaries, market, rations, rates and purchases, sealed
-    /// together by "Continuer".
+    /// The Saison: the year's sky and the grain ledger it leaves.
+    Season,
+    /// The roll: market, rations, rates and purchases, sealed together by
+    /// "Continuer".
     Intendance,
     /// Census: how the people fared under the council just promulgated.
     Report,
@@ -90,7 +93,14 @@ pub enum Step {
 }
 
 impl Step {
-    pub const LABELS: [&'static str; 5] = ["Chronique", "Intendance", "Peuple", "Trésor", "Guerre"];
+    pub const LABELS: [&'static str; 6] = [
+        "Chronique",
+        "Saison",
+        "Intendance",
+        "Peuple",
+        "Trésor",
+        "Guerre",
+    ];
 
     pub fn index(self) -> usize {
         self as usize
@@ -675,12 +685,12 @@ impl Room {
                 self.run_computer_intendance(id);
             } else {
                 // The year opens on its Chronique; the first has nothing to
-                // tell yet and opens on the roll.
+                // tell yet and opens on the season.
                 let seat = self.seat_mut(id);
                 seat.step = if seat.demo.is_some() {
                     Step::Chronicle
                 } else {
-                    Step::Intendance
+                    Step::Season
                 };
                 seat.ready = false;
                 seat.draft = None;
@@ -792,7 +802,8 @@ impl Room {
         let seat = self.seat_mut(id);
         seat.notice = None;
         match seat.step {
-            Step::Chronicle => seat.step = Step::Intendance,
+            Step::Chronicle => seat.step = Step::Season,
+            Step::Season => seat.step = Step::Intendance,
             Step::Intendance => {
                 // "Continuer" is final: the council is promulgated, its
                 // census and ledger follow at once, and the Chronique
@@ -1853,11 +1864,12 @@ mod tests {
     /// Play `id` through the intendance: the council is promulgated with the
     /// default draft, every other step is skipped with its "next" button.
     fn finish_intendance(room: &mut Room, id: Kingdoms) {
-        // The first year opens on the roll; the others tell the year first.
+        // The first year opens on the season; the others tell the year first.
         if room.seat(id).step == Step::Chronicle {
-            room.advance(id); // Chronicle → Intendance
+            room.advance(id); // Chronicle → Season
         }
-        assert_eq!(room.seat(id).step, Step::Intendance);
+        assert_eq!(room.seat(id).step, Step::Season);
+        room.advance(id); // Season → Intendance
         room.advance(id); // Intendance → promulgated, Report
         room.advance(id); // Report → Treasury
         room.advance(id); // Treasury → ready
@@ -1869,7 +1881,7 @@ mod tests {
         assert_eq!(room.phase, Phase::Intendance);
         for id in [Kingdoms::France, Kingdoms::Spain] {
             assert!(room.playing(id));
-            assert!(room.may_act(id, Step::Intendance));
+            assert!(room.may_act(id, Step::Season));
             assert!(!room.may_act(id, Step::War));
         }
         // The computers have already run their kingdoms.
@@ -2243,10 +2255,11 @@ mod tests {
         let mut room = playing(&[Kingdoms::France]);
         let id = Kingdoms::France;
         room.report(id, News::Crowned);
-        // The first year opens on the roll; the news waits for next year's
+        // The first year opens on the season; the news waits for next year's
         // Chronique.
-        assert_eq!(room.seat(id).step, Step::Intendance);
+        assert_eq!(room.seat(id).step, Step::Season);
         assert_eq!(room.seat(id).news.len(), 1);
+        room.advance(id); // Season → Intendance
         room.advance(id); // Intendance → promulgated: the tale starts over
         assert!(room.seat(id).news.is_empty());
         // A fallen seat keeps its epitaph through the years.

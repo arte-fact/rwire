@@ -1388,6 +1388,7 @@ fn turn(t: T, id: Kingdoms, sheet_open: bool) -> View {
     };
     let (body, action) = match seat.step {
         Step::Chronicle => (chronicle_step(t, k), Some(next("Continuer", t))),
+        Step::Season => (season_step(t, k, seat), Some(next("Continuer", t))),
         Step::Report => (report_step(seat), Some(next("Continuer", t))),
         Step::Treasury => (treasury_step(k, seat), Some(next("Continuer", t))),
         Step::Intendance => (intendance_step(t, id), None),
@@ -1964,32 +1965,23 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
     }
 }
 
-/// Saison: the year's sky, then the grain ledger, cascading from `shift`.
-fn season(t: T, k: &Kingdom, seat: &Seat, shift: usize) -> [ElementBuilder; 2] {
+/// Saison: the year's sky, then the grain ledger it leaves — read before
+/// the market opens, so the granaries hold last year's stocks and the harvest.
+fn season_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let game = &t.room.game;
+    let shift = 0;
     let sky = sky(game.weather, game.year, shift);
 
     let needs = k.peasants_grain_needs() + k.soldiers_grain_needs();
     let balance = k.grain_stocks - needs;
     let dawn = seat.stocks_at_dawn;
     let before = dawn + seat.rats - k.grain_harvest;
-    // The year's dealings so far: lots listed leave the granaries, grain
-    // bought comes in.
-    let dealt = k.grain_stocks - dawn;
     let largest = k.grain_harvest.max(dawn).max(needs);
     let (verdict, tone) = if balance < 0 {
         ("Il manque", St::TextError)
     } else {
         ("Il reste", St::TextSuccess)
     };
-    let market = (dealt != 0).then(|| {
-        ledger_row(
-            shift + 6,
-            aside("Marché", "· ventes et achats"),
-            signed(dealt),
-            Some(ledger_bar(dealt, largest, shift + 6)),
-        )
-    });
     let ledger = el(El::Div).st([St::PxXs]).append([
         ledger_row(
             shift + 2,
@@ -2013,7 +2005,7 @@ fn season(t: T, k: &Kingdom, seat: &Seat, shift: usize) -> [ElementBuilder; 2] {
         ),
         total_row(shift + 5, "Réserves", el(El::Span).text(&fmt(dawn))),
     ]);
-    let ledger = ledger.append(market).append([
+    let ledger = ledger.append([
         ledger_row(
             shift + 6,
             aside("Besoins de l'an", "· peuple + ost"),
@@ -2028,7 +2020,7 @@ fn season(t: T, k: &Kingdom, seat: &Seat, shift: usize) -> [ElementBuilder; 2] {
                 .text(&format!("{} boisseaux", fmt(balance.abs()))),
         ),
     ]);
-    [sky, ledger]
+    Stack::column().gap(Gap::Lg).children([sky, ledger]).build()
 }
 
 // ---------------------------------------------------------------------------
@@ -4497,9 +4489,9 @@ fn purchase_sheet(t: T, id: Kingdoms, kind: InvestmentType) -> ElementBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// Intendance: the new year on one roll — the sky and the granaries, the
-// market, the rations, the taxes, the register, the purchases, and the act
-// that closes the council. Every decision opens a sheet.
+// Intendance: the new year on one roll — the register pinned at the top,
+// then the market, the rations, the taxes, the purchases, and the act that
+// closes the council. Every decision opens a sheet.
 // ---------------------------------------------------------------------------
 
 fn intendance_step(t: T, id: Kingdoms) -> ElementBuilder {
@@ -4515,7 +4507,6 @@ fn intendance_step(t: T, id: Kingdoms) -> ElementBuilder {
             .flatten()
             .map(|n| Alert::info().message(n).build())
     };
-    let [sky, ledger] = season(t, k, seat, 0);
 
     let market = block(
         heading(
@@ -4556,8 +4547,22 @@ fn intendance_step(t: T, id: Kingdoms) -> ElementBuilder {
         None,
     );
 
+    // Pinned to the top of the scroll so every setting is read against it;
+    // it bleeds into the page's side padding to hide what scrolls beneath.
     let forecast = el(El::Div)
-        .st([St::DisplayFlex, St::FlexCol, St::GapSm])
+        .st([
+            St::PositionSticky,
+            St::Top0,
+            St::Z10,
+            St::BgApp,
+            St::MxNegMd,
+            St::PxMd,
+            St::PySm,
+            St::BorderB,
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapSm,
+        ])
         .append([
             heading(
                 Icon::FileText,
@@ -4597,9 +4602,7 @@ fn intendance_step(t: T, id: Kingdoms) -> ElementBuilder {
 
     Stack::column()
         .gap(Gap::Lg)
-        .children([
-            sky, ledger, market, rations, taxes, forecast, purchases, close,
-        ])
+        .children([forecast, market, rations, taxes, purchases, close])
         .build()
 }
 
