@@ -3,14 +3,23 @@
 //! hits it together. Once it falls the survivors have their victory and march
 //! on, each on its own line of arpents, taking whatever lies on the ground it
 //! crosses — the people met on the way rally one time in three and fight one
-//! man of arms otherwise. The realm is laid out from the frontier (arpent 1)
-//! to the capital (arpent N) and split equally between the lines.
+//! man of arms otherwise: serfs and merchants as a militia, the nobles with
+//! the realm's ardour. The realm is laid out from the frontier (arpent 1) to
+//! the capital (arpent N) and split equally between the lines.
 
 use std::cmp::max;
 
 use crate::game::EmpireGame;
 use crate::kingdom::{Fate, Kingdom, Kingdoms};
 use crate::random::random;
+
+/// How serfs and merchants fight when the army meets them on its march: a
+/// militia, whatever the realm's soldiers are worth (the peasants defending in
+/// [`crate::war`] fight at the same). It sets the ground a march takes per man
+/// lost: 1 / (people per arpent × ⅔ × P(a duel lost)), about 30 arpents at
+/// the start of a game — what the original battle yields per man lost, once
+/// the men fallen before the garrison are counted.
+const MILITIA_EFFICIENCY: i32 = 50;
 
 /// The buildings a realm has along its line, in the order of the spoils arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,6 +336,14 @@ enum Met {
 }
 
 impl Met {
+    /// What this one fights with.
+    fn ardour(self, d: &Kingdom) -> i32 {
+        match self {
+            Met::Peasant | Met::Merchant => MILITIA_EFFICIENCY,
+            Met::Noble => d.soldiers_efficiency,
+        }
+    }
+
     fn count(self, p: &mut People) {
         match self {
             Met::Peasant => p.peasants += 1,
@@ -466,7 +483,7 @@ fn fight(
             for (k, who) in people.iter().enumerate() {
                 if random(0, 3) == 0 {
                     who.count(&mut stands[i].rallied);
-                } else if random(1, strength[i]) >= random(1, d.soldiers_efficiency) {
+                } else if random(1, strength[i]) >= random(1, who.ardour(d)) {
                     who.count(&mut stands[i].killed);
                 } else {
                     stands[i].men -= 1;
@@ -760,13 +777,32 @@ mod tests {
         assert!(met > 1000, "met {met}");
         let share = a.rallied.peasants as f64 / met as f64;
         assert!((0.28..0.38).contains(&share), "rallied {share}");
-        // Each lost duel costs one man of arms; at twice the efficiency, three
-        // duels in four are won.
+        // Each lost duel costs one man of arms; against a militia at 50, an
+        // army at 300 wins eleven duels in twelve.
         assert!(
-            a.lost() > 0 && a.lost() < a.killed.peasants,
-            "lost {}",
-            a.lost()
+            a.lost() > 0 && a.lost() * 6 < a.killed.peasants,
+            "lost {} killed {}",
+            a.lost(),
+            a.killed.peasants
         );
+    }
+
+    #[test]
+    fn serfs_fight_as_a_militia_whatever_the_realms_soldiers_are_worth() {
+        let mut game = EmpireGame::default();
+        let f = game.kingdom_mut(Kingdoms::France);
+        f.soldiers = 5000;
+        f.soldiers_efficiency = 100;
+        let s = game.kingdom_mut(Kingdoms::Spain);
+        s.soldiers = 0;
+        s.soldiers_efficiency = 300;
+        s.peasants = 30_000;
+        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 5000)]);
+        let a = &r.armies[0];
+        // Duels at 100 against 50: about three in four won, not one in six as
+        // against the realm's own soldiers.
+        let won = a.killed.peasants as f64 / (a.killed.peasants + a.lost()) as f64;
+        assert!((0.68..0.82).contains(&won), "won {won}");
     }
 
     #[test]
@@ -781,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn a_small_army_takes_a_few_hundred_arpents_not_the_realm() {
+    fn a_small_army_takes_some_hundred_arpents_not_the_realm() {
         let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 10;
         game.kingdom_mut(Kingdoms::Spain).soldiers = 0;
@@ -791,8 +827,9 @@ mod tests {
             assert!(r.annexed_by.is_none());
             total += r.armies[0].advance;
         }
+        // About 45 arpents a man at 150 against the militia's 50.
         let mean = total / 50;
-        assert!((60..400).contains(&mean), "mean advance {mean}");
+        assert!((200..800).contains(&mean), "mean advance {mean}");
     }
 
     #[test]

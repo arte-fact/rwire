@@ -338,20 +338,29 @@ Le pool de serfs et la carte à une dimension ont disparu ; la ligne d'arpents r
 - **Habitants répartis sur la ligne** (`Line::people`) : serfs et marchands uniformément, nobles
   vers la capitale. À chaque rencontre : **1/3 se rallie** (passe à l'attaquant : `Spoils::rallied`),
   **2/3 se battent** contre un homme d'armes : `random(1, efficacité attaquant) >= random(1,
-  efficacité défenseur)` (le même jet que contre la garnison) ⇒ la personne est **tuée** (`Spoils::killed`) et l'armée avance ; sinon l'homme d'armes meurt
-  (**un** homme, pas `tu`), la personne survit et reste au défenseur. Même règle pour serfs,
-  marchands et nobles ; la jauge « serfs » du défenseur a disparu.
+  ardeur du rencontré)` ⇒ la personne est **tuée** (`Spoils::killed`) et l'armée avance ; sinon
+  l'homme d'armes meurt (**un** homme, pas `tu`), la personne survit et reste au défenseur. Serfs
+  et marchands se battent **en milice, à 50** (`MILITIA_EFFICIENCY`, comme les paysans qui
+  défendent dans `war.rs`), les nobles à l'efficacité des soldats du royaume ; la jauge « serfs »
+  du défenseur a disparu.
 - **Fin d'une armée** : 0 homme (elle s'arrête à la porte de celui qui l'a tuée : le reste du
   tronçon n'est pas franchi) ou ligne entièrement franchie. **Annexion** = toutes les lignes
   franchies jusqu'au bout ; le reliquat (arrondis, gens non rencontrés) va à l'armée la plus avancée.
 - **Bâtiments** : **un pris pour deux brûlés** (tirage indépendant par bâtiment, `Building::burned`).
 - **Calibrage arpents / homme** : le gain par manche est celui d'origine ; la marche coûte
-  ≈ 0,2 serf/arpent × 2/3 × P(perdre le duel) hommes par arpent, soit ~15 arpents par homme à
-  efficacités égales (P = 0,5) — les habitants d'un royaume mieux entraîné coûtent plus cher.
-  Mesuré (200 tirages, Castille 2 000 serfs, efficacités 150 des deux côtés) : 20 hommes contre
-  20 en garnison → 48 arpents en moyenne (victoire une fois sur deux) ; 20 contre 0 → 297 ;
-  10 contre 0 → 143 ; 100 contre 20 → 1 184 ; 300 contre 20 → 4 150 ; 600 contre 20 → 8 372,
-  jamais annexé. Une armée qui ne conquiert pas le royaume y meurt toujours (règle « fin = 0 homme »).
+  ≈ 0,2 serf/arpent × 2/3 × P(perdre le duel) hommes par arpent. Le terrain par manche n'y change
+  rien (plus de terrain = plus de rencontres) : seuls le taux de ralliement et le duel règlent
+  le rendement. Avec la milice à 50 (P ≈ 0,245 pour un attaquant à 100) : **~30 arpents par
+  homme qui marche**, quels que soient l'effectif, la garnison et l'efficacité du défenseur —
+  ce que la bataille d'origine rendait par homme perdu (10–13) une fois comptés les hommes
+  tombés devant la garnison, qui ne rapportent rien. Mesuré (2 000 tirages, royaume de 10 000
+  arpents et 2 000 serfs, efficacités 100/100, d'origine entre parenthèses) : 40 contre 40 en
+  garnison → 325 (355) ; 40 contre 20 → 636 (230) ; 80 contre 40 → 1 297 (484) ; 160 contre 80
+  → 2 431 (998) ; 320 contre 40 → 8 438 (566). À parité on retrouve l'ancien ; en supériorité la
+  marche rapporte bien plus, parce qu'une armée qui ne conquiert pas le royaume y meurt toujours
+  (règle « fin = 0 homme ») là où l'ancien ramenait ses hommes. Le rendement baisse de lui-même
+  quand le royaume se peuple. Avant la milice (duel à l'efficacité des soldats du défenseur) :
+  15 arpents par homme, 40 contre 40 → 156.
 - **UI** (`ui/campaign.rs::march`) : par attaquant, une **barre** (arpents pris sur sa part) et
   dessous trois lignes mises à jour à chaque frame — biens (+or, +boisseaux), gens (ralliés, tués),
   bâtiments (pris, brûlés). Verdict et Chronique distinguent ralliés (« 74 serfs ralliés » /

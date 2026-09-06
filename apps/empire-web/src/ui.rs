@@ -3351,7 +3351,10 @@ fn council_sheet(t: T, id: Kingdoms, field: Field) -> ElementBuilder {
             "sur chaque étranger qui entre".to_string(),
             "Fixer la douane",
         ),
-        Field::Sales => ("foires, moulins, marchands".to_string(), "Fixer la gabelle"),
+        Field::Sales => (
+            "commerce du royaume, nobles, serfs".to_string(),
+            "Fixer la gabelle",
+        ),
         Field::Income => ("paysans, nobles, domaines".to_string(), "Fixer la taille"),
     };
     let (sentence, slider) = match field {
@@ -3502,7 +3505,7 @@ const INCOME: TaxCopy = TaxCopy {
         "Taille légère : le peuple prospère, le trésor moins.",
         "Taille ordinaire : la cour reste, les naissances fléchissent un peu.",
         "Taille lourde : les nobles quittent la cour, les berceaux se vident.",
-        "Taille écrasante : la fraude ronge la recette, la cour se vide.",
+        "Taille écrasante : les berceaux se vident, la cour aussi, les moulins tournent au ralenti.",
     ],
 };
 
@@ -4252,24 +4255,26 @@ fn invest_intro(kind: InvestmentType, cur: &str) -> String {
     match kind {
         InvestmentType::Marketplaces => format!(
             "Un champ de foire attire de un à six marchands, pris parmi vos serfs. Les foires \
-             rapportent avec le nombre de marchands ; chaque marchand fait 30 {cur} de commerce \
-             taxable par la gabelle, et le champ vaut 99 {cur} de richesse à la taille."
+             rapportent avec le nombre de marchands, et d'autant moins que la gabelle est lourde \
+             — elle prend en retour sa part de leur commerce ; le champ vaut 99 {cur} de richesse \
+             à la taille."
         ),
         InvestmentType::GrainMills => format!(
-            "Le moulin vend sa farine : il rapporte avec la récolte — un bon été, un bon moulin. \
-             Sa mouture est taxable par la gabelle, et il vaut 99 {cur} de richesse à la taille. \
-             Il ne protège pas des rats."
+            "Le moulin vend sa farine : il rapporte avec la récolte — un bon été, un bon moulin —, \
+             moins sous une taille et une gabelle lourdes. Sa mouture entre dans l'assiette de la \
+             gabelle, et il vaut 99 {cur} de richesse à la taille. Il ne protège pas des rats."
         ),
         InvestmentType::Foundries => format!(
-            "La fonderie forge les armes du royaume : son commerce va au trésor, elle fournit les \
-             chantiers navals (+15 chacun) et vaut 425 {cur} de richesse à la taille. Un roi doit \
-             en tenir une. Ses ouvriers ne labourent pas : −500 bx sur chaque récolte."
+            "La fonderie forge les armes du royaume : son commerce va au trésor sans passer par \
+             aucune taxe mais pèse lourd dans l'assiette de la gabelle ; elle fournit les chantiers \
+             navals (+15 chacun) et vaut 425 {cur} de richesse à la taille. Un roi doit en tenir \
+             une. Ses ouvriers ne labourent pas : −500 bx sur chaque récolte."
         ),
         InvestmentType::Shipyards => format!(
             "Le chantier arme des navires pour le commerce du royaume : il rapporte selon ce qu'il \
              y a à embarquer — 4 par marchand, 9 par champ de foire, 15 par fonderie — et selon le \
-             temps qu'il fait. Sa recette passe par la gabelle ; il vaut 965 {cur} de richesse à \
-             la taille."
+             temps qu'il fait. Sa recette n'est pas taxée mais pèse le plus lourd dans l'assiette \
+             de la gabelle ; il vaut 965 {cur} de richesse à la taille."
         ),
         InvestmentType::Soldiers => format!(
             "L'ost défend vos terres et mène les expéditions — une par an, plus une tous les \
@@ -4302,12 +4307,14 @@ fn invest_chips(kind: InvestmentType) -> &'static [&'static str] {
         ],
         InvestmentType::Foundries => &[
             "titre de roi",
+            "gabelle ↑",
             "taille ↑",
             "récolte −500 bx/an",
             "brûle en cas d'invasion",
         ],
         InvestmentType::Shipyards => &[
             "profit ↑ avec marchands et foires",
+            "gabelle ↑",
             "taille ↑",
             "dépend du temps",
             "brûle en cas d'invasion",
@@ -5361,7 +5368,7 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                     d.soldiers_efficiency,
                     fmt(d.surface)
                 ),
-                "L'armée force la garnison, puis marche le long des terres : les gens rencontrés se rallient une fois sur trois et se battent sinon. Prendre toutes les terres annexe le royaume.",
+                "L'armée force la garnison, puis marche le long des terres : les gens rencontrés se rallient une fois sur trois et se battent sinon — serfs et marchands en milice, les nobles avec l'ardeur du royaume. Prendre toutes les terres annexe le royaume.",
                 vec![
                     format!("garnison {}", fmt(d.soldiers)),
                     format!("annexion à {}", fmt(d.surface)),

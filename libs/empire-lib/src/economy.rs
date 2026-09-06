@@ -112,24 +112,20 @@ pub fn apply_economy(kingdom: &mut Kingdom, eco: &YearEconomy) {
     kingdom.treasury += eco.net();
 }
 
-// The sales tax ("gabelle") slows the trade: the fairs, the mills and the
-// shipyards keep `activity(y)` of their gross, and the tax itself is levied on
-// that slowed trade — so past a point a higher rate yields less.
-const SALES_DRAG: f32 = 0.5;
-const SALES_DRAG_EXP: f32 = 1.5;
-/// What the trade keeps under the sales tax, 1 at no tax, ½ at the cap.
-fn activity(y: f32) -> f32 {
-    1.0 - SALES_DRAG * y.powf(SALES_DRAG_EXP)
-}
+// The revenue follows Empire.bas lines 96–98, with two divisors softened:
+// the original fairs lost five sixths of their trade at the first point of
+// gabelle, and an untaxed mill earned fifteen thousand écus a year — a kingdom
+// at 0/0/0 out-earned any honest treasury. The rates themselves weigh on the
+// people (births, the court, the merchants) in `demography`, not here.
 
-/// The taille shrinks the wealth it is levied on: at the cap the base is 55 %
-/// of what it would be untaxed.
-const INCOME_DRAG: f32 = 0.45;
 /// Customs: each immigrant pays `rate × 0.4` écus.
 const CUSTOMS_PER_HEAD: f32 = 0.4;
-/// Every merchant brings 30 écus of taxable trade a year, on top of the
-/// fairs', mills' and shipyards' gross.
-const MERCHANT_TRADE: f32 = 30.0;
+/// Original: the fairs' trade is divided by `sales + 1`; `+ 2` halves the
+/// untaxed windfall and keeps the first points of gabelle from gutting them.
+const FAIR_TAX_OFFSET: f32 = 2.0;
+/// Original: the mills' flour is divided by `income × 20 + sales × 40 + 10`;
+/// `+ 200` keeps the untaxed mill within reach of the taxed one.
+const MILL_TAX_OFFSET: f32 = 200.0;
 
 /// Both dice of the fairs: 2 × random(1, 35) → 2..68.
 const FAIR_DICE: (i32, i32) = (2, 68);
@@ -138,34 +134,31 @@ const MILL_DIE: (i32, i32) = (1, 249);
 /// The foundries' die: random(1, 150) → 1..149.
 const FOUNDRY_DIE: (i32, i32) = (1, 149);
 
-/// Original: F1 = (marketplaces × ((merchants + 2d35) / (sales + 1) × 12 + 5))^0.9 —
-/// the tax divisor is gone, the sales tax now acts through `activity`.
-fn marketplaces_gross(kingdom: &Kingdom, dice: i32) -> f32 {
-    let base = kingdom.marketplaces as f32 * ((kingdom.merchants + dice) as f32 * 2.5 + 5.0);
-    base.powf(0.9)
+/// Original: F1 = (marketplaces × ((merchants + 2d35) / (sales + 1) × 12 + 5))^0.9
+fn marketplaces_profits(kingdom: &Kingdom, taxes: Taxes, dice: i32) -> f32 {
+    let trade = (kingdom.merchants + dice) as f32 / (taxes.sales as f32 + FAIR_TAX_OFFSET);
+    (kingdom.marketplaces as f32 * (trade * 12.0 + 5.0)).powf(0.9)
 }
 
-/// Original: F2 = (mills × (5.8 × (harvest + random(250)) / (income × 20 + sales × 40 + 10) + 150))^0.9
-fn grain_mills_gross(kingdom: &Kingdom, die: i32) -> f32 {
-    let base = kingdom.grain_mills as f32 * ((kingdom.grain_harvest + die) as f32 / 60.0 + 150.0);
-    base.powf(0.9)
+/// Original: F2 = (mills × (5.8 × (harvest + d250) / (income × 20 + sales × 40 + 10) + 150))^0.9
+fn grain_mills_profits(kingdom: &Kingdom, taxes: Taxes, die: i32) -> f32 {
+    let divisor = taxes.income as f32 * 20.0 + taxes.sales as f32 * 40.0 + MILL_TAX_OFFSET;
+    let flour = 5.8 * (kingdom.grain_harvest + die) as f32 / divisor;
+    (kingdom.grain_mills as f32 * (flour + 150.0)).powf(0.9)
 }
 
-/// Original: F3 = (foundries + (soldiers + random(150) + 400))^0.9 — arms
-/// are the crown's own trade, outside the gabelle.
-fn foundries_profit(kingdom: &Kingdom, die: i32) -> i32 {
-    let base = (kingdom.foundries + kingdom.soldiers + die + 400) as f32;
-    base.powf(0.9) as i32
+/// Original: F3 = (foundries + (soldiers + d150 + 400))^0.9 — the crown's
+/// own arms trade, taxed by nothing.
+fn foundries_profits(kingdom: &Kingdom, die: i32) -> f32 {
+    ((kingdom.foundries + kingdom.soldiers + die + 400) as f32).powf(0.9)
 }
 
 /// Original: F4 = (shipyards × (merchants × 4 + marketplaces × 9 + foundries × 15) × weather)^0.9
-fn shipyards_gross(kingdom: &Kingdom, weather: Weather) -> f32 {
-    let base = kingdom.shipyards as f32
-        * (kingdom.merchants as f32 * 4.0
-            + kingdom.marketplaces as f32 * 9.0
-            + kingdom.foundries as f32 * 15.0)
-        * weather.value() as f32;
-    base.powf(0.9)
+fn shipyards_profits(kingdom: &Kingdom, weather: Weather) -> f32 {
+    let cargo = kingdom.merchants as f32 * 4.0
+        + kingdom.marketplaces as f32 * 9.0
+        + kingdom.foundries as f32 * 15.0;
+    (kingdom.shipyards as f32 * cargo * weather.value() as f32).powf(0.9)
 }
 
 fn soldiers_maintenance(kingdom: &Kingdom) -> i32 {
@@ -178,16 +171,23 @@ fn customs_profits(immigrants: i32, taxes: Taxes) -> i32 {
     (immigrants as f32 * CUSTOMS_PER_HEAD * taxes.customs as f32).round() as i32
 }
 
-fn commercial_taxes_profits(kingdom: &Kingdom, gross: f32, taxes: Taxes) -> i32 {
-    let (_, y, _) = taxes.shares();
-    let trade = MERCHANT_TRADE * kingdom.merchants as f32 + gross;
-    (taxes.sales as f32 / 100.0 * trade * activity(y)).round() as i32
+/// Original: FS = rate / 100 × ((merchants × 1.8 + F1 × 33 + F2 × 17 + F3 × 50 +
+/// F4 × 70)^0.85 + nobles × 5 + peasants) — levied on the year's trade, the
+/// foundries and the shipyards weighing most, plus a head tax.
+fn commercial_taxes_profits(kingdom: &Kingdom, taxes: Taxes, trade: [f32; 4]) -> i32 {
+    let [fairs, mills, foundries, ships] = trade;
+    let goods = kingdom.merchants as f32 * 1.8
+        + fairs * 33.0
+        + mills * 17.0
+        + foundries * 50.0
+        + ships * 70.0;
+    let base = goods.powf(0.85) + kingdom.nobles as f32 * 5.0 + kingdom.peasants as f32;
+    (taxes.sales as f32 / 100.0 * base) as i32
 }
 
 /// Original: FI = (rate / 100 × (peasants × 1.3 + nobles × 145 + merchants × 39
 /// + marketplaces × 99 + mills × 99 + foundries × 425 + shipyards × 965))^0.97
 fn income_taxes_profits(kingdom: &Kingdom, taxes: Taxes) -> i32 {
-    let (_, _, z) = taxes.shares();
     let wealth = kingdom.peasants as f32 * 1.3
         + kingdom.nobles as f32 * 145.0
         + kingdom.merchants as f32 * 39.0
@@ -195,7 +195,7 @@ fn income_taxes_profits(kingdom: &Kingdom, taxes: Taxes) -> i32 {
         + kingdom.grain_mills as f32 * 99.0
         + kingdom.foundries as f32 * 425.0
         + kingdom.shipyards as f32 * 965.0;
-    (taxes.income as f32 / 100.0 * wealth * (1.0 - INCOME_DRAG * z * z * z)).powf(0.97) as i32
+    (taxes.income as f32 / 100.0 * wealth).powf(0.97) as i32
 }
 
 /// The year's economy for a given set of dice.
@@ -208,19 +208,20 @@ fn economy_with(
     mill_die: i32,
     foundry_die: i32,
 ) -> YearEconomy {
-    let (_, y, _) = taxes.shares();
-    let fairs = marketplaces_gross(kingdom, fair_dice);
-    let mills = grain_mills_gross(kingdom, mill_die);
-    let ships = shipyards_gross(kingdom, weather);
-    let net = |gross: f32| (gross * activity(y)) as i32;
+    let trade = [
+        marketplaces_profits(kingdom, taxes, fair_dice),
+        grain_mills_profits(kingdom, taxes, mill_die),
+        foundries_profits(kingdom, foundry_die),
+        shipyards_profits(kingdom, weather),
+    ];
     YearEconomy {
-        marketplaces_profits: net(fairs),
-        grain_mills_profits: net(mills),
-        foundries_profits: foundries_profit(kingdom, foundry_die),
-        shipyards_profits: net(ships),
+        marketplaces_profits: trade[0] as i32,
+        grain_mills_profits: trade[1] as i32,
+        foundries_profits: trade[2] as i32,
+        shipyards_profits: trade[3] as i32,
         soldiers_maintenance: soldiers_maintenance(kingdom),
         immigration_taxes_profits: customs_profits(immigrants, taxes),
-        commercial_taxes_profits: commercial_taxes_profits(kingdom, fairs + mills + ships, taxes),
+        commercial_taxes_profits: commercial_taxes_profits(kingdom, taxes, trade),
         income_taxes_profits: income_taxes_profits(kingdom, taxes),
     }
 }
@@ -374,18 +375,22 @@ mod tests {
         let mild = at(20, 8, 20);
         assert_eq!(mild.immigration_taxes, Outlook::sure(800));
         assert_eq!(at(0, 8, 20).immigration_taxes, Outlook::sure(0));
-        // The gabelle slows the trade: the fairs earn less at the cap…
+        // The gabelle slows the fairs and the mills…
         assert!(at(20, 20, 20).marketplaces.expected < mild.marketplaces.expected);
-        // …and the tax on a slowed trade still grows with the rate here.
+        assert!(at(20, 20, 20).grain_mills.expected < mild.grain_mills.expected);
+        // …but neither the foundries nor the shipyards, which it taxes instead.
+        assert_eq!(at(20, 20, 20).shipyards, mild.shipyards);
+        assert_eq!(at(20, 20, 20).foundries, mild.foundries);
         assert!(at(20, 20, 20).commercial_taxes.expected > mild.commercial_taxes.expected);
         assert_eq!(at(20, 0, 20).commercial_taxes, Outlook::sure(0));
-        // The taille keeps growing to the cap, but less than linearly.
+        // The taille keeps growing to the cap, but less than linearly, and
+        // weighs on the mills too.
         let full = at(20, 8, 35).income_taxes as f32;
         let mild_income = mild.income_taxes as f32;
         assert!(full > mild_income && full < mild_income * 35.0 / 20.0);
-        // The shipyards trade under the gabelle too; the foundries don't.
-        assert!(at(20, 20, 20).shipyards < mild.shipyards);
-        assert_eq!(at(20, 20, 20).foundries, mild.foundries);
+        assert!(at(20, 8, 35).grain_mills.expected < mild.grain_mills.expected);
+        // No tax at all is no windfall: the honest rates out-earn it.
+        assert!(at(0, 0, 0).net().expected < mild.net().expected);
     }
 
     #[test]
