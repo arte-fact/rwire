@@ -371,7 +371,7 @@ pub enum News {
     Elsewhere(Elsewhere),
     /// How this seat's realm fell; always the last line.
     Fallen(Fate),
-    /// Six realms, one emperor: this seat.
+    /// This seat took the imperial crown: the game is won.
     Crowned,
 }
 
@@ -975,6 +975,20 @@ impl Room {
             return;
         }
         seat.title_year = year;
+        if now == PlayerTitle::Emperor {
+            // The imperial crown ends the game: the original's only ending.
+            seat.news.push(News::Crowned);
+            self.report_others(&[id], Elsewhere::Crowned(id));
+            let k = self.game.kingdom(id);
+            let line = format!(
+                "{} de {} est couronné {}.",
+                k.player_name,
+                k.name(),
+                k.title_name()
+            );
+            self.journal([id], line);
+            return;
+        }
         seat.news.push(News::Rank { before, now });
         self.report_others(&[id], Elsewhere::Rank { id, before, now });
         let k = self.game.kingdom(id);
@@ -996,42 +1010,27 @@ impl Room {
         self.journal([id], line);
     }
 
+    /// The game ends on the imperial crown — judged with the titles at
+    /// year's end, human or computer, as in the original — or when no human
+    /// is left to play it. A lone survivor plays on until the crown.
     fn check_over(&mut self) -> bool {
         let humans_alive = self.humans().any(|id| !self.game.kingdom(id).is_dead);
-        if humans_alive && self.game.alive_kingdoms().len() > 1 {
+        if humans_alive && self.emperor().is_none() {
             return false;
         }
         self.stage = Stage::Over;
         self.battles.clear();
         self.history.push(self.surfaces());
-        if let [id] = self.game.alive_kingdoms()[..] {
-            self.crown(id);
-        }
         self.journal([], "La partie est terminée.");
         true
     }
 
-    /// Six realms, one emperor: the last one standing takes the crown of the
-    /// whole map, whatever its ledgers say.
-    fn crown(&mut self, id: Kingdoms) {
-        let year = self.game.year;
-        let k = self.game.kingdom_mut(id);
-        k.crowned = true;
-        let line = format!(
-            "Six royaumes, un seul empereur : {} de {} est couronné {}.",
-            k.player_name,
-            k.name(),
-            k.title_name()
-        );
-        let seat = self.seat_mut(id);
-        seat.title = Some(PlayerTitle::Emperor);
-        seat.title_year = year;
-        seat.news.push(News::Crowned);
-        // The others are all fallen: the crown closes their epitaphs.
-        for other in KINGDOMS.into_iter().filter(|&o| o != id) {
-            self.report(other, News::Elsewhere(Elsewhere::Crowned(id)));
-        }
-        self.journal([id], line);
+    /// The realm crowned at the last judgement of the titles, if any.
+    pub fn emperor(&self) -> Option<Kingdoms> {
+        self.game
+            .alive_kingdoms()
+            .into_iter()
+            .find(|&id| self.seat(id).title == Some(PlayerTitle::Emperor))
     }
 
     // -- ticker: battle replay -----------------------------------------------
@@ -2189,8 +2188,53 @@ mod tests {
         );
     }
 
+    fn make_emperor(k: &mut Kingdom) {
+        k.peasants = 3200;
+        k.surface = 3200 * 6;
+        k.nobles = 41;
+        k.grain_mills = 6;
+        k.marketplaces = 14;
+        k.foundries = 1;
+        k.palaces = 10;
+    }
+
     #[test]
-    fn the_last_realm_standing_is_crowned_emperor() {
+    fn the_imperial_crown_wins_the_game() {
+        let mut room = playing(&[Kingdoms::France]);
+        let id = Kingdoms::France;
+        make_emperor(room.game.kingdom_mut(id));
+        room.judge_title(id);
+        assert_eq!(room.seat(id).title, Some(PlayerTitle::Emperor));
+        assert_eq!(room.seat(id).title_year, room.game.year);
+        assert_eq!(room.seat(id).news.last(), Some(&News::Crowned));
+        assert!(room
+            .seat(Kingdoms::Spain)
+            .news
+            .contains(&News::Elsewhere(Elsewhere::Crowned(id))));
+        assert_eq!(room.emperor(), Some(id));
+        assert!(room.check_over());
+        assert_eq!(room.stage, Stage::Over);
+        let texts: Vec<&str> = room.log.iter().map(|e| e.text.as_str()).collect();
+        assert!(texts.contains(&"Hugues de France est couronné Empereur."));
+        assert_eq!(texts.last(), Some(&"La partie est terminée."));
+    }
+
+    #[test]
+    fn a_computer_may_take_the_crown_too() {
+        let mut room = playing(&[Kingdoms::France]);
+        let id = Kingdoms::Spain;
+        make_emperor(room.game.kingdom_mut(id));
+        room.judge_title(id);
+        assert_eq!(room.emperor(), Some(id));
+        assert!(room.check_over());
+        assert!(room
+            .seat(Kingdoms::France)
+            .news
+            .contains(&News::Elsewhere(Elsewhere::Crowned(id))));
+    }
+
+    #[test]
+    fn the_last_realm_standing_plays_on_until_the_crown() {
         let mut room = playing(&[Kingdoms::France]);
         let id = Kingdoms::France;
         for other in KINGDOMS.into_iter().filter(|&o| o != id) {
@@ -2198,17 +2242,20 @@ mod tests {
                 .kingdom_mut(other)
                 .fall(Fate::Annexed(Kingdoms::France));
         }
-        assert!(room.check_over());
-        assert_eq!(room.stage, Stage::Over);
-        let k = room.game.kingdom(id);
-        assert!(k.crowned);
-        assert_eq!(k.title(), PlayerTitle::Emperor);
-        assert_eq!(room.seat(id).title, Some(PlayerTitle::Emperor));
-        assert_eq!(room.seat(id).title_year, room.game.year);
-        let texts: Vec<&str> = room.log.iter().map(|e| e.text.as_str()).collect();
-        assert!(texts
-            .contains(&"Six royaumes, un seul empereur : Hugues de France est couronné Empereur."));
-        assert_eq!(texts.last(), Some(&"La partie est terminée."));
+        assert!(!room.check_over());
+        assert_eq!(room.stage, Stage::Playing);
+        assert_eq!(room.seat(id).title, Some(PlayerTitle::Duke));
+        assert_eq!(room.emperor(), None);
+    }
+
+    #[test]
+    fn the_crown_is_judged_at_years_end_not_on_the_field() {
+        let mut room = playing(&[Kingdoms::France]);
+        // The ledgers already earn the crown, but the titles have not been
+        // judged since: the campaign's check leaves the game running.
+        make_emperor(room.game.kingdom_mut(Kingdoms::France));
+        assert!(!room.check_over());
+        assert_eq!(room.stage, Stage::Playing);
     }
 
     #[test]
@@ -2216,7 +2263,7 @@ mod tests {
         let mut room = playing(&[Kingdoms::France]);
         room.game.kingdom_mut(Kingdoms::France).is_dead = true;
         assert!(room.check_over());
-        assert!(!KINGDOMS.into_iter().any(|id| room.game.kingdom(id).crowned));
+        assert_eq!(room.emperor(), None);
     }
 
     #[test]

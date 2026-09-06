@@ -274,10 +274,6 @@ pub struct Kingdom {
     /// Why `is_dead`, once it is.
     #[serde(default)]
     pub fate: Option<Fate>,
-    /// Crowned for uniting the map — the last realm standing — whatever the
-    /// judged rank says.
-    #[serde(default)]
-    pub crowned: bool,
     pub surface: i32,
     pub peasants: i32,
     pub nobles: i32,
@@ -331,7 +327,6 @@ impl Kingdom {
             is_player: false,
             is_dead: false,
             fate: None,
-            crowned: false,
             surface: 10000,
             peasants: 2000,
             nobles: 1,
@@ -438,12 +433,9 @@ impl Kingdom {
     }
 
     /// Current title: the highest rank whose every requirement is met. It is
-    /// judged afresh each time, so a title can be lost — unless the crown of
-    /// the whole map was won.
+    /// judged afresh each time, so a title can be lost — until the imperial
+    /// crown, which ends the game.
     pub fn title(&self) -> PlayerTitle {
-        if self.crowned {
-            return PlayerTitle::Emperor;
-        }
         PlayerTitle::ALL
             .into_iter()
             .rev()
@@ -568,15 +560,6 @@ mod tests {
         assert_eq!(PlayerTitle::Emperor.next(), None);
         assert!(PlayerTitle::Duke < PlayerTitle::Emperor);
         assert!(PlayerTitle::Duke.requirements().is_none());
-    }
-
-    #[test]
-    fn the_crown_of_the_map_outranks_the_judged_title() {
-        let mut k = Kingdom::new(Kingdoms::France);
-        assert_eq!(k.title(), PlayerTitle::Duke);
-        k.crowned = true;
-        assert_eq!(k.title(), PlayerTitle::Emperor);
-        assert_eq!(k.title_name(), "Empereur");
     }
 
     #[test]

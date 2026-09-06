@@ -237,7 +237,8 @@ fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
                 .build()
                 .st([St::TrackingWidest]),
             Text::body(
-                "Six royaumes, un seul empereur. Les sièges vides sont tenus par l'ordinateur.",
+                "Six royaumes, un seul empereur : le premier à ceindre la couronne impériale \
+                 l'emporte. Les sièges vides sont tenus par l'ordinateur.",
             )
             .muted()
             .build(),
@@ -1051,10 +1052,17 @@ const CURVE_COLORS: [&str; 6] = [
 fn over(room: &Room) -> ElementBuilder {
     let mut standing: Vec<&Kingdom> = room.game.kingdoms.iter().filter(|k| !k.is_dead).collect();
     standing.sort_by_key(|k| std::cmp::Reverse((k.surface, k.total_population())));
-    let winner = standing
-        .first()
-        .map(|k| format!("{} règne sur {} arpents.", k.full_title(), fmt(k.surface)))
-        .unwrap_or_else(|| "Tous les royaumes sont tombés.".to_string());
+    let winner = room
+        .emperor()
+        .map(|id| {
+            let k = room.game.kingdom(id);
+            format!(
+                "{} l'emporte : la couronne impériale est sienne, sur {} arpents.",
+                k.full_title(),
+                fmt(k.surface)
+            )
+        })
+        .unwrap_or_else(|| "Nul n'a ceint la couronne impériale.".to_string());
     let most = standing.first().map_or(1, |k| k.surface.max(1));
     let peak = |id: Kingdoms| {
         room.history
@@ -1980,13 +1988,13 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
         News::Crowned => news_line(
             Icon::ImperialCrown,
             Tone::Gold,
-            "Six royaumes, un seul empereur",
             &format!(
                 "{} de {} est couronné {}",
                 k.player_name,
                 k.name(),
                 k.id.title_name(PlayerTitle::Emperor)
             ),
+            "Six royaumes, un seul empereur : la partie est gagnée",
         ),
     }
 }
