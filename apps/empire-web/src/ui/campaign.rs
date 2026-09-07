@@ -3,11 +3,16 @@
 //! gauge against the garrison, then each army's march along its share of the
 //! realm with what it takes as it goes — then its verdict, then the schema
 //! again; once every front is told, the schema stays and the year may turn.
+//! Every seat reads on its own clock: a front moves by itself, everything
+//! else waits for the reader's tap, and a tap on a moving front ends it. The
+//! fronts' outcomes reach the map only once everyone has read; a viewer
+//! with no seat is shown the campaign fully told.
 
+use empire_lib::campaign::Fought;
 use empire_lib::front::{Army, People, Round, Spoils, Stand};
 
 use super::*;
-use crate::room::{buildings_fr, goods_fr, people_fr, Side, Staging};
+use crate::room::{buildings_fr, goods_fr, people_fr, Replay, Side, Staging};
 
 /// A side of the war: a kingdom, or the barbarian lands.
 type Party = Option<Kingdoms>;
@@ -45,22 +50,32 @@ fn pct(n: i64, of: i64) -> String {
 
 pub(super) fn campaign_page(t: T, me: Option<Kingdoms>) -> View {
     let room = t.room;
-    let body = match room.staging {
-        Staging::Schema(_) | Staging::Done => schema(room, me),
-        Staging::Fight => battle(room, me),
-        Staging::Verdict(_) => verdict(room, me),
+    let replay = room.replay(me);
+    let body = match replay.staging {
+        Staging::Schema | Staging::Done => schema(room, replay, me),
+        Staging::Fight(_) => battle(room, replay, me),
+        Staging::Verdict => verdict(room, replay, me),
     };
-    let action = match me {
-        Some(id) if room.may_continue(id) => primary("Continuer", t.act(room::continue_campaign())),
-        _ => status(room, me),
+    // A seated player taps their replay on; once it is told, only a seigneur
+    // who has not yet continued.
+    let taps = match me {
+        Some(id) => !replay.done() || room.may_continue(id),
+        None => false,
     };
-    View::new(body, Some(action))
+    let line = status(room, replay, me, taps);
+    if taps {
+        View::tap(body, line, t.act(room::tap_campaign()))
+    } else {
+        View::new(body, Some(line))
+    }
 }
 
-/// The blinking line under the screen: what is happening, or who is still reading.
-fn status(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
+/// The line under the screen: what is happening and what a tap does, or who
+/// is still reading. It blinks while a front moves.
+fn status(room: &Room, replay: Replay, me: Option<Kingdoms>, taps: bool) -> ElementBuilder {
     let n = room.battles.len();
-    let text = match room.staging {
+    let text = match replay.staging {
+        Staging::Done if taps => "Touchez l'écran pour finir l'année".to_string(),
         Staging::Done => {
             let reading: Vec<&str> = room.still_reading().map(|id| id.name()).collect();
             format!(
@@ -68,52 +83,49 @@ fn status(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
                 reading.join(", ")
             )
         }
-        Staging::Verdict(_) => format!("Front {}/{n} tranché", room.current + 1),
-        Staging::Fight => {
-            let b = &room.battles[room.current];
-            let armies = &b.fought.result.armies;
+        Staging::Verdict => format!(
+            "Front {}/{n} tranché · touchez pour continuer",
+            replay.current + 1
+        ),
+        Staging::Fight(_) => {
+            let b = &room.battles[replay.current];
+            let armies = &b.result.armies;
             let names: Vec<String> = armies
                 .iter()
                 .map(|a| format!("la {}", a.attacker.name()))
                 .collect();
-            let (verb, plural) = if b.frame().garrison == 0 {
+            let (verb, plural) = if replay.frame(b).garrison == 0 {
                 ("pille", "pillent")
             } else {
                 ("marche sur", "marchent sur")
             };
-            let land = if me.is_some() && me == b.fought.target {
+            let land = if me.is_some() && me == b.target {
                 "vos terres".to_string()
             } else {
-                party_the(b.fought.target)
+                party_the(b.target)
             };
             format!(
-                "{} {} {land}",
+                "{} {} {land} · touchez pour abréger",
                 cap(&names.join(" et ")),
                 if names.len() > 1 { plural } else { verb }
             )
         }
-        Staging::Schema(_) => "Chaque bataille se joue sous vos yeux.".to_string(),
+        Staging::Schema => format!(
+            "Front {}/{n} · touchez pour livrer bataille",
+            replay.current + 1
+        ),
     };
-    el(El::Div)
-        .st([
-            St::DisplayFlex,
-            St::ItemsCenter,
-            St::JustifyCenter,
-            St::GapSm,
-            St::TextSm,
-            St::TextMuted,
-            St::PySm,
+    let dot = matches!(replay.staging, Staging::Fight(_)).then(|| {
+        el(El::Span).st([
+            St::W05rem,
+            St::H05rem,
+            St::RoundedFull,
+            St::BgError,
+            St::Blink,
+            St::FlexShrink0,
         ])
-        .append([
-            el(El::Span).st([
-                St::W05rem,
-                St::H05rem,
-                St::RoundedFull,
-                St::BgError,
-                St::Blink,
-            ]),
-            el(El::Span).text(&text),
-        ])
+    });
+    hint_line(dot, &text)
 }
 
 fn cap(s: &str) -> String {
@@ -124,32 +136,27 @@ fn cap(s: &str) -> String {
     }
 }
 
-/// Front `i` has been told (its outcome is on the map).
-fn settled(room: &Room, i: usize) -> bool {
-    i < room.current || (i == room.current && matches!(room.staging, Staging::Verdict(_)))
-}
-
 // ---------------------------------------------------------------------------
 // A · the order of battle
 // ---------------------------------------------------------------------------
 
-fn schema(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
+fn schema(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
     let mut attackers: Vec<Kingdoms> = Vec::new();
-    for a in room.battles.iter().flat_map(|b| b.fought.armies()) {
+    for a in room.battles.iter().flat_map(|b| b.armies()) {
         if !attackers.contains(&a.attacker) {
             attackers.push(a.attacker);
         }
     }
     attackers.sort_by_key(|&a| Some(a) != me);
     let n = room.battles.len();
-    let told = room.current.min(n);
+    let told = replay.current.min(n);
     let plural = |n: usize, s: &str| format!("{n} {s}{}", if n > 1 { "s" } else { "" });
-    let count = if room.campaign_over() {
+    let count = if replay.done() {
         "tous tranchés".to_string()
     } else {
         format!("{told}/{n} tranché{}", if told > 1 { "s" } else { "" })
     };
-    let expeditions: usize = room.battles.iter().map(|b| b.fought.armies().len()).sum();
+    let expeditions: usize = room.battles.iter().map(|b| b.armies().len()).sum();
     let title = el(El::Div)
         .st([
             St::DisplayFlex,
@@ -171,7 +178,7 @@ fn schema(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
                     plural(n, "front"),
                 )),
         ]);
-    let state = if room.campaign_over() {
+    let state = if replay.done() {
         "l'an s'achève"
     } else {
         "les armées se mettent en marche"
@@ -187,13 +194,13 @@ fn schema(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
                         eyebrow("Ordre de bataille"),
                         el(El::Span).st([St::TextXs, St::TextMuted]).text(state),
                     ]),
-                order_of_battle(room, me, &attackers),
+                order_of_battle(room, replay, me, &attackers),
             ]),
             section(
                 "Fronts",
                 el(El::Div)
                     .st([St::DisplayFlex, St::FlexCol, St::GapXs])
-                    .append((0..n).map(|i| front_line(room, i))),
+                    .append((0..n).map(|i| front_line(room, replay, i))),
             ),
         ])
 }
@@ -201,10 +208,15 @@ fn schema(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
 /// The hero: attackers on the left, fronts on the right, each expedition a
 /// line between them — marching for the front about to be fought, faint
 /// once told.
-fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) -> ElementBuilder {
+fn order_of_battle(
+    room: &Room,
+    replay: Replay,
+    me: Option<Kingdoms>,
+    attackers: &[Kingdoms],
+) -> ElementBuilder {
     let n = room.battles.len();
     let rows = attackers.len().max(n);
-    let next = (!room.campaign_over()).then_some(room.current);
+    let next = (!replay.done()).then_some(replay.current);
     let name_row = |p: Party, i: usize, right: bool| {
         el(El::Div)
             .st([
@@ -269,11 +281,11 @@ fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) ->
             .battles
             .iter()
             .enumerate()
-            .flat_map(|(i, b)| b.fought.armies().iter().map(move |a| (i, a)))
+            .flat_map(|(i, b)| b.armies().iter().map(move |a| (i, a)))
             .filter(|(_, army)| army.attacker == a)
             .collect();
         let sent: i32 = mine.iter().map(|(_, a)| a.sent).sum();
-        let all_told = mine.iter().all(|(i, _)| settled(room, *i));
+        let all_told = mine.iter().all(|(i, _)| replay.settled(*i));
         let won: i32 = mine
             .iter()
             .filter(|(_, a)| a.victory)
@@ -300,9 +312,9 @@ fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) ->
         row
     });
     let right = room.battles.iter().enumerate().map(|(i, b)| {
-        let r = &b.fought.result;
-        let target = b.fought.target;
-        let annexed = settled(room, i).then(|| b.fought.annexed_by()).flatten();
+        let r = &b.result;
+        let target = b.target;
+        let annexed = replay.settled(i).then(|| b.annexed_by()).flatten();
         let mut lines = vec![big_name(
             target,
             true,
@@ -345,7 +357,7 @@ fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) ->
     let mut paths = Vec::new();
     let mut slot = 0;
     for (i, b) in room.battles.iter().enumerate() {
-        for a in b.fought.armies() {
+        for a in b.armies() {
             let from = attackers.iter().position(|&k| k == a.attacker).unwrap_or(0);
             let d = format!(
                 "M35.5,{y1:.1} C50,{y1:.1} 50,{y2:.1} 64.5,{y2:.1}",
@@ -371,7 +383,7 @@ fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) ->
             slot += 1;
             if next == Some(i) {
                 paths.push(line(St::PathMarch));
-            } else if settled(room, i) {
+            } else if replay.settled(i) {
                 paths.push(line(if a.victory {
                     St::Opacity75
                 } else {
@@ -411,12 +423,12 @@ fn order_of_battle(room: &Room, me: Option<Kingdoms>, attackers: &[Kingdoms]) ->
 }
 
 /// One line of the fronts list: who marches on whom, and how it went.
-fn front_line(room: &Room, i: usize) -> ElementBuilder {
+fn front_line(room: &Room, replay: Replay, i: usize) -> ElementBuilder {
     let b = &room.battles[i];
-    let r = &b.fought.result;
+    let r = &b.result;
     let names: Vec<&str> = r.armies.iter().map(|a| a.attacker.name()).collect();
-    let (text, tone) = if settled(room, i) {
-        match b.fought.annexed_by() {
+    let (text, tone) = if replay.settled(i) {
+        match b.annexed_by() {
             Some(by) => (format!("annexion par la {}", by.name()), St::TextWarning),
             None if r.garrison_fell() => (
                 format!("victoire · +{} arpents", fmt(r.spoils().arpents)),
@@ -431,7 +443,7 @@ fn front_line(room: &Room, i: usize) -> ElementBuilder {
                 St::TextError,
             ),
         }
-    } else if !room.campaign_over() && i == room.current {
+    } else if !replay.done() && i == replay.current {
         ("à l'instant".to_string(), St::TextDefault)
     } else {
         ("à venir".to_string(), St::TextMuted)
@@ -447,11 +459,7 @@ fn front_line(room: &Room, i: usize) -> ElementBuilder {
         .append([
             el(El::Span).st([St::TextMuted, St::Truncate]).append([
                 mono(&format!("{} ", i + 1)),
-                txt(&format!(
-                    "{} → {}",
-                    names.join(", "),
-                    party_name(b.fought.target)
-                )),
+                txt(&format!("{} → {}", names.join(", "), party_name(b.target))),
             ]),
             el(El::Span)
                 .st([St::FontMono, St::TabularNums, St::WhitespaceNowrap, tone])
@@ -482,14 +490,9 @@ fn you_tag() -> ElementBuilder {
 // ---------------------------------------------------------------------------
 
 /// "FRONT 1/3 · Bretagne → Castille".
-fn front_header(room: &Room) -> ElementBuilder {
-    let b = &room.battles[room.current];
-    let names: Vec<&str> = b
-        .fought
-        .armies()
-        .iter()
-        .map(|a| a.attacker.name())
-        .collect();
+fn front_header(room: &Room, replay: Replay) -> ElementBuilder {
+    let b = &room.battles[replay.current];
+    let names: Vec<&str> = b.armies().iter().map(|a| a.attacker.name()).collect();
     el(El::Div)
         .st([
             St::DisplayFlex,
@@ -509,13 +512,13 @@ fn front_header(room: &Room) -> ElementBuilder {
                 ])
                 .text(&format!(
                     "Front {}/{}",
-                    room.current + 1,
+                    replay.current + 1,
                     room.battles.len()
                 )),
             el(El::Span).st([St::Truncate]).text(&format!(
                 "{} → {}",
                 names.join(", "),
-                party_name(b.fought.target)
+                party_name(b.target)
             )),
         ])
 }
@@ -618,11 +621,11 @@ impl Gauge<'_> {
     }
 }
 
-fn battle(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
-    let b = &room.battles[room.current];
-    let r = &b.fought.result;
-    let round = b.frame();
-    let target = b.fought.target;
+fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
+    let b = &room.battles[replay.current];
+    let r = &b.result;
+    let round = replay.frame(b);
+    let target = b.target;
     let attackers = r.armies.iter().zip(&round.armies).map(|(a, s)| {
         Gauge {
             party: Some(a.attacker),
@@ -655,7 +658,7 @@ fn battle(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
             .append(g)
     };
     let mut body = vec![
-        front_header(room),
+        front_header(room, replay),
         el(El::Div)
             .st([
                 St::DisplayGrid,
@@ -703,9 +706,9 @@ fn battle(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
 
 /// The realm under attack: each army's march along its share of it, with
 /// what it takes as it goes.
-fn march(room: &Room, b: &Battle, round: &Round) -> ElementBuilder {
-    let r = &b.fought.result;
-    let target = b.fought.target;
+fn march(room: &Room, b: &Fought, round: &Round) -> ElementBuilder {
+    let r = &b.result;
+    let target = b.target;
     let taken: i32 = round.armies.iter().map(|s| s.advance).sum();
     let total = match target {
         Some(_) => format!(
@@ -824,11 +827,11 @@ fn army_march(room: &Room, a: &Army, s: &Stand, n: usize, bounded: bool) -> Elem
 // C · the verdict
 // ---------------------------------------------------------------------------
 
-fn verdict(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
-    let b = &room.battles[room.current];
-    let r = &b.fought.result;
-    let target = b.fought.target;
-    let annexed = b.fought.annexed_by();
+fn verdict(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
+    let b = &room.battles[replay.current];
+    let r = &b.result;
+    let target = b.target;
+    let annexed = b.annexed_by();
     let (big, sub, tone) = match (annexed, r.garrison_fell()) {
         (Some(_), _) => (
             "Annexion",
@@ -860,7 +863,7 @@ fn verdict(room: &Room, me: Option<Kingdoms>) -> ElementBuilder {
         ),
     };
     let mut body = vec![
-        front_header(room),
+        front_header(room, replay),
         el(El::Div)
             .st([
                 St::DisplayFlex,
@@ -1003,17 +1006,17 @@ fn army_verdict(
 }
 
 /// The defender's losses, once at the foot.
-fn defender_verdict(room: &Room, b: &Battle) -> ElementBuilder {
-    let r = &b.fought.result;
+fn defender_verdict(room: &Room, b: &Fought) -> ElementBuilder {
+    let r = &b.result;
     let mut parts: Vec<String> = Vec::new();
-    match b.fought.target {
+    match b.target {
         Some(t) => {
             let k = room.game.kingdom(t);
             if r.garrison_start > 0 {
                 parts.push(format!("{} d'armes tombés", hommes(r.garrison_fallen())));
             }
             parts.extend(people_fr(&r.spoils(), Side::Defender));
-            if b.fought.annexed_by().is_some() {
+            if b.annexed_by().is_some() {
                 parts.push(format!("{} est déchu", k.player_name));
                 parts.push("ses serfs changent de maître".to_string());
             } else if r.garrison_fell() {
@@ -1038,7 +1041,7 @@ fn defender_verdict(room: &Room, b: &Battle) -> ElementBuilder {
             St::AnimateFadeUp,
             delay(r.armies.len() + 1),
         ])
-        .style(Style::new().set("--kc", party_color(b.fought.target)))
+        .style(Style::new().set("--kc", party_color(b.target)))
         .append([
             el(El::Span)
                 .st([
@@ -1048,7 +1051,7 @@ fn defender_verdict(room: &Room, b: &Battle) -> ElementBuilder {
                     St::TextParty,
                     St::PrSm,
                 ])
-                .text(party_name(b.fought.target)),
+                .text(party_name(b.target)),
             txt(&parts.join(" · ")),
         ])
 }

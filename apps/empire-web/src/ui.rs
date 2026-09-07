@@ -22,8 +22,8 @@ use rwire_components::{
 };
 
 use crate::room::{
-    self, buildings_fr, by, goods_fr, people_fr, Battle, Deal, Draft, Elsewhere, Entry, Field,
-    News, Phase, Room, Rooms, Seat, Side, Spot, Stage, Step,
+    self, buildings_fr, by, goods_fr, people_fr, Deal, Draft, Elsewhere, Entry, Field, News, Phase,
+    Room, Rooms, Seat, Side, Spot, Stage, Step,
 };
 
 type Label = Cow<'static, str>;
@@ -162,12 +162,20 @@ pub fn page(
 /// `main` is the scroll container and the bar sits in normal flow below it. No
 /// `position: fixed`, so a collapsing mobile address bar can't hide or jolt it.
 /// `panel` sits between the header and `main`, out of the scroll.
+/// A passive screen (`tap`) moves on with a tap anywhere on `main`.
 fn shell(
     header: ElementBuilder,
     content: ElementBuilder,
     bar: ElementBuilder,
     overlay: Option<ElementBuilder>,
+    tap: Option<HandlerSpec>,
 ) -> ElementBuilder {
+    let mut main = el(El::Main).st([St::Flex1, St::MinH0, St::OverflowYAuto, St::WFull]);
+    if let Some(spec) = tap {
+        main = main
+            .st([St::CursorPointer, St::SelectNone])
+            .on(Ev::Click, spec);
+    }
     el(El::Div)
         .st([
             St::HDvh,
@@ -179,18 +187,16 @@ fn shell(
         ])
         .append([
             header,
-            el(El::Main)
-                .st([St::Flex1, St::MinH0, St::OverflowYAuto, St::WFull])
-                .append([el(El::Div)
-                    .st([
-                        St::MaxWMd,
-                        St::MxAuto,
-                        St::PMd,
-                        St::DisplayFlex,
-                        St::FlexCol,
-                        St::GapMd,
-                    ])
-                    .append([content])]),
+            main.append([el(El::Div)
+                .st([
+                    St::MaxWMd,
+                    St::MxAuto,
+                    St::PMd,
+                    St::DisplayFlex,
+                    St::FlexCol,
+                    St::GapMd,
+                ])
+                .append([content])]),
             bar,
             overlay.unwrap_or_else(|| el(El::Div)),
         ])
@@ -301,10 +307,15 @@ fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
     let me = t.room.seat_of(t.token);
     let open = sheet.and_then(|sh| open_action(t, me, sh));
     let war = war_target(t, me);
-    let View { body, action } = match tab {
+    let View { body, foot } = match tab {
         1 => View::new(kingdoms_tab(t), None),
         2 => View::new(journal_tab(t), None),
         _ => partie(t, me, open.is_some() || war.is_some()),
+    };
+    let (action, tap) = match foot {
+        Foot::None => (None, None),
+        Foot::Bar(line) => (Some(line), None),
+        Foot::Tap { spec, hint } => (Some(hint.on(Ev::Click, spec.clone())), Some(spec)),
     };
     let overlay = match (open, war) {
         (Some((id, act)), _) => Some(drawer(
@@ -324,7 +335,7 @@ fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
         (None, None) => None,
     };
     let tabs = (t.room.stage != Stage::Lobby).then_some(tab);
-    shell(header(t, me), body, bottom_bar(action, tabs), overlay)
+    shell(header(t, me), body, bottom_bar(action, tabs), overlay, tap)
 }
 
 /// The bottom sheet: the seat's notice for it, if any, over `form`.
@@ -828,13 +839,62 @@ fn kingdom_row(room: &Room, id: Kingdoms, mine: bool, most: i32) -> ElementBuild
 /// an optional panel pinned under the header.
 struct View {
     body: ElementBuilder,
-    action: Option<ElementBuilder>,
+    foot: Foot,
+}
+
+/// What the bar holds under a screen, and how the screen is left.
+enum Foot {
+    None,
+    /// A button, or a line saying what is happening.
+    Bar(ElementBuilder),
+    /// A passive screen: a tap anywhere on it moves on, and the bar only
+    /// says so — no button, the room goes to what is read.
+    Tap {
+        spec: HandlerSpec,
+        hint: ElementBuilder,
+    },
 }
 
 impl View {
     fn new(body: ElementBuilder, action: Option<ElementBuilder>) -> View {
-        View { body, action }
+        View {
+            body,
+            foot: action.map_or(Foot::None, Foot::Bar),
+        }
     }
+
+    fn tap(body: ElementBuilder, hint: ElementBuilder, spec: HandlerSpec) -> View {
+        View {
+            body,
+            foot: Foot::Tap { spec, hint },
+        }
+    }
+}
+
+/// The bar line of a passive screen: `text`, then a chevron.
+fn tap_hint(text: &str) -> ElementBuilder {
+    hint_line(None, text)
+}
+
+/// [`tap_hint`] with something before the text — a blinking dot.
+fn hint_line(lead: Option<ElementBuilder>, text: &str) -> ElementBuilder {
+    el(El::Div)
+        .st([
+            St::DisplayFlex,
+            St::ItemsCenter,
+            St::JustifyCenter,
+            St::GapSm,
+            St::TextSm,
+            St::TextMuted,
+            St::PySm,
+            St::CursorPointer,
+            St::SelectNone,
+        ])
+        .append(lead)
+        .append([
+            el(El::Span).text(text),
+            icon_sized(Icon::ChevronRight, 16).st([St::FlexShrink0]),
+        ])
 }
 
 fn partie(t: T, me: Option<Kingdoms>, sheet_open: bool) -> View {
@@ -1420,20 +1480,26 @@ fn turn(t: T, id: Kingdoms, sheet_open: bool) -> View {
         (Some(notice), Spot::Top, false) => Some(Alert::info().message(notice.clone()).build()),
         _ => None,
     };
-    let (body, action) = match seat.step {
-        Step::Chronicle => (chronicle_step(t, k), Some(next("Continuer", t))),
-        Step::Season => (season_step(t, k, seat), Some(next("Continuer", t))),
-        Step::Report => (report_step(seat), Some(next("Continuer", t))),
-        Step::Treasury => (treasury_step(k, seat), Some(next("Continuer", t))),
-        Step::Intendance => (intendance_step(t, id), None),
-        Step::War => (war_step(t, id), Some(end_turn(t, id))),
+    // The screens that only tell — the Chronique, the Saison, the census,
+    // the treasury — are read, then tapped away.
+    let read = || Foot::Tap {
+        spec: t.act(room::advance()),
+        hint: tap_hint("Touchez l'écran pour continuer"),
+    };
+    let (body, foot) = match seat.step {
+        Step::Chronicle => (chronicle_step(t, k), read()),
+        Step::Season => (season_step(t, k, seat), read()),
+        Step::Report => (report_step(seat), read()),
+        Step::Treasury => (treasury_step(k, seat), read()),
+        Step::Intendance => (intendance_step(t, id), Foot::None),
+        Step::War => (war_step(t, id), Foot::Bar(end_turn(t, id))),
     };
     let mut items = vec![stepper(seat.step)];
     items.extend(notice);
     items.push(body);
     View {
         body: Stack::column().gap(Gap::Md).children(items).build(),
-        action,
+        foot,
     }
 }
 
@@ -4638,7 +4704,7 @@ fn intendance_step(t: T, id: Kingdoms) -> ElementBuilder {
                 "Le conseil est levé : les rations sont servies, les impôts levés, vos achats \
                  faits. Rien ne se rouvre avant l'an prochain.",
             ),
-            next("Continuer", t),
+            primary("Continuer", t.act(room::advance())),
         ]);
 
     Stack::column()
@@ -5662,10 +5728,6 @@ fn end_turn(t: T, id: Kingdoms) -> ElementBuilder {
     b.size(ButtonSize::Lg)
         .full_width(true)
         .on_click(t.act(room::advance()))
-}
-
-fn next(label: &'static str, t: T) -> ElementBuilder {
-    primary(label, t.act(room::advance()))
 }
 
 /// "1 homme" / "12 hommes".
