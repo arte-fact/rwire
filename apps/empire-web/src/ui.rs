@@ -5264,6 +5264,9 @@ fn letter(
         _ if melted => line.push_str(" · le trésor a fondu de moitié"),
         _ => {}
     }
+    if let Some(t) = room.temper(at) {
+        line.push_str(&format!(" · son conseil est {}", t.told()));
+    }
     line
 }
 

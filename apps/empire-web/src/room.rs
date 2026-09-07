@@ -11,6 +11,9 @@ use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_
 use empire_lib::ia::plan_ai_turn;
 use empire_lib::investments::{apply_investment, InvestmentType};
 use empire_lib::kingdom::RATION_SCALE;
+use empire_lib::mind::SCOUT_CAUGHT;
+pub use empire_lib::mind::SCOUT_PRICE;
+use empire_lib::mind::{Mind, Seen, Temper};
 use empire_lib::trade::{
     apply_trade, calculate_buy_cost, max_land_sale, Trade, LAND_SELL_PRICE, MAX_GRAIN_PRICE,
 };
@@ -394,6 +397,8 @@ pub struct Seat {
     /// Bumped when a sheet's form concludes, so the sheet opened for the
     /// previous generation closes on its own.
     pub sheet_gen: u16,
+    /// The computer's temperament and eye (kept, unused, under a seigneur).
+    pub mind: Mind,
 }
 
 /// Where a seat's notice shows: under the roll's block it answers, inside
@@ -533,10 +538,6 @@ pub struct Rumour {
     pub annexed: bool,
 }
 
-/// What an éclaireur costs: about twenty men of arms.
-pub const SCOUT_PRICE: i32 = 150;
-/// One chance in this of the éclaireur being taken.
-const SCOUT_CAUGHT: u32 = 6;
 /// What an agent costs each year: about fifty men of arms.
 pub const AGENT_PRICE: i32 = 400;
 /// One chance in this, each year, of an agent being unmasked.
@@ -917,6 +918,11 @@ impl Room {
 
     pub fn dossier(&self, id: Kingdoms, on: Kingdoms) -> &Dossier {
         &self.seat(id).dossiers[on.index()]
+    }
+
+    /// How a computer's council leans; `None` under a seigneur.
+    pub fn temper(&self, id: Kingdoms) -> Option<Temper> {
+        self.is_computer(id).then(|| self.seat(id).mind.temper)
     }
 
     /// Whether `id` has an éclaireur leaving for `on` this year.
@@ -1597,8 +1603,25 @@ impl Room {
 
     /// A computer runs its whole kingdom the moment the year opens; its
     /// expeditions march with everyone else's.
+    /// The computer's council: the year's growth and trade, then its war —
+    /// its éclaireur's report of the year read from its dossier, the spy it
+    /// sends ordered like a seigneur's (taken, journaled and told alike).
     fn run_computer_intendance(&mut self, id: Kingdoms) {
-        let decision = plan_ai_turn(&mut self.game, id);
+        let year = self.game.year;
+        let mut mind = self.seat(id).mind;
+        mind.seen = mind.eye.and_then(|on| {
+            let report = self.dossier(id, on).report.filter(|r| r.year == year)?;
+            Some(Seen {
+                garrison: report.garrison,
+                efficiency: report.efficiency,
+                serfs: report.serfs,
+            })
+        });
+        let decision = plan_ai_turn(&mut self.game, id, &mut mind);
+        self.seat_mut(id).mind = mind;
+        if let Some(on) = decision.scout {
+            self.seat_mut(id).missions.push(Mission::Scout(on));
+        }
         if let Some((amount, price)) = decision.grain_listed {
             self.journal(
                 [id],
@@ -3446,5 +3469,112 @@ mod scouting {
             room.game.increment_year();
         }
         assert!(room.war_forecast(id, Some(on)).is_none());
+    }
+
+    /// A computer at year three with a report of the year on its eye.
+    fn watching(temper: Temper, garrison: i32) -> (Room, Kingdoms, Kingdoms) {
+        let mut room = table();
+        let (id, on) = (Kingdoms::Germany, Kingdoms::Spain);
+        room.game.year = 3;
+        room.seat_mut(id).mind = Mind {
+            temper,
+            eye: Some(on),
+            seen: None,
+        };
+        let k = room.game.kingdom_mut(id);
+        k.soldiers = 60;
+        k.soldiers_efficiency = 100;
+        k.treasury = 1_000;
+        room.seat_mut(id).dossiers[on.index()].report = Some(Report {
+            year: 3,
+            garrison,
+            efficiency: 100,
+            nobles: 1,
+            merchants: 100,
+            serfs: 1000,
+            surface: 10_000,
+        });
+        (room, id, on)
+    }
+
+    #[test]
+    fn a_computer_reads_its_dossier_and_strikes_on_a_favourable_report() {
+        let (mut room, id, on) = watching(Temper::Bold, 20);
+        room.run_computer_intendance(id);
+        // 1.5 × 20 × 100 at the efficiency the council left, or three
+        // quarters of the men it left.
+        let k = room.game.kingdom(id);
+        let men =
+            ((3000 + k.soldiers_efficiency - 1) / k.soldiers_efficiency).max(k.soldiers * 3 / 4);
+        let planned = &room.seat(id).planned;
+        assert!(
+            planned
+                .iter()
+                .any(|e| e.target == Some(on) && e.soldiers == men),
+            "{planned:?}"
+        );
+        assert!(room.scout_ordered(id, on));
+        assert_eq!(room.seat(id).mind.eye, Some(on));
+        assert_eq!(room.seat(id).mind.seen, None);
+    }
+
+    #[test]
+    fn a_computer_looks_elsewhere_on_an_unfavourable_report() {
+        let (mut room, id, on) = watching(Temper::Cautious, 200);
+        // The watched realm is a speck: the new eye all but surely lands
+        // elsewhere.
+        room.game.kingdom_mut(on).surface = 1;
+        room.run_computer_intendance(id);
+        let eye = room.seat(id).mind.eye.expect("an eye");
+        assert!(eye != id && eye != on, "{eye:?}");
+        assert!(room.scout_ordered(id, eye));
+        assert!(!room.scout_ordered(id, on));
+    }
+
+    #[test]
+    fn a_stale_report_is_not_read() {
+        let (mut room, id, on) = watching(Temper::Bold, 1);
+        room.seat_mut(id).dossiers[on.index()]
+            .report
+            .as_mut()
+            .unwrap()
+            .year = 2;
+        room.run_computer_intendance(id);
+        // Only the coup de sang could have marched: never an ost cut to the
+        // report (1.5 × 100 / 100 = 2 men).
+        assert!(!room.seat(id).planned.iter().any(|e| e.soldiers == 2));
+    }
+
+    #[test]
+    fn a_computer_scout_is_taken_and_told_like_a_seigneur_s() {
+        let (id, on) = (Kingdoms::Germany, Kingdoms::Spain);
+        let (mut back, mut caught) = (false, false);
+        for _ in 0..200 {
+            let (mut room, _, _) = watching(Temper::Measured, 20);
+            room.seat_mut(on).news.clear();
+            room.run_computer_intendance(id);
+            assert!(room.scout_ordered(id, on));
+            room.game.increment_year();
+            room.resolve_missions();
+            let d = room.dossier(id, on);
+            if d.report.is_some_and(|r| r.year == 4) {
+                back = true;
+            } else {
+                assert_eq!(d.caught, Some(4));
+                assert!(room.seat(on).news.contains(&News::SpyCaught {
+                    by: id,
+                    agent: false
+                }));
+                caught = true;
+            }
+        }
+        assert!(back && caught);
+    }
+
+    #[test]
+    fn the_letter_tells_the_council_s_temper() {
+        let (room, id, _) = watching(Temper::Cautious, 20);
+        assert_eq!(room.temper(id), Some(Temper::Cautious));
+        assert_eq!(room.temper(Kingdoms::France), None);
     }
 }

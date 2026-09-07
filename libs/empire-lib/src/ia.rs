@@ -1,5 +1,6 @@
 use crate::game::EmpireGame;
-use crate::kingdom::Kingdoms;
+use crate::kingdom::{Kingdom, Kingdoms};
+use crate::mind::{Mind, Seen, SCOUT_CAUGHT, SCOUT_PRICE};
 use crate::random::random;
 use crate::trade::{apply_trade, calculate_buy_cost, Trade, MAX_GRAIN_PRICE};
 use crate::war::{
@@ -23,6 +24,8 @@ pub struct AiTurnDecision {
     pub grain_listed: Option<(i32, i32)>,
     /// Grain bought from another kingdom's market: `(seller, amount)`.
     pub grain_bought: Option<(Kingdoms, i32)>,
+    /// The realm an éclaireur rides to this year (paid for).
+    pub scout: Option<Kingdoms>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,19 +45,15 @@ pub struct AiGrowth {
 
 /// Plan the AI turn: growth is applied immediately, battles are returned for
 /// the caller to run (so a UI can animate them) — see [`execute_ai_turn`].
-pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
+/// From the third year the war is the mind's: the caller feeds `mind.seen`
+/// with the éclaireur's report and sends the éclaireur it asks for.
+pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiTurnDecision {
     if game.kingdom(id).is_player || game.kingdom(id).is_dead {
         return AiTurnDecision::default();
     }
 
     let weather_ratio = game.weather.value() as f32 / 6.0;
     let year = game.year;
-    let enemies: Vec<Kingdoms> = game
-        .alive_kingdoms()
-        .into_iter()
-        .filter(|&k| k != id)
-        .collect();
-
     let kingdom = game.kingdom_mut(id);
 
     // Phase 1: resource growth. Weather scales each roll; rounded, not
@@ -186,33 +185,38 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
         }
     }
 
-    // Phase 2: plan combat (decide only, don't execute)
-    let mut attacks_allowed = nobles / 4 + 1;
-
-    loop {
-        if random(1, 5) < 2 || attacks_allowed <= 0 || soldiers <= 0 {
-            break;
-        }
-
-        if year < 3 {
+    // Phase 2: plan combat (decide only, don't execute). The first two years
+    // are the original's barbarian raids; from the third the mind decides.
+    if year < 3 {
+        let mut attacks_allowed = nobles / 4 + 1;
+        while random(1, 5) >= 2 && attacks_allowed > 0 && soldiers > 0 {
             decision.barbarian_attacks.push(random(1, soldiers).max(1));
-        } else {
-            if enemies.is_empty() {
-                break;
-            }
-            let target = enemies[random(0, enemies.len() as i32) as usize];
-            let soldiers_to_send = random(soldiers / 3, soldiers).max(1);
-            decision.kingdom_attacks.push((target, soldiers_to_send));
+            attacks_allowed -= 1;
         }
-        attacks_allowed -= 1;
+        return decision;
+    }
+    let enemies: Vec<&Kingdom> = game
+        .kingdoms
+        .iter()
+        .filter(|k| k.id != id && !k.is_dead)
+        .collect();
+    let orders = mind.campaign(game.kingdom(id), &enemies);
+    decision
+        .kingdom_attacks
+        .extend(orders.blind.into_iter().chain(orders.aimed));
+    if orders.scout.is_some() {
+        game.kingdom_mut(id).treasury -= SCOUT_PRICE;
+        decision.scout = orders.scout;
     }
 
     decision
 }
 
-/// Plan and fully execute the AI turn, running every planned battle silently.
-pub fn execute_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
-    let decision = plan_ai_turn(game, id);
+/// Plan and fully execute the AI turn, running every planned battle silently;
+/// the éclaireur reads the realm at once (or is taken, one in six) for next
+/// year's orders.
+pub fn execute_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiTurnDecision {
+    let decision = plan_ai_turn(game, id, mind);
 
     for &soldiers in &decision.barbarian_attacks {
         let soldiers = soldiers.min(game.kingdom(id).soldiers);
@@ -235,13 +239,28 @@ pub fn execute_ai_turn(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
         apply_kingdom_battle_result(game, id, target, soldiers, &result);
     }
 
+    if let Some(on) = decision.scout {
+        if random(0, SCOUT_CAUGHT) != 0 {
+            mind.seen = Some(Seen::read(game.kingdom(on)));
+        }
+    }
+
     decision
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mind::Temper;
     use crate::trade::grain_value;
+
+    fn mind() -> Mind {
+        Mind {
+            temper: Temper::Measured,
+            eye: None,
+            seen: None,
+        }
+    }
 
     #[test]
     fn players_and_dead_kingdoms_do_nothing() {
@@ -249,15 +268,15 @@ mod tests {
         game.kingdom_mut(Kingdoms::France).is_player = true;
         game.kingdom_mut(Kingdoms::Spain).is_dead = true;
         let before = game.clone();
-        plan_ai_turn(&mut game, Kingdoms::France);
-        plan_ai_turn(&mut game, Kingdoms::Spain);
+        plan_ai_turn(&mut game, Kingdoms::France, &mut mind());
+        plan_ai_turn(&mut game, Kingdoms::Spain, &mut mind());
         assert_eq!(game, before);
     }
 
     #[test]
     fn ai_grows_and_only_raids_barbarians_before_year_three() {
         let mut game = EmpireGame::default();
-        let d = plan_ai_turn(&mut game, Kingdoms::Germany);
+        let d = plan_ai_turn(&mut game, Kingdoms::Germany, &mut mind());
         assert!(d.kingdom_attacks.is_empty());
         let k = game.kingdom(Kingdoms::Germany);
         assert_eq!(k.peasants, 2000 + d.growth.peasants);
@@ -271,7 +290,7 @@ mod tests {
             ..Default::default()
         };
         for _ in 0..60 {
-            plan_ai_turn(&mut game, Kingdoms::Germany);
+            plan_ai_turn(&mut game, Kingdoms::Germany, &mut mind());
         }
         let k = game.kingdom(Kingdoms::Germany);
         assert!(k.nobles > 1, "nobles stuck at {}", k.nobles);
@@ -288,7 +307,7 @@ mod tests {
         let mut listed = false;
         for _ in 0..60 {
             let before = game.kingdom(Kingdoms::Germany).clone();
-            let d = plan_ai_turn(&mut game, Kingdoms::Germany);
+            let d = plan_ai_turn(&mut game, Kingdoms::Germany, &mut mind());
             if let Some((amount, price)) = d.grain_listed {
                 listed = true;
                 let k = game.kingdom(Kingdoms::Germany);
@@ -316,7 +335,7 @@ mod tests {
         for _ in 0..40 {
             game.kingdom_mut(Kingdoms::Germany).treasury = 50_000;
             let before = game.kingdom(Kingdoms::France).clone();
-            let d = plan_ai_turn(&mut game, Kingdoms::Germany);
+            let d = plan_ai_turn(&mut game, Kingdoms::Germany, &mut mind());
             if let Some((seller, amount)) = d.grain_bought {
                 if seller == Kingdoms::France {
                     bought = true;
@@ -341,15 +360,52 @@ mod tests {
             ..Default::default()
         };
         game.kingdom_mut(Kingdoms::Spain).is_dead = true;
-        game.kingdom_mut(Kingdoms::Germany).nobles = 40; // many attacks allowed
+        let mut m = Mind {
+            temper: Temper::Bold,
+            ..mind()
+        };
         for _ in 0..50 {
-            let d = plan_ai_turn(&mut game, Kingdoms::Germany);
+            game.kingdom_mut(Kingdoms::Germany).treasury = 1000;
+            let d = plan_ai_turn(&mut game, Kingdoms::Germany, &mut m);
             for (target, soldiers) in d.kingdom_attacks {
                 assert_ne!(target, Kingdoms::Germany);
                 assert_ne!(target, Kingdoms::Spain);
                 assert!(soldiers >= 1);
             }
+            assert!(d
+                .scout
+                .is_some_and(|s| s != Kingdoms::Germany && s != Kingdoms::Spain));
+            if d.grain_bought.is_none() {
+                let k = game.kingdom(Kingdoms::Germany);
+                assert_eq!(k.treasury, 1000 + d.growth.treasury - SCOUT_PRICE);
+            }
         }
+    }
+
+    #[test]
+    fn a_scout_sent_reads_the_realm_for_next_year() {
+        let mut game = EmpireGame {
+            year: 4,
+            ..Default::default()
+        };
+        let mut m = mind();
+        let (mut sent, mut read) = (0, 0);
+        while sent < 60 && game.alive_kingdoms().len() > 1 {
+            // Money for the éclaireur, no men to march (the council raises
+            // a few: the table may thin out).
+            let k = game.kingdom_mut(Kingdoms::Germany);
+            k.treasury = 100_000;
+            k.soldiers = 0;
+            let d = execute_ai_turn(&mut game, Kingdoms::Germany, &mut m);
+            let on = d.scout.expect("an éclaireur every year with money");
+            assert_eq!(m.eye, Some(on));
+            sent += 1;
+            if let Some(seen) = m.seen {
+                read += 1;
+                assert_eq!(seen, Seen::read(game.kingdom(on)));
+            }
+        }
+        assert!(sent >= 20 && read * 3 >= sent * 2, "{read} of {sent}");
     }
 
     #[test]
@@ -359,7 +415,7 @@ mod tests {
             ..Default::default()
         };
         for id in crate::KINGDOMS {
-            execute_ai_turn(&mut game, id);
+            execute_ai_turn(&mut game, id, &mut mind());
         }
         for k in &game.kingdoms {
             assert!(k.soldiers >= 0, "{:?}", k);

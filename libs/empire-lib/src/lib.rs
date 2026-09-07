@@ -16,6 +16,7 @@ pub mod harvests;
 pub mod ia;
 pub mod investments;
 pub mod kingdom;
+pub mod mind;
 pub mod random;
 pub mod trade;
 pub mod war;

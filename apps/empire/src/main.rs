@@ -10,6 +10,7 @@ mod ui;
 use empire_lib::demography::{apply_feed, Council};
 use empire_lib::economy::{apply_economy, economy_report};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
+use empire_lib::mind::Mind;
 use empire_lib::trade::apply_trade;
 use empire_lib::{EmpireGame, Kingdoms, KINGDOMS};
 
@@ -28,28 +29,30 @@ use ui::alternate_screen_buffer;
 
 fn main() {
     let mut game = EmpireGame::default();
+    // Each computer's temperament and eye, drawn as the game opens.
+    let mut minds: [Mind; 6] = std::array::from_fn(|_| Mind::default());
 
     alternate_screen_buffer();
     welcome();
     game_setup(&mut game);
 
     loop {
-        game_loop(&mut game);
+        game_loop(&mut game, &mut minds);
     }
 }
 
-fn game_loop(game: &mut EmpireGame) {
+fn game_loop(game: &mut EmpireGame, minds: &mut [Mind; 6]) {
     game.random_weather();
     game.open_market();
     weather_page(game);
     for id in KINGDOMS {
-        kingdom_turn(game, id);
+        kingdom_turn(game, id, &mut minds[id.index()]);
     }
     resume_page(game);
     game.increment_year();
 }
 
-fn kingdom_turn(game: &mut EmpireGame, id: Kingdoms) {
+fn kingdom_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) {
     let weather = game.weather;
     let year = game.year;
 
@@ -61,7 +64,7 @@ fn kingdom_turn(game: &mut EmpireGame, id: Kingdoms) {
     }
 
     if !game.kingdom(id).is_player {
-        ia_turn(game, id);
+        ia_turn(game, id, mind);
         return;
     }
 

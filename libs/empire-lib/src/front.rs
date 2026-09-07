@@ -19,7 +19,7 @@ use crate::random::random;
 /// lost: 1 / (people per arpent × ⅔ × P(a duel lost)), about 30 arpents at
 /// the start of a game — what the original battle yields per man lost, once
 /// the men fallen before the garrison are counted.
-const MILITIA_EFFICIENCY: i32 = 50;
+pub const MILITIA_EFFICIENCY: i32 = 50;
 
 /// The buildings a realm has along its line, in the order of the spoils arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
