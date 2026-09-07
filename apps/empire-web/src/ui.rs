@@ -1128,6 +1128,7 @@ fn standing(room: &Room) -> Vec<&Kingdom> {
 fn epilogue(room: &Room, id: Kingdoms) -> ElementBuilder {
     let year = room.game.year;
     let mut tale: Vec<String> = Vec::new();
+    let crowned = room.emperor().is_some();
     if let Some(emperor) = room.emperor() {
         let k = room.game.kingdom(emperor);
         tale.push(format!(
@@ -1182,13 +1183,13 @@ fn epilogue(room: &Room, id: Kingdoms) -> ElementBuilder {
             tale.into_iter()
                 .map(|line| Text::body(line).build().st([St::M0])),
         );
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            section(format!("Épilogue · an {year}"), tale),
-            chronicle(room, id, "Votre chronique", 1),
-        ])
-        .build()
+    // The fall told above is not told twice.
+    let lines = chronicle_lines(room, id, |n| crowned || !matches!(n, News::Fallen(_)));
+    let mut children = vec![section(format!("Épilogue · an {year}"), tale)];
+    if !lines.is_empty() {
+        children.push(chronicle_section("Votre chronique", 1, lines));
+    }
+    Stack::column().gap(Gap::Md).children(children).build()
 }
 
 /// "premier", "deuxième", … for a rank.
@@ -1855,10 +1856,8 @@ fn chronicle_step(t: T, k: &Kingdom) -> ElementBuilder {
 
 /// The seat's news as a list, one line per fact, fading in from `slot`.
 fn chronicle(room: &Room, id: Kingdoms, title: impl Into<Label>, slot: usize) -> ElementBuilder {
-    let k = room.game.kingdom(id);
     let news = &room.seat(id).news;
-    let last_sale = news.iter().rposition(|n| matches!(n, News::Sold { .. }));
-    let lines: Vec<ElementBuilder> = if news.is_empty() {
+    let lines = if news.is_empty() {
         vec![news_line(
             Icon::Map,
             Tone::Neutral,
@@ -1866,11 +1865,28 @@ fn chronicle(room: &Room, id: Kingdoms, title: impl Into<Label>, slot: usize) ->
             "Personne n'a marché sur vos terres, la peste vous a épargné et le marché n'a rien vendu.",
         )]
     } else {
-        news.iter()
-            .enumerate()
-            .map(|(i, n)| tell(room, k, n, last_sale == Some(i)))
-            .collect()
+        chronicle_lines(room, id, |_| true)
     };
+    chronicle_section(title, slot, lines)
+}
+
+/// The seat's news kept by `keep`, told one line each.
+fn chronicle_lines(room: &Room, id: Kingdoms, keep: impl Fn(&News) -> bool) -> Vec<ElementBuilder> {
+    let k = room.game.kingdom(id);
+    let news = &room.seat(id).news;
+    let last_sale = news.iter().rposition(|n| matches!(n, News::Sold { .. }));
+    news.iter()
+        .enumerate()
+        .filter(|(_, n)| keep(n))
+        .map(|(i, n)| tell(room, k, n, last_sale == Some(i)))
+        .collect()
+}
+
+fn chronicle_section(
+    title: impl Into<Label>,
+    slot: usize,
+    lines: Vec<ElementBuilder>,
+) -> ElementBuilder {
     let title = title.into();
     let list = el(El::Ul)
         .st([St::ListStyleNone, St::P0, St::M0])
