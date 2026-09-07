@@ -363,14 +363,16 @@ pub fn simulate_front(
     fight(game, defender, armies, true)
 }
 
-/// The outcome of one army sent alone against `defender`, fought `draws`
-/// times: what it would take and lose, as bands from the first to the ninth
+/// The outcome of one army sent alone against `defender`, fought once per
+/// draw: what it would take and lose, as bands from the first to the ninth
 /// decile, and how often the garrison fell.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Forecast {
     pub arpents: (i32, i32),
     pub lost: (i32, i32),
     pub victories: i32,
+    /// How often the whole realm fell to the army (never, for the bands).
+    pub annexations: i32,
 }
 
 /// Deciles of `v` (sorted in place): the first and the ninth.
@@ -383,27 +385,31 @@ pub(crate) fn deciles(v: &mut [i32]) -> (i32, i32) {
     (v[last / 10], v[last - last / 10])
 }
 
-pub fn forecast_front(
-    game: &EmpireGame,
+/// One draw per game given: the realm may differ from one to the next when
+/// it is only known through a report.
+pub fn forecast_front<'a>(
+    games: impl IntoIterator<Item = &'a EmpireGame>,
     defender: Kingdoms,
     attacker: Kingdoms,
     sent: i32,
-    draws: usize,
 ) -> Forecast {
-    let mut arpents = Vec::with_capacity(draws);
-    let mut lost = Vec::with_capacity(draws);
+    let mut arpents = Vec::new();
+    let mut lost = Vec::new();
     let mut victories = 0;
-    for _ in 0..draws {
+    let mut annexations = 0;
+    for game in games {
         let r = fight(game, defender, &[(attacker, sent)], false);
         let a = &r.armies[0];
         arpents.push(a.advance);
         lost.push(a.lost());
         victories += i32::from(a.victory);
+        annexations += i32::from(r.annexed_by.is_some());
     }
     Forecast {
         arpents: deciles(&mut arpents),
         lost: deciles(&mut lost),
         victories,
+        annexations,
     }
 }
 

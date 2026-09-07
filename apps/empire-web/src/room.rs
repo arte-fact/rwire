@@ -18,7 +18,7 @@ use empire_lib::{EmpireGame, Fate, Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
 use rand::Rng;
 use rwire::{handler, EventContext, HandlerSpec, State};
 
-use crate::ui::{coins, fmt};
+use crate::ui::{coins, fmt, hommes_darmes};
 
 /// Ticker period.
 pub const TICK_MS: u64 = 50;
@@ -144,7 +144,7 @@ impl Step {
         "Intendance",
         "Peuple",
         "Trésor",
-        "Guerre",
+        "Extérieur",
     ];
 
     pub fn index(self) -> usize {
@@ -162,7 +162,21 @@ pub struct Entry {
     pub year: i32,
     /// Kingdoms this entry concerns (empty = everyone).
     pub about: Vec<Kingdoms>,
+    /// The line as everyone reads it.
     pub text: String,
+    /// The fuller line the kingdoms it concerns read instead: the figures
+    /// that stay inside the walls (an army's headcount, a loot).
+    pub secret: Option<String>,
+}
+
+impl Entry {
+    /// The line as `reader` reads it.
+    pub fn told_to(&self, reader: Option<Kingdoms>) -> &str {
+        match &self.secret {
+            Some(s) if reader.is_some_and(|r| self.about.contains(&r)) => s,
+            _ => &self.text,
+        }
+    }
 }
 
 /// One of the council's five sliders.
@@ -311,6 +325,8 @@ pub struct WarForecast {
     pub max: i32,
     pub sent: Vec<i32>,
     pub rows: Vec<Forecast>,
+    /// How wide of the truth the report it rests on may be, in per cent.
+    pub spread: i32,
 }
 
 pub const FORECAST_DRAWS: usize = 24;
@@ -355,8 +371,16 @@ pub struct Seat {
     /// re-centre on them; `None` = the sheet's defaults.
     pub deal_amount: Option<i32>,
     pub deal_price: Option<i32>,
-    /// The target whose war sheet is open (kingdom number, 0 = barbarians).
+    /// The éclaireurs sent this year, one realm each; they report as the
+    /// next year opens.
+    pub missions: Vec<Kingdoms>,
+    /// What this seat knows of every realm, by kingdom index.
+    pub dossiers: [Dossier; 6],
+    /// The target whose sheet is open (kingdom number, 0 = barbarians).
     pub target: Option<u8>,
+    /// The open sheet is the war form (a kingdom's sheet opens on what is
+    /// known of it first).
+    pub attack: bool,
     /// What the open war sheet foretells, computed as it opens.
     pub forecast: Option<WarForecast>,
     /// The title held at the last year's end, so a change can be announced;
@@ -418,10 +442,31 @@ pub enum News {
     },
     /// Something that changed the map or the hierarchy elsewhere.
     Elsewhere(Elsewhere),
+    /// This seat's éclaireur sent to `at` last year.
+    Scout {
+        at: Kingdoms,
+        outcome: Scouting,
+    },
+    /// An éclaireur of `by` was taken at this seat's court.
+    SpyCaught {
+        by: Kingdoms,
+    },
     /// How this seat's realm fell; always the last line.
     Fallen(Fate),
     /// This seat took the imperial crown: the game is won.
     Crowned,
+}
+
+/// How an éclaireur's year ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scouting {
+    /// Home with his report (its garrison, for the Chronique).
+    Back {
+        garrison: i32,
+    },
+    Caught,
+    /// The realm was annexed while he rode: no court left to look at.
+    Gone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,6 +474,13 @@ pub enum Elsewhere {
     RulerDied {
         id: Kingdoms,
         cause: RulerDeathCause,
+    },
+    /// A war between two other realms, short of an annexation.
+    Marched {
+        by: Kingdoms,
+        on: Kingdoms,
+        victory: bool,
+        arpents: i32,
     },
     Annexed {
         id: Kingdoms,
@@ -440,6 +492,90 @@ pub enum Elsewhere {
         now: PlayerTitle,
     },
     Crowned(Kingdoms),
+}
+
+/// What everyone hears of a front of the last campaign: who marched on whom
+/// and how it went — never how many men.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rumour {
+    pub year: i32,
+    pub attacker: Kingdoms,
+    /// `None` = the barbarians.
+    pub target: Option<Kingdoms>,
+    pub victory: bool,
+    /// Arpents taken (the whole realm on an annexation).
+    pub arpents: i32,
+    pub annexed: bool,
+}
+
+/// What an éclaireur costs: about twenty men of arms.
+pub const SCOUT_PRICE: i32 = 150;
+/// One chance in this of the éclaireur being taken.
+const SCOUT_CAUGHT: u32 = 6;
+
+/// What an éclaireur saw of a realm — the figures a war is fought with —
+/// dated with the year it was read, as the year opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Report {
+    pub year: i32,
+    pub garrison: i32,
+    pub efficiency: i32,
+    pub nobles: i32,
+    pub merchants: i32,
+    pub serfs: i32,
+    pub surface: i32,
+}
+
+impl Report {
+    fn read(k: &Kingdom, year: i32) -> Self {
+        Report {
+            year,
+            garrison: k.soldiers,
+            efficiency: k.soldiers_efficiency,
+            nobles: k.nobles,
+            merchants: k.merchants,
+            serfs: k.peasants,
+            surface: k.surface,
+        }
+    }
+
+    pub fn subjects(&self) -> i32 {
+        self.nobles + self.merchants + self.serfs
+    }
+
+    /// How wide of the truth a forecast built on this report may be, in
+    /// per cent, by its age in `year`; `None` once too old to compute on.
+    pub fn spread(&self, year: i32) -> Option<i32> {
+        match year - self.year {
+            0 => Some(0),
+            1 => Some(20),
+            2 => Some(40),
+            _ => None,
+        }
+    }
+
+    /// The realm as the report tells it, every figure `jitter` per cent off.
+    fn kingdom(&self, id: Kingdoms, jitter: i32) -> Kingdom {
+        let off = |n: i32| (i64::from(n) * i64::from(100 + jitter) / 100) as i32;
+        let mut k = Kingdom::new(id);
+        k.soldiers = off(self.garrison);
+        k.soldiers_efficiency = off(self.efficiency).max(1);
+        k.nobles = off(self.nobles);
+        k.merchants = off(self.merchants);
+        k.peasants = off(self.serfs);
+        k.surface = self.surface;
+        k
+    }
+}
+
+/// What a seat knows of a foreign realm.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Dossier {
+    /// The last report brought back.
+    pub report: Option<Report>,
+    /// Year an éclaireur was last taken there: that seigneur knows they are
+    /// watched.
+    pub caught: Option<i32>,
 }
 
 /// One line of the trade step's list: buy from a seller, or one of the two sales.
@@ -561,6 +697,8 @@ pub struct Room {
     /// The campaign's fronts, fought at the march and applied to the map once
     /// every seigneur has read them.
     pub battles: Vec<Fought>,
+    /// The last campaign as the heralds tell it, until the next one marches.
+    pub rumours: Vec<Rumour>,
 }
 
 impl Room {
@@ -628,8 +766,29 @@ impl Room {
     }
 
     /// Foretell what `id` would bring back from `target`, for every size of
-    /// army it can send.
-    pub fn war_forecast(&self, id: Kingdoms, target: Option<Kingdoms>) -> WarForecast {
+    /// army it can send. The bands are foretold on sight; a realm only as its
+    /// report tells it, wider of the truth as the report ages — and not at
+    /// all without one, or on one too old.
+    pub fn war_forecast(&self, id: Kingdoms, target: Option<Kingdoms>) -> Option<WarForecast> {
+        let mut games = Vec::new();
+        let mut spread = 0;
+        if let Some(t) = target {
+            let report = self.dossier(id, t).report?;
+            spread = report.spread(self.game.year)?;
+            let mut rng = rand::thread_rng();
+            games.extend((0..FORECAST_DRAWS).map(|_| {
+                let mut g = self.game.clone();
+                *g.kingdom_mut(t) = report.kingdom(t, rng.gen_range(-spread..=spread));
+                g
+            }));
+        }
+        let draws = || {
+            if target.is_some() {
+                games.iter().collect::<Vec<_>>()
+            } else {
+                vec![&self.game; FORECAST_DRAWS]
+            }
+        };
         let max = self.available(id, target).max(1);
         let points = max.min(FORECAST_POINTS);
         let sent: Vec<i32> = (0..points)
@@ -643,13 +802,83 @@ impl Room {
             .collect();
         let rows = sent
             .iter()
-            .map(|&n| forecast(&self.game, target, id, n, FORECAST_DRAWS))
+            .map(|&n| forecast(draws(), target, id, n))
             .collect();
-        WarForecast {
+        Some(WarForecast {
             target,
             max,
             sent,
             rows,
+            spread,
+        })
+    }
+
+    pub fn dossier(&self, id: Kingdoms, on: Kingdoms) -> &Dossier {
+        &self.seat(id).dossiers[on.index()]
+    }
+
+    /// Whether `id` has an éclaireur leaving for `on` this year.
+    pub fn scout_ordered(&self, id: Kingdoms, on: Kingdoms) -> bool {
+        self.seat(id).missions.contains(&on)
+    }
+
+    /// Send an éclaireur to `on`, or call back the one ordered there (the
+    /// price comes back with him).
+    fn toggle_scout(&mut self, id: Kingdoms, on: Kingdoms) -> Result<(), String> {
+        if on == id || self.game.kingdom(on).is_dead {
+            return Err("Il n'y a rien à éclairer là.".to_string());
+        }
+        if self.scout_ordered(id, on) {
+            self.seat_mut(id).missions.retain(|&o| o != on);
+            self.game.kingdom_mut(id).treasury += SCOUT_PRICE;
+            return Ok(());
+        }
+        let k = self.game.kingdom_mut(id);
+        if k.treasury < SCOUT_PRICE {
+            return Err(format!(
+                "Un éclaireur coûte {SCOUT_PRICE} francs ; le trésor n'en a que {}.",
+                k.treasury
+            ));
+        }
+        k.treasury -= SCOUT_PRICE;
+        self.seat_mut(id).missions.push(on);
+        Ok(())
+    }
+
+    /// The éclaireurs come home as the year opens: each reads the realm as
+    /// it stands, or is taken (one in six) — then that seigneur knows, and
+    /// so does everyone reading the journal.
+    fn resolve_missions(&mut self) {
+        let year = self.game.year;
+        for id in KINGDOMS {
+            let missions = std::mem::take(&mut self.seat_mut(id).missions);
+            if self.game.kingdom(id).is_dead {
+                continue;
+            }
+            for on in missions {
+                let outcome = if self.game.kingdom(on).is_dead {
+                    Scouting::Gone
+                } else if rand::thread_rng().gen_range(0..SCOUT_CAUGHT) == 0 {
+                    self.seat_mut(id).dossiers[on.index()].caught = Some(year);
+                    self.journal(
+                        [id, on],
+                        format!(
+                            "Un éclaireur de la {} a été pris en {}.",
+                            id.name(),
+                            on.name()
+                        ),
+                    );
+                    self.report(on, News::SpyCaught { by: id });
+                    Scouting::Caught
+                } else {
+                    let r = Report::read(self.game.kingdom(on), year);
+                    self.seat_mut(id).dossiers[on.index()].report = Some(r);
+                    Scouting::Back {
+                        garrison: r.garrison,
+                    }
+                };
+                self.report(id, News::Scout { at: on, outcome });
+            }
         }
     }
 
@@ -672,10 +901,22 @@ impl Room {
     /// Append a journal entry; `about` names the kingdoms it concerns so the
     /// viewer's own news can be marked.
     pub fn journal(&mut self, about: impl IntoIterator<Item = Kingdoms>, line: impl Into<String>) {
+        self.confide(about, line, None);
+    }
+
+    /// Append a journal entry whose fuller telling is kept for the kingdoms
+    /// it concerns; everyone else reads `line`.
+    fn confide(
+        &mut self,
+        about: impl IntoIterator<Item = Kingdoms>,
+        line: impl Into<String>,
+        secret: Option<String>,
+    ) {
         self.log.push(Entry {
             year: self.game.year,
             about: about.into_iter().collect(),
             text: line.into(),
+            secret,
         });
         if self.log.len() > JOURNAL_LEN {
             self.log.remove(0);
@@ -784,8 +1025,10 @@ impl Room {
                 seat.deal_amount = None;
                 seat.deal_price = None;
                 seat.target = None;
+                seat.attack = false;
                 seat.forecast = None;
                 seat.planned.clear();
+                seat.missions.clear();
             }
         }
         self.try_open_exterior();
@@ -813,8 +1056,10 @@ impl Room {
             seat.ready = false;
             seat.notice = None;
             seat.target = None;
+            seat.attack = false;
             seat.forecast = None;
             seat.planned.clear();
+            seat.missions.clear();
         }
         self.try_march();
     }
@@ -827,6 +1072,7 @@ impl Room {
             return;
         }
         self.phase = Phase::Campaign;
+        self.rumours.clear();
         let mut orders = Vec::new();
         for id in KINGDOMS {
             orders.append(&mut self.seat_mut(id).planned);
@@ -975,12 +1221,7 @@ impl Room {
         let delta = demo.population_delta();
         self.journal(
             [id],
-            format!(
-                "La {} a {} {} sujets taillables et corvéables à merci.",
-                id.name(),
-                delta_verb(delta),
-                delta.abs()
-            ),
+            format!("La {} a {}.", id.name(), subjects_delta(delta, "ses")),
         );
         let seat = self.seat_mut(id);
         seat.draft = None;
@@ -1037,6 +1278,7 @@ impl Room {
             return;
         }
         self.game.increment_year();
+        self.resolve_missions();
         self.begin_year();
     }
 
@@ -1226,12 +1468,13 @@ impl Room {
         };
         for e in fought.expeditions() {
             let attacker = self.game.kingdom(e.attacker).titled_name();
-            self.journal(
+            self.confide(
                 [e.attacker].into_iter().chain(e.target),
-                format!(
-                    "{attacker} marche sur {foe} avec {} hommes d'armes.",
-                    e.soldiers
-                ),
+                format!("{attacker} marche sur {foe}."),
+                Some(format!(
+                    "{attacker} marche sur {foe} avec {}.",
+                    hommes_darmes(e.soldiers)
+                )),
             );
         }
         let rounds = &fought.result.rounds;
@@ -1268,8 +1511,32 @@ impl Room {
             }
             self.tally_expedition(a.attacker, a.victory, spoils, a.lost());
             let k = self.game.kingdom(a.attacker);
-            let line = verdict(&k.titled_name(), k.currency(), a);
-            self.journal(audience.iter().copied(), line);
+            let name = k.titled_name();
+            let line = verdict(&name, k.currency(), a);
+            self.confide(
+                audience.iter().copied(),
+                verdict_heard(&name, a),
+                Some(line),
+            );
+            self.rumours.push(Rumour {
+                year: self.game.year,
+                attacker: a.attacker,
+                target: fought.target,
+                victory: a.victory,
+                arpents: spoils.arpents,
+                annexed: annexed == Some(a.attacker),
+            });
+            if let Some(on) = fought.target.filter(|_| annexed.is_none()) {
+                self.report_others(
+                    &audience,
+                    Elsewhere::Marched {
+                        by: a.attacker,
+                        on,
+                        victory: a.victory,
+                        arpents: spoils.arpents,
+                    },
+                );
+            }
         }
         if let Some(t) = fought.target {
             match annexed {
@@ -1331,6 +1598,19 @@ impl Room {
 }
 
 /// One army's line of the journal.
+/// The verdict as the other courts hear it: the outcome and the land, no
+/// loot and no headcount.
+fn verdict_heard(attacker: &str, a: &Army) -> String {
+    let arpents = a.spoils().arpents;
+    if !a.victory {
+        format!("{attacker} perd toute son expédition sans garder un arpent.")
+    } else if arpents == 0 {
+        format!("{attacker} repousse l'ennemi sans gagner un arpent.")
+    } else {
+        format!("{attacker} gagne : {} arpents conquis.", fmt(arpents))
+    }
+}
+
 fn verdict(attacker: &str, cur: &str, a: &Army) -> String {
     if !a.victory {
         // The expedition is wiped out: whatever it overran is lost with it.
@@ -1878,17 +2158,20 @@ pub fn settle(rooms: &mut Rooms, ctx: &EventContext) {
     room.close_sheet(id);
 }
 
-/// The chronicle's verb for a population delta.
-pub fn delta_verb(delta: i32) -> &'static str {
+/// The chronicle's telling of a population delta, after "a" / "avez";
+/// `own` is the possessive ("ses", "vos") for a year that changed nothing.
+pub fn subjects_delta(delta: i32, own: &str) -> String {
+    let taillables = "sujets taillables et corvéables à merci";
     match delta {
-        n if n > 0 => "gagné",
-        n if n < 0 => "perdu",
-        _ => "conservé",
+        n if n > 0 => format!("gagné {} {taillables}", fmt(n)),
+        n if n < 0 => format!("perdu {} {taillables}", fmt(-n)),
+        _ => format!("conservé {own} {taillables}"),
     }
 }
 
-/// A target's tile touched: its war sheet opens (the extra param byte is the
-/// kingdom number, 0 = the barbarians) or, with 0xFF, closes.
+/// A row touched: the barbarians' war sheet opens, a kingdom's sheet opens
+/// on what is known of it (the extra param byte is the kingdom number, 0 =
+/// the barbarians; 0xFF closes).
 #[handler]
 pub fn pick_target(rooms: &mut Rooms, ctx: &EventContext) {
     let Some((token, extra, room)) = table(rooms, ctx) else {
@@ -1898,11 +2181,57 @@ pub fn pick_target(rooms: &mut Rooms, ctx: &EventContext) {
         return;
     };
     let picked = extra.first().copied().filter(|&n| n <= 6);
-    let forecast = picked.map(|n| room.war_forecast(id, Kingdoms::from_number(i32::from(n))));
+    let attack = picked == Some(0);
+    let forecast = attack.then(|| room.war_forecast(id, None)).flatten();
     let seat = room.seat_mut(id);
     seat.target = picked;
+    seat.attack = attack;
     seat.forecast = forecast;
     seat.notice = None;
+}
+
+/// "Attaquer" on a kingdom's sheet: the war form opens on it.
+#[handler]
+pub fn open_attack(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::War) else {
+        return;
+    };
+    let Some(target) = sheet_kingdom(room, id) else {
+        return;
+    };
+    let forecast = room.war_forecast(id, Some(target));
+    let seat = room.seat_mut(id);
+    seat.attack = true;
+    seat.forecast = forecast;
+    seat.notice = None;
+}
+
+/// "Envoyer un éclaireur" on a kingdom's sheet, or his recall.
+#[handler]
+pub fn scout(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::War) else {
+        return;
+    };
+    let Some(target) = sheet_kingdom(room, id) else {
+        return;
+    };
+    room.seat_mut(id).notice = None;
+    if let Err(msg) = room.toggle_scout(id, target) {
+        room.note_at(id, Spot::Sheet, msg);
+    }
+}
+
+/// The living kingdom whose sheet `id` has open.
+fn sheet_kingdom(room: &Room, id: Kingdoms) -> Option<Kingdoms> {
+    let n = room.seat(id).target.filter(|&n| n != 0)?;
+    let o = Kingdoms::from_number(i32::from(n))?;
+    (o != id && !room.game.kingdom(o).is_dead).then_some(o)
 }
 
 /// A purchase sheet validated: the kind is the first extra param byte (its
@@ -1983,6 +2312,7 @@ pub fn attack(rooms: &mut Rooms, ctx: &EventContext) {
         Ok(()) => {
             let seat = room.seat_mut(id);
             seat.target = None;
+            seat.attack = false;
             seat.forecast = None;
         }
         Err(msg) => {
@@ -2011,6 +2341,7 @@ pub fn withdraw(rooms: &mut Rooms, ctx: &EventContext) {
         seat.planned.remove(i as usize);
         seat.notice = None;
         seat.target = None;
+        seat.attack = false;
         seat.forecast = None;
     }
 }
@@ -2465,6 +2796,59 @@ mod tests {
     }
 
     #[test]
+    fn a_war_is_heard_everywhere_but_its_headcount_stays_on_the_field() {
+        let mut room = playing(&[Kingdoms::France, Kingdoms::Spain, Kingdoms::Germany]);
+        let (a, d, other) = (Kingdoms::France, Kingdoms::Spain, Kingdoms::Germany);
+        room.game.kingdom_mut(a).soldiers = 100;
+        room.game.kingdom_mut(d).soldiers = 5;
+        room.seat_mut(other).news.clear();
+        let fought = march(
+            &mut room.game,
+            [Expedition {
+                attacker: a,
+                target: Some(d),
+                soldiers: 60,
+            }],
+        )
+        .remove(0);
+        room.start_battle(fought);
+        room.finish_battle(0);
+        // The march: the field knows the headcount, the court next door not.
+        let march_line = room
+            .log
+            .iter()
+            .find(|e| e.text.contains("marche sur"))
+            .expect("the march is journaled");
+        assert!(march_line.told_to(Some(a)).contains("60 hommes d'armes"));
+        assert!(march_line.told_to(Some(d)).contains("60 hommes d'armes"));
+        assert!(!march_line.told_to(Some(other)).contains("hommes"));
+        assert!(!march_line.told_to(None).contains("hommes"));
+        // The verdict: the land is public, the loot is not.
+        let verdict_line = room.log.last().unwrap();
+        assert!(verdict_line.told_to(Some(other)).contains("arpent"));
+        assert!(!verdict_line.told_to(Some(other)).contains("Butin"));
+        // The heralds keep the front, without a headcount…
+        assert_eq!(room.rumours.len(), 1);
+        let r = room.rumours[0];
+        assert_eq!((r.attacker, r.target, r.year), (a, Some(d), room.game.year));
+        // …and the third court reads it in its chronicle.
+        assert!(room.seat(other).news.iter().any(|n| matches!(
+            n,
+            News::Elsewhere(Elsewhere::Marched { by, on, .. }) if *by == a && *on == d
+        )));
+        assert!(!room
+            .seat(a)
+            .news
+            .iter()
+            .any(|n| matches!(n, News::Elsewhere(Elsewhere::Marched { .. }))));
+        // The rumours last until the next campaign marches.
+        room.end_year();
+        assert_eq!(room.rumours.len(), 1);
+        room.try_open_exterior();
+        assert_eq!(room.rumours.len(), 1);
+    }
+
+    #[test]
     fn a_rank_is_told_to_the_others_too() {
         let mut room = playing(&[Kingdoms::France, Kingdoms::Spain]);
         let id = Kingdoms::France;
@@ -2557,5 +2941,131 @@ mod tests {
             b.expeditions()
                 .any(|e| e.attacker == Kingdoms::Britanny && e.soldiers == 5)
         }));
+    }
+}
+
+#[cfg(test)]
+mod scouting {
+    use super::*;
+
+    fn table() -> Room {
+        let mut room = Room::default();
+        for id in [Kingdoms::France, Kingdoms::Spain] {
+            room.seats[id.index()].owner = Some(id.index() as u64 + 1);
+            room.game.kingdom_mut(id).is_player = true;
+        }
+        room.stage = Stage::Playing;
+        room.begin_year();
+        room
+    }
+
+    #[test]
+    fn a_scout_is_paid_on_order_and_refunded_on_recall() {
+        let mut room = table();
+        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
+        let before = room.game.kingdom(id).treasury;
+        assert_eq!(room.toggle_scout(id, on), Ok(()));
+        assert!(room.scout_ordered(id, on));
+        assert_eq!(room.game.kingdom(id).treasury, before - SCOUT_PRICE);
+        assert_eq!(room.toggle_scout(id, on), Ok(()));
+        assert!(!room.scout_ordered(id, on));
+        assert_eq!(room.game.kingdom(id).treasury, before);
+        // Nothing to scout at home, and no scout without the price.
+        assert!(room.toggle_scout(id, id).is_err());
+        room.game.kingdom_mut(id).treasury = SCOUT_PRICE - 1;
+        assert!(room.toggle_scout(id, on).is_err());
+        assert!(!room.scout_ordered(id, on));
+    }
+
+    #[test]
+    fn a_scout_comes_home_with_a_report_or_is_taken() {
+        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
+        let (mut back, mut caught) = (false, false);
+        for _ in 0..200 {
+            let mut room = table();
+            room.game.kingdom_mut(on).soldiers = 77;
+            room.game.kingdom_mut(id).treasury = 10_000;
+            room.seat_mut(id).news.clear();
+            room.seat_mut(on).news.clear();
+            room.toggle_scout(id, on).unwrap();
+            room.game.increment_year();
+            room.resolve_missions();
+            let year = room.game.year;
+            assert!(room.seat(id).missions.is_empty());
+            match room.seat(id).news.as_slice() {
+                [News::Scout {
+                    at,
+                    outcome: Scouting::Back { garrison },
+                }] => {
+                    back = true;
+                    assert_eq!((*at, *garrison), (on, 77));
+                    let r = room.dossier(id, on).report.expect("a report");
+                    assert_eq!((r.year, r.garrison), (year, 77));
+                    assert!(room.seat(on).news.is_empty());
+                    assert!(room.dossier(id, on).caught.is_none());
+                }
+                [News::Scout {
+                    at,
+                    outcome: Scouting::Caught,
+                }] => {
+                    caught = true;
+                    assert_eq!(*at, on);
+                    assert!(room.dossier(id, on).report.is_none());
+                    assert_eq!(room.dossier(id, on).caught, Some(year));
+                    assert!(matches!(
+                        room.seat(on).news.as_slice(),
+                        [News::SpyCaught { by }] if *by == id
+                    ));
+                    let line = room.log.last().expect("a journal line");
+                    let heard = line.told_to(Some(Kingdoms::Germany));
+                    assert!(heard.contains("éclaireur de la France"), "{heard}");
+                    assert!(line.secret.is_none());
+                }
+                other => panic!("unexpected news {other:?}"),
+            }
+            if back && caught {
+                return;
+            }
+        }
+        panic!("both outcomes should show up in 200 draws (back {back}, caught {caught})");
+    }
+
+    #[test]
+    fn a_scout_finds_only_ruins_in_an_annexed_realm() {
+        let mut room = table();
+        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
+        room.toggle_scout(id, on).unwrap();
+        room.game.kingdom_mut(on).is_dead = true;
+        room.seat_mut(id).news.clear();
+        room.resolve_missions();
+        assert!(matches!(
+            room.seat(id).news.as_slice(),
+            [News::Scout {
+                outcome: Scouting::Gone,
+                ..
+            }]
+        ));
+        assert!(room.dossier(id, on).report.is_none());
+    }
+
+    #[test]
+    fn a_forecast_needs_a_report_and_the_report_ages_out() {
+        let mut room = table();
+        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
+        assert!(room.war_forecast(id, Some(on)).is_none());
+        assert!(room.war_forecast(id, None).is_some());
+        let year = room.game.year;
+        let report = Report::read(room.game.kingdom(on), year);
+        assert_eq!(report.spread(year), Some(0));
+        assert_eq!(report.spread(year + 1), Some(20));
+        assert_eq!(report.spread(year + 2), Some(40));
+        assert_eq!(report.spread(year + 3), None);
+        room.seat_mut(id).dossiers[on.index()].report = Some(report);
+        let fc = room.war_forecast(id, Some(on)).expect("a forecast");
+        assert_eq!((fc.target, fc.spread), (Some(on), 0));
+        for _ in 0..3 {
+            room.game.increment_year();
+        }
+        assert!(room.war_forecast(id, Some(on)).is_none());
     }
 }

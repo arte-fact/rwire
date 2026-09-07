@@ -333,7 +333,10 @@ fn room_page(t: T, journal: Journal, sheet: Option<Sheet>) -> ElementBuilder {
             id,
             campaign::party_name(target).to_string(),
             by(room::pick_target(), t.token, t.code, &[0xFF]),
-            war_sheet(t, id, target),
+            match target.filter(|_| !t.room.seat(id).attack) {
+                Some(o) => kingdom_sheet(t, id, o),
+                None => war_sheet(t, id, target),
+            },
         )),
         (_, None, None) => None,
     };
@@ -714,7 +717,7 @@ fn journal_line(e: &Entry, me: Option<Kingdoms>) -> ElementBuilder {
             el(El::Span)
                 .st([St::W05rem, St::H05rem, St::RoundedFull, St::FlexShrink0])
                 .st(if mine { [St::BgWarning] } else { [St::BgMuted] }),
-            el(El::Span).text(&e.text),
+            el(El::Span).text(e.told_to(me)),
         ])
 }
 
@@ -1383,7 +1386,7 @@ fn waiting_exterieur(t: T) -> ElementBuilder {
         let badge = if marching || room.is_computer(id) || room.seat(id).ready {
             Badge::primary("Prêt")
         } else {
-            Badge::default_badge("Guerre")
+            Badge::default_badge("Extérieur")
         };
         waiting_row(room, id, badge)
     });
@@ -1400,7 +1403,7 @@ fn waiting_exterieur(t: T) -> ElementBuilder {
         )
     } else {
         (
-            "Guerre",
+            "Extérieur",
             "Chaque seigneur donne ses ordres ; les armées marcheront quand tous seront prêts.",
         )
     };
@@ -1414,7 +1417,7 @@ fn waiting_exterieur(t: T) -> ElementBuilder {
             Text::caption(caption).muted().build(),
         ])
         .build()];
-    if let Some(list) = me.filter(|_| ready).map(|id| orders(t, id, false)) {
+    if let Some(list) = me.filter(|_| ready).map(|id| orders(t, id)) {
         body.push(list);
     }
     body.push(section("Royaumes", el(El::Div).append(rows)));
@@ -1422,36 +1425,36 @@ fn waiting_exterieur(t: T) -> ElementBuilder {
     Stack::column().gap(Gap::Md).children(body).build()
 }
 
-/// The expeditions `id` has ordered this year, one line each; while the
-/// orders are open, each can be struck off.
-fn orders(t: T, id: Kingdoms, open: bool) -> ElementBuilder {
-    let planned = &t.room.seat(id).planned;
-    let rows = planned.iter().enumerate().map(|(i, e)| {
-        let foe = e.target.map_or("Barbares", |o| o.name());
-        let mut cells = vec![el(El::Span).append([
-            el(El::Strong).text(foe),
-            txt(&format!(" · {}", hommes(e.soldiers))),
-        ])];
-        if open {
-            cells.push(Button::ghost("Retirer").size(ButtonSize::Sm).on_click(by(
-                room::withdraw(),
-                t.token,
-                t.code,
-                &[i as u8],
-            )));
-        }
+/// The orders `id` has given this year, one line each: the expeditions
+/// and the scouts on their way.
+fn orders(t: T, id: Kingdoms) -> ElementBuilder {
+    let seat = t.room.seat(id);
+    let line = |what: ElementBuilder| {
         el(El::Div)
             .st([
                 St::DisplayFlex,
-                St::JustifyBetween,
                 St::ItemsCenter,
                 St::GapSm,
                 St::PyXs,
                 St::TextSm,
             ])
-            .append(cells)
+            .append([what])
+    };
+    let expeditions = seat.planned.iter().map(|e| {
+        let foe = e.target.map_or("Barbares", |o| o.name());
+        line(el(El::Span).append([
+            el(El::Strong).text(foe),
+            txt(&format!(" · {}", hommes(e.soldiers))),
+        ]))
     });
-    let body = if planned.is_empty() {
+    let scouts = seat.missions.iter().map(|o| {
+        line(el(El::Span).append([
+            el(El::Strong).text("Éclaireur"),
+            txt(&format!(" · en {}", o.name())),
+        ]))
+    });
+    let rows: Vec<ElementBuilder> = expeditions.chain(scouts).collect();
+    let body = if rows.is_empty() {
         Text::caption("Aucune expédition cette année.")
             .muted()
             .build()
@@ -1994,6 +1997,41 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
                 )
             }
         }
+        News::Scout { at, outcome } => {
+            let o = room.game.kingdom(*at);
+            match outcome {
+                room::Scouting::Back { garrison } => news_line(
+                    Icon::Feather,
+                    Tone::Good,
+                    &format!("Votre éclaireur est rentré de {}", at.name()),
+                    &format!(
+                        "Il a vu {} ; le rapport vous attend à l'Extérieur",
+                        hommes_darmes(*garrison)
+                    ),
+                ),
+                room::Scouting::Caught => news_line(
+                    Icon::Skull,
+                    Tone::Bad,
+                    &format!("Votre éclaireur a été pris en {}", at.name()),
+                    &format!("{} sait désormais que vous l'observez", o.player_name),
+                ),
+                room::Scouting::Gone => news_line(
+                    Icon::Map,
+                    Tone::Neutral,
+                    &format!("Votre éclaireur est rentré de {} sans rapport", at.name()),
+                    "Il n'y a plus trouvé de cour : le royaume est annexé",
+                ),
+            }
+        }
+        News::SpyCaught { by } => {
+            let o = room.game.kingdom(*by);
+            news_line(
+                Icon::Shield,
+                Tone::Bad,
+                &format!("Un espion de la {} a été pris à votre cour", by.name()),
+                &format!("{} vous observe · l'homme a été pendu", o.full_title()),
+            )
+        }
         News::Elsewhere(fact) => {
             let line = match *fact {
                 Elsewhere::RulerDied { id, cause } => {
@@ -2005,6 +2043,23 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
                         o.name()
                     )
                 }
+                Elsewhere::Marched {
+                    by,
+                    on,
+                    victory,
+                    arpents,
+                } => format!(
+                    "Ailleurs : la {} a marché sur la {} · {}.",
+                    by.name(),
+                    on.name(),
+                    if !victory {
+                        "l'expédition y est anéantie".to_string()
+                    } else if arpents == 0 {
+                        "victoire sans un arpent".to_string()
+                    } else {
+                        format!("victoire, {} arpents pris", fmt(arpents))
+                    }
+                ),
                 Elsewhere::Annexed { id, by } => {
                     format!(
                         "Ailleurs : la {} est annexée par la {}.",
@@ -4100,9 +4155,8 @@ fn report_step(seat: &Seat) -> ElementBuilder {
                 St::PtMd,
             ])
             .text(&format!(
-                "Vous avez {} {} sujets taillables et corvéables à merci.",
-                room::delta_verb(change),
-                fmt(change.abs())
+                "Vous avez {}.",
+                room::subjects_delta(change, "vos")
             )),
     ));
 
@@ -4995,11 +5049,13 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-/// The war step: the ost as a stacked bar (what marches where, what stays),
-/// then the targets as tiles, the barbarians first. Touching a tile opens
-/// that target's sheet ([`war_sheet`]); a tile whose army is ordered says so
-/// and reopens its sheet to settle or withdraw it. The armies march once
-/// every seigneur has given their orders.
+/// The war step — the Extérieur, the only look at the other realms of the
+/// whole turn: the ost as a stacked bar (what marches where, what stays),
+/// then the table of the kingdoms, the barbarians first, each row saying
+/// what the heralds know and "?" for what stays inside the walls. Touching a
+/// row opens that target's sheet ([`war_sheet`]); a row whose army is
+/// ordered says so and reopens its sheet to settle or withdraw it. The armies
+/// march once every seigneur has given their orders.
 fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     let room = t.room;
     let k = room.game.kingdom(id);
@@ -5018,7 +5074,7 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
         .append([
             Text::new()
                 .variant(TextVariant::Heading3)
-                .content("Guerre")
+                .content("Extérieur")
                 .build(),
             el(El::Span)
                 .st([St::TextSm, St::TextMuted, St::TabularNums])
@@ -5036,10 +5092,11 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
                 ]),
         ]);
 
-    let tiles = [None]
+    let rows = [None]
         .into_iter()
         .chain(others.iter().map(|&o| Some(o)))
-        .map(|target| target_tile(t, id, target));
+        .map(|target| kingdom_row(t, id, target));
+    let returns = reports_returned(room, id);
     let hint = if k.soldiers < 1 {
         "Vous n'avez plus d'hommes d'armes."
     } else if year < 3 && left > 0 && garrison > 0 {
@@ -5049,22 +5106,234 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     } else if left < 1 {
         "Vos nobles ne peuvent mener davantage d'expéditions cette année. Toucher une armée rouvre son ordre."
     } else {
-        "Une expédition par tranche de 4 nobles, plus une. Toucher une cible règle son armée ; les armées marcheront toutes ensemble."
+        "Une expédition par tranche de 4 nobles, plus une. Toucher un royaume règle son armée ; les armées marcheront toutes ensemble."
     };
-    Stack::column()
-        .gap(Gap::Md)
-        .children([
-            title,
-            ost_bar(t, id, None),
-            section(
-                "Cibles",
-                el(El::Div)
-                    .st([St::DisplayGrid, St::GridCols3, St::GapSm])
-                    .append(tiles),
-            ),
-            Text::caption(hint).muted().build(),
-        ])
-        .build()
+    let mut children = vec![title, ost_bar(t, id, None)];
+    if !returns.is_empty() {
+        children.push(section(
+            "Rapports rentrés",
+            el(El::Div)
+                .st([St::DisplayFlex, St::FlexCol, St::GapSm])
+                .append(returns),
+        ));
+    }
+    children.push(section(
+        "Royaumes",
+        el(El::Div)
+            .st([St::DisplayFlex, St::FlexCol, St::GapSm])
+            .append(rows),
+    ));
+    children.push(Text::caption(hint).muted().build());
+    Stack::column().gap(Gap::Md).children(children).build()
+}
+
+/// The éclaireurs home this year, read as one arrives at the Extérieur:
+/// what each saw, or where he was taken.
+fn reports_returned(room: &Room, id: Kingdoms) -> Vec<ElementBuilder> {
+    let year = room.game.year;
+    let mut lines = Vec::new();
+    for on in KINGDOMS {
+        if on == id {
+            continue;
+        }
+        let d = room.dossier(id, on);
+        if let Some(r) = d.report.filter(|r| r.year == year) {
+            lines.push(news_line(
+                Icon::Feather,
+                Tone::Good,
+                &format!("Votre éclaireur est rentré de {}", on.name()),
+                &format!(
+                    "garnison {} · efficacité {} · {} sujets",
+                    fmt(r.garrison),
+                    r.efficiency,
+                    fmt(r.subjects())
+                ),
+            ));
+        }
+        if d.caught == Some(year) {
+            lines.push(news_line(
+                Icon::Skull,
+                Tone::Bad,
+                &format!("Votre éclaireur a été pris en {}", on.name()),
+                &format!(
+                    "{} sait désormais que vous l'observez",
+                    room.game.kingdom(on).full_title()
+                ),
+            ));
+        }
+    }
+    lines
+}
+
+/// Land as the heralds tell it: to the hundred.
+fn arpents_heard(surface: i32) -> i32 {
+    (surface + 50) / 100 * 100
+}
+
+/// What everyone heard of `id` in the last campaign: whom it marched on and
+/// how, what it lost.
+fn rumours_about(room: &Room, id: Kingdoms) -> Vec<String> {
+    let mut lines = Vec::new();
+    for r in &room.rumours {
+        if r.attacker == id {
+            let on = match r.target {
+                Some(o) => format!("la {}", o.name()),
+                None => "les Barbares".to_string(),
+            };
+            let how = if r.annexed {
+                "annexion".to_string()
+            } else if !r.victory {
+                "anéantie".to_string()
+            } else {
+                format!("+{} arp.", fmt(r.arpents))
+            };
+            lines.push(format!("a marché sur {on} en l'an {} · {how}", r.year));
+        } else if r.target == Some(id) && r.victory && r.arpents > 0 {
+            lines.push(format!(
+                "a cédé {} arp. à la {} en l'an {}",
+                fmt(r.arpents),
+                r.attacker.name(),
+                r.year
+            ));
+        }
+    }
+    lines
+}
+
+/// A kingdom's row at the Extérieur: its colour on the left; its name and
+/// seigneur, its lands as heard; "?" for its garrison and its people; the
+/// army ordered on it, or the rumours of the last campaign. Dimmed once no
+/// more army can be ordered, unless one already is.
+fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
+    let room = t.room;
+    let year = room.game.year;
+    let planned = room.planned_on(id, target).map(|(_, e)| e.soldiers);
+    // A kingdom's sheet always opens: there is always something to learn.
+    let enabled = target.is_some()
+        || planned.is_some()
+        || (room.expeditions_left(id) > 0 && room.garrison(id) > 0);
+    let scout = target.is_some_and(|o| room.scout_ordered(id, o));
+    let (name, land, known, rumours) = match target {
+        None => (
+            "Barbares".to_string(),
+            "terres sans fin ∞".to_string(),
+            "des bandes à la mesure de l'ost".to_string(),
+            Vec::new(),
+        ),
+        Some(o) => {
+            let k = room.game.kingdom(o);
+            (
+                format!(
+                    "{} · {}{}",
+                    o.name(),
+                    k.player_name,
+                    if room.is_computer(o) {
+                        " · ordinateur"
+                    } else {
+                        ""
+                    }
+                ),
+                if year < 3 {
+                    "dès l'an 3".to_string()
+                } else {
+                    format!("≈ {} arp.", fmt(arpents_heard(k.surface)))
+                },
+                match room.dossier(id, o).report {
+                    Some(r) => format!(
+                        "{} ⚔ · {} sujets · an {}",
+                        fmt(r.garrison),
+                        fmt(r.subjects()),
+                        r.year
+                    ),
+                    None => "? ⚔ · ? sujets".to_string(),
+                },
+                rumours_about(room, o),
+            )
+        }
+    };
+    let line = |left: ElementBuilder, right: ElementBuilder| {
+        el(El::Div)
+            .st([
+                St::DisplayFlex,
+                St::JustifyBetween,
+                St::ItemsBaseline,
+                St::GapSm,
+                St::MinW0,
+            ])
+            .append([left, right])
+    };
+    let first = line(
+        el(El::Span)
+            .st([St::TextSm, St::FontSemibold, St::LeadingTight, St::Truncate])
+            .text(&name),
+        el(El::Span)
+            .st([
+                St::TextXs,
+                St::TextMuted,
+                St::TabularNums,
+                St::WhitespaceNowrap,
+            ])
+            .text(&land),
+    );
+    let mut badges = Vec::new();
+    if scout {
+        badges.push(Badge::default_badge("éclaireur ✓").build());
+    }
+    if let Some(n) = planned {
+        badges.push(Badge::primary(format!("{} ✓", hommes(n))).build());
+    }
+    let second = line(
+        el(El::Span)
+            .st([St::TextXs, St::TextMuted, St::TabularNums, St::Truncate])
+            .text(&known),
+        el(El::Span)
+            .st([St::DisplayFlex, St::GapXs, St::FlexShrink0])
+            .append(badges),
+    );
+    let mut body = vec![first, second];
+    body.extend(rumours.iter().map(|r| {
+        el(El::Div)
+            .st([St::TextXs, St::TextMuted, St::Italic, St::Truncate])
+            .text(r)
+    }));
+    let mut tokens = vec![
+        St::DisplayFlex,
+        St::FlexCol,
+        St::GapXs,
+        St::WFull,
+        St::PySm,
+        St::PxMd,
+        St::RoundedMd,
+        St::TextLeft,
+        St::BgSurface,
+        St::TextDefault,
+        St::FontInheritAll,
+        St::BorderL3Party,
+    ];
+    tokens.push(if planned.is_some() || scout {
+        St::BorderAccent
+    } else {
+        St::BorderDefault
+    });
+    tokens.push(if enabled {
+        St::CursorPointer
+    } else {
+        St::Opacity50
+    });
+    let mut row = el(El::Button)
+        .st(tokens)
+        .style(Style::new().set("--kc", campaign::party_color(target)))
+        .at(At::Type, Av::Button)
+        .append(body);
+    if enabled {
+        row = row.on(
+            Ev::Click,
+            by(room::pick_target(), t.token, t.code, &[target_byte(target)]),
+        );
+    } else {
+        row = row.bool_attr(At::Disabled);
+    }
+    row
 }
 
 /// The wire byte naming a target: 0 = the barbarians, else the kingdom number.
@@ -5091,95 +5360,15 @@ fn war_target(t: T, me: Option<Kingdoms>) -> Option<(Kingdoms, Option<Kingdoms>)
     Some((id, target))
 }
 
-/// A target's tile: the party's colour on top, the garrison it holds (or the
-/// army ordered on it), its name and its lands. Dimmed once no more army can
-/// be ordered, unless one already is.
-fn target_tile(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
-    let room = t.room;
-    let year = room.game.year;
-    let planned = room.planned_on(id, target).map(|(_, e)| e.soldiers);
-    let enabled = planned.is_some()
-        || (room.expeditions_left(id) > 0
-            && room.garrison(id) > 0
-            && (target.is_none() || year >= 3));
-    let (name, badge, sub) = match target {
-        None => (
-            "Barbares",
-            planned.map_or_else(|| "∞".to_string(), hommes),
-            "terres sans fin".to_string(),
-        ),
-        Some(o) => {
-            let k = room.game.kingdom(o);
-            (
-                o.name(),
-                planned.map_or_else(|| format!("{} ⚔", fmt(k.soldiers)), hommes),
-                if year < 3 {
-                    "dès l'an 3".to_string()
-                } else {
-                    format!("{} arp.", fmt(k.surface))
-                },
-            )
-        }
-    };
-    let badge = if planned.is_some() {
-        Badge::primary(format!("{badge} ✓"))
-    } else {
-        Badge::new().text(badge)
-    };
-    let mut tokens = vec![
-        St::DisplayFlex,
-        St::FlexCol,
-        St::ItemsCenter,
-        St::GapXs,
-        St::PSm,
-        St::RoundedMd,
-        St::TextCenter,
-        St::BgSurface,
-        St::TextDefault,
-        St::FontInheritAll,
-        St::BorderT3Party,
-    ];
-    tokens.push(if planned.is_some() {
-        St::BorderAccent
-    } else {
-        St::BorderDefault
-    });
-    tokens.push(if enabled {
-        St::CursorPointer
-    } else {
-        St::Opacity50
-    });
-    let mut tile = el(El::Button)
-        .st(tokens)
-        .style(Style::new().set("--kc", campaign::party_color(target)))
-        .at(At::Type, Av::Button)
-        .append([
-            badge.build(),
-            el(El::Div)
-                .st([St::TextSm, St::FontSemibold, St::LeadingTight])
-                .text(name),
-            el(El::Div)
-                .st([St::TextXs, St::TextMuted, St::TabularNums])
-                .text(&sub),
-        ]);
-    if enabled {
-        tile = tile.on(
-            Ev::Click,
-            by(room::pick_target(), t.token, t.code, &[target_byte(target)]),
-        );
-    } else {
-        tile = tile.bool_attr(At::Disabled);
-    }
-    tile
-}
-
 /// The ost as a stacked bar over every man of arms: one segment per army
 /// ordered, in its target's colour, the garrison hatched. With `live`, the
 /// segment of the target being settled follows the sheet's slider (its
 /// channel, the men it stands at, its maximum).
 fn ost_bar(t: T, id: Kingdoms, live: Option<(Option<Kingdoms>, u16, i32, i32)>) -> ElementBuilder {
     let room = t.room;
-    let total = room.game.kingdom(id).soldiers.max(1);
+    let soldiers = room.game.kingdom(id).soldiers;
+    // The bar's geometry needs a width; the figures show the true headcount.
+    let total = soldiers.max(1);
     let fixed: Vec<(Option<Kingdoms>, i32)> = room
         .seat(id)
         .planned
@@ -5282,7 +5471,7 @@ fn ost_bar(t: T, id: Kingdoms, live: Option<(Option<Kingdoms>, u16, i32, i32)>) 
             )));
             (
                 el(El::Span).text(&fmt(marching)),
-                el(El::Span).text(&fmt(total - marching)),
+                el(El::Span).text(&fmt(soldiers - marching)),
             )
         }
     };
@@ -5301,7 +5490,7 @@ fn ost_bar(t: T, id: Kingdoms, live: Option<(Option<Kingdoms>, u16, i32, i32)>) 
                     Some((_, ch, ..)) => el(El::Span)
                         .text(&fmt(total - marching))
                         .live_remainder_grouped((total - others) as u32, &[ch]),
-                    None => el(El::Span).text(&fmt(total - marching)),
+                    None => el(El::Span).text(&fmt(soldiers - marching)),
                 },
                 txt(" garnison"),
             ]),
@@ -5385,12 +5574,13 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
     let total = k.soldiers.max(1);
     let planned = room.planned_on(id, target);
     let max = room.available(id, target);
+    let report = target.and_then(|o| room.dossier(id, o).report);
     let fc = seat
         .forecast
         .as_ref()
         .filter(|f| f.target == target && f.max == max.max(1))
         .cloned()
-        .unwrap_or_else(|| room.war_forecast(id, target));
+        .or_else(|| room.war_forecast(id, target));
     let ch = rwire::builder::next_live_channel();
     let value = planned
         .map(|(_, e)| e.soldiers)
@@ -5405,21 +5595,34 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
         ),
         Some(o) => {
             let d = room.game.kingdom(o);
-            (
-                format!(
-                    "{} · garnison {} ⚔ · efficacité {} · {} arpents",
-                    d.player_name,
-                    fmt(d.soldiers),
-                    d.soldiers_efficiency,
-                    fmt(d.surface)
+            let rule = "L'armée force la garnison, puis marche le long des terres : les gens rencontrés se rallient une fois sur trois et se battent sinon — serfs et marchands en milice, les nobles avec l'ardeur du royaume. Prendre toutes les terres annexe le royaume.";
+            match report {
+                Some(r) => (
+                    format!(
+                        "{} · {} arpents · {}",
+                        d.player_name,
+                        fmt(r.surface),
+                        report_dated(r.year, room.game.year)
+                    ),
+                    rule,
+                    vec![
+                        format!("garnison {}", fmt(r.garrison)),
+                        format!("efficacité {}", r.efficiency),
+                        format!("annexion à {}", fmt(r.surface)),
+                    ],
                 ),
-                "L'armée force la garnison, puis marche le long des terres : les gens rencontrés se rallient une fois sur trois et se battent sinon — serfs et marchands en milice, les nobles avec l'ardeur du royaume. Prendre toutes les terres annexe le royaume.",
-                vec![
-                    format!("garnison {}", fmt(d.soldiers)),
-                    format!("annexion à {}", fmt(d.surface)),
-                    "brûle 1 bâtiment sur 3".to_string(),
-                ],
-            )
+                None => {
+                    let land = fmt(arpents_heard(d.surface));
+                    (
+                        format!("{} · ≈ {land} arpents · aucun rapport", d.player_name),
+                        rule,
+                        vec![
+                            format!("annexion vers {land}"),
+                            "brûle 1 bâtiment sur 3".to_string(),
+                        ],
+                    )
+                }
+            }
         }
     };
     let mut body = vec![
@@ -5438,75 +5641,6 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
     }
     body.push(ost_bar(t, id, Some((target, ch, value, max))));
 
-    // The register: the tables follow the slider by interpolation.
-    let lookup = |f: &dyn Fn(&empire_lib::front::Forecast) -> i32| -> Vec<i32> {
-        fc.rows.iter().map(f).collect()
-    };
-    let at = |table: &[i32]| -> i32 {
-        // The table's value at the slider's initial position.
-        let i = fc
-            .sent
-            .iter()
-            .position(|&n| n >= value)
-            .unwrap_or(fc.sent.len() - 1);
-        table[i]
-    };
-    let arp_lo = lookup(&|r| r.arpents.0);
-    let arp_hi = lookup(&|r| r.arpents.1);
-    let lost_lo = lookup(&|r| -r.lost.0);
-    let lost_hi = lookup(&|r| -r.lost.1);
-    let wins = lookup(&|r| r.victories * 100 / room::FORECAST_DRAWS as i32);
-    let range = |lo: &[i32], hi: &[i32], signed: bool, unit: &str| {
-        let span = |table: &[i32]| {
-            let e = el(El::Span).text(&if signed {
-                delta(at(table))
-            } else {
-                fmt(at(table))
-            });
-            if signed {
-                e.live_lookup_signed(ch, table)
-            } else {
-                e.live_lookup(ch, table)
-            }
-        };
-        vec![txt("≈ "), span(lo), txt(" … "), span(hi), txt(unit)]
-    };
-    let forces = match target {
-        Some(o) => {
-            let d = room.game.kingdom(o).soldiers.max(0);
-            let axis = max.max(d).max(1);
-            war_cell(
-                "Forces",
-                vec![
-                    el(El::Span).text(&fmt(value)).live_text_grouped(ch),
-                    txt(&format!(" contre {}", fmt(d))),
-                ],
-                Some(gauge([
-                    gauge_tick(d as f64 / axis as f64),
-                    el(El::Div)
-                        .st([St::GaugeSpan, St::BgAccent])
-                        .style(Style::new().set("left", "0").width(&pct_of(value, axis)))
-                        .live_span(
-                            LiveSum {
-                                base: 0,
-                                terms: Vec::new(),
-                            },
-                            along(ch, value, 1, max, &|n| n),
-                            (0, axis),
-                            (0, axis),
-                        ),
-                ])),
-            )
-        }
-        None => war_cell(
-            "Forces",
-            vec![
-                el(El::Span).text(&fmt(value)).live_text_grouped(ch),
-                txt(" contre des bandes"),
-            ],
-            None,
-        ),
-    };
     let after = war_cell(
         "Garnison après",
         vec![
@@ -5532,55 +5666,63 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                 (0, total),
             )])),
     );
-    let last = match target {
-        Some(o) => {
-            let surface = room.game.kingdom(o).surface;
-            let reach = fc
-                .sent
-                .iter()
-                .zip(&arp_hi)
-                .find(|(_, &hi)| hi >= surface)
-                .map(|(&n, _)| n);
-            let figure = match reach {
-                Some(n) => vec![el(El::Span).live_switch(ch, &[n as u32]).append([
-                    hidden_unless(value < n, el(El::Span).text("hors de portée")),
-                    hidden_unless(value >= n, el(El::Span).text("à portée")),
-                ])],
-                None => vec![txt("hors de portée")],
-            };
-            war_cell("Annexion", figure, None)
+    let register = el(El::Div).st([
+        St::DisplayGrid,
+        St::GridCols3,
+        St::GapXMd,
+        St::GapYSm,
+        St::PtSm,
+        St::BorderT,
+    ]);
+    if let Some(fc) = &fc {
+        let against = match report {
+            Some(r) => format!(" contre {}", fmt(r.garrison)),
+            None => " contre des bandes".to_string(),
+        };
+        body.push(register.append(war_register(fc, ch, value, after, &against)));
+        if target.is_some() {
+            body.push(
+                el(El::Div)
+                    .st([St::TextSm, St::TextMuted])
+                    .text(spread_text(fc.spread)),
+            );
         }
-        None => war_cell("Butin", vec![txt("terres seules")], None),
-    };
-    body.push(
-        el(El::Div)
-            .st([
-                St::DisplayGrid,
-                St::GridCols3,
-                St::GapXMd,
-                St::GapYSm,
-                St::PtSm,
-                St::BorderT,
-            ])
-            .append([
-                forces,
-                war_cell("Terres prises", range(&arp_lo, &arp_hi, false, ""), None),
-                war_cell("Hommes perdus", range(&lost_lo, &lost_hi, true, ""), None),
-                after,
-                war_cell(
-                    "Victoire",
-                    vec![
-                        txt("≈ "),
-                        el(El::Span)
-                            .text(&at(&wins).to_string())
-                            .live_lookup(ch, &wins),
-                        txt(" %"),
-                    ],
-                    None,
-                ),
-                last,
+    } else if let Some(o) = target {
+        let unknown = |title: &str, unit: &str| {
+            war_cell(title, vec![txt(format!("— {unit}").trim_end())], None)
+        };
+        body.push(register.append([
+            war_cell(
+                "Forces",
+                vec![
+                    el(El::Span).text(&fmt(value)).live_text_grouped(ch),
+                    txt(" contre ???"),
+                ],
+                None,
+            ),
+            unknown("Terres prises", "arpents"),
+            unknown("Hommes perdus", "hommes"),
+            after,
+            unknown("Victoire", "%"),
+            unknown("Annexion", ""),
+        ]));
+        let blind = match report {
+            Some(r) => format!(
+                "Votre rapport sur la {} date de l'an {} : trop vieux pour un pronostic. ",
+                o.name(),
+                r.year
+            ),
+            None => format!("Vous ne savez rien de la garnison de la {}. ", o.name()),
+        };
+        body.push(
+            el(El::Div).st([St::TextSm, St::TextMuted]).append([
+                txt(&blind),
+                el(El::Span)
+                    .st([St::Italic])
+                    .text("« Qui ne connaît ni l'autre ni lui-même perdra toutes les batailles. »"),
             ]),
-    );
+        );
+    }
 
     let foe = match target {
         None => "contre les Barbares".to_string(),
@@ -5639,6 +5781,272 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
         by(room::attack(), t.token, t.code, &[target_byte(target)]),
         body,
     )
+}
+
+/// The six cells of a foretold war (the barbarians, for now): the tables
+/// follow the slider by interpolation. `after` is the viewer's own
+/// "garrison after" cell, foretold or not.
+fn war_register(
+    fc: &room::WarForecast,
+    ch: u16,
+    value: i32,
+    after: ElementBuilder,
+    against: &str,
+) -> [ElementBuilder; 6] {
+    let lookup = |f: &dyn Fn(&empire_lib::front::Forecast) -> i32| -> Vec<i32> {
+        fc.rows.iter().map(f).collect()
+    };
+    let at = |table: &[i32]| -> i32 {
+        // The table's value at the slider's initial position.
+        let i = fc
+            .sent
+            .iter()
+            .position(|&n| n >= value)
+            .unwrap_or(fc.sent.len() - 1);
+        table[i]
+    };
+    let arp_lo = lookup(&|r| r.arpents.0);
+    let arp_hi = lookup(&|r| r.arpents.1);
+    let lost_lo = lookup(&|r| -r.lost.0);
+    let lost_hi = lookup(&|r| -r.lost.1);
+    let wins = lookup(&|r| r.victories * 100 / room::FORECAST_DRAWS as i32);
+    let annexations = lookup(&|r| r.annexations * 100 / room::FORECAST_DRAWS as i32);
+    let range = |lo: &[i32], hi: &[i32], signed: bool, unit: &str| {
+        let span = |table: &[i32]| {
+            let e = el(El::Span).text(&if signed {
+                delta(at(table))
+            } else {
+                fmt(at(table))
+            });
+            if signed {
+                e.live_lookup_signed(ch, table)
+            } else {
+                e.live_lookup(ch, table)
+            }
+        };
+        vec![txt("≈ "), span(lo), txt(" … "), span(hi), txt(unit)]
+    };
+    [
+        war_cell(
+            "Forces",
+            vec![
+                el(El::Span).text(&fmt(value)).live_text_grouped(ch),
+                txt(against),
+            ],
+            None,
+        ),
+        war_cell("Terres prises", range(&arp_lo, &arp_hi, false, ""), None),
+        war_cell("Hommes perdus", range(&lost_lo, &lost_hi, true, ""), None),
+        after,
+        war_cell(
+            "Victoire",
+            vec![
+                txt("≈ "),
+                el(El::Span)
+                    .text(&at(&wins).to_string())
+                    .live_lookup(ch, &wins),
+                txt(" %"),
+            ],
+            None,
+        ),
+        if fc.target.is_some() {
+            war_cell(
+                "Annexion",
+                vec![
+                    txt("≈ "),
+                    el(El::Span)
+                        .text(&at(&annexations).to_string())
+                        .live_lookup(ch, &annexations),
+                    txt(" %"),
+                ],
+                None,
+            )
+        } else {
+            war_cell("Butin", vec![txt("terres seules")], None)
+        },
+    ]
+}
+
+/// "éclaireur de cette année" / "éclaireur de l'an N".
+fn report_dated(report_year: i32, year: i32) -> String {
+    if report_year == year {
+        "éclaireur de cette année".to_string()
+    } else {
+        format!("éclaireur de l'an {report_year}")
+    }
+}
+
+/// What the forecast's band owes to the report's age.
+fn spread_text(spread: i32) -> &'static str {
+    match spread {
+        0 => "Rapport de l'année : la fourchette est celle du sort des armes, rien d'autre.",
+        20 => "Un rapport d'un an : le pronostic tient à ±20 %.",
+        _ => "Un rapport de deux ans : le pronostic tient à ±40 %.",
+    }
+}
+
+/// A kingdom's sheet: what is known of it, dated, and what is not with the
+/// way to learn it; the rumours of the year; then the three gestures —
+/// send an éclaireur, (an agent, later), attack.
+fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
+    let room = t.room;
+    let year = room.game.year;
+    let k = room.game.kingdom(o);
+    let d = room.dossier(id, o);
+    let treasury = room.game.kingdom(id).treasury;
+    let ordered = room.scout_ordered(id, o);
+    let planned = room.planned_on(id, o.into()).map(|(_, e)| e.soldiers);
+    let land = fmt(arpents_heard(k.surface));
+    let sub = match d.report {
+        Some(r) => format!(
+            "{} · ≈ {land} arpents · d'après votre {}",
+            k.player_name,
+            report_dated(r.year, year)
+        ),
+        None => format!("{} · ≈ {land} arpents · aucun rapport", k.player_name),
+    };
+    let mut body = vec![subtitle(vec![txt(&sub)])];
+
+    let dated = |r: &room::Report| format!(" · an {}", r.year);
+    let cells = match d.report {
+        Some(r) => vec![
+            war_cell(
+                "Garnison",
+                vec![txt(&format!("{} ⚔{}", fmt(r.garrison), dated(&r)))],
+                None,
+            ),
+            war_cell(
+                "Efficacité de l'ost",
+                vec![txt(&format!("{}{}", r.efficiency, dated(&r)))],
+                None,
+            ),
+            war_cell(
+                "Nobles · marchands · serfs",
+                vec![txt(&format!(
+                    "{} · {} · {}",
+                    fmt(r.nobles),
+                    fmt(r.merchants),
+                    fmt(r.serfs)
+                ))],
+                None,
+            ),
+            war_cell(
+                "Terres",
+                vec![txt(&format!("{} arpents{}", fmt(r.surface), dated(&r)))],
+                None,
+            ),
+        ],
+        None => [
+            "Garnison",
+            "Efficacité de l'ost",
+            "Nobles · marchands · serfs",
+        ]
+        .into_iter()
+        .map(|l| war_cell(l, vec![txt("? ? ?")], None))
+        .chain([war_cell(
+            "Terres",
+            vec![txt(&format!("≈ {land} arpents"))],
+            None,
+        )])
+        .collect(),
+    };
+    body.push(
+        el(El::Div)
+            .st([
+                St::DisplayGrid,
+                St::GridCols2,
+                St::GapXMd,
+                St::GapYSm,
+                St::PtSm,
+                St::BorderT,
+            ])
+            .append(cells),
+    );
+    let age = match d.report {
+        Some(r) => match r.spread(year) {
+            Some(0) => "Rapport de l'année : le pronostic ne tient qu'au sort des armes.".to_string(),
+            Some(p) => format!(
+                "Un rapport {} : le pronostic tient à ±{p} %.",
+                if p == 20 { "d'un an" } else { "de deux ans" }
+            ),
+            None => format!(
+                "Un rapport de {} ans : trop vieux pour un pronostic.",
+                year - r.year
+            ),
+        },
+        None => "Un éclaireur rapporte la garnison, l'efficacité et les classes ; il coûte 150 francs et rentre l'an prochain.".to_string(),
+    };
+    body.push(el(El::Div).st([St::TextSm, St::TextMuted]).text(&age));
+
+    let mut year_lines: Vec<ElementBuilder> = rumours_about(room, o)
+        .iter()
+        .map(|r| {
+            el(El::Div)
+                .st([St::TextSm])
+                .text(&format!("⚔ {}", capitalize(r)))
+        })
+        .collect();
+    if let Some(y) = d.caught {
+        let when = if y == year {
+            "cette année".to_string()
+        } else {
+            format!("en l'an {y}")
+        };
+        year_lines.push(el(El::Div).st([St::TextSm, St::TextError]).text(&format!(
+            "✕ Votre éclaireur y a été pris {when} · {} sait que vous l'observez",
+            k.player_name
+        )));
+    }
+    if !year_lines.is_empty() {
+        body.push(section(
+            "Ces derniers temps",
+            el(El::Div)
+                .st([St::DisplayFlex, St::FlexCol, St::GapXs])
+                .append(year_lines),
+        ));
+    }
+
+    let scout_label = if ordered {
+        "Rappeler l'éclaireur · 150 francs rendus".to_string()
+    } else {
+        format!("Envoyer un éclaireur · {} francs", room::SCOUT_PRICE)
+    };
+    body.push(
+        Button::secondary(scout_label)
+            .size(ButtonSize::Lg)
+            .full_width(true)
+            .disabled(!ordered && treasury < room::SCOUT_PRICE)
+            .on_click(by(room::scout(), t.token, t.code, &[])),
+    );
+    if !ordered && treasury < room::SCOUT_PRICE {
+        body.push(Text::caption("Le trésor ne suffit pas.").muted().build());
+    }
+    let cannot = if year < 3 {
+        Some("Les autres royaumes ne peuvent être attaqués qu'à partir de la 3ème année.")
+    } else if planned.is_none() && room.game.kingdom(id).soldiers < 1 {
+        Some("Vous n'avez plus d'hommes d'armes.")
+    } else if planned.is_none() && room.garrison(id) < 1 {
+        Some("Tous vos hommes d'armes sont déjà en campagne.")
+    } else if planned.is_none() && room.expeditions_left(id) < 1 {
+        Some("Vos nobles ne peuvent mener davantage d'expéditions cette année.")
+    } else {
+        None
+    };
+    let attack_label = match planned {
+        Some(n) => format!("Régler l'armée · {}", hommes(n)),
+        None => "Attaquer".to_string(),
+    };
+    body.push(
+        Button::destructive(attack_label)
+            .size(ButtonSize::Lg)
+            .full_width(true)
+            .disabled(cannot.is_some())
+            .on_click(by(room::open_attack(), t.token, t.code, &[])),
+    );
+    if let Some(why) = cannot {
+        body.push(Text::caption(why).muted().build());
+    }
+    Stack::column().gap(Gap::Sm).children(body).build()
 }
 
 // ---------------------------------------------------------------------------
@@ -5704,6 +6112,15 @@ fn end_turn(t: T, id: Kingdoms) -> ElementBuilder {
 /// "1 homme" / "12 hommes".
 pub fn hommes(n: i32) -> String {
     format!("{} homme{}", fmt(n), if n.abs() == 1 { "" } else { "s" })
+}
+
+/// "1 homme d'armes" / "34 hommes d'armes".
+pub fn hommes_darmes(n: i32) -> String {
+    if n == 1 {
+        "1 homme d'armes".to_string()
+    } else {
+        format!("{} hommes d'armes", fmt(n))
+    }
 }
 
 /// 12345 → "12 345"

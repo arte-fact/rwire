@@ -1005,6 +1005,7 @@ define_token_enum! {
         MxNegMd = 0x382 => "margin-inline:calc(-1 * var(--S4))",
         /// A party's colour as a thick rule on top (the inline `--kc`).
         BorderT3Party = 0x383 => "border-top:3px solid var(--kc)",
+        BorderL3Party = 0x387 => "border-left:3px solid var(--kc)",
         /// A stacked bar: a flat strip whose segments ([`St::BarSeg`]) set `left`/`width`.
         Bar = 0x384 => "position:relative;height:8px;border-radius:2px;overflow:hidden;background:var(--c)",
         BarSeg = 0x385 => "position:absolute;top:0;bottom:0",

@@ -34,6 +34,32 @@ fn party_the(p: Party) -> String {
     }
 }
 
+/// Whether `me` stood on this front — its figures are theirs to read. The
+/// others hear who marched on whom and what land changed hands, never how
+/// many men: a campaign told in full would be a free scout's report on
+/// everyone every year.
+fn on_field(b: &Fought, me: Option<Kingdoms>) -> bool {
+    me.is_some_and(|m| b.target == Some(m) || b.armies().iter().any(|a| a.attacker == m))
+}
+
+/// "10 008 arpents" on the viewer's fronts, "≈ 10 000 arpents" elsewhere.
+fn arpents_told(n: i32, known: bool) -> String {
+    if known {
+        format!("{} arpents", fmt(n))
+    } else {
+        format!("≈ {} arpents", fmt(arpents_heard(n)))
+    }
+}
+
+/// "12 hommes", or "? hommes" for what stays inside the walls.
+fn hommes_heard(n: i32, known: bool) -> String {
+    if known {
+        hommes(n)
+    } else {
+        "? hommes".to_string()
+    }
+}
+
 /// Fixed height of a row in the order of battle, in the SVG's units (one row
 /// is 4.5rem; the lines are drawn against a stretched viewBox).
 const OB_ROW: f64 = 10.0;
@@ -285,6 +311,7 @@ fn order_of_battle(
             .filter(|(_, army)| army.attacker == a)
             .collect();
         let sent: i32 = mine.iter().map(|(_, a)| a.sent).sum();
+        let known = mine.iter().all(|(i, _)| on_field(&room.battles[*i], me));
         let all_told = mine.iter().all(|(i, _)| replay.settled(*i));
         let won: i32 = mine
             .iter()
@@ -297,9 +324,12 @@ fn order_of_battle(
             el(El::Span)
                 .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
                 .append(
-                    [Some(el(El::Span).text(&hommes(sent))), you(Some(a))]
-                        .into_iter()
-                        .flatten(),
+                    [
+                        Some(el(El::Span).text(&hommes_heard(sent, known))),
+                        you(Some(a)),
+                    ]
+                    .into_iter()
+                    .flatten(),
                 ),
         ]);
         if all_told {
@@ -323,16 +353,18 @@ fn order_of_battle(
             next == Some(i),
         )];
         if target.is_some() {
+            let garrison = if on_field(b, me) {
+                fmt(r.garrison_start)
+            } else {
+                "?".to_string()
+            };
             lines.push(
                 el(El::Span)
                     .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
                     .append(
                         [
                             you(target),
-                            Some(
-                                el(El::Span)
-                                    .text(&format!("{} en garnison", fmt(r.garrison_start))),
-                            ),
+                            Some(el(El::Span).text(&format!("{garrison} en garnison"))),
                         ]
                         .into_iter()
                         .flatten(),
@@ -340,14 +372,22 @@ fn order_of_battle(
             );
         }
         lines.push(el(El::Span).text(&match target {
-            Some(_) => format!(
-                "{} arpents",
-                fmt(r.armies.iter().map(|a| a.line.arpents).sum::<i32>())
+            Some(_) => arpents_told(
+                r.armies.iter().map(|a| a.line.arpents).sum::<i32>(),
+                on_field(b, me),
             ),
             None => "terres sans fin".to_string(),
         }));
         if let Some(by) = annexed {
             lines.push(verdict(format!("annexée par la {}", by.name()), true));
+        } else if target.is_some() && replay.settled(i) {
+            // The defender's outcome, as public as the attackers' land.
+            let taken = r.spoils().arpents;
+            lines.push(if taken > 0 {
+                verdict(format!("−{} arpents", fmt(taken)), true)
+            } else {
+                verdict("a tenu".to_string(), false)
+            });
         }
         name_row(target, i, true).append(lines)
     });
@@ -533,6 +573,8 @@ struct Gauge<'a> {
     start: i32,
     /// The defender's side reads right-to-left.
     right: bool,
+    /// The viewer stood on this front; else the figures read "?".
+    known: bool,
 }
 
 impl Gauge<'_> {
@@ -544,9 +586,15 @@ impl Gauge<'_> {
             now,
             start,
             right,
+            known,
         } = self;
         let dead = now <= 0;
         let share = pct(now as i64, start as i64);
+        let figures = if known {
+            format!("{} / {}", fmt(now.max(0)), fmt(start))
+        } else {
+            "? / ?".to_string()
+        };
         el(El::Div)
             .st([St::MinW0])
             .style(Style::new().set("--kc", party_color(party)))
@@ -585,9 +633,7 @@ impl Gauge<'_> {
                                 .flatten(),
                             ),
                         mono(&format!(
-                            "{} / {}{}",
-                            fmt(now.max(0)),
-                            fmt(start),
+                            "{figures}{}",
                             if dead && start > 0 { " ✗" } else { "" }
                         )),
                     ]),
@@ -626,6 +672,7 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
     let r = &b.result;
     let round = replay.frame(b);
     let target = b.target;
+    let known = on_field(b, me);
     let attackers = r.armies.iter().zip(&round.armies).map(|(a, s)| {
         Gauge {
             party: Some(a.attacker),
@@ -634,12 +681,14 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
             now: s.men,
             start: a.sent,
             right: false,
+            known,
         }
         .build(me)
     });
+    // An empty garrison is a secret too: the others see a garrison.
     let garrison_kind = match (target, r.garrison_start, round.garrison) {
         (None, _, _) => "bande",
-        (Some(_), 0, _) => "sans garnison",
+        (Some(_), 0, _) if known => "sans garnison",
         (Some(_), _, 0) => "garnison balayée",
         _ => "garnison",
     };
@@ -650,6 +699,7 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
         now: round.garrison,
         start: r.garrison_start,
         right: true,
+        known,
     }
     .build(me)];
     let column = |g: Vec<ElementBuilder>| {
@@ -698,7 +748,7 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
                 .text("La garnison est balayée — victoire acquise"),
         );
     }
-    body.push(march(room, b, round));
+    body.push(march(room, b, round, known));
     el(El::Div)
         .st([St::DisplayFlex, St::FlexCol, St::GapMd])
         .append(body)
@@ -706,14 +756,14 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
 
 /// The realm under attack: each army's march along its share of it, with
 /// what it takes as it goes.
-fn march(room: &Room, b: &Fought, round: &Round) -> ElementBuilder {
+fn march(room: &Room, b: &Fought, round: &Round, known: bool) -> ElementBuilder {
     let r = &b.result;
     let target = b.target;
     let taken: i32 = round.armies.iter().map(|s| s.advance).sum();
     let total = match target {
         Some(_) => format!(
-            "{} arpents · ",
-            fmt(r.armies.iter().map(|a| a.line.arpents).sum::<i32>())
+            "{} · ",
+            arpents_told(r.armies.iter().map(|a| a.line.arpents).sum::<i32>(), known)
         ),
         None => String::new(),
     };
@@ -740,7 +790,7 @@ fn march(room: &Room, b: &Fought, round: &Round) -> ElementBuilder {
         .armies
         .iter()
         .zip(&round.armies)
-        .map(|(a, s)| army_march(room, a, s, n, target.is_some()));
+        .map(|(a, s)| army_march(room, a, s, n, target.is_some(), known));
     el(El::Div)
         .st([St::DisplayFlex, St::FlexCol, St::GapSm])
         .append([header])
@@ -748,19 +798,27 @@ fn march(room: &Room, b: &Fought, round: &Round) -> ElementBuilder {
 }
 
 /// One army's march: its share of the realm as a bar filling with the
-/// arpents taken, and under it what it took — goods, people, buildings. On
-/// the barbarians' endless lands the bar spans what the band was worth and
-/// no total is named.
-fn army_march(room: &Room, a: &Army, s: &Stand, n: usize, bounded: bool) -> ElementBuilder {
+/// arpents taken, and under it what it took — goods, people, buildings, for
+/// the viewer's own fronts. On the barbarians' endless lands the bar spans
+/// what the band was worth and no total is named.
+fn army_march(
+    room: &Room,
+    a: &Army,
+    s: &Stand,
+    n: usize,
+    bounded: bool,
+    known: bool,
+) -> ElementBuilder {
     let len = a.line.arpents.max(1) as i64;
     let x = s.advance.clamp(0, a.line.arpents) as i64;
+    let line = arpents_told(a.line.arpents, known);
     let share = match (bounded, n) {
         (false, _) => String::new(),
-        (true, 1) => format!("{} arpents · ", fmt(a.line.arpents)),
-        (true, 2) => format!("½ · {} arpents · ", fmt(a.line.arpents)),
-        (true, 3) => format!("⅓ · {} arpents · ", fmt(a.line.arpents)),
-        (true, 4) => format!("¼ · {} arpents · ", fmt(a.line.arpents)),
-        (true, n) => format!("1/{n} · {} arpents · ", fmt(a.line.arpents)),
+        (true, 1) => format!("{line} · "),
+        (true, 2) => format!("½ · {line} · "),
+        (true, 3) => format!("⅓ · {line} · "),
+        (true, 4) => format!("¼ · {line} · "),
+        (true, n) => format!("1/{n} · {line} · "),
     };
     let header = el(El::Div)
         .st([
@@ -810,7 +868,7 @@ fn army_march(room: &Room, a: &Army, s: &Stand, n: usize, bounded: bool) -> Elem
         (buildings_fr(&spoils), St::TextMuted),
     ]
     .into_iter()
-    .filter(|(v, _)| !v.is_empty())
+    .filter(|(v, _)| known && !v.is_empty())
     .map(|(v, tone)| {
         el(El::Div)
             .st([St::TextXs, St::TabularNums, tone])
@@ -831,6 +889,7 @@ fn verdict(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder 
     let b = &room.battles[replay.current];
     let r = &b.result;
     let target = b.target;
+    let known = on_field(b, me);
     let annexed = b.annexed_by();
     let (big, sub, tone) = match (annexed, r.garrison_fell()) {
         (Some(_), _) => (
@@ -842,7 +901,7 @@ fn verdict(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder 
             "Victoire",
             match target {
                 None => "la bande est défaite",
-                Some(_) if r.garrison_start == 0 => "les serfs ont cédé",
+                Some(_) if known && r.garrison_start == 0 => "les serfs ont cédé",
                 Some(_) => "la garnison est tombée",
             }
             .to_string(),
@@ -886,21 +945,29 @@ fn verdict(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder 
             ]),
     ];
     for (slot, a) in r.armies.iter().enumerate() {
-        body.push(army_verdict(room, me, a, annexed == Some(a.attacker), slot));
+        body.push(army_verdict(
+            room,
+            me,
+            a,
+            annexed == Some(a.attacker),
+            slot,
+            known,
+        ));
     }
-    body.push(defender_verdict(room, b));
+    body.push(defender_verdict(room, b, known));
     el(El::Div)
         .st([St::DisplayFlex, St::FlexCol, St::GapMd])
         .append(body)
 }
 
-/// One army's fate and its loot.
+/// One army's fate and its loot; off the viewer's fronts, the land alone.
 fn army_verdict(
     room: &Room,
     me: Option<Kingdoms>,
     a: &Army,
     conqueror: bool,
     slot: usize,
+    known: bool,
 ) -> ElementBuilder {
     let k = room.game.kingdom(a.attacker);
     let fate = if !a.victory {
@@ -933,11 +1000,15 @@ fn army_verdict(
                     .into_iter()
                     .flatten(),
                 ),
-            mono(&format!(
-                "{} partis · {} perdus · {fate}",
-                hommes(a.sent),
-                fmt(a.lost())
-            )),
+            mono(&if known {
+                format!(
+                    "{} partis · {} perdus · {fate}",
+                    hommes(a.sent),
+                    fmt(a.lost())
+                )
+            } else {
+                fate.to_string()
+            }),
         ]);
     let mut card = el(El::Div)
         .st([
@@ -956,6 +1027,8 @@ fn army_verdict(
             loot.push(("le royaume entier".to_string(), "arpents, serfs, blé, or"));
         } else {
             loot.push((format!("+{}", fmt(s.arpents)), "arpents"));
+        }
+        if !conqueror && known {
             if s.rallied.peasants > 0 {
                 loot.push((format!("+{}", fmt(s.rallied.peasants)), "serfs ralliés"));
             }
@@ -996,7 +1069,7 @@ fn army_verdict(
         };
         let mut rest = people_fr(&killed, Side::Attacker);
         rest.extend(buildings_fr(&s));
-        if !rest.is_empty() {
+        if known && !rest.is_empty() {
             card = card.append([el(El::Div)
                 .st([St::TextXs, St::TextMuted, St::TabularNums])
                 .text(&rest.join(" · "))]);
@@ -1005,24 +1078,32 @@ fn army_verdict(
     card
 }
 
-/// The defender's losses, once at the foot.
-fn defender_verdict(room: &Room, b: &Fought) -> ElementBuilder {
+/// The defender's losses, once at the foot; off the viewer's fronts, no
+/// headcount and the land to the hundred.
+fn defender_verdict(room: &Room, b: &Fought, known: bool) -> ElementBuilder {
     let r = &b.result;
     let mut parts: Vec<String> = Vec::new();
     match b.target {
         Some(t) => {
             let k = room.game.kingdom(t);
-            if r.garrison_start > 0 {
-                parts.push(format!("{} d'armes tombés", hommes(r.garrison_fallen())));
+            if known {
+                if r.garrison_start > 0 {
+                    parts.push(format!("{} d'armes tombés", hommes(r.garrison_fallen())));
+                }
+                parts.extend(people_fr(&r.spoils(), Side::Defender));
             }
-            parts.extend(people_fr(&r.spoils(), Side::Defender));
             if b.annexed_by().is_some() {
                 parts.push(format!("{} est déchu", k.player_name));
                 parts.push("ses serfs changent de maître".to_string());
             } else if r.garrison_fell() {
-                parts.push(format!("{} arpents restants", fmt(k.surface)));
+                // The map only takes the outcome once everyone has read it:
+                // the ground taken is still on the defender's count here.
+                let left = (k.surface - r.spoils().arpents).max(0);
+                parts.push(format!("{} restants", arpents_told(left, known)));
             } else {
-                parts.push(format!("{} en garnison", fmt(r.garrison_left)));
+                if known {
+                    parts.push(format!("{} en garnison", fmt(r.garrison_left)));
+                }
                 parts.push("la terre est intacte".to_string());
             }
         }

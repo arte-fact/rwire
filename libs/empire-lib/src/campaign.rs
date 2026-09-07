@@ -162,21 +162,20 @@ fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
 }
 
 /// What `sent` men of `attacker` may bring back from `target` (`None` = the
-/// barbarians), over `draws` fights.
-pub fn forecast(
-    game: &EmpireGame,
+/// barbarians), fought once on every game given.
+pub fn forecast<'a>(
+    games: impl IntoIterator<Item = &'a EmpireGame>,
     target: Option<Kingdoms>,
     attacker: Kingdoms,
     sent: i32,
-    draws: usize,
 ) -> Forecast {
     match target {
-        Some(t) => forecast_front(game, t, attacker, sent, draws),
+        Some(t) => forecast_front(games, t, attacker, sent),
         None => {
-            let mut arpents = Vec::with_capacity(draws);
-            let mut lost = Vec::with_capacity(draws);
+            let mut arpents = Vec::new();
+            let mut lost = Vec::new();
             let mut victories = 0;
-            for _ in 0..draws {
+            for game in games {
                 let r = simulate_barbarian_battle(game, attacker, sent, |_| {});
                 arpents.push(if r.attacker_won {
                     r.surface_conquered
@@ -190,6 +189,7 @@ pub fn forecast(
                 arpents: deciles(&mut arpents),
                 lost: deciles(&mut lost),
                 victories,
+                annexations: 0,
             }
         }
     }
