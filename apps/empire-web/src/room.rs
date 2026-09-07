@@ -346,6 +346,8 @@ pub struct Seat {
     pub stocks_at_dawn: i32,
     /// This seigneur's reading of the campaign.
     pub replay: Replay,
+    /// The tale of the game's end has been read; the ranking follows.
+    pub epilogue_read: bool,
     /// Feedback from the player's last action, and where it shows.
     pub notice: Option<String>,
     pub notice_spot: Spot,
@@ -991,18 +993,20 @@ impl Room {
     fn end_year(&mut self) {
         self.battles.clear();
         for id in KINGDOMS {
-            let starved = self
+            // A computer's abstract growth knows no famine (original line 206).
+            let starvation_deaths = self
                 .seat(id)
                 .demo
                 .as_ref()
-                .is_some_and(|d| d.starvation_victims > 0);
+                .map_or(0, |d| d.starvation_victims);
+            let computer = self.is_computer(id);
             let k = self.game.kingdom_mut(id);
             if k.is_dead {
                 continue;
             }
             let title = k.full_title();
-            let (plague, death) = check_random_events(k, starved);
-            if plague.occurred {
+            let (plague, death) = check_random_events(k, starvation_deaths, computer);
+            if let Some(plague) = plague {
                 self.journal(
                     [id],
                     format!(
@@ -1016,9 +1020,14 @@ impl Room {
                 );
                 self.report(id, News::Plague(plague));
             }
-            if death.occurred {
-                let cause = death.cause;
-                self.journal([id], format!("{title} {}.", death_fr(&cause)));
+            if let Some(cause) = death {
+                self.journal(
+                    [id],
+                    format!(
+                        "{title} {}. Les autres nations ont envoyé des représentants aux funérailles.",
+                        death_fr(&cause)
+                    ),
+                );
                 self.report(id, News::Fallen(Fate::RulerDied(cause)));
                 self.report_others(&[id], Elsewhere::RulerDied { id, cause });
             }
@@ -1093,7 +1102,15 @@ impl Room {
         self.stage = Stage::Over;
         self.battles.clear();
         self.history.push(self.surfaces());
-        self.journal([], "La partie est terminée.");
+        let why = match self.emperor() {
+            Some(id) => format!(
+                "{} de {} est couronné Empereur",
+                self.game.kingdom(id).player_name,
+                id.name()
+            ),
+            None => "plus aucun seigneur en vie".to_string(),
+        };
+        self.journal([], format!("La partie est terminée : {why}."));
         true
     }
 
@@ -1449,12 +1466,17 @@ fn sample(rounds: &[Round], n: usize) -> Vec<Round> {
 
 pub fn death_fr(cause: &RulerDeathCause) -> &'static str {
     match cause {
-        RulerDeathCause::None => "",
         RulerDeathCause::Assassination => "a été assassiné par un noble ambitieux",
-        RulerDeathCause::HuntingAccident => "est mort dans un accident de chasse",
-        RulerDeathCause::FoodPoisoning => "est mort empoisonné (le cuisinier a été exécuté)",
-        RulerDeathCause::NaturalCauses => "est mort de sa belle mort",
-        RulerDeathCause::StarvationAssassination => "a été assassiné par une mère affamée",
+        RulerDeathCause::HuntingAccident => {
+            "s'est tué d'une chute pendant la chasse au renard annuelle"
+        }
+        RulerDeathCause::FoodPoisoning => {
+            "est mort d'un empoisonnement alimentaire foudroyant ; le cuisinier royal a été exécuté sur-le-champ"
+        }
+        RulerDeathCause::NaturalCauses => "s'est éteint cet hiver, le cœur fatigué",
+        RulerDeathCause::StarvationAssassination => {
+            "a été assassiné par une mère folle de douleur dont l'enfant était mort de faim"
+        }
     }
 }
 
@@ -1642,6 +1664,20 @@ pub fn tap_campaign(rooms: &mut Rooms, ctx: &EventContext) {
     };
     if let Some(id) = room.seat_of(token) {
         room.tap_campaign(id);
+    }
+}
+
+/// A tap on the Épilogue: this seigneur moves on to the ranking.
+#[handler]
+pub fn tap_epilogue(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    if room.stage != Stage::Over {
+        return;
+    }
+    if let Some(id) = room.seat_of(token) {
+        room.seat_mut(id).epilogue_read = true;
     }
 }
 
@@ -2310,7 +2346,10 @@ mod tests {
         assert_eq!(room.stage, Stage::Over);
         let texts: Vec<&str> = room.log.iter().map(|e| e.text.as_str()).collect();
         assert!(texts.contains(&"Hugues de France est couronné Empereur."));
-        assert_eq!(texts.last(), Some(&"La partie est terminée."));
+        assert_eq!(
+            texts.last(),
+            Some(&"La partie est terminée : Hugues de France est couronné Empereur.")
+        );
     }
 
     #[test]
@@ -2358,6 +2397,10 @@ mod tests {
         room.game.kingdom_mut(Kingdoms::France).is_dead = true;
         assert!(room.check_over());
         assert_eq!(room.emperor(), None);
+        assert_eq!(
+            room.log.last().map(|e| e.text.as_str()),
+            Some("La partie est terminée : plus aucun seigneur en vie.")
+        );
     }
 
     #[test]

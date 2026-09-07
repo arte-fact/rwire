@@ -519,7 +519,7 @@ fn fate_fr(k: &Kingdom) -> String {
                     "assassiné",
                 RulerDeathCause::HuntingAccident => "mort à la chasse",
                 RulerDeathCause::FoodPoisoning => "empoisonné",
-                RulerDeathCause::NaturalCauses | RulerDeathCause::None => "mort",
+                RulerDeathCause::NaturalCauses => "mort",
             }
         ),
         None => "tombée".to_string(),
@@ -904,10 +904,17 @@ fn partie(t: T, me: Option<Kingdoms>, sheet_open: bool) -> View {
             lobby(t, me),
             me.map(|_| primary("Commencer la partie", t.act(room::start()))),
         ),
-        Stage::Over => View::new(
-            over(room),
-            me.map(|_| primary("Nouvelle partie", t.act(room::new_game()))),
-        ),
+        Stage::Over => match me {
+            Some(id) if !room.seat(id).epilogue_read => View::tap(
+                epilogue(room, id),
+                tap_hint("Touchez l'écran pour continuer"),
+                t.act(room::tap_epilogue()),
+            ),
+            _ => View::new(
+                over(room),
+                me.map(|_| primary("Nouvelle partie", t.act(room::new_game()))),
+            ),
+        },
         Stage::Playing => {
             if room.phase == Phase::Campaign {
                 return campaign::campaign_page(t, me);
@@ -1109,9 +1116,93 @@ const CURVE_COLORS: [&str; 6] = [
     "var(--N9)",
 ];
 
-fn over(room: &Room) -> ElementBuilder {
+/// The living realms, first by land then by people — the final ranking.
+fn standing(room: &Room) -> Vec<&Kingdom> {
     let mut standing: Vec<&Kingdom> = room.game.kingdoms.iter().filter(|k| !k.is_dead).collect();
     standing.sort_by_key(|k| std::cmp::Reverse((k.surface, k.total_population())));
+    standing
+}
+
+/// The first screen of the end: what ended the game, told to `id` as the
+/// original did, then the year's Chronique of their seat.
+fn epilogue(room: &Room, id: Kingdoms) -> ElementBuilder {
+    let year = room.game.year;
+    let mut tale: Vec<String> = Vec::new();
+    if let Some(emperor) = room.emperor() {
+        let k = room.game.kingdom(emperor);
+        tale.push(format!(
+            "{} de {} est couronné Empereur. Six royaumes, un seul empereur : la partie est gagnée.",
+            k.player_name,
+            k.name()
+        ));
+        let me = room.game.kingdom(id);
+        if emperor == id {
+            tale.push("Vous l'emportez.".to_string());
+        } else if !me.is_dead {
+            let standing = standing(room);
+            let rank = standing
+                .iter()
+                .position(|k| k.id == id)
+                .map_or(0, |i| i + 1);
+            tale.push(format!(
+                "Vous terminez {} sur {}, avec {} arpents.",
+                ordinal_fr(rank),
+                standing.len(),
+                fmt(me.surface)
+            ));
+        }
+    } else {
+        // Every seigneur has fallen; those who fell this year are told.
+        for human in room.humans() {
+            let k = room.game.kingdom(human);
+            let fell = room.seat(human).news.iter().find_map(|n| match n {
+                News::Fallen(fate) => Some(*fate),
+                _ => None,
+            });
+            match fell {
+                Some(Fate::RulerDied(cause)) => tale.push(format!(
+                    "Très triste nouvelle. {} {}. Les autres nations ont envoyé des représentants aux funérailles.",
+                    k.full_title(),
+                    room::death_fr(&cause)
+                )),
+                Some(Fate::Annexed(by)) => tale.push(format!(
+                    "{} a perdu son dernier arpent : la {} est annexée par la {}.",
+                    k.full_title(),
+                    k.name(),
+                    by.name()
+                )),
+                None => {}
+            }
+        }
+        tale.push("Plus aucun seigneur ne tient de royaume : la partie est terminée.".to_string());
+    }
+    let tale = el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapSm])
+        .append(
+            tale.into_iter()
+                .map(|line| Text::body(line).build().st([St::M0])),
+        );
+    Stack::column()
+        .gap(Gap::Md)
+        .children([
+            section(format!("Épilogue · an {year}"), tale),
+            chronicle(room, id, "Votre chronique", 1),
+        ])
+        .build()
+}
+
+/// "premier", "deuxième", … for a rank.
+fn ordinal_fr(rank: usize) -> Cow<'static, str> {
+    match rank {
+        1 => Cow::Borrowed("premier"),
+        2 => Cow::Borrowed("deuxième"),
+        3 => Cow::Borrowed("troisième"),
+        n => Cow::Owned(format!("{n}e")),
+    }
+}
+
+fn over(room: &Room) -> ElementBuilder {
+    let standing = standing(room);
     let winner = room
         .emperor()
         .map(|id| {
@@ -1122,7 +1213,9 @@ fn over(room: &Room) -> ElementBuilder {
                 fmt(k.surface)
             )
         })
-        .unwrap_or_else(|| "Nul n'a ceint la couronne impériale.".to_string());
+        .unwrap_or_else(|| {
+            "Plus aucun seigneur en vie : nul n'a ceint la couronne impériale.".to_string()
+        });
     let most = standing.first().map_or(1, |k| k.surface.max(1));
     let peak = |id: Kingdoms| {
         room.history
@@ -1188,11 +1281,13 @@ fn over(room: &Room) -> ElementBuilder {
                 .st([St::Opacity75])
             }),
     );
-    let mut children = vec![
+    let banner = if room.emperor().is_some() {
         Alert::success()
-            .title("Fin de la partie")
-            .message(winner)
-            .build(),
+    } else {
+        Alert::warning()
+    };
+    let mut children = vec![
+        banner.title("Fin de la partie").message(winner).build(),
         section("Classement", el(El::Div).append(rows)),
     ];
     if room.history.len() > 1 {
