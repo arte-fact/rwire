@@ -32,8 +32,8 @@ use room::Rooms;
 #[storage(memory)]
 struct Me {
     token: u64,
-    /// Bottom tab: 0 = Partie, 1 = Royaumes, 2 = Journal.
-    tab: u8,
+    /// The journal drawer and its read mark.
+    journal: ui::Journal,
     /// Room code from the URL (`/r/<code>`); `None` = home.
     room: Option<String>,
     /// Open bottom sheet: `(action, step, year)` — shown only while the table
@@ -45,16 +45,24 @@ impl Default for Me {
     fn default() -> Self {
         Me {
             token: rand::random::<u64>() | 1,
-            tab: 0,
+            journal: ui::Journal::default(),
             room: None,
             sheet: None,
         }
     }
 }
 
+/// Open or close the journal drawer; params: `[open, len (u32 LE)]` where
+/// `len` is the log length on screen — everything up to it counts as read.
 #[handler]
-fn set_tab(me: &mut Me, ctx: &EventContext) {
-    me.tab = ctx.param_bytes().first().copied().unwrap_or(0).min(2);
+fn set_journal(me: &mut Me, ctx: &EventContext) {
+    let p = ctx.param_bytes();
+    if p.len() >= 5 {
+        me.journal = ui::Journal {
+            open: p[0] != 0,
+            seen: u32::from_le_bytes([p[1], p[2], p[3], p[4]]),
+        };
+    }
 }
 
 /// The URL is the source of truth for the current room: shared links, room
@@ -66,7 +74,7 @@ fn on_route(me: &mut Me, ctx: &EventContext) {
         .and_then(|p| p.strip_prefix("/r/"))
         .map(room::normalize_code)
         .filter(|c| !c.is_empty());
-    me.tab = 0;
+    me.journal = ui::Journal::default();
 }
 
 /// Open the bottom sheet for an action; params:
@@ -90,15 +98,15 @@ fn close_sheet(me: &mut Me) {
 #[handler]
 fn go_home(me: &mut Me, ctx: &EventContext) {
     me.room = None;
-    me.tab = 0;
+    me.journal = ui::Journal::default();
     ctx.navigate("/");
 }
 
 #[renderer]
 fn root(me: &Me) -> ElementBuilder {
-    let (token, tab, room, sheet) = (me.token, me.tab, me.room.clone(), me.sheet);
+    let (token, journal, room, sheet) = (me.token, me.journal, me.room.clone(), me.sheet);
     ElementBuilder::synced_with_storage::<Rooms, _>(
-        move |rooms| ui::page(rooms, token, tab, room.as_deref(), sheet),
+        move |rooms| ui::page(rooms, token, journal, room.as_deref(), sheet),
         RendererDeps::always(),
     )
 }

@@ -16,9 +16,8 @@ use rwire::attr_tokens::{At, Av};
 use rwire::builder::LiveSum;
 use rwire::{el, icon_sized, El, ElementBuilder, Ev, HandlerSpec, Icon, St, Style};
 use rwire_components::{
-    Alert, Badge, Button, ButtonIntent, ButtonSize, CopyButton, Drawer, DrawerPosition, Gap, Grid,
-    GridColumns, Input, Link, Progress, ProgressIntent, Slider, Stack, StackJustify, Stat, Stepper,
-    Text, TextVariant,
+    Alert, Badge, Button, ButtonIntent, ButtonSize, CopyButton, Drawer, DrawerPosition, Gap, Input,
+    Link, Progress, ProgressIntent, Slider, Stack, StackJustify, Stepper, Text, TextVariant,
 };
 
 use crate::room::{
@@ -29,7 +28,14 @@ use crate::room::{
 type Label = Cow<'static, str>;
 
 /// Bottom tabs.
-const TABS: [&str; 3] = ["Partie", "Royaumes", "Journal"];
+/// The viewer's journal drawer: whether it is open, and how many lines the
+/// log held when it was last opened or closed — the header's dot marks newer
+/// ones.
+#[derive(Clone, Copy, Default)]
+pub struct Journal {
+    pub open: bool,
+    pub seen: u32,
+}
 
 /// An open bottom sheet, pinned to the step/year it was opened for and to
 /// the seat's sheet generation (the form concluding bumps it, which closes
@@ -148,12 +154,12 @@ impl T<'_> {
 pub fn page(
     rooms: &Rooms,
     token: u64,
-    tab: u8,
+    journal: Journal,
     code: Option<&str>,
     sheet: Option<Sheet>,
 ) -> ElementBuilder {
     match code.and_then(|c| rooms.get(c).map(|r| (c, r))) {
-        Some((code, room)) => room_page(T { room, code, token }, tab, sheet),
+        Some((code, room)) => room_page(T { room, code, token }, journal, sheet),
         None => home_page(rooms, token, code.is_some()),
     }
 }
@@ -303,39 +309,41 @@ fn home_page(rooms: &Rooms, token: u64, unknown: bool) -> ElementBuilder {
             .append(items)])
 }
 
-fn room_page(t: T, tab: u8, sheet: Option<Sheet>) -> ElementBuilder {
+fn room_page(t: T, journal: Journal, sheet: Option<Sheet>) -> ElementBuilder {
     let me = t.room.seat_of(t.token);
     let open = sheet.and_then(|sh| open_action(t, me, sh));
     let war = war_target(t, me);
-    let View { body, foot } = match tab {
-        1 => View::new(kingdoms_tab(t), None),
-        2 => View::new(journal_tab(t), None),
-        _ => partie(t, me, open.is_some() || war.is_some()),
-    };
+    let View { body, foot } = partie(t, me, open.is_some() || war.is_some());
     let (action, tap) = match foot {
         Foot::None => (None, None),
         Foot::Bar(line) => (Some(line), None),
         Foot::Tap { spec, hint } => (Some(hint.on(Ev::Click, spec.clone())), Some(spec)),
     };
-    let overlay = match (open, war) {
-        (Some((id, act)), _) => Some(drawer(
+    let overlay = match (journal.open, open, war) {
+        (true, _, _) => Some(journal_drawer(t)),
+        (_, Some((id, act)), _) => Some(drawer(
             t,
             id,
             act.title(),
             crate::close_sheet(),
             sheet_form(t, id, act),
         )),
-        (None, Some((id, target))) => Some(drawer(
+        (_, None, Some((id, target))) => Some(drawer(
             t,
             id,
             campaign::party_name(target).to_string(),
             by(room::pick_target(), t.token, t.code, &[0xFF]),
             war_sheet(t, id, target),
         )),
-        (None, None) => None,
+        (_, None, None) => None,
     };
-    let tabs = (t.room.stage != Stage::Lobby).then_some(tab);
-    shell(header(t, me), body, bottom_bar(action, tabs), overlay, tap)
+    shell(
+        header(t, me, journal),
+        body,
+        bottom_bar(action),
+        overlay,
+        tap,
+    )
 }
 
 /// The bottom sheet: the seat's notice for it, if any, over `form`.
@@ -408,7 +416,7 @@ fn sheet_form(t: T, id: Kingdoms, act: Action) -> ElementBuilder {
     }
 }
 
-fn header(t: T, me: Option<Kingdoms>) -> ElementBuilder {
+fn header(t: T, me: Option<Kingdoms>, journal: Journal) -> ElementBuilder {
     let room = t.room;
     let (title, sub) = match me {
         Some(id) if room.stage != Stage::Lobby => {
@@ -444,13 +452,59 @@ fn header(t: T, me: Option<Kingdoms>) -> ElementBuilder {
         sub,
         (room.stage != Stage::Lobby)
             .then(|| Badge::primary(format!("An {}", room.game.year)).build()),
-        Some(
+        [
+            journal_button(t, journal),
             Button::icon_only(Icon::Home, "Accueil")
                 .intent(ButtonIntent::Ghost)
                 .size(ButtonSize::Sm)
                 .on_click(crate::go_home()),
-        ),
+        ],
     )
+}
+
+/// Opens or closes the journal drawer, marking the log read up to `len`.
+fn journal_spec(t: T, open: bool) -> HandlerSpec {
+    let len = (t.room.log.len() as u32).to_le_bytes();
+    crate::set_journal().with_param_bytes(vec![u8::from(open), len[0], len[1], len[2], len[3]])
+}
+
+/// The header's journal icon; a dot when lines were written since the viewer
+/// last had the journal open.
+fn journal_button(t: T, journal: Journal) -> ElementBuilder {
+    let unread = t.room.log.len() as u32 > journal.seen;
+    let button = Button::icon_only(Icon::Feather, "Journal")
+        .intent(ButtonIntent::Ghost)
+        .size(ButtonSize::Sm)
+        .on_click(journal_spec(t, true));
+    let mut wrap = el(El::Div)
+        .st([St::PositionRelative, St::DisplayFlex])
+        .append([button]);
+    if unread {
+        wrap = wrap.append([el(El::Span)
+            .st([
+                St::PositionAbsolute,
+                St::Top0,
+                St::Right0,
+                St::W05rem,
+                St::H05rem,
+                St::RoundedFull,
+                St::BgPrimary,
+                St::PointerEventsNone,
+            ])
+            .at(At::AriaHidden, Av::True)]);
+    }
+    wrap
+}
+
+/// The journal, over the screen in course: public facts by year, latest first.
+fn journal_drawer(t: T) -> ElementBuilder {
+    Drawer::new()
+        .position(DrawerPosition::Bottom)
+        .open(true)
+        .title("Journal")
+        .on_close(journal_spec(t, false))
+        .content(journal(t))
+        .build()
 }
 
 /// The header's name line: the rank mark and the titled name, as a flat
@@ -567,15 +621,10 @@ fn header_bar(
     title: ElementBuilder,
     sub: ElementBuilder,
     badge: Option<ElementBuilder>,
-    action: Option<ElementBuilder>,
+    actions: impl IntoIterator<Item = ElementBuilder>,
 ) -> ElementBuilder {
-    let mut right = Vec::new();
-    if let Some(b) = badge {
-        right.push(b);
-    }
-    if let Some(a) = action {
-        right.push(a);
-    }
+    let mut right: Vec<ElementBuilder> = badge.into_iter().collect();
+    right.extend(actions);
     el(El::Header)
         .st([
             St::FlexShrink0,
@@ -605,46 +654,11 @@ fn header_bar(
             ])])
 }
 
-/// Bottom bar: the current primary action (if any) above the tabs.
-fn bottom_bar(action: Option<ElementBuilder>, tab: Option<u8>) -> ElementBuilder {
-    let mut rows = Vec::new();
-    if let Some(action) = action {
-        rows.push(action);
-    }
-    if let Some(tab) = tab {
-        rows.push(
-            el(El::Div)
-                .st([St::DisplayFlex])
-                .at(At::Role, Av::RoleTablist)
-                .append(TABS.iter().enumerate().map(|(i, label)| {
-                    let on = i as u8 == tab;
-                    el(El::Button)
-                        .st([
-                            St::Flex1,
-                            St::BgTransparent,
-                            St::BorderNone,
-                            St::TextSm,
-                            St::TextCenter,
-                            St::CursorPointer,
-                            St::PySm,
-                            if on { St::TextDefault } else { St::TextMuted },
-                            if on { St::FontSemibold } else { St::FontNormal },
-                            if on {
-                                St::BorderB2Accent
-                            } else {
-                                St::BorderB2Transparent
-                            },
-                        ])
-                        .at(At::Role, Av::RoleTab)
-                        .at(At::AriaSelected, if on { Av::True } else { Av::False })
-                        .text(label)
-                        .on(Ev::Click, crate::set_tab().with_param_bytes(vec![i as u8]))
-                })),
-        );
-    }
-    if rows.is_empty() {
+/// Bottom bar: the current primary action, or nothing at all.
+fn bottom_bar(action: Option<ElementBuilder>) -> ElementBuilder {
+    let Some(action) = action else {
         return el(El::Div);
-    }
+    };
     el(El::Div)
         .st([
             St::FlexShrink0,
@@ -656,10 +670,10 @@ fn bottom_bar(action: Option<ElementBuilder>, tab: Option<u8>) -> ElementBuilder
         ])
         .append([el(El::Div)
             .st([St::MaxWMd, St::MxAuto, St::WFull])
-            .append([Stack::column().gap(Gap::Sm).children(rows).build()])])
+            .append([action])])
 }
 
-fn journal_tab(t: T) -> ElementBuilder {
+fn journal(t: T) -> ElementBuilder {
     let room = t.room;
     if room.log.is_empty() {
         return Text::body("Le journal est encore vierge.").muted().build();
@@ -718,125 +732,11 @@ fn latest_news(t: T, n: usize) -> ElementBuilder {
     section("Derniers événements", el(El::Div).append(lines))
 }
 
-fn kingdoms_tab(t: T) -> ElementBuilder {
-    let room = t.room;
-    let me = room.seat_of(t.token);
-    let most = KINGDOMS
-        .into_iter()
-        .map(|id| room.game.kingdom(id).surface)
-        .max()
-        .unwrap_or(1)
-        .max(1);
-    let mut cards: Vec<ElementBuilder> = vec![Grid::new()
-        .columns(GridColumns::Fixed2)
-        .gap(Gap::Sm)
-        .children([
-            Stat::new(fmt(room
-                .game
-                .kingdoms
-                .iter()
-                .map(|k| k.surface)
-                .sum::<i32>()))
-            .label("Terres tenues")
-            .build(),
-            Stat::new(room.game.alive_kingdoms().len().to_string())
-                .label("Royaumes en lice")
-                .build(),
-        ])
-        .build()];
-    let mut alive: Vec<Kingdoms> = room.game.alive_kingdoms();
-    alive.sort_by_key(|&id| std::cmp::Reverse(room.game.kingdom(id).surface));
-    let mut rows: Vec<ElementBuilder> = alive
-        .into_iter()
-        .map(|id| kingdom_row(room, id, me == Some(id), most))
-        .collect();
-    rows.extend(
-        KINGDOMS
-            .into_iter()
-            .map(|id| room.game.kingdom(id))
-            .filter(|k| k.is_dead)
-            .map(|k| {
-                Text::caption(format!("{} · {}", k.name(), fate_fr(k)))
-                    .muted()
-                    .build()
-                    .st([St::PySm, St::PlSm, St::BorderB])
-            }),
-    );
-    cards.push(section("Royaumes", el(El::Div).append(rows)));
-    cards.push(market_section(t, me));
-    Stack::column().gap(Gap::Md).children(cards).build()
-}
-
-/// One kingdom: name and ruler, its land against the largest realm, and the
-/// four headcounts that make up its strength. The viewer's own line carries
-/// the accent left border.
-fn kingdom_row(room: &Room, id: Kingdoms, mine: bool, most: i32) -> ElementBuilder {
-    let k = room.game.kingdom(id);
-    let figure = |n: i32, label: &'static str| {
-        el(El::Span).st([St::WhitespaceNowrap]).append([
-            el(El::Strong).st([St::TabularNums]).text(&fmt(n)),
-            el(El::Span).st([St::TextMuted]).text(&format!(" {label}")),
-        ])
-    };
-    let mut title = vec![ruler(
-        k,
-        if room.is_computer(id) {
-            " · ordinateur"
-        } else {
-            ""
-        },
-    )];
-    if mine {
-        title.push(Badge::new().text("vous").build().st([St::MlSm]));
-    }
-    el(El::Div)
-        .st([St::PySm, St::PlSm, St::BorderB])
-        .st(if mine {
-            [St::BorderL3Accent]
-        } else {
-            [St::BorderL3Transparent]
-        })
-        .append([
-            el(El::Div)
-                .st([
-                    St::DisplayFlex,
-                    St::JustifyBetween,
-                    St::ItemsBaseline,
-                    St::GapSm,
-                ])
-                .append([
-                    el(El::Span).st([St::MinW0]).append(title),
-                    figure(k.surface, "arpents"),
-                ]),
-            Progress::new()
-                .value(k.surface.max(0) as u32)
-                .max(most as u32)
-                .thin(true)
-                .build()
-                .st([St::MtXs]),
-            el(El::Div)
-                .st([
-                    St::DisplayFlex,
-                    St::FlexWrap,
-                    St::GapMd,
-                    St::TextSm,
-                    St::MtXs,
-                ])
-                .append([
-                    figure(k.nobles, "nobles"),
-                    figure(k.soldiers, "soldats"),
-                    figure(k.merchants, "marchands"),
-                    figure(k.peasants, "serfs"),
-                ]),
-        ])
-}
-
 // ---------------------------------------------------------------------------
-// Partie tab
+// The game screen
 // ---------------------------------------------------------------------------
 
-/// What a tab shows: the scrolling body, the bottom bar's primary action and
-/// an optional panel pinned under the header.
+/// What a screen shows: the scrolling body and what the bottom bar holds.
 struct View {
     body: ElementBuilder,
     foot: Foot,
@@ -2665,46 +2565,6 @@ fn sellers(room: &Room) -> Vec<Kingdoms> {
             s.grain_to_sell > 0 && s.grain_price > 0
         })
         .collect()
-}
-
-/// Every current listing on the grain market, the viewer's own marked.
-fn market_section(t: T, viewer: Option<Kingdoms>) -> ElementBuilder {
-    let room = t.room;
-    let listed = sellers(room);
-    if listed.is_empty() {
-        return section(
-            "Marché du grain",
-            Text::body("Personne ne vend de grain en ce moment.")
-                .muted()
-                .build(),
-        );
-    }
-    let rows = listed.into_iter().map(|o| {
-        let s = room.game.kingdom(o);
-        let offer = format!(
-            "{} bx à {} le cent",
-            fmt(s.grain_to_sell),
-            fmt(s.grain_price.min(MAX_GRAIN_PRICE))
-        );
-        let who = el(El::Div).append([
-            el(El::Strong).text(s.name()),
-            el(El::Span)
-                .st([St::TextSm, St::TextMuted, St::MlXs, St::TabularNums])
-                .text(&offer),
-        ]);
-        let mut row = vec![who];
-        if viewer == Some(o) {
-            row.push(Badge::new().text("vous").build());
-        }
-        Stack::row()
-            .align_center()
-            .justify(StackJustify::Between)
-            .gap(Gap::Sm)
-            .children(row)
-            .build()
-            .st([St::PySm, St::BorderB])
-    });
-    section("Marché du grain", el(El::Div).append(rows))
 }
 
 fn rename_form(t: T, k: &Kingdom) -> ElementBuilder {
