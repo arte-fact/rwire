@@ -1447,10 +1447,14 @@ fn orders(t: T, id: Kingdoms) -> ElementBuilder {
             txt(&format!(" · {}", hommes(e.soldiers))),
         ]))
     });
-    let scouts = seat.missions.iter().map(|o| {
+    let scouts = seat.missions.iter().map(|m| {
+        let who = match m {
+            room::Mission::Scout(_) => "Éclaireur",
+            room::Mission::Agent(_) => "Agent",
+        };
         line(el(El::Span).append([
-            el(El::Strong).text("Éclaireur"),
-            txt(&format!(" · en {}", o.name())),
+            el(El::Strong).text(who),
+            txt(&format!(" · en {}", m.at().name())),
         ]))
     });
     let rows: Vec<ElementBuilder> = expeditions.chain(scouts).collect();
@@ -2023,14 +2027,55 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
                 ),
             }
         }
-        News::SpyCaught { by } => {
+        News::SpyCaught { by, agent } => {
             let o = room.game.kingdom(*by);
+            let what = if *agent {
+                format!("Un agent de la {} a été démasqué à votre cour", by.name())
+            } else {
+                format!("Un espion de la {} a été pris à votre cour", by.name())
+            };
             news_line(
                 Icon::Shield,
                 Tone::Bad,
-                &format!("Un espion de la {} a été pris à votre cour", by.name()),
+                &what,
                 &format!("{} vous observe · l'homme a été pendu", o.full_title()),
             )
+        }
+        News::Agent { at, outcome } => {
+            let o = room.game.kingdom(*at);
+            match outcome {
+                room::Writing::Letter {
+                    ledger,
+                    levied,
+                    spent,
+                } => news_line(
+                    Icon::Feather,
+                    Tone::Good,
+                    &format!("Votre agent en {} écrit", at.name()),
+                    &letter(room, *at, ledger, *levied, *spent),
+                ),
+                room::Writing::Unmasked => news_line(
+                    Icon::Skull,
+                    Tone::Bad,
+                    &format!("Votre agent en {} a été démasqué", at.name()),
+                    &format!("{} sait désormais que vous l'observez", o.player_name),
+                ),
+                room::Writing::Unpaid => news_line(
+                    Icon::Coins,
+                    Tone::Bad,
+                    &format!("Votre agent en {} s'est tu", at.name()),
+                    &format!(
+                        "Le trésor n'avait pas ses {} francs : il a quitté votre service",
+                        room::AGENT_PRICE
+                    ),
+                ),
+                room::Writing::Gone => news_line(
+                    Icon::Map,
+                    Tone::Neutral,
+                    &format!("Votre agent en {} n'écrit plus", at.name()),
+                    "Il n'y a plus de cour ni de registres : le royaume est annexé",
+                ),
+            }
         }
         News::Elsewhere(fact) => {
             let line = match *fact {
@@ -5137,7 +5182,14 @@ fn reports_returned(room: &Room, id: Kingdoms) -> Vec<ElementBuilder> {
             continue;
         }
         let d = room.dossier(id, on);
-        if let Some(r) = d.report.filter(|r| r.year == year) {
+        if let Some(l) = d.ledger.filter(|l| l.year == year) {
+            lines.push(news_line(
+                Icon::Feather,
+                Tone::Good,
+                &format!("Votre agent en {} écrit", on.name()),
+                &letter(room, on, &l, None, None),
+            ));
+        } else if let Some(r) = d.report.filter(|r| r.year == year) {
             lines.push(news_line(
                 Icon::Feather,
                 Tone::Good,
@@ -5154,7 +5206,7 @@ fn reports_returned(room: &Room, id: Kingdoms) -> Vec<ElementBuilder> {
             lines.push(news_line(
                 Icon::Skull,
                 Tone::Bad,
-                &format!("Votre éclaireur a été pris en {}", on.name()),
+                &format!("Votre espion a été pris en {}", on.name()),
                 &format!(
                     "{} sait désormais que vous l'observez",
                     room.game.kingdom(on).full_title()
@@ -5163,6 +5215,56 @@ fn reports_returned(room: &Room, id: Kingdoms) -> Vec<ElementBuilder> {
         }
     }
     lines
+}
+
+/// A palace by its completion in tenths, after "un palais".
+fn palace_told(tenths: i32) -> &'static str {
+    match tenths {
+        ..=0 => "pas commencé",
+        1..=2 => "à peine commencé",
+        3..=4 => "au tiers",
+        5 => "à demi",
+        6..=7 => "aux deux tiers",
+        8..=9 => "presque achevé",
+        _ => "achevé",
+    }
+}
+
+/// An agent's letter in one line: the treasury and the palace, the rank
+/// the court works towards, and what moved since his last report.
+fn letter(
+    room: &Room,
+    at: Kingdoms,
+    l: &room::Ledger,
+    levied: Option<i32>,
+    spent: Option<i32>,
+) -> String {
+    let k = room.game.kingdom(at);
+    let palace = match l.palaces {
+        0 => "pas de palais".to_string(),
+        n => format!("un palais {}", palace_told(n)),
+    };
+    let mut line = format!("Trésor {} francs, {palace}", fmt(l.treasury));
+    match l.aim {
+        Some((t, met, of)) => line.push_str(&format!(
+            " : {} vise le titre de {} ({met} condition{} sur {of})",
+            k.player_name,
+            at.title_name(t),
+            if met > 1 { "s" } else { "" }
+        )),
+        None => line.push_str(&format!(" : {} règne sur tout", k.player_name)),
+    }
+    let melted = spent.is_some_and(|n| n > 0 && n * 2 >= l.treasury + n);
+    match levied {
+        Some(n) if n > 0 && melted => line.push_str(" · le trésor a fondu : il arme"),
+        Some(n) if n > 0 => line.push_str(&format!(
+            " · il a levé {} depuis le dernier rapport",
+            hommes_darmes(n)
+        )),
+        _ if melted => line.push_str(" · le trésor a fondu de moitié"),
+        _ => {}
+    }
+    line
 }
 
 /// Land as the heralds tell it: to the hundred.
@@ -5213,6 +5315,10 @@ fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
         || planned.is_some()
         || (room.expeditions_left(id) > 0 && room.garrison(id) > 0);
     let scout = target.is_some_and(|o| room.scout_ordered(id, o));
+    let agent = target.map(|o| {
+        let d = room.dossier(id, o);
+        (d.agent, room.agent_ordered(id, o))
+    });
     let (name, land, known, rumours) = match target {
         None => (
             "Barbares".to_string(),
@@ -5278,6 +5384,11 @@ fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
     let mut badges = Vec::new();
     if scout {
         badges.push(Badge::default_badge("éclaireur ✓").build());
+    }
+    match agent {
+        Some((true, _)) => badges.push(Badge::success("agent en place").build()),
+        Some((false, true)) => badges.push(Badge::default_badge("agent ✓").build()),
+        _ => {}
     }
     if let Some(n) = planned {
         badges.push(Badge::primary(format!("{} ✓", hommes(n))).build());
@@ -5602,7 +5713,7 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                         "{} · {} arpents · {}",
                         d.player_name,
                         fmt(r.surface),
-                        report_dated(r.year, room.game.year)
+                        report_dated(room.dossier(id, o), room.game.year)
                     ),
                     rule,
                     vec![
@@ -5868,11 +5979,19 @@ fn war_register(
 }
 
 /// "éclaireur de cette année" / "éclaireur de l'an N".
-fn report_dated(report_year: i32, year: i32) -> String {
-    if report_year == year {
-        "éclaireur de cette année".to_string()
+fn report_dated(d: &room::Dossier, year: i32) -> String {
+    let Some(r) = d.report else {
+        return "aucun rapport".to_string();
+    };
+    let who = if d.ledger.is_some_and(|l| l.year == r.year) {
+        "agent"
     } else {
-        format!("éclaireur de l'an {report_year}")
+        "éclaireur"
+    };
+    if r.year == year {
+        format!("{who} de cette année")
+    } else {
+        format!("{who} de l'an {}", r.year)
     }
 }
 
@@ -5897,14 +6016,16 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
     let ordered = room.scout_ordered(id, o);
     let planned = room.planned_on(id, o.into()).map(|(_, e)| e.soldiers);
     let land = fmt(arpents_heard(k.surface));
-    let sub = match d.report {
-        Some(r) => format!(
-            "{} · ≈ {land} arpents · d'après votre {}",
-            k.player_name,
-            report_dated(r.year, year)
-        ),
-        None => format!("{} · ≈ {land} arpents · aucun rapport", k.player_name),
-    };
+    let sub = format!(
+        "{} · ≈ {land} arpents · {}{}",
+        k.player_name,
+        if d.report.is_some() {
+            "d'après votre "
+        } else {
+            ""
+        },
+        report_dated(d, year)
+    );
     let mut body = vec![subtitle(vec![txt(&sub)])];
 
     let dated = |r: &room::Report| format!(" · an {}", r.year);
@@ -5978,6 +6099,72 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
     };
     body.push(el(El::Div).st([St::TextSm, St::TextMuted]).text(&age));
 
+    let registers = match d.ledger {
+        Some(l) => {
+            let dated = format!(" · an {}", l.year);
+            let bought: Vec<String> = KINGDOMS
+                .into_iter()
+                .filter(|s| l.bought[s.index()] > 0)
+                .map(|s| format!("{} bx · {}", fmt(l.bought[s.index()]), s.name()))
+                .collect();
+            vec![
+                war_cell(
+                    "Trésor",
+                    vec![txt(&format!("{} francs{dated}", fmt(l.treasury)))],
+                    None,
+                ),
+                war_cell(
+                    "Greniers",
+                    vec![txt(&format!("{} boisseaux{dated}", fmt(l.grain_stocks)))],
+                    None,
+                ),
+                war_cell("Palais", vec![txt(palace_told(l.palaces))], None),
+                war_cell(
+                    "Foires · moulins",
+                    vec![txt(&format!("{} · {}", l.marketplaces, l.grain_mills))],
+                    None,
+                ),
+                war_cell(
+                    "Fonderies · chantiers",
+                    vec![txt(&format!("{} · {}", l.foundries, l.shipyards))],
+                    None,
+                ),
+                war_cell(
+                    "Achats de grain",
+                    vec![txt(&if bought.is_empty() {
+                        format!("aucun{dated}")
+                    } else {
+                        bought.join(", ")
+                    })],
+                    None,
+                ),
+            ]
+        }
+        None => ["Trésor", "Greniers", "Palais"]
+            .into_iter()
+            .map(|l| war_cell(l, vec![txt("? ? ?")], None))
+            .collect(),
+    };
+    body.push(
+        el(El::Div)
+            .st([
+                St::DisplayGrid,
+                St::GridCols2,
+                St::GapXMd,
+                St::GapYSm,
+                St::PtSm,
+                St::BorderT,
+            ])
+            .append(registers),
+    );
+    if d.ledger.is_none() {
+        body.push(
+            el(El::Div)
+                .st([St::TextSm, St::TextMuted])
+                .text("Seul un agent en place lit les registres."),
+        );
+    }
+
     let mut year_lines: Vec<ElementBuilder> = rumours_about(room, o)
         .iter()
         .map(|r| {
@@ -5993,7 +6180,7 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
             format!("en l'an {y}")
         };
         year_lines.push(el(El::Div).st([St::TextSm, St::TextError]).text(&format!(
-            "✕ Votre éclaireur y a été pris {when} · {} sait que vous l'observez",
+            "✕ Votre espion y a été pris {when} · {} sait que vous l'observez",
             k.player_name
         )));
     }
@@ -6020,6 +6207,44 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
     );
     if !ordered && treasury < room::SCOUT_PRICE {
         body.push(Text::caption("Le trésor ne suffit pas.").muted().build());
+    }
+    let fresh = d.report.is_some_and(|r| r.year == year);
+    let (agent_label, agent_hint) = if d.agent {
+        (
+            "Congédier l'agent".to_string(),
+            Some(format!(
+                "Il est en place · {} francs à sa prochaine lettre",
+                room::AGENT_PRICE
+            )),
+        )
+    } else if room.agent_ordered(id, o) {
+        (
+            format!("Rappeler l'agent · {} francs rendus", room::AGENT_PRICE),
+            None,
+        )
+    } else {
+        let hint = if !fresh {
+            Some("il faut un rapport de l'année".to_string())
+        } else if treasury < room::AGENT_PRICE {
+            Some("Le trésor ne suffit pas.".to_string())
+        } else {
+            None
+        };
+        (
+            format!("Acheter un agent · {} francs / an", room::AGENT_PRICE),
+            hint,
+        )
+    };
+    let agent_disabled = !d.agent && !room.agent_ordered(id, o) && agent_hint.is_some();
+    body.push(
+        Button::secondary(agent_label)
+            .size(ButtonSize::Lg)
+            .full_width(true)
+            .disabled(agent_disabled)
+            .on_click(by(room::agent(), t.token, t.code, &[])),
+    );
+    if let Some(hint) = agent_hint {
+        body.push(Text::caption(hint).muted().build());
     }
     let cannot = if year < 3 {
         Some("Les autres royaumes ne peuvent être attaqués qu'à partir de la 3ème année.")
