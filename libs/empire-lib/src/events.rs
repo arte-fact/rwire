@@ -75,11 +75,19 @@ fn chance_death() -> Option<RulerDeathCause> {
 }
 
 /// The ruler's death draws for the year; the kingdom falls when one hits.
-pub fn check_ruler_death(kingdom: &mut Kingdom, starvation_deaths: i32) -> Option<RulerDeathCause> {
+/// The 1 % `chance` can be spared — the arena does, having nothing to
+/// teach from luck.
+pub fn check_ruler_death(
+    kingdom: &mut Kingdom,
+    starvation_deaths: i32,
+    chance: bool,
+) -> Option<RulerDeathCause> {
     let cause = if starving_mother_strikes(starvation_deaths) {
         Some(RulerDeathCause::StarvationAssassination)
-    } else {
+    } else if chance {
         chance_death()
+    } else {
+        None
     }?;
     kingdom.fall(Fate::RulerDied(cause));
     Some(cause)
@@ -93,10 +101,10 @@ pub fn check_random_events(
     computer: bool,
 ) -> (Option<PlagueEvent>, Option<RulerDeathCause>) {
     if computer {
-        return (None, check_ruler_death(kingdom, 0));
+        return (None, check_ruler_death(kingdom, 0, true));
     }
     let plague = check_plague(kingdom);
-    let death = check_ruler_death(kingdom, starvation_deaths);
+    let death = check_ruler_death(kingdom, starvation_deaths, true);
     (plague, death)
 }
 
@@ -151,7 +159,7 @@ mod tests {
     #[test]
     fn ruler_death_eliminates_kingdom_with_a_cause() {
         let mut k = Kingdom::new(Kingdoms::France);
-        let cause = check_ruler_death(&mut k, 100_000).unwrap();
+        let cause = check_ruler_death(&mut k, 100_000, true).unwrap();
         assert!(k.is_dead);
         assert_eq!(cause, RulerDeathCause::StarvationAssassination);
         assert_eq!(k.fate, Some(Fate::RulerDied(cause)));

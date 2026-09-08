@@ -71,7 +71,7 @@ fn draw_resource_management_page(game: &EmpireGame, id: Kingdoms) {
                 "{:<2}          {:<16} {:>8}{:>8}",
                 i + 1,
                 s.name(),
-                large_number(s.grain_to_sell),
+                large_number(s.for_sale()),
                 s.grain_price.min(MAX_GRAIN_PRICE)
             ),
         );
@@ -173,7 +173,7 @@ fn prompt_grain_to_buy(game: &EmpireGame, id: Kingdoms) -> Option<Trade> {
         amount: bottom_input_number_with_range(
             Some("Combien de boisseaux achetez-vous ?"),
             1,
-            game.kingdom(seller).grain_to_sell.max(1),
+            game.kingdom(seller).for_sale().max(1),
         ),
         seller,
     })

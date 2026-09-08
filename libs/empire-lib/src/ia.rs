@@ -62,7 +62,7 @@ pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision
         return AiTurnDecision::default();
     }
 
-    let weather_ratio = game.weather.value() as f32 / 6.0;
+    let weather_ratio = game.kingdom(id).weather.value() as f32 / 6.0;
     let kingdom = game.kingdom_mut(id);
 
     // Phase 1: resource growth. Weather scales each roll; rounded, not
@@ -139,7 +139,7 @@ pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision
         .kingdoms
         .iter()
         .filter(|k| k.is_player && !k.is_dead)
-        .map(|k| (k.grain_to_sell, k.grain_price))
+        .map(|k| (k.for_sale(), k.grain_price))
         .collect();
     if !humans.is_empty() {
         let n = humans.len() as i32;
@@ -150,22 +150,22 @@ pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision
         let mut q4 = (humans.iter().map(|h| h.1).sum::<i32>() / n + random(0, 6) - random(0, 6))
             .clamp(0, MAX_GRAIN_PRICE);
         // Bad years push the asking price up (original: +RND/1.5 when NW<3).
-        if game.weather.value() < 3 {
+        if game.kingdom(id).weather.value() < 3 {
             q4 = (q4 + 10).min(MAX_GRAIN_PRICE);
         }
         let k = game.kingdom_mut(id);
         // 1-in-3 years it matches the humans' volume (bounded by real stocks);
         // like theirs, the listing reaches the stall next year.
-        let listed = k.grain_to_sell + k.listing.map_or(0, |(amount, _)| amount);
+        let listed = k.offered();
         if q3 > listed && random(1, 10) > 6 {
-            let add = (q3 - listed).min(k.grain_stocks.max(0)) / MIN_LOT * MIN_LOT;
+            let add = (q3 - listed).min(k.grain_stocks - listed) / MIN_LOT * MIN_LOT;
             if add > 0 {
                 k.list_grain(add, q4.max(1));
                 decision.grain_listed = Some((add, q4.max(1)));
             }
         }
         // Grain already on the stall follows the market's price.
-        k.grain_price = if k.grain_to_sell > 0 { q4.max(1) } else { q4 };
+        k.grain_price = if k.for_sale() > 0 { q4.max(1) } else { q4 };
     }
 
     // Original lines 228–232: shop at one random kingdom's stall, buying a
@@ -179,7 +179,7 @@ pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision
         let seller = stalls[random(0, stalls.len() as i32) as usize];
         let (on_sale, price) = {
             let s = game.kingdom(seller);
-            (s.grain_to_sell, s.grain_price.min(MAX_GRAIN_PRICE))
+            (s.for_sale(), s.grain_price.min(MAX_GRAIN_PRICE))
         };
         if on_sale >= MIN_LOT && price > 0 {
             for _ in 0..3 {
@@ -315,10 +315,8 @@ mod tests {
 
     #[test]
     fn ai_nobles_grow_in_decent_weather() {
-        let mut game = EmpireGame {
-            weather: crate::Weather::Good,
-            ..Default::default()
-        };
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::Germany).weather = crate::Weather::Good;
         for _ in 0..60 {
             plan_ai_turn(&mut game, Kingdoms::Germany, &mut mind());
         }

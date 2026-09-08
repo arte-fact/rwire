@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use empire_lib::campaign::{apply_battle, forecast, march, Expedition, Fought};
-use empire_lib::demography::{apply_feed, Council, YearDemography};
+use empire_lib::demography::{affordable_ration, apply_feed, Council, YearDemography};
 use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, YearEconomy};
 use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
 use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Round, Spoils};
@@ -260,17 +260,9 @@ impl Draft {
     /// the army's rate is free: it is what the recruits will be put on.
     pub fn bounds(k: &Kingdom) -> (i32, i32) {
         (
-            Self::affordable(k, Council::PEASANTS_FULL * 2, k.mouths()),
-            Self::affordable(k, Council::SOLDIERS_FULL * 3 / 2, k.soldiers),
+            affordable_ration(k, Council::PEASANTS_FULL * 2, k.mouths()),
+            affordable_ration(k, Council::SOLDIERS_FULL * 3 / 2, k.soldiers),
         )
-    }
-
-    /// `cap`, or the rate the stocks can pay `heads` at when that is less.
-    fn affordable(k: &Kingdom, cap: i32, heads: i32) -> i32 {
-        match heads {
-            0 => cap,
-            heads => cap.min(k.grain_stocks.max(0) * RATION_SCALE / heads),
-        }
     }
 
     /// Where the sliders start: full rations (the army on the rate it was
@@ -315,7 +307,7 @@ impl Draft {
         let peasants = self.peasants.clamp(0, peasants_max);
         let mut left = k.clone();
         left.grain_stocks -= peasants * k.mouths() / RATION_SCALE;
-        let soldiers_max = Self::affordable(&left, soldiers_max, k.soldiers);
+        let soldiers_max = affordable_ration(&left, soldiers_max, k.soldiers);
         let t = self.taxes().clamped();
         Draft {
             peasants,
@@ -1198,7 +1190,7 @@ impl Room {
             buyer,
             amount,
             price: s.grain_price.min(MAX_GRAIN_PRICE),
-            left: s.grain_to_sell,
+            left: s.for_sale(),
         };
         self.report(seller, news);
     }
@@ -1219,8 +1211,8 @@ impl Room {
     fn begin_year(&mut self) {
         self.history.push(self.surfaces());
         self.bought = [[0; 6]; 6];
-        let weather = self.game.random_weather();
-        self.journal([], weather.sentence());
+        self.game.random_weather();
+        self.journal([], self.game.weather_news());
         self.game.open_market();
         for id in KINGDOMS {
             let k = self.game.kingdom_mut(id);
@@ -1231,7 +1223,7 @@ impl Room {
             let before_rats = k.grain_stocks;
             apply_rat_loss_rate(k);
             let rats = before_rats - k.grain_stocks;
-            apply_grain_harvest(k, weather);
+            apply_grain_harvest(k, k.weather);
             let title = k.title();
             let stocks = k.grain_stocks;
             let seat = self.seat_mut(id);
@@ -1447,8 +1439,8 @@ impl Room {
     /// Promulgate the council's decision as the roll's sliders stand:
     /// rations served, taxes levied, the year's economy applied.
     fn promulgate(&mut self, id: Kingdoms) {
-        let weather = self.game.weather;
         let k = self.game.kingdom(id);
+        let weather = k.weather;
         let council = self.draft(id).clamped(k).council();
         let k = self.game.kingdom_mut(id);
         apply_taxes(k, council.taxes);
@@ -2347,7 +2339,7 @@ fn buy_grain(
     }
     let s = room.game.kingdom(seller);
     let price = s.grain_price.min(MAX_GRAIN_PRICE);
-    let on_sale = s.grain_to_sell;
+    let on_sale = s.for_sale();
     if on_sale < 1 || price < 1 {
         return Err(format!("La {} n'a pas de grain à vendre.", seller.name()));
     }

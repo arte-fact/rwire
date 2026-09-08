@@ -6,6 +6,8 @@
 //! such as the terminal `empire` app. The rule modules are pure functions over
 //! `&EmpireGame` / `&mut EmpireGame` (or a single `&mut Kingdom`).
 
+pub mod arena;
+pub mod brain;
 pub mod campaign;
 pub mod demography;
 pub mod economy;

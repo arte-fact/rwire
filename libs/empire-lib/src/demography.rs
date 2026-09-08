@@ -385,6 +385,19 @@ fn draws(kingdom: &Kingdom, council: Council) -> Draws {
     }
 }
 
+/// `cap`, or the rate the stocks can pay `heads` at when that is less: the
+/// ceiling of a ration slider (a free rate with no head to feed).
+pub fn affordable_ration(k: &Kingdom, cap: i32, heads: i32) -> i32 {
+    match heads {
+        0 => cap,
+        heads => {
+            let by_stocks =
+                i64::from(k.grain_stocks.max(0)) * i64::from(RATION_SCALE) / i64::from(heads);
+            cap.min(by_stocks.min(i64::from(cap)) as i32)
+        }
+    }
+}
+
 pub fn demography_report(kingdom: &Kingdom, council: Council) -> YearDemography {
     let d = draws(kingdom, council);
     let (x, y, _) = council.taxes.shares();

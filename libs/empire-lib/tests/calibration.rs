@@ -62,7 +62,7 @@ fn play_year(
     scouts: Vec<(Kingdoms, Kingdoms)>,
     tally: &mut Tally,
 ) -> Vec<(Kingdoms, Kingdoms)> {
-    let weather = game.random_weather();
+    game.random_weather();
     game.open_market();
     for id in KINGDOMS {
         let k = game.kingdom_mut(id);
@@ -71,7 +71,7 @@ fn play_year(
         }
         apply_seed_grain(k);
         apply_rat_loss_rate(k);
-        apply_grain_harvest(k, weather);
+        apply_grain_harvest(k, k.weather);
         plan_ai_intendance(game, id);
     }
     for (id, on) in scouts {

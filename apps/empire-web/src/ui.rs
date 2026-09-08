@@ -2191,7 +2191,7 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
 fn season_step(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let game = &t.room.game;
     let shift = 0;
-    let sky = sky(game.weather, game.year, shift);
+    let sky = sky(k.weather, game.year, shift);
 
     let needs = k.peasants_grain_needs() + k.soldiers_grain_needs();
     let balance = k.grain_stocks - needs;
@@ -2332,7 +2332,7 @@ fn can_buy(k: &Kingdom, s: &Kingdom) -> i32 {
     if price < 1 {
         return 0;
     }
-    (k.treasury * 90 / price).min(s.grain_to_sell).max(0)
+    (k.treasury * 90 / price).min(s.for_sale()).max(0)
 }
 
 /// Buy from `o`: the grain and the courtage, what the treasury and the
@@ -2346,7 +2346,7 @@ fn buy_sheet(t: T, k: &Kingdom, seat: &Seat, o: Kingdoms) -> ElementBuilder {
     let mut body = vec![
         subtitle(vec![txt(&format!(
             "{price} le cent · {} bx en vente · courtage 10 %",
-            fmt(s.grain_to_sell)
+            fmt(s.for_sale())
         ))]),
         intro(&format!(
             "Le grain arrive aux greniers tout de suite ; la {} en fera état dans sa chronique. \
@@ -2355,7 +2355,7 @@ fn buy_sheet(t: T, k: &Kingdom, seat: &Seat, o: Kingdoms) -> ElementBuilder {
         )),
     ];
     if max < 1 {
-        let reason = if s.grain_to_sell < 1 || price < 1 {
+        let reason = if s.for_sale() < 1 || price < 1 {
             format!("La {} n'a plus de grain à vendre.", o.name())
         } else {
             format!(
@@ -2426,24 +2426,33 @@ fn buy_sheet(t: T, k: &Kingdom, seat: &Seat, o: Kingdoms) -> ElementBuilder {
 /// List grain: amount and price the hundred, what it brings if it all sells,
 /// what stays in the granaries and whether the year's bread is still covered.
 fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
-    let stocks = k.grain_stocks;
+    // What isn't offered yet: the offered grain stays in the granaries too.
+    let stocks = k.grain_stocks - k.offered();
     let cur = k.currency();
-    let surplus = stocks - k.peasants_grain_needs() - k.soldiers_grain_needs();
+    let surplus = k.grain_stocks - k.peasants_grain_needs() - k.soldiers_grain_needs();
     let mut body = vec![
         subtitle(vec![txt(&format!(
             "réserves {} bx · {} {} bx",
-            fmt(stocks),
+            fmt(k.grain_stocks),
             if surplus < 0 { "manque" } else { "surplus" },
             fmt(surplus.abs())
         ))]),
         intro(
-            "Le lot part au marché l'an prochain ; il se vend au fil de l'année, et chaque acheteur \
-             vous paie comptant. Ce qui ne se vend pas revient aux greniers. Au-delà du surplus, \
+            "Le lot est proposé au marché l'an prochain ; il se vend au fil de l'année, et chaque \
+             acheteur vous paie comptant. Jusque-là le grain reste aux greniers — nourrit vos gens \
+             et les rats comme le reste — et ce qui ne se vend pas y demeure. Au-delà du surplus, \
              vous vendez le pain de vos sujets.",
         ),
     ];
     if stocks < 1 {
-        body.extend(refused("Les greniers sont vides.", "Mettre en vente"));
+        body.extend(refused(
+            if k.grain_stocks < 1 {
+                "Les greniers sont vides."
+            } else {
+                "Tout le grain des greniers est déjà proposé."
+            },
+            "Mettre en vente",
+        ));
         return Stack::column().gap(Gap::Sm).children(body).build();
     }
     let amount = seat
@@ -2524,7 +2533,7 @@ fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             ],
         ),
         line(
-            "Réserves après",
+            "Réserves si tout se vend",
             vec![
                 el(El::Span)
                     .text(&fmt(stocks - amount))
@@ -2672,7 +2681,7 @@ fn sellers(room: &Room) -> Vec<Kingdoms> {
         .into_iter()
         .filter(|&o| {
             let s = room.game.kingdom(o);
-            s.grain_to_sell > 0 && s.grain_price > 0
+            s.for_sale() > 0 && s.grain_price > 0
         })
         .collect()
 }
@@ -2824,10 +2833,10 @@ struct Prospect {
 /// The year to come for `k` under `draft`, told as changes from `base` — the
 /// kingdom as it stands — so a purchase's immediate moves (the merchants a
 /// fair draws, the nobles a palace draws, the recruits) count with the year's.
-fn prospect(base: &Kingdom, k: &Kingdom, weather: Weather, draft: Draft) -> Prospect {
+fn prospect(base: &Kingdom, k: &Kingdom, draft: Draft) -> Prospect {
     let council = draft.council();
     let demo = demography_outlook(k, council);
-    let eco = economy_outlook(k, weather, demo.immigrants, council.taxes);
+    let eco = economy_outlook(k, k.weather, demo.immigrants, council.taxes);
     let moved = |a: i32, b: i32| Outlook::sure(b - a);
     Prospect {
         people: demo.people + moved(base.population(), k.population()),
@@ -2910,8 +2919,8 @@ struct Board<'a> {
 
 impl Board<'_> {
     /// The roll: the year as it is settled, no slider.
-    fn council(k: &Kingdom, weather: Weather, draft: Draft) -> Board<'_> {
-        let now = prospect(k, k, weather, draft);
+    fn council(k: &Kingdom, draft: Draft) -> Board<'_> {
+        let now = prospect(k, k, draft);
         Board {
             k,
             draft,
@@ -2922,7 +2931,7 @@ impl Board<'_> {
     }
 
     /// A council sheet: `field` runs its whole range, the other four held.
-    fn along(k: &Kingdom, weather: Weather, draft: Draft, field: Field) -> Board<'_> {
+    fn along(k: &Kingdom, draft: Draft, field: Field) -> Board<'_> {
         let (peasants_max, soldiers_max) = Draft::bounds(k);
         let max = match field {
             Field::Peasants => peasants_max,
@@ -2935,10 +2944,10 @@ impl Board<'_> {
             .map(|v| {
                 let mut d = draft;
                 d.set(field, v);
-                prospect(k, k, weather, d)
+                prospect(k, k, d)
             })
             .collect();
-        let mut b = Board::council(k, weather, draft);
+        let mut b = Board::council(k, draft);
         b.axes.push(Axis {
             along: Along::Field(field),
             channel: rwire::builder::next_live_channel(),
@@ -2950,21 +2959,12 @@ impl Board<'_> {
 
     /// A purchase sheet: `now` is the year with one unit bought, the axis
     /// runs from one to `max` units (none when the treasury can't buy one).
-    fn purchase(
-        k: &Kingdom,
-        weather: Weather,
-        draft: Draft,
-        kind: InvestmentType,
-        max: i32,
-    ) -> Board<'_> {
+    fn purchase(k: &Kingdom, draft: Draft, kind: InvestmentType, max: i32) -> Board<'_> {
         let at = |n: i32| {
             let (lo, hi) = bought(k, kind, n);
-            Prospect::merge(
-                prospect(k, &lo, weather, draft),
-                prospect(k, &hi, weather, draft),
-            )
+            Prospect::merge(prospect(k, &lo, draft), prospect(k, &hi, draft))
         };
-        let mut b = Board::council(k, weather, draft);
+        let mut b = Board::council(k, draft);
         b.now = at(1);
         if max >= 1 {
             b.axes.push(Axis {
@@ -3483,7 +3483,7 @@ fn efficiency(b: &Board) -> ElementBuilder {
 
 fn council_sheet(t: T, id: Kingdoms, field: Field) -> ElementBuilder {
     let k = t.room.game.kingdom(id);
-    let b = Board::along(k, t.room.game.weather, t.room.draft(id), field);
+    let b = Board::along(k, t.room.draft(id), field);
     let council = b.draft.council();
     let (sub, verb) = match field {
         Field::Peasants => (
@@ -4555,7 +4555,7 @@ fn purchase_sheet(t: T, id: Kingdoms, kind: InvestmentType) -> ElementBuilder {
     let cur = k.currency();
     let cost = kind.cost();
     let max = kind.max_investment(k).max(0);
-    let b = Board::purchase(k, t.room.game.weather, t.room.draft(id), kind, max);
+    let b = Board::purchase(k, t.room.draft(id), kind, max);
     let have = owned(k, kind);
     let sub = match kind {
         InvestmentType::Palaces => format!(
@@ -4686,7 +4686,7 @@ fn intendance_step(t: T, id: Kingdoms) -> ElementBuilder {
     let k = room.game.kingdom(id);
     let seat = room.seat(id);
     let cur = k.currency();
-    let b = Board::council(k, room.game.weather, room.draft(id));
+    let b = Board::council(k, room.draft(id));
     let surplus = k.grain_stocks - k.peasants_grain_needs() - k.soldiers_grain_needs();
     let notice = |spot: Spot| {
         (seat.notice_spot == spot)
@@ -4926,15 +4926,27 @@ fn market_rows(t: T, id: Kingdoms) -> Vec<ElementBuilder> {
             row(
                 blazon(o),
                 &format!("Grain de la {}", o.name()),
-                vec![txt(&format!("{} bx · courtage 10 %", fmt(s.grain_to_sell)))],
+                vec![txt(&format!("{} bx · courtage 10 %", fmt(s.for_sale())))],
                 big(&fmt(s.grain_price.min(MAX_GRAIN_PRICE)), "le cent"),
                 opener(t, "Acheter", Action::Buy(o)),
             )
         })
         .collect();
-    let listed = match k.listing {
-        Some((a, p)) => format!("{} bx à l'étal, à {p}", fmt(a)),
-        None => "rien à l'étal".to_string(),
+    let mut stall = Vec::new();
+    if k.for_sale() > 0 {
+        stall.push(format!(
+            "{} bx à l'étal, à {}",
+            fmt(k.for_sale()),
+            k.grain_price.min(MAX_GRAIN_PRICE)
+        ));
+    }
+    if let Some((a, p)) = k.listing {
+        stall.push(format!("{} bx pour l'an prochain, à {p}", fmt(a)));
+    }
+    let listed = if stall.is_empty() {
+        "rien à l'étal".to_string()
+    } else {
+        stall.join(" · ")
     };
     rows.push(row(
         mark(Icon::Wheat),

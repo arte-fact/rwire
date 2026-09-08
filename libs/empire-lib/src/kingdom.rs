@@ -4,6 +4,7 @@ use crate::events::RulerDeathCause;
 
 use crate::economy::Taxes;
 use crate::random::random;
+use crate::weather::Weather;
 
 pub const KINGDOMS: [Kingdoms; 6] = [
     Kingdoms::France,
@@ -287,12 +288,16 @@ pub struct Kingdom {
     pub treasury: i32,
     pub grain_stocks: i32,
     pub grain_harvest: i32,
+    /// The year's sky over this realm: every realm has its own.
+    pub weather: Weather,
     /// Price of the hundred bushels on the stall.
     pub grain_price: i32,
-    /// Bushels on the stall, buyable now.
+    /// Bushels offered on the stall. An offer, not a transfer: the grain
+    /// stays in the stocks — eaten, sown and gnawed like the rest — until a
+    /// neighbour buys it, so what is buyable is [`Kingdom::for_sale`].
     pub grain_to_sell: i32,
-    /// Bushels listed this year with their price: they leave the stocks at once
-    /// but only reach the stall at [`Kingdom::open_market`], next year.
+    /// Bushels offered this year with their price: they reach the stall at
+    /// [`Kingdom::open_market`], next year.
     pub listing: Option<(i32, i32)>,
     pub rats_loss_rate: i32,
     pub marketplaces: i32,
@@ -338,6 +343,7 @@ impl Kingdom {
             // Original: A(I,2)=15000+INT(RND*1000)+1 = [15001, 16000]
             grain_stocks: 15000 + random(1, 1001),
             grain_harvest: 0,
+            weather: Weather::default(),
             grain_price: 0,
             grain_to_sell: 0,
             listing: None,
@@ -353,22 +359,38 @@ impl Kingdom {
         }
     }
 
-    /// Take `amount` bushels out of the stocks and add them to this year's
-    /// listing at `price` the hundred (weighted-average price if some grain was
-    /// already listed).
+    /// Bushels a neighbour can buy now: the offer, as far as the stocks
+    /// still cover it.
+    pub fn for_sale(&self) -> i32 {
+        self.grain_to_sell.min(self.grain_stocks).max(0)
+    }
+
+    /// Bushels offered, on the stall or listed for next year.
+    pub fn offered(&self) -> i32 {
+        self.grain_to_sell + self.listing.map_or(0, |(amount, _)| amount)
+    }
+
+    /// Add `amount` bushels to this year's listing at `price` the hundred
+    /// (weighted-average price if some grain was already listed). The grain
+    /// stays in the stocks; the offer is capped to what isn't offered yet.
     pub fn list_grain(&mut self, amount: i32, price: i32) {
-        self.grain_stocks -= amount;
+        let amount = amount.min(self.grain_stocks - self.offered()).max(0);
+        if amount == 0 {
+            return;
+        }
         self.listing = Some(merge_lot(self.listing.unwrap_or((0, price)), amount, price));
     }
 
     /// Move the year's listing onto the stall — original formula
-    /// A(K,6)=(A(K,6)*A(K,5)+H1*H2)/(A(K,5)+H1), a weighted-average price.
+    /// A(K,6)=(A(K,6)*A(K,5)+H1*H2)/(A(K,5)+H1), a weighted-average price —
+    /// and trim the offer to the stocks.
     pub fn open_market(&mut self) {
         if let Some((amount, price)) = self.listing.take() {
             let (total, avg) = merge_lot((self.grain_to_sell, self.grain_price), amount, price);
             self.grain_to_sell = total;
             self.grain_price = avg;
         }
+        self.grain_to_sell = self.for_sale();
     }
 
     pub fn taxes(&self) -> Taxes {

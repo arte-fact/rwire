@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::kingdom::{Kingdom, Kingdoms, KINGDOMS};
 use crate::weather::Weather;
 
-/// Complete state of one Empire game: the calendar, the
-/// current weather and the six kingdoms.
+/// Complete state of one Empire game: the calendar and the six kingdoms,
+/// each under its own sky.
 ///
 /// Derives `rwire::State` (memory storage) so an rwire app can take it as
 /// handler/renderer state directly; a synchronous front-end simply owns one.
@@ -13,7 +13,6 @@ use crate::weather::Weather;
 #[storage(memory)]
 pub struct EmpireGame {
     pub year: i32,
-    pub weather: Weather,
     pub kingdoms: [Kingdom; 6],
 }
 
@@ -21,7 +20,6 @@ impl Default for EmpireGame {
     fn default() -> Self {
         EmpireGame {
             year: 1,
-            weather: Weather::default(),
             kingdoms: KINGDOMS.map(Kingdom::new),
         }
     }
@@ -45,10 +43,42 @@ impl EmpireGame {
             .collect()
     }
 
-    /// Roll and store a new weather for the year.
-    pub fn random_weather(&mut self) -> Weather {
-        self.weather = Weather::random();
-        self.weather
+    /// Roll the year's weather, a sky for every realm.
+    pub fn random_weather(&mut self) {
+        for k in &mut self.kingdoms {
+            k.weather = Weather::random();
+        }
+    }
+
+    /// The year's skies told as one line — "Temps superbe en Bretagne et en
+    /// Perse ; sécheresse en Castille…" — worst last, so a famine somewhere
+    /// is the news.
+    pub fn weather_news(&self) -> String {
+        let mut parts = Vec::new();
+        for w in Weather::ALL {
+            let names: Vec<String> = self
+                .kingdoms
+                .iter()
+                .filter(|k| !k.is_dead && k.weather == w)
+                .map(|k| format!("en {}", k.name()))
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            let places = match names.len() {
+                1 => names[0].clone(),
+                n => format!("{} et {}", names[..n - 1].join(", "), names[n - 1]),
+            };
+            parts.push(format!("{} {places}", w.short()));
+        }
+        let news = parts.join(" ; ");
+        let mut chars = news.chars();
+        let first: String = chars
+            .next()
+            .into_iter()
+            .flat_map(char::to_uppercase)
+            .collect();
+        format!("{first}{}.", chars.as_str())
     }
 
     pub fn increment_year(&mut self) {
@@ -95,8 +125,28 @@ mod tests {
         let mut game = EmpireGame::default();
         game.increment_year();
         assert_eq!(game.year, 2);
-        let w = game.random_weather();
-        assert_eq!(game.weather, w);
+        game.random_weather();
+        assert!(game
+            .kingdoms
+            .iter()
+            .all(|k| Weather::ALL.contains(&k.weather)));
+    }
+
+    #[test]
+    fn the_weather_news_groups_the_realms_by_sky() {
+        let mut game = EmpireGame::default();
+        for k in &mut game.kingdoms {
+            k.weather = Weather::VeryGood;
+        }
+        game.kingdoms[0].weather = Weather::Disastrous;
+        game.kingdoms[5].weather = Weather::Disastrous;
+        game.kingdoms[2].weather = Weather::Bad;
+        game.kingdoms[3].is_dead = true;
+        assert_eq!(
+            game.weather_news(),
+            "Été long en Bretagne et en Moscovie ; inondations en Germanie ; \
+             sécheresse en France et en Perse."
+        );
     }
 
     #[test]

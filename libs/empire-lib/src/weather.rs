@@ -14,6 +14,16 @@ pub enum Weather {
 }
 
 impl Weather {
+    /// Best to worst.
+    pub const ALL: [Weather; 6] = [
+        Weather::Great,
+        Weather::VeryGood,
+        Weather::Good,
+        Weather::Bad,
+        Weather::VeryBad,
+        Weather::Disastrous,
+    ];
+
     /// Numeric weather factor used by harvest / economy formulas (1..=6).
     pub fn value(self) -> i32 {
         match self {
@@ -34,6 +44,18 @@ impl Weather {
             Weather::Bad => "Inondations. Trop de pluies.",
             Weather::VeryBad => "Gelées précoces. Aridité.",
             Weather::Disastrous => "Mauvais temps. Sécheresse. Sauterelles.",
+        }
+    }
+
+    /// The sky in two words, for the news of the table.
+    pub fn short(self) -> &'static str {
+        match self {
+            Weather::Great => "temps superbe",
+            Weather::VeryGood => "été long",
+            Weather::Good => "temps moyen",
+            Weather::Bad => "inondations",
+            Weather::VeryBad => "gelées précoces",
+            Weather::Disastrous => "sécheresse",
         }
     }
 

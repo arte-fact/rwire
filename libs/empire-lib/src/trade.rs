@@ -28,8 +28,8 @@ pub enum Trade {
         amount: i32,
         seller: Kingdoms,
     },
-    /// List `amount` bushels at `price` per hundred bushels; they reach the
-    /// stall next year (see [`Kingdom::open_market`]).
+    /// Offer `amount` bushels at `price` per hundred bushels; they stay in the
+    /// stocks and reach the stall next year (see [`Kingdom::open_market`]).
     Sell {
         amount: i32,
         price: i32,
@@ -57,9 +57,10 @@ pub fn apply_trade(game: &mut EmpireGame, buyer: Kingdoms, trade: Trade) {
         Trade::Buy { amount, seller } => {
             let s = game.kingdom_mut(seller);
             let price = s.grain_price.min(MAX_GRAIN_PRICE);
-            let amount = amount.clamp(0, s.grain_to_sell);
+            let amount = amount.clamp(0, s.for_sale());
             // The seller receives the base price; the 10% broker fee is lost.
             s.grain_to_sell -= amount;
+            s.grain_stocks -= amount;
             s.treasury += grain_value(amount, price);
             let cost = calculate_buy_cost(amount, price);
             let k = game.kingdom_mut(buyer);
@@ -98,6 +99,7 @@ mod tests {
         let spain = game.kingdom_mut(Kingdoms::Spain);
         spain.grain_price = 250; // capped to 100
         spain.grain_to_sell = 1000;
+        let spain_stocks = spain.grain_stocks;
         let before = game.kingdom(Kingdoms::France).clone();
         apply_trade(
             &mut game,
@@ -112,7 +114,32 @@ mod tests {
         assert_eq!(after.treasury, before.treasury - 1000);
         let spain = game.kingdom(Kingdoms::Spain);
         assert_eq!(spain.grain_to_sell, 100);
+        assert_eq!(spain.grain_stocks, spain_stocks - 900);
         assert_eq!(spain.treasury, 1000 + 900);
+    }
+
+    #[test]
+    fn buying_is_capped_to_the_sellers_stocks() {
+        let mut game = EmpireGame::default();
+        let spain = game.kingdom_mut(Kingdoms::Spain);
+        spain.grain_price = 10;
+        spain.grain_to_sell = 1000;
+        spain.grain_stocks = 300; // the rats got the rest
+        assert_eq!(spain.for_sale(), 300);
+        apply_trade(
+            &mut game,
+            Kingdoms::France,
+            Trade::Buy {
+                amount: 900,
+                seller: Kingdoms::Spain,
+            },
+        );
+        let spain = game.kingdom(Kingdoms::Spain);
+        assert_eq!((spain.grain_stocks, spain.grain_to_sell), (0, 700));
+        assert_eq!(spain.treasury, 1000 + 30);
+        // Opening the market trims the stall to the stocks.
+        game.kingdom_mut(Kingdoms::Spain).open_market();
+        assert_eq!(game.kingdom(Kingdoms::Spain).grain_to_sell, 0);
     }
 
     #[test]
@@ -133,6 +160,7 @@ mod tests {
     #[test]
     fn selling_averages_the_price() {
         let mut game = EmpireGame::default();
+        let stocks = game.kingdom(Kingdoms::France).grain_stocks;
         apply_trade(
             &mut game,
             Kingdoms::France,
@@ -150,7 +178,8 @@ mod tests {
             },
         );
         let k = game.kingdom(Kingdoms::France);
-        // Listed grain leaves the stocks at once but is not on the stall yet.
+        // Listed grain stays in the stocks and is not on the stall yet.
+        assert_eq!(k.grain_stocks, stocks);
         assert_eq!(k.grain_to_sell, 0);
         assert_eq!(k.listing, Some((200, 55))); // second sale capped to 100 → (1000+10000)/200
         game.kingdom_mut(Kingdoms::France).open_market();
@@ -176,7 +205,7 @@ mod tests {
             },
         );
         let k = game.kingdom_mut(Kingdoms::France);
-        assert_eq!(k.grain_stocks, stocks - 100);
+        assert_eq!(k.grain_stocks, stocks);
         assert_eq!((k.grain_to_sell, k.grain_price), (300, 20));
         k.open_market();
         assert_eq!((k.grain_to_sell, k.grain_price), (400, 30));
@@ -210,5 +239,18 @@ mod tests {
         assert_eq!(k.surface, 9000);
         assert_eq!(k.treasury, 1000 + 1000 * LAND_SELL_PRICE);
         assert_eq!(max_land_sale(9000), 900);
+    }
+
+    #[test]
+    fn offers_are_capped_to_the_stocks() {
+        let mut game = EmpireGame::default();
+        let k = game.kingdom_mut(Kingdoms::France);
+        k.grain_stocks = 1000;
+        k.grain_to_sell = 400;
+        k.list_grain(900, 10);
+        assert_eq!(k.listing, Some((600, 10)));
+        k.list_grain(100, 10);
+        assert_eq!(k.listing, Some((600, 10)));
+        assert_eq!(k.offered(), 1000);
     }
 }

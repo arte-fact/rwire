@@ -53,7 +53,7 @@ fn game_loop(game: &mut EmpireGame, minds: &mut [Mind; 6]) {
 }
 
 fn kingdom_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) {
-    let weather = game.weather;
+    let weather = game.kingdom(id).weather;
     let year = game.year;
 
     {
