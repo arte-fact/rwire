@@ -9,10 +9,11 @@ use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
 use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Round, Spoils};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::ia::{plan_ai_intendance, plan_ai_war};
+pub use empire_lib::intel::{
+    Dossier, Ledger, Mission, Report, Rumour, Scouting, Writing, AGENT_PRICE, SCOUT_PRICE,
+};
 use empire_lib::investments::{apply_investment, InvestmentType};
 use empire_lib::kingdom::RATION_SCALE;
-use empire_lib::mind::SCOUT_CAUGHT;
-pub use empire_lib::mind::SCOUT_PRICE;
 use empire_lib::mind::{Mind, Seen, Temper};
 use empire_lib::trade::{
     apply_trade, calculate_buy_cost, max_land_sale, Trade, LAND_SELL_PRICE, MAX_GRAIN_PRICE,
@@ -496,36 +497,6 @@ impl News {
     }
 }
 
-/// How an éclaireur's year ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scouting {
-    /// Home with his report (its garrison, for the Chronique).
-    Back {
-        garrison: i32,
-    },
-    Caught,
-    /// The realm was annexed while he rode: no court left to look at.
-    Gone,
-}
-
-/// How an agent's year ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Writing {
-    /// His yearly letter: the registers, and what moved since the last
-    /// report — men of arms levied, francs spent (`None` without a
-    /// previous report or ledger to compare with).
-    Letter {
-        ledger: Ledger,
-        levied: Option<i32>,
-        spent: Option<i32>,
-    },
-    Unmasked,
-    /// The treasury could not pay him: he kept quiet and left.
-    Unpaid,
-    /// The realm was annexed: no registers left to read.
-    Gone,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Elsewhere {
     RulerDied {
@@ -549,160 +520,6 @@ pub enum Elsewhere {
         now: PlayerTitle,
     },
     Crowned(Kingdoms),
-}
-
-/// What everyone hears of a front of the last campaign: who marched on whom
-/// and how it went — never how many men.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rumour {
-    pub year: i32,
-    pub attacker: Kingdoms,
-    /// `None` = the barbarians.
-    pub target: Option<Kingdoms>,
-    pub victory: bool,
-    /// Arpents taken (the whole realm on an annexation).
-    pub arpents: i32,
-    pub annexed: bool,
-}
-
-/// What an agent costs each year: about fifty men of arms.
-pub const AGENT_PRICE: i32 = 400;
-/// One chance in this, each year, of an agent being unmasked.
-const AGENT_UNMASKED: u32 = 8;
-
-/// A spy ordered at the Extérieur, resolved as the year ends: an éclaireur
-/// rides to a realm and comes back; an agent is bought among its officials
-/// and stays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mission {
-    Scout(Kingdoms),
-    Agent(Kingdoms),
-}
-
-impl Mission {
-    pub fn at(self) -> Kingdoms {
-        match self {
-            Mission::Scout(on) | Mission::Agent(on) => on,
-        }
-    }
-
-    fn price(self) -> i32 {
-        match self {
-            Mission::Scout(_) => SCOUT_PRICE,
-            Mission::Agent(_) => AGENT_PRICE,
-        }
-    }
-}
-
-/// What an éclaireur saw of a realm — the figures a war is fought with —
-/// dated with the year it was read, as the Extérieur opened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Report {
-    pub year: i32,
-    pub garrison: i32,
-    pub efficiency: i32,
-    pub nobles: i32,
-    pub merchants: i32,
-    pub serfs: i32,
-    pub surface: i32,
-}
-
-impl Report {
-    fn read(k: &Kingdom, year: i32) -> Self {
-        Report {
-            year,
-            garrison: k.soldiers,
-            efficiency: k.soldiers_efficiency,
-            nobles: k.nobles,
-            merchants: k.merchants,
-            serfs: k.peasants,
-            surface: k.surface,
-        }
-    }
-
-    pub fn subjects(&self) -> i32 {
-        self.nobles + self.merchants + self.serfs
-    }
-
-    /// How wide of the truth a forecast built on this report may be, in
-    /// per cent, by its age in `year`; `None` once too old to compute on.
-    pub fn spread(&self, year: i32) -> Option<i32> {
-        match year - self.year {
-            0 => Some(0),
-            1 => Some(20),
-            2 => Some(40),
-            _ => None,
-        }
-    }
-
-    /// The realm as the report tells it, every figure `jitter` per cent off.
-    fn kingdom(&self, id: Kingdoms, jitter: i32) -> Kingdom {
-        let off = |n: i32| (i64::from(n) * i64::from(100 + jitter) / 100) as i32;
-        let mut k = Kingdom::new(id);
-        k.soldiers = off(self.garrison);
-        k.soldiers_efficiency = off(self.efficiency).max(1);
-        k.nobles = off(self.nobles);
-        k.merchants = off(self.merchants);
-        k.peasants = off(self.serfs);
-        k.surface = self.surface;
-        k
-    }
-}
-
-/// What an agent reads in a realm's registers — what a scout on the roads
-/// never sees — dated like a report.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Ledger {
-    pub year: i32,
-    pub treasury: i32,
-    pub grain_stocks: i32,
-    /// Palace completion in tenths.
-    pub palaces: i32,
-    pub marketplaces: i32,
-    pub grain_mills: i32,
-    pub foundries: i32,
-    pub shipyards: i32,
-    /// Bushels bought this year from each realm, by kingdom index.
-    pub bought: [i32; 6],
-    /// The rank the court works towards, with the criteria met out of all;
-    /// `None` for an emperor.
-    pub aim: Option<(PlayerTitle, i32, i32)>,
-}
-
-impl Ledger {
-    fn read(k: &Kingdom, year: i32, bought: [i32; 6]) -> Self {
-        let aim = k.title().next().map(|t| {
-            let all = k.progress(t);
-            let met = all.iter().filter(|c| c.met()).count() as i32;
-            (t, met, all.len() as i32)
-        });
-        Ledger {
-            year,
-            treasury: k.treasury,
-            grain_stocks: k.grain_stocks,
-            palaces: k.palaces,
-            marketplaces: k.marketplaces,
-            grain_mills: k.grain_mills,
-            foundries: k.foundries,
-            shipyards: k.shipyards,
-            bought,
-            aim,
-        }
-    }
-}
-
-/// What a seat knows of a foreign realm.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Dossier {
-    /// The last report brought back, by an éclaireur or an agent.
-    pub report: Option<Report>,
-    /// The registers as the agent last read them.
-    pub ledger: Option<Ledger>,
-    /// An agent is in place, paid each year as long as he is kept.
-    pub agent: bool,
-    /// Year a spy was last taken there: that seigneur knows they are
-    /// watched.
-    pub caught: Option<i32>,
 }
 
 /// One line of the trade step's list: buy from a seller, or one of the two sales.
@@ -1042,18 +859,11 @@ impl Room {
 
     fn resolve_scout(&mut self, id: Kingdoms, on: Kingdoms) {
         let year = self.game.year;
-        let outcome = if self.game.kingdom(on).is_dead {
-            Scouting::Gone
-        } else if rand::thread_rng().gen_range(0..SCOUT_CAUGHT) == 0 {
+        let outcome =
+            self.seats[id.index()].dossiers[on.index()].scout(self.game.kingdom(on), year);
+        if outcome == Scouting::Caught {
             self.spy_taken(id, on, false);
-            Scouting::Caught
-        } else {
-            let r = Report::read(self.game.kingdom(on), year);
-            self.seat_mut(id).dossiers[on.index()].report = Some(r);
-            Scouting::Back {
-                garrison: r.garrison,
-            }
-        };
+        }
         self.report(id, News::Scout { at: on, outcome });
     }
 
@@ -1061,42 +871,25 @@ impl Room {
     /// `standing` agents pay their year now; a new one paid on purchase.
     fn resolve_agent(&mut self, id: Kingdoms, on: Kingdoms, standing: bool) {
         let year = self.game.year;
-        let outcome = if self.game.kingdom(on).is_dead {
-            Writing::Gone
-        } else if rand::thread_rng().gen_range(0..AGENT_UNMASKED) == 0 {
+        let bought = self.bought[on.index()];
+        let mut treasury = self.game.kingdom(id).treasury;
+        let outcome = self.seats[id.index()].dossiers[on.index()].agent_year(
+            self.game.kingdom(on),
+            year,
+            bought,
+            &mut treasury,
+            standing,
+        );
+        self.game.kingdom_mut(id).treasury = treasury;
+        if outcome == Writing::Unmasked {
             self.spy_taken(id, on, true);
-            Writing::Unmasked
-        } else if standing && self.game.kingdom(id).treasury < AGENT_PRICE {
-            Writing::Unpaid
-        } else {
-            if standing {
-                self.game.kingdom_mut(id).treasury -= AGENT_PRICE;
-            }
-            let k = self.game.kingdom(on);
-            let report = Report::read(k, year);
-            let ledger = Ledger::read(k, year, self.bought[on.index()]);
-            let d = &mut self.seat_mut(id).dossiers[on.index()];
-            let levied = d.report.map(|p| report.garrison - p.garrison);
-            let spent = d.ledger.map(|p| p.treasury - ledger.treasury);
-            d.report = Some(report);
-            d.ledger = Some(ledger);
-            Writing::Letter {
-                ledger,
-                levied,
-                spent,
-            }
-        };
-        if !matches!(outcome, Writing::Letter { .. }) {
-            self.seat_mut(id).dossiers[on.index()].agent = false;
         }
         self.report(id, News::Agent { at: on, outcome });
     }
 
-    /// A spy of `id` taken in `on`: `id` knows, `on` knows who sent him,
-    /// and the journal tells everyone.
+    /// A spy of `id` taken in `on` (the dossier already notes it): `on`
+    /// knows who sent him, and the journal tells everyone.
     fn spy_taken(&mut self, id: Kingdoms, on: Kingdoms, agent: bool) {
-        let year = self.game.year;
-        self.seat_mut(id).dossiers[on.index()].caught = Some(year);
         let line = if agent {
             format!(
                 "Un agent de la {} a été démasqué en {}.",

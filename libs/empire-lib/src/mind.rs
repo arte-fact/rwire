@@ -9,13 +9,10 @@
 //! éclaireur (a new one if the eye has no fresh report, aimed by land).
 
 use crate::front::MILITIA_EFFICIENCY;
+use crate::intel::SCOUT_PRICE;
 use crate::kingdom::{Kingdom, Kingdoms};
 use crate::random::random;
 
-/// What an éclaireur costs: about twenty men of arms.
-pub const SCOUT_PRICE: i32 = 150;
-/// One chance in this of the éclaireur being taken.
-pub const SCOUT_CAUGHT: i32 = 6;
 /// The ost cut to a report: this many tenths of the adverse force…
 const OST_TENTHS: i32 = 15;
 /// …and never less than this many quarters of the men at hand. The force

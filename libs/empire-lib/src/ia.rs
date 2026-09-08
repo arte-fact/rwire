@@ -1,6 +1,7 @@
 use crate::game::EmpireGame;
+use crate::intel::{SCOUT_CAUGHT, SCOUT_PRICE};
 use crate::kingdom::{Kingdom, Kingdoms};
-use crate::mind::{Mind, Seen, SCOUT_CAUGHT, SCOUT_PRICE};
+use crate::mind::{Mind, Seen};
 use crate::random::random;
 use crate::trade::{apply_trade, calculate_buy_cost, Trade, MAX_GRAIN_PRICE};
 use crate::war::{

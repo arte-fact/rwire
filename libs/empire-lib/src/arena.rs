@@ -4,8 +4,7 @@
 //! seat made of it comes back as an [`Outcome`], scored for evolution.
 
 use crate::brain::{
-    bound_council, decode_intendance, decode_orders, sight, Brain, Intendance, Memory, Report,
-    Rumour, Stage, A_OUT,
+    bound_council, decode_intendance, decode_orders, sight, Brain, Intendance, Memory, Stage, A_OUT,
 };
 use crate::campaign::{apply_battle, march, Expedition};
 use crate::demography::apply_feed;
@@ -13,10 +12,9 @@ use crate::economy::{apply_economy, apply_taxes, economy_report};
 use crate::events::{check_plague, check_ruler_death, RulerDeathCause};
 use crate::game::EmpireGame;
 use crate::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
+use crate::intel::{heard, Rumour, SCOUT_PRICE};
 use crate::investments::apply_investment;
 use crate::kingdom::{Kingdom, Kingdoms, PlayerTitle, Requirement, KINGDOMS};
-use crate::mind::{SCOUT_CAUGHT, SCOUT_PRICE};
-use crate::random::random;
 use crate::trade::{apply_trade, Trade};
 
 /// How one seat's game went.
@@ -153,10 +151,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
         }
         // The éclaireurs sent last year report as the Extérieur opens.
         for (id, on) in scouts.drain(..) {
-            if !game.kingdom(on).is_dead && random(0, SCOUT_CAUGHT) != 0 {
-                memories[id.index()].reports[on.index()] =
-                    Some(Report::read(game.kingdom(on), year));
-            }
+            memories[id.index()].dossiers[on.index()].scout(game.kingdom(on), year);
         }
         let mut expeditions = Vec::new();
         for id in KINGDOMS {
@@ -183,25 +178,26 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             }
         }
         let fought = march(&mut game, expeditions);
-        let mut rumours = [Rumour::default(); 6];
+        let mut rumours = Vec::new();
         for f in &fought {
             apply_battle(&mut game, f);
-            if let Some(t) = f.target {
-                for a in f.armies() {
-                    let (attacker, target) = (a.attacker.index(), t.index());
-                    rumours[attacker].marched_on[target] = true;
-                    rumours[target].marched_by[attacker] = true;
-                    rumours[target].beaten_by[attacker] = a.victory;
-                    rumours[target].lost_to[attacker] += a.spoils().arpents;
-                }
-            }
+            let annexed = f.target.is_some_and(|t| game.kingdom(t).is_dead);
+            rumours.extend(f.armies().iter().map(|a| Rumour {
+                year,
+                attacker: a.attacker,
+                target: f.target,
+                victory: a.victory,
+                arpents: a.spoils().arpents,
+                annexed: annexed && a.victory,
+            }));
         }
+        let heard = heard(&rumours);
         // The year ends: plague, the ruler's death, the ranks judged.
         let mut deaths = [None; 6];
         for id in KINGDOMS {
             let i = id.index();
             let m = &mut memories[i];
-            m.rumours = rumours;
+            m.heard = heard;
             let k = game.kingdom_mut(id);
             if outcomes[i].crowned.is_some() {
                 // Crowned already: the seat plays on unscored.

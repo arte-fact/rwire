@@ -12,7 +12,8 @@
 use empire_lib::campaign::{apply_battle, march, Expedition};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::ia::{plan_ai_intendance, plan_ai_war};
-use empire_lib::mind::{Mind, Seen, Temper, SCOUT_CAUGHT};
+use empire_lib::intel::SCOUT_CAUGHT;
+use empire_lib::mind::{Mind, Seen, Temper};
 use empire_lib::random::random;
 use empire_lib::{EmpireGame, Kingdoms, PlayerTitle, KINGDOMS};
 

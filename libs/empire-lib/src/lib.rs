@@ -16,6 +16,7 @@ pub mod front;
 pub mod game;
 pub mod harvests;
 pub mod ia;
+pub mod intel;
 pub mod investments;
 pub mod kingdom;
 pub mod mind;

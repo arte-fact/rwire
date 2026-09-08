@@ -8,9 +8,9 @@
 
 use crate::demography::{affordable_ration, Council, YearDemography};
 use crate::economy::{Taxes, YearEconomy};
+use crate::intel::{Dossier, Heard, SCOUT_PRICE};
 use crate::investments::InvestmentType;
 use crate::kingdom::{Kingdom, Kingdoms, PlayerTitle, Requirement, KINGDOMS, RATION_SCALE};
-use crate::mind::SCOUT_PRICE;
 use crate::trade::{calculate_buy_cost, max_land_sale, GRAIN_LOT, MAX_GRAIN_PRICE};
 
 /// Neurons of the hidden layer of each network.
@@ -50,45 +50,11 @@ pub struct Memory {
     pub eco: Option<YearEconomy>,
     pub plague: bool,
     /// What everyone heard of the last campaign, indexed by realm.
-    pub rumours: [Rumour; 6],
+    pub heard: [Heard; 6],
     /// The Extérieur's raw answer of last year.
     pub last_orders: [f32; B_OUT],
-    /// What an éclaireur last read of each realm, and when.
-    pub reports: [Option<Report>; 6],
-}
-
-/// What everyone hears of a realm after a campaign: who it marched on, who
-/// marched on it, how it went — never how many men.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Rumour {
-    /// Realms it marched on.
-    pub marched_on: [bool; 6],
-    /// Realms that marched on it.
-    pub marched_by: [bool; 6],
-    /// Realms that beat it on its own ground.
-    pub beaten_by: [bool; 6],
-    /// Arpents it lost to each realm.
-    pub lost_to: [i32; 6],
-}
-
-/// The figures an éclaireur brings back, dated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Report {
-    pub year: i32,
-    pub garrison: i32,
-    pub efficiency: i32,
-    pub subjects: i32,
-}
-
-impl Report {
-    pub fn read(k: &Kingdom, year: i32) -> Report {
-        Report {
-            year,
-            garrison: k.soldiers,
-            efficiency: k.soldiers_efficiency,
-            subjects: k.population(),
-        }
-    }
+    /// What the seat knows of each realm.
+    pub dossiers: [Dossier; 6],
 }
 
 /// The rivals of `id`, in the order they sit from its seat.
@@ -217,8 +183,8 @@ pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Ve
         } else {
             0
         };
-        let mine = &m.rumours[id.index()];
-        let theirs = &m.rumours[i];
+        let mine = &m.heard[id.index()];
+        let theirs = &m.heard[i];
         let others = |flags: &[bool; 6]| {
             flags
                 .iter()
@@ -227,7 +193,7 @@ pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Ve
                 .count() as f32
                 / 2.0
         };
-        let report = m.reports[i].filter(|_| !r.is_dead);
+        let report = m.dossiers[i].report.filter(|_| !r.is_dead);
         v.extend([
             f32::from(u8::from(!r.is_dead)),
             title_level(r.title()),
@@ -243,7 +209,7 @@ pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Ve
             f32::from(u8::from(report.is_some())),
             report.map_or(0.0, |r| count(r.garrison, 400.0)),
             report.map_or(0.0, |r| r.efficiency as f32 / 150.0),
-            report.map_or(0.0, |r| count(r.subjects, 3_000.0)),
+            report.map_or(0.0, |r| count(r.subjects(), 3_000.0)),
         ]);
         // The report's age rides on the "known" flag: a report read this
         // year reads 1, an old one fades.
