@@ -7,11 +7,11 @@
 //! prints the thousand-game reading. The original's AI (a random realm
 //! three years in four, a third to all of the men) ends a game of six
 //! computers in 69 years (median); the temperaments, with an ost of at
-//! least three quarters of the men, in about 90.
+//! least three quarters of the men, in about 100.
 
 use empire_lib::campaign::{apply_battle, march, Expedition};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
-use empire_lib::ia::plan_ai_turn;
+use empire_lib::ia::{plan_ai_intendance, plan_ai_war};
 use empire_lib::mind::{Mind, Seen, Temper, SCOUT_CAUGHT};
 use empire_lib::random::random;
 use empire_lib::{EmpireGame, Kingdoms, PlayerTitle, KINGDOMS};
@@ -54,12 +54,16 @@ fn winner(game: &EmpireGame) -> Option<(Kingdoms, bool)> {
 }
 
 /// One year at the table, as the web plays it: the councils sit, the
-/// armies march together, the éclaireurs read the realms as they stand.
-fn play_year(game: &mut EmpireGame, minds: &mut [Mind; 6], tally: &mut Tally) {
+/// éclaireurs sent last year read the realms as the Extérieur opens, the
+/// armies march together. Returns the éclaireurs sent this year.
+fn play_year(
+    game: &mut EmpireGame,
+    minds: &mut [Mind; 6],
+    scouts: Vec<(Kingdoms, Kingdoms)>,
+    tally: &mut Tally,
+) -> Vec<(Kingdoms, Kingdoms)> {
     let weather = game.random_weather();
     game.open_market();
-    let mut orders = Vec::new();
-    let mut scouts = Vec::new();
     for id in KINGDOMS {
         let k = game.kingdom_mut(id);
         if k.is_dead {
@@ -68,20 +72,37 @@ fn play_year(game: &mut EmpireGame, minds: &mut [Mind; 6], tally: &mut Tally) {
         apply_seed_grain(k);
         apply_rat_loss_rate(k);
         apply_grain_harvest(k, weather);
+        plan_ai_intendance(game, id);
+    }
+    for (id, on) in scouts {
+        if !game.kingdom(on).is_dead && random(0, SCOUT_CAUGHT) != 0 {
+            minds[id.index()].seen = Some(Seen::read(game.kingdom(on)));
+        }
+    }
+    let mut orders = Vec::new();
+    let mut sent = Vec::new();
+    for id in KINGDOMS {
+        if game.kingdom(id).is_dead {
+            continue;
+        }
         let mind = &mut minds[id.index()];
-        let d = plan_ai_turn(game, id, mind);
+        let war = plan_ai_war(game, id, mind);
         if game.year >= 3 {
             let s = slot(mind.temper);
             tally.years_sat[s] += 1;
-            tally.attacks[s] += d.kingdom_attacks.len();
+            tally.attacks[s] += war.kingdom_attacks.len();
         }
-        orders.extend(d.barbarian_attacks.into_iter().map(|soldiers| Expedition {
-            attacker: id,
-            target: None,
-            soldiers,
-        }));
         orders.extend(
-            d.kingdom_attacks
+            war.barbarian_attacks
+                .into_iter()
+                .map(|soldiers| Expedition {
+                    attacker: id,
+                    target: None,
+                    soldiers,
+                }),
+        );
+        orders.extend(
+            war.kingdom_attacks
                 .into_iter()
                 .map(|(target, soldiers)| Expedition {
                     attacker: id,
@@ -89,24 +110,21 @@ fn play_year(game: &mut EmpireGame, minds: &mut [Mind; 6], tally: &mut Tally) {
                     soldiers,
                 }),
         );
-        if let Some(on) = d.scout {
-            scouts.push((id, on));
+        if let Some(on) = war.scout {
+            sent.push((id, on));
         }
     }
     for f in march(game, orders) {
         apply_battle(game, &f);
     }
-    for (id, on) in scouts {
-        if !game.kingdom(on).is_dead && random(0, SCOUT_CAUGHT) != 0 {
-            minds[id.index()].seen = Some(Seen::read(game.kingdom(on)));
-        }
-    }
     game.increment_year();
+    sent
 }
 
 fn play(tally: &mut Tally) {
     let mut game = EmpireGame::default();
     let mut minds: [Mind; 6] = std::array::from_fn(|_| Mind::default());
+    let mut scouts = Vec::new();
     tally.games += 1;
     while game.year <= LONGEST {
         if let Some((id, crowned)) = winner(&game) {
@@ -114,7 +132,7 @@ fn play(tally: &mut Tally) {
             tally.crowned += usize::from(crowned);
             break;
         }
-        play_year(&mut game, &mut minds, tally);
+        scouts = play_year(&mut game, &mut minds, scouts, tally);
     }
     tally.years.push(game.year);
 }
@@ -173,10 +191,14 @@ fn games_end_and_every_temper_can_win() {
 }
 
 #[test]
-#[ignore = "a thousand games; prints the reading"]
+#[ignore = "a thousand games (or `GAMES`); prints the reading"]
 fn a_thousand_games() {
+    let games = std::env::var("GAMES")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1000);
     let mut tally = Tally::default();
-    for _ in 0..1000 {
+    for _ in 0..games {
         play(&mut tally);
     }
     println!("{}", reading(&tally));

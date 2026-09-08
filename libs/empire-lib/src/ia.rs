@@ -11,7 +11,7 @@ use crate::war::{
 /// The computer trades by the hundred: no one-bushel stalls or purchases.
 const MIN_LOT: i32 = 100;
 
-/// What the AI decided to do.
+/// What the AI decided to do over its year: the intendance, then the war.
 #[derive(Debug, Clone, Default)]
 pub struct AiTurnDecision {
     /// Barbarian attacks: soldiers to send per attack.
@@ -24,6 +24,17 @@ pub struct AiTurnDecision {
     pub grain_listed: Option<(i32, i32)>,
     /// Grain bought from another kingdom's market: `(seller, amount)`.
     pub grain_bought: Option<(Kingdoms, i32)>,
+    /// The realm an éclaireur rides to this year (paid for).
+    pub scout: Option<Kingdoms>,
+}
+
+/// The war orders of one year, given once the éclaireur is back.
+#[derive(Debug, Clone, Default)]
+pub struct AiWar {
+    /// Barbarian attacks: soldiers to send per attack.
+    pub barbarian_attacks: Vec<i32>,
+    /// Kingdom attacks: (target, soldiers).
+    pub kingdom_attacks: Vec<(Kingdoms, i32)>,
     /// The realm an éclaireur rides to this year (paid for).
     pub scout: Option<Kingdoms>,
 }
@@ -43,17 +54,15 @@ pub struct AiGrowth {
     pub soldiers_efficiency: i32,
 }
 
-/// Plan the AI turn: growth is applied immediately, battles are returned for
-/// the caller to run (so a UI can animate them) — see [`execute_ai_turn`].
-/// From the third year the war is the mind's: the caller feeds `mind.seen`
-/// with the éclaireur's report and sends the éclaireur it asks for.
-pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiTurnDecision {
+/// The computer's intendance as the year opens: growth applied at once, the
+/// market mirrored, grain bought. The war comes later, at the Extérieur —
+/// see [`plan_ai_war`]; [`plan_ai_turn`] does both in one go.
+pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision {
     if game.kingdom(id).is_player || game.kingdom(id).is_dead {
         return AiTurnDecision::default();
     }
 
     let weather_ratio = game.weather.value() as f32 / 6.0;
-    let year = game.year;
     let kingdom = game.kingdom_mut(id);
 
     // Phase 1: resource growth. Weather scales each roll; rounded, not
@@ -126,7 +135,6 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiT
 
     // Market, per original Empire.bas lines 209–232: the computer mirrors the
     // human players' market rather than running its own economy.
-    let (nobles, soldiers) = (kingdom.nobles, kingdom.soldiers);
     let humans: Vec<(i32, i32)> = game
         .kingdoms
         .iter()
@@ -185,15 +193,27 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiT
         }
     }
 
-    // Phase 2: plan combat (decide only, don't execute). The first two years
-    // are the original's barbarian raids; from the third the mind decides.
-    if year < 3 {
+    decision
+}
+
+/// The computer's war orders, given at the Extérieur once the éclaireur is
+/// back: the first two years are the original's barbarian raids; from the
+/// third the mind decides on what `mind.seen` tells it (the caller feeds it
+/// with the éclaireur's report and sends the éclaireur asked for, paid here).
+pub fn plan_ai_war(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiWar {
+    let mut war = AiWar::default();
+    let k = game.kingdom(id);
+    if k.is_player || k.is_dead {
+        return war;
+    }
+    let (nobles, soldiers) = (k.nobles, k.soldiers);
+    if game.year < 3 {
         let mut attacks_allowed = nobles / 4 + 1;
         while random(1, 5) >= 2 && attacks_allowed > 0 && soldiers > 0 {
-            decision.barbarian_attacks.push(random(1, soldiers).max(1));
+            war.barbarian_attacks.push(random(1, soldiers).max(1));
             attacks_allowed -= 1;
         }
-        return decision;
+        return war;
     }
     let enemies: Vec<&Kingdom> = game
         .kingdoms
@@ -201,14 +221,24 @@ pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiT
         .filter(|k| k.id != id && !k.is_dead)
         .collect();
     let orders = mind.campaign(game.kingdom(id), &enemies);
-    decision
-        .kingdom_attacks
+    war.kingdom_attacks
         .extend(orders.blind.into_iter().chain(orders.aimed));
     if orders.scout.is_some() {
         game.kingdom_mut(id).treasury -= SCOUT_PRICE;
-        decision.scout = orders.scout;
+        war.scout = orders.scout;
     }
+    war
+}
 
+/// The whole year at once — intendance, then war — for a table where the
+/// computers play one after the other. Battles are returned for the caller
+/// to run (so a UI can animate them) — see [`execute_ai_turn`].
+pub fn plan_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiTurnDecision {
+    let mut decision = plan_ai_intendance(game, id);
+    let war = plan_ai_war(game, id, mind);
+    decision.barbarian_attacks = war.barbarian_attacks;
+    decision.kingdom_attacks = war.kingdom_attacks;
+    decision.scout = war.scout;
     decision
 }
 

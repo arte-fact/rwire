@@ -8,7 +8,7 @@ use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, Yea
 use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
 use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Round, Spoils};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
-use empire_lib::ia::plan_ai_turn;
+use empire_lib::ia::{plan_ai_intendance, plan_ai_war};
 use empire_lib::investments::{apply_investment, InvestmentType};
 use empire_lib::kingdom::RATION_SCALE;
 use empire_lib::mind::SCOUT_CAUGHT;
@@ -27,6 +27,12 @@ use crate::ui::{coins, fmt, hommes_darmes};
 pub const TICK_MS: u64 = 50;
 /// Ticks between two frames of a front being replayed.
 const FRAME_TICKS: u32 = 3;
+/// Ticks the order of battle stays before a front is fought: the lines draw
+/// themselves, then the fronts not concerned fade.
+const SCHEMA_TICKS: u32 = 50;
+/// Ticks a verdict stays, and how many more for every army past the first.
+const VERDICT_TICKS: u32 = 60;
+const VERDICT_TICKS_PER_ARMY: u32 = 20;
 /// A front is replayed over as many frames as it had rounds, within these bounds.
 const BATTLE_MIN_FRAMES: usize = 25;
 const BATTLE_MAX_FRAMES: usize = 50;
@@ -59,16 +65,16 @@ pub enum Phase {
 
 /// Where a seat's reading of the campaign stands: the order of battle with
 /// the next front blinking, the front itself, its verdict, then the order of
-/// battle again. Only the front moves by itself; every other screen waits
-/// for a tap, and a tap on a moving front ends it.
+/// battle again. The reading runs by itself; a tap skips to the next screen,
+/// and once every front is told the last screen waits for the reader.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Staging {
-    /// The schema, `current` about to be fought.
-    Schema,
+    /// The schema, `current` about to be fought; ticks before it is.
+    Schema(u32),
     /// `current` is being fought; ticks before its next frame.
     Fight(u32),
-    /// `current` is settled.
-    Verdict,
+    /// `current` is settled; ticks before the next schema.
+    Verdict(u32),
     /// Every front has been told.
     #[default]
     Done,
@@ -87,7 +93,7 @@ impl Replay {
     /// About to read the campaign from its first front.
     fn opening() -> Self {
         Self {
-            staging: Staging::Schema,
+            staging: Staging::Schema(SCHEMA_TICKS),
             ..Self::default()
         }
     }
@@ -106,7 +112,25 @@ impl Replay {
 
     /// Whether front `i` has been told to its end.
     pub fn settled(&self, i: usize) -> bool {
-        i < self.current || (i == self.current && self.staging == Staging::Verdict)
+        i < self.current || (i == self.current && matches!(self.staging, Staging::Verdict(_)))
+    }
+
+    /// The front is over: its verdict, held long enough to be read.
+    fn settle(&mut self, fought: &Fought) {
+        self.cursor = fought.result.rounds.len() - 1;
+        let armies = fought.result.armies.len() as u32;
+        self.staging = Staging::Verdict(VERDICT_TICKS + VERDICT_TICKS_PER_ARMY * (armies - 1));
+    }
+
+    /// On to the next of `n` fronts, or done.
+    fn next_front(&mut self, n: usize) {
+        self.current += 1;
+        self.cursor = 0;
+        self.staging = if self.current < n {
+            Staging::Schema(SCHEMA_TICKS)
+        } else {
+            Staging::Done
+        };
     }
 
     /// The round of `fought` being shown.
@@ -469,6 +493,17 @@ pub enum News {
     Crowned,
 }
 
+impl News {
+    /// Told at the Extérieur, where it comes in, rather than in the
+    /// Chronique a year later: the spies' returns and the spies taken.
+    pub fn is_intelligence(&self) -> bool {
+        matches!(
+            self,
+            News::Scout { .. } | News::Agent { .. } | News::SpyCaught { .. }
+        )
+    }
+}
+
 /// How an éclaireur's year ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scouting {
@@ -568,7 +603,7 @@ impl Mission {
 }
 
 /// What an éclaireur saw of a realm — the figures a war is fought with —
-/// dated with the year it was read, as the year opened.
+/// dated with the year it was read, as the Extérieur opened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Report {
     pub year: i32,
@@ -984,7 +1019,7 @@ impl Room {
         Ok(())
     }
 
-    /// The spies report as the year opens. Each éclaireur reads the realm as
+    /// The spies report as the Extérieur opens. Each éclaireur reads the realm as
     /// it stands, or is taken (one in six); the agents bought this year take
     /// their place, then every agent is unmasked (one in eight) or, paid for
     /// the year, writes his letter — a taken spy is told to that seigneur and
@@ -1236,7 +1271,6 @@ impl Room {
                 seat.attack = false;
                 seat.forecast = None;
                 seat.planned.clear();
-                seat.missions.clear();
             }
         }
         self.try_open_exterior();
@@ -1255,8 +1289,16 @@ impl Room {
             return;
         }
         self.phase = Phase::Exterieur;
+        // The éclaireurs and letters come in as the Extérieur opens: every
+        // court has held its intendance, the figures are those the campaign
+        // will be fought with.
+        self.resolve_missions();
         for id in KINGDOMS {
-            if self.is_computer(id) || self.game.kingdom(id).is_dead {
+            if self.game.kingdom(id).is_dead {
+                continue;
+            }
+            if self.is_computer(id) {
+                self.run_computer_war(id);
                 continue;
             }
             let seat = self.seat_mut(id);
@@ -1267,7 +1309,6 @@ impl Room {
             seat.attack = false;
             seat.forecast = None;
             seat.planned.clear();
-            seat.missions.clear();
         }
         self.try_march();
     }
@@ -1333,10 +1374,10 @@ impl Room {
             .filter(|&id| !self.game.kingdom(id).is_dead && !self.seat(id).ready)
     }
 
-    /// A tap on the campaign screen, on `id`'s own clock: the order of battle
-    /// gives way to the front, a front still moving jumps to its end, a
-    /// verdict gives way to the next order of battle; once every front has
-    /// been told, the tap is `id`'s "continue".
+    /// A tap on the campaign screen skips ahead on `id`'s own clock: the
+    /// order of battle gives way to the front at once, a front still moving
+    /// jumps to its end, a verdict gives way to the next order of battle;
+    /// once every front has been told, the tap is `id`'s "continue".
     pub fn tap_campaign(&mut self, id: Kingdoms) {
         if self.stage != Stage::Playing || self.phase != Phase::Campaign {
             return;
@@ -1344,20 +1385,9 @@ impl Room {
         let n = self.battles.len();
         let replay = &mut self.seats[id.index()].replay;
         match replay.staging {
-            Staging::Schema => replay.staging = Staging::Fight(FRAME_TICKS),
-            Staging::Fight(_) => {
-                replay.cursor = self.battles[replay.current].result.rounds.len() - 1;
-                replay.staging = Staging::Verdict;
-            }
-            Staging::Verdict => {
-                replay.current += 1;
-                replay.cursor = 0;
-                replay.staging = if replay.current < n {
-                    Staging::Schema
-                } else {
-                    Staging::Done
-                };
-            }
+            Staging::Schema(_) => replay.staging = Staging::Fight(FRAME_TICKS),
+            Staging::Fight(_) => replay.settle(&self.battles[replay.current]),
+            Staging::Verdict(_) => replay.next_front(n),
             Staging::Done => self.continue_campaign(id),
         }
     }
@@ -1486,7 +1516,6 @@ impl Room {
             return;
         }
         self.game.increment_year();
-        self.resolve_missions();
         self.begin_year();
     }
 
@@ -1574,54 +1603,50 @@ impl Room {
 
     // -- ticker: battle replay -----------------------------------------------
 
-    /// Advance every seat's clock by one tick: a front being fought moves a
-    /// frame and reaches its verdict at its last. Returns true when a view
-    /// changed.
+    /// Advance every seat's clock by one tick: the order of battle gives way
+    /// to its front, a front being fought moves a frame and reaches its
+    /// verdict at its last, a verdict gives way to the next order of battle.
+    /// Returns true when a view changed.
     pub fn tick(&mut self) -> bool {
         if self.stage != Stage::Playing || self.phase != Phase::Campaign {
             return false;
         }
+        let n = self.battles.len();
         let mut changed = false;
         for id in KINGDOMS {
             let replay = &mut self.seats[id.index()].replay;
             match replay.staging {
-                Staging::Fight(n) if n > 1 => replay.staging = Staging::Fight(n - 1),
-                Staging::Fight(_) => {
-                    replay.cursor += 1;
-                    replay.staging = if replay.finished(&self.battles[replay.current]) {
-                        Staging::Verdict
-                    } else {
-                        Staging::Fight(FRAME_TICKS)
-                    };
+                Staging::Schema(t) if t > 1 => replay.staging = Staging::Schema(t - 1),
+                Staging::Schema(_) => {
+                    replay.staging = Staging::Fight(FRAME_TICKS);
                     changed = true;
                 }
-                _ => {}
+                Staging::Fight(t) if t > 1 => replay.staging = Staging::Fight(t - 1),
+                Staging::Fight(_) => {
+                    replay.cursor += 1;
+                    let fought = &self.battles[replay.current];
+                    if replay.finished(fought) {
+                        replay.settle(fought);
+                    } else {
+                        replay.staging = Staging::Fight(FRAME_TICKS);
+                    }
+                    changed = true;
+                }
+                Staging::Verdict(t) if t > 1 => replay.staging = Staging::Verdict(t - 1),
+                Staging::Verdict(_) => {
+                    replay.next_front(n);
+                    changed = true;
+                }
+                Staging::Done => {}
             }
         }
         changed
     }
 
-    /// A computer runs its whole kingdom the moment the year opens; its
-    /// expeditions march with everyone else's.
-    /// The computer's council: the year's growth and trade, then its war —
-    /// its éclaireur's report of the year read from its dossier, the spy it
-    /// sends ordered like a seigneur's (taken, journaled and told alike).
+    /// The computer's council as the year opens: its growth and trade. Its
+    /// war waits for the Extérieur, like everyone's — see `run_computer_war`.
     fn run_computer_intendance(&mut self, id: Kingdoms) {
-        let year = self.game.year;
-        let mut mind = self.seat(id).mind;
-        mind.seen = mind.eye.and_then(|on| {
-            let report = self.dossier(id, on).report.filter(|r| r.year == year)?;
-            Some(Seen {
-                garrison: report.garrison,
-                efficiency: report.efficiency,
-                serfs: report.serfs,
-            })
-        });
-        let decision = plan_ai_turn(&mut self.game, id, &mut mind);
-        self.seat_mut(id).mind = mind;
-        if let Some(on) = decision.scout {
-            self.seat_mut(id).missions.push(Mission::Scout(on));
-        }
+        let decision = plan_ai_intendance(&mut self.game, id);
         if let Some((amount, price)) = decision.grain_listed {
             self.journal(
                 [id],
@@ -1642,7 +1667,28 @@ impl Room {
             );
             self.report_sale(seller, id, amount);
         }
-        let barbarians = decision
+    }
+
+    /// The computer's war orders as the Extérieur opens, on the éclaireur's
+    /// report of this very day; the spy it sends is ordered like a
+    /// seigneur's (taken, journaled and told alike).
+    fn run_computer_war(&mut self, id: Kingdoms) {
+        let year = self.game.year;
+        let mut mind = self.seat(id).mind;
+        mind.seen = mind.eye.and_then(|on| {
+            let report = self.dossier(id, on).report.filter(|r| r.year == year)?;
+            Some(Seen {
+                garrison: report.garrison,
+                efficiency: report.efficiency,
+                serfs: report.serfs,
+            })
+        });
+        let war = plan_ai_war(&mut self.game, id, &mut mind);
+        self.seat_mut(id).mind = mind;
+        if let Some(on) = war.scout {
+            self.seat_mut(id).missions.push(Mission::Scout(on));
+        }
+        let barbarians = war
             .barbarian_attacks
             .into_iter()
             .map(|soldiers| Expedition {
@@ -1650,7 +1696,7 @@ impl Room {
                 target: None,
                 soldiers,
             });
-        let kingdoms = decision
+        let kingdoms = war
             .kingdom_attacks
             .into_iter()
             .map(|(target, soldiers)| Expedition {
@@ -2695,49 +2741,54 @@ mod tests {
         assert_eq!(human, vec![f, s]);
         // Each front was fought against the reduced garrison.
         assert_eq!(room.battles[0].result.garrison_start, 60);
-        // Every seigneur reads on their own clock: the order of battle waits
-        // for a tap before the first front moves.
+        // Every seigneur reads on their own clock: the order of battle holds
+        // a moment, then the first front moves by itself.
         assert_eq!(room.seat(f).replay, Replay::opening());
         assert_eq!(room.seat(s).replay, Replay::opening());
         assert!(room.seat(Kingdoms::Britanny).replay.done());
-        for _ in 0..100 {
+        for _ in 1..SCHEMA_TICKS {
             assert!(!room.tick());
         }
-        assert_eq!(room.seat(f).replay.staging, Staging::Schema);
-        room.tap_campaign(f);
+        assert!(room.tick());
         assert_eq!(room.seat(f).replay.staging, Staging::Fight(FRAME_TICKS));
-        assert_eq!(room.seat(s).replay.staging, Staging::Schema);
+        assert_eq!(room.seat(s).replay.staging, Staging::Fight(FRAME_TICKS));
         for _ in 1..FRAME_TICKS {
             assert!(!room.tick());
         }
         assert!(room.tick());
         assert_eq!(room.seat(f).replay.cursor, 1);
-        assert_eq!(room.seat(s).replay.cursor, 0);
         // Nobody may continue before they have read the last front.
         assert!(!room.may_continue(f));
         room.continue_campaign(f);
         assert_eq!(room.phase, Phase::Campaign);
-        // Left alone, France's front runs to its verdict, which then waits.
+        // Spain taps: a tap during the front ends it, held for its verdict.
+        room.tap_campaign(s);
         let frames = room.battles[0].result.rounds.len();
+        let armies = room.battles[0].result.armies.len() as u32;
+        let held = VERDICT_TICKS + VERDICT_TICKS_PER_ARMY * (armies - 1);
+        assert_eq!(room.seat(s).replay.staging, Staging::Verdict(held));
+        assert_eq!(room.seat(s).replay.cursor, frames - 1);
+        assert!(room.seat(s).replay.settled(0));
+        // A tap on the verdict moves Spain on at once.
+        room.tap_campaign(s);
+        assert_eq!(room.seat(s).replay.current, 1);
+        assert_eq!(room.seat(s).replay.staging, Staging::Schema(SCHEMA_TICKS));
+        // Left alone, France's front runs to the same verdict, which holds,
+        // then gives way by itself.
         for _ in 0..(frames * FRAME_TICKS as usize) {
             room.tick();
         }
-        assert_eq!(room.seat(f).replay.staging, Staging::Verdict);
-        assert!(room.seat(f).replay.settled(0));
+        assert!(matches!(room.seat(f).replay.staging, Staging::Verdict(_)));
         assert_eq!(room.seat(f).replay.cursor, frames - 1);
-        for _ in 0..100 {
-            assert!(!room.tick());
-        }
-        // Spain, still on the order of battle, taps through its first front
-        // at once: a tap during the front ends it.
-        room.tap_campaign(s);
-        room.tap_campaign(s);
-        assert_eq!(room.seat(s).replay.staging, Staging::Verdict);
-        assert_eq!(room.seat(s).replay.cursor, frames - 1);
-        room.tap_campaign(s);
-        assert_eq!(room.seat(s).replay.current, 1);
-        assert_eq!(room.seat(s).replay.staging, Staging::Schema);
         assert_eq!(room.seat(f).replay.current, 0);
+        let mut ticks = 0;
+        while matches!(room.seat(f).replay.staging, Staging::Verdict(_)) {
+            room.tick();
+            ticks += 1;
+        }
+        assert!(ticks <= held);
+        assert_eq!(room.seat(f).replay.current, 1);
+        assert_eq!(room.seat(f).replay.staging, Staging::Schema(SCHEMA_TICKS));
         // A spectator sees everything told.
         assert!(room.replay(None).done());
         assert!(room.replay(None).settled(room.battles.len() - 1));
@@ -3168,22 +3219,77 @@ mod tests {
         assert!(!room.seat(Kingdoms::Spain).news.contains(&News::Crowned));
     }
 
+    /// Play `id` from its war orders to the next year's Extérieur.
+    fn turn_year(room: &mut Room, id: Kingdoms) {
+        room.advance(id);
+        if room.phase == Phase::Campaign {
+            while !room.seat(id).replay.done() {
+                room.tap_campaign(id);
+            }
+            room.tap_campaign(id);
+        }
+        finish_intendance(room, id);
+    }
+
     #[test]
-    fn computers_plan_their_expeditions_with_their_intendance() {
+    fn an_eclaireur_sent_at_the_exterior_reports_at_the_next_one() {
         let mut room = playing(&[Kingdoms::France]);
-        // Force a plan: the computer's expeditions march with everyone's.
-        room.seats[Kingdoms::Britanny.index()].planned = vec![Expedition {
-            attacker: Kingdoms::Britanny,
-            target: None,
-            soldiers: 5,
-        }];
+        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
+        finish_intendance(&mut room, id);
+        room.game.kingdom_mut(id).treasury = 100_000;
+        room.toggle_scout(id, on).unwrap();
+        turn_year(&mut room, id);
+        assert_eq!(room.phase, Phase::Exterieur);
+        assert!(!room.scout_ordered(id, on), "the mission lingers");
+        let d = room.dossier(id, on);
+        let year = room.game.year;
+        let read = d.report.is_some_and(|r| r.year == year);
+        let taken = d.caught == Some(year);
+        assert!(read || taken, "{d:?}");
+        // The figures are of this very day, after Spain's council sat.
+        if read {
+            let r = d.report.unwrap();
+            let k = room.game.kingdom(on);
+            assert_eq!((r.garrison, r.serfs), (k.soldiers, k.peasants));
+        }
+        // Told at the Extérieur, not in a Chronique a year late.
+        assert!(room.seat(id).news.iter().any(News::is_intelligence));
+    }
+
+    #[test]
+    fn computers_give_their_war_orders_as_the_exterior_opens() {
+        let mut room = playing(&[Kingdoms::France]);
+        // A bold council, year three, with a fresh report on a weak realm:
+        // it strikes for sure (a coup de sang may march first and take men).
+        let (id, on) = (Kingdoms::Britanny, Kingdoms::Spain);
+        room.game.year = 3;
+        room.seat_mut(id).mind = Mind {
+            temper: Temper::Bold,
+            eye: Some(on),
+            seen: None,
+        };
+        let k = room.game.kingdom_mut(id);
+        k.soldiers = 60;
+        k.soldiers_efficiency = 100;
+        room.seat_mut(id).dossiers[on.index()].report = Some(Report {
+            year: 3,
+            garrison: 20,
+            efficiency: 100,
+            nobles: 1,
+            merchants: 100,
+            serfs: 1000,
+            surface: 10_000,
+        });
+        assert!(room.seat(id).planned.is_empty());
         finish_intendance(&mut room, Kingdoms::France);
+        assert_eq!(room.phase, Phase::Exterieur);
+        assert!(room.seat(id).planned.iter().any(|e| e.attacker == id));
         room.advance(Kingdoms::France);
         assert_eq!(room.phase, Phase::Campaign);
-        assert!(room.battles.iter().any(|b| {
-            b.expeditions()
-                .any(|e| e.attacker == Kingdoms::Britanny && e.soldiers == 5)
-        }));
+        assert!(room
+            .battles
+            .iter()
+            .any(|b| b.expeditions().any(|e| e.attacker == id)));
     }
 }
 
@@ -3500,17 +3606,13 @@ mod scouting {
     #[test]
     fn a_computer_reads_its_dossier_and_strikes_on_a_favourable_report() {
         let (mut room, id, on) = watching(Temper::Bold, 20);
-        room.run_computer_intendance(id);
-        // 1.5 × 20 × 100 at the efficiency the council left, or three
-        // quarters of the men it left.
-        let k = room.game.kingdom(id);
-        let men =
-            ((3000 + k.soldiers_efficiency - 1) / k.soldiers_efficiency).max(k.soldiers * 3 / 4);
+        room.run_computer_war(id);
+        // 1.5 × 20 × 100 / 100 = 30 men, or three quarters of the 60: 45.
         let planned = &room.seat(id).planned;
         assert!(
             planned
                 .iter()
-                .any(|e| e.target == Some(on) && e.soldiers == men),
+                .any(|e| e.target == Some(on) && e.soldiers == 45),
             "{planned:?}"
         );
         assert!(room.scout_ordered(id, on));
@@ -3524,7 +3626,7 @@ mod scouting {
         // The watched realm is a speck: the new eye all but surely lands
         // elsewhere.
         room.game.kingdom_mut(on).surface = 1;
-        room.run_computer_intendance(id);
+        room.run_computer_war(id);
         let eye = room.seat(id).mind.eye.expect("an eye");
         assert!(eye != id && eye != on, "{eye:?}");
         assert!(room.scout_ordered(id, eye));
@@ -3539,7 +3641,7 @@ mod scouting {
             .as_mut()
             .unwrap()
             .year = 2;
-        room.run_computer_intendance(id);
+        room.run_computer_war(id);
         // Only the coup de sang could have marched: never an ost cut to the
         // report (1.5 × 100 / 100 = 2 men).
         assert!(!room.seat(id).planned.iter().any(|e| e.soldiers == 2));
@@ -3552,7 +3654,7 @@ mod scouting {
         for _ in 0..200 {
             let (mut room, _, _) = watching(Temper::Measured, 20);
             room.seat_mut(on).news.clear();
-            room.run_computer_intendance(id);
+            room.run_computer_war(id);
             assert!(room.scout_ordered(id, on));
             room.game.increment_year();
             room.resolve_missions();

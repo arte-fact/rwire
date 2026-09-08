@@ -1011,6 +1011,8 @@ define_token_enum! {
         BarSeg = 0x385 => "position:absolute;top:0;bottom:0",
         /// Hatched fill for what is held back (a garrison, a reserve).
         BgHatched = 0x386 => "background:repeating-linear-gradient(135deg,var(--l) 0 2px,transparent 2px 5px);opacity:.6",
+        /// Fades to a quarter once the in-animations are done: what stays out of the moment.
+        AnimateDim = 0x388 => "animation:rw-dim .6s 1.2s ease both",
     }
 }
 
@@ -1283,6 +1285,7 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@keyframes rw-march{to{stroke-dashoffset:-12}}",
     "@keyframes rw-blink{0%,100%{opacity:.25}50%{opacity:1}}",
     "@keyframes rw-stamp{from{opacity:0;transform:rotate(-6deg) scale(1.6)}}",
+    "@keyframes rw-dim{to{opacity:.25}}",
     // `--n` must be a registered integer so the browser can interpolate it (St::CountUp).
     "@property --n{syntax:'<integer>';inherits:false;initial-value:0}",
     "@keyframes rw-count{to{--n:var(--to)}}",
@@ -1290,7 +1293,7 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@keyframes rw-rain{to{background-position:0 44px,9px 78px}}",
     "@keyframes rw-snow{to{background-position:44px 85px,-22px 140px,43px 174px}}",
     ".u853::after{content:counter(n)}",
-    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853,.u861,.u867,.u868,.u884,.u885,.u886,.u887,.u889,.u890{animation-duration:0s!important;animation-delay:0s!important}}"
+    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853,.u861,.u867,.u868,.u884,.u885,.u886,.u887,.u889,.u890,.u904{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
 /// Whether a utility declaration references one of the shared `rw-*` keyframes.
@@ -1514,6 +1517,7 @@ mod tests {
             St::PathMarch,
             St::Blink,
             St::Stamp,
+            St::AnimateDim,
         ] {
             let class = format!(".u{}", st.as_u16());
             assert!(PSEUDO_GLOBAL_CSS.contains(&class), "{class} missing");

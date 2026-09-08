@@ -3,10 +3,11 @@
 //! gauge against the garrison, then each army's march along its share of the
 //! realm with what it takes as it goes — then its verdict, then the schema
 //! again; once every front is told, the schema stays and the year may turn.
-//! Every seat reads on its own clock: a front moves by itself, everything
-//! else waits for the reader's tap, and a tap on a moving front ends it. The
-//! fronts' outcomes reach the map only once everyone has read; a viewer
-//! with no seat is shown the campaign fully told.
+//! Every seat reads on its own clock: the telling runs by itself, a tap
+//! skips to the next screen, and only the last screen waits for the reader.
+//! Before a front is fought, the order of battle fades everything that is
+//! not on it. The fronts' outcomes reach the map only once everyone has
+//! read; a viewer with no seat is shown the campaign fully told.
 
 use empire_lib::campaign::Fought;
 use empire_lib::front::{Army, People, Round, Spoils, Stand};
@@ -78,9 +79,9 @@ pub(super) fn campaign_page(t: T, me: Option<Kingdoms>) -> View {
     let room = t.room;
     let replay = room.replay(me);
     let body = match replay.staging {
-        Staging::Schema | Staging::Done => schema(room, replay, me),
+        Staging::Schema(_) | Staging::Done => schema(room, replay, me),
         Staging::Fight(_) => battle(room, replay, me),
-        Staging::Verdict => verdict(room, replay, me),
+        Staging::Verdict(_) => verdict(room, replay, me),
     };
     // A seated player taps their replay on; once it is told, only a seigneur
     // who has not yet continued.
@@ -109,8 +110,8 @@ fn status(room: &Room, replay: Replay, me: Option<Kingdoms>, taps: bool) -> Elem
                 reading.join(", ")
             )
         }
-        Staging::Verdict => format!(
-            "Front {}/{n} tranché · touchez pour continuer",
+        Staging::Verdict(_) => format!(
+            "Front {}/{n} tranché · touchez pour passer",
             replay.current + 1
         ),
         Staging::Fight(_) => {
@@ -136,10 +137,7 @@ fn status(room: &Room, replay: Replay, me: Option<Kingdoms>, taps: bool) -> Elem
                 if names.len() > 1 { plural } else { verb }
             )
         }
-        Staging::Schema => format!(
-            "Front {}/{n} · touchez pour livrer bataille",
-            replay.current + 1
-        ),
+        Staging::Schema(_) => format!("Front {}/{n} · touchez pour passer", replay.current + 1),
     };
     let dot = matches!(replay.staging, Staging::Fight(_)).then(|| {
         el(El::Span).st([
@@ -243,7 +241,8 @@ fn order_of_battle(
     let n = room.battles.len();
     let rows = attackers.len().max(n);
     let next = (!replay.done()).then_some(replay.current);
-    let name_row = |p: Party, i: usize, right: bool| {
+    // Before a front is fought, everything that is not on it fades away.
+    let name_row = |p: Party, i: usize, right: bool, dim: bool| {
         el(El::Div)
             .st([
                 St::H4_5rem,
@@ -255,6 +254,7 @@ fn order_of_battle(
                 St::TextMuted,
                 St::TabularNums,
                 if right { St::TextRight } else { St::TextLeft },
+                if dim { St::AnimateDim } else { St::Opacity100 },
             ])
             .style(
                 Style::new()
@@ -319,7 +319,8 @@ fn order_of_battle(
             .map(|(_, a)| a.spoils().arpents)
             .sum();
         let lost_all = all_told && won == 0;
-        let mut row = name_row(Some(a), i, false).append([
+        let dim = next.is_some_and(|n| !mine.iter().any(|(i, _)| *i == n));
+        let mut row = name_row(Some(a), i, false, dim).append([
             big_name(Some(a), false, false, lost_all, false),
             el(El::Span)
                 .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
@@ -389,7 +390,7 @@ fn order_of_battle(
                 verdict("a tenu".to_string(), false)
             });
         }
-        name_row(target, i, true).append(lines)
+        name_row(target, i, true, next.is_some_and(|n| n != i)).append(lines)
     });
 
     // One bezier per expedition, from its attacker's row to its front's.

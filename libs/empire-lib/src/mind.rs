@@ -21,7 +21,7 @@ const OST_TENTHS: i32 = 15;
 /// …and never less than this many quarters of the men at hand. The force
 /// alone beats the garrison but takes little ground: without the floor the
 /// games last three times longer than the original's (see the calibration
-/// test); at three quarters they last a third longer, at every man the same.
+/// test); at three quarters half again as long, at every man a fifth.
 const OST_FLOOR_QUARTERS: i32 = 3;
 /// One serf in this many takes up arms against an army that meets no
 /// garrison: what an empty realm weighs in a computer's reckoning.
@@ -70,12 +70,14 @@ impl Temper {
     }
 
     /// How much stronger than the watched realm it must be to find the
-    /// report favourable, in tenths.
+    /// report favourable, in tenths. The garrison is read as the Extérieur
+    /// opens, at its yearly peak, before the realm's own armies leave it:
+    /// the bold march on a realm a little stronger than theirs.
     fn margin_tenths(self) -> i32 {
         match self {
-            Temper::Bold => 12,
-            Temper::Measured => 15,
-            Temper::Cautious => 20,
+            Temper::Bold => 8,
+            Temper::Measured => 10,
+            Temper::Cautious => 12,
         }
     }
 

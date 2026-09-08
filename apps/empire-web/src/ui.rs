@@ -1087,7 +1087,9 @@ fn epilogue(room: &Room, id: Kingdoms) -> ElementBuilder {
                 .map(|line| Text::body(line).build().st([St::M0])),
         );
     // The fall told above is not told twice.
-    let lines = chronicle_lines(room, id, |n| crowned || !matches!(n, News::Fallen(_)));
+    let lines = chronicle_lines(room, id, |n| {
+        !n.is_intelligence() && (crowned || !matches!(n, News::Fallen(_)))
+    });
     let mut children = vec![section(format!("Épilogue · an {year}"), tale)];
     if !lines.is_empty() {
         children.push(chronicle_section("Votre chronique", 1, lines));
@@ -1764,7 +1766,7 @@ fn chronicle_step(t: T, k: &Kingdom) -> ElementBuilder {
 /// The seat's news as a list, one line per fact, fading in from `slot`.
 fn chronicle(room: &Room, id: Kingdoms, title: impl Into<Label>, slot: usize) -> ElementBuilder {
     let news = &room.seat(id).news;
-    let lines = if news.is_empty() {
+    let lines = if news.iter().all(News::is_intelligence) {
         vec![news_line(
             Icon::Map,
             Tone::Neutral,
@@ -1772,7 +1774,7 @@ fn chronicle(room: &Room, id: Kingdoms, title: impl Into<Label>, slot: usize) ->
             "Personne n'a marché sur vos terres, la peste vous a épargné et le marché n'a rien vendu.",
         )]
     } else {
-        chronicle_lines(room, id, |_| true)
+        chronicle_lines(room, id, |n| !n.is_intelligence())
     };
     chronicle_section(title, slot, lines)
 }
@@ -2004,15 +2006,23 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
         News::Scout { at, outcome } => {
             let o = room.game.kingdom(*at);
             match outcome {
-                room::Scouting::Back { garrison } => news_line(
-                    Icon::Feather,
-                    Tone::Good,
-                    &format!("Votre éclaireur est rentré de {}", at.name()),
-                    &format!(
-                        "Il a vu {} ; le rapport vous attend à l'Extérieur",
-                        hommes_darmes(*garrison)
-                    ),
-                ),
+                room::Scouting::Back { garrison } => {
+                    let detail = match room.dossier(k.id, *at).report {
+                        Some(r) => format!(
+                            "garnison {} · efficacité {} · {} sujets",
+                            fmt(r.garrison),
+                            r.efficiency,
+                            fmt(r.subjects())
+                        ),
+                        None => format!("Il a vu {}", hommes_darmes(*garrison)),
+                    };
+                    news_line(
+                        Icon::Feather,
+                        Tone::Good,
+                        &format!("Votre éclaireur est rentré de {}", at.name()),
+                        &detail,
+                    )
+                }
                 room::Scouting::Caught => news_line(
                     Icon::Skull,
                     Tone::Bad,
@@ -5141,7 +5151,7 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
         .into_iter()
         .chain(others.iter().map(|&o| Some(o)))
         .map(|target| kingdom_row(t, id, target));
-    let returns = reports_returned(room, id);
+    let returns = chronicle_lines(room, id, News::is_intelligence);
     let hint = if k.soldiers < 1 {
         "Vous n'avez plus d'hommes d'armes."
     } else if year < 3 && left > 0 && garrison > 0 {
@@ -5156,7 +5166,7 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     let mut children = vec![title, ost_bar(t, id, None)];
     if !returns.is_empty() {
         children.push(section(
-            "Rapports rentrés",
+            "Renseignement",
             el(El::Div)
                 .st([St::DisplayFlex, St::FlexCol, St::GapSm])
                 .append(returns),
@@ -5170,51 +5180,6 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
     ));
     children.push(Text::caption(hint).muted().build());
     Stack::column().gap(Gap::Md).children(children).build()
-}
-
-/// The éclaireurs home this year, read as one arrives at the Extérieur:
-/// what each saw, or where he was taken.
-fn reports_returned(room: &Room, id: Kingdoms) -> Vec<ElementBuilder> {
-    let year = room.game.year;
-    let mut lines = Vec::new();
-    for on in KINGDOMS {
-        if on == id {
-            continue;
-        }
-        let d = room.dossier(id, on);
-        if let Some(l) = d.ledger.filter(|l| l.year == year) {
-            lines.push(news_line(
-                Icon::Feather,
-                Tone::Good,
-                &format!("Votre agent en {} écrit", on.name()),
-                &letter(room, on, &l, None, None),
-            ));
-        } else if let Some(r) = d.report.filter(|r| r.year == year) {
-            lines.push(news_line(
-                Icon::Feather,
-                Tone::Good,
-                &format!("Votre éclaireur est rentré de {}", on.name()),
-                &format!(
-                    "garnison {} · efficacité {} · {} sujets",
-                    fmt(r.garrison),
-                    r.efficiency,
-                    fmt(r.subjects())
-                ),
-            ));
-        }
-        if d.caught == Some(year) {
-            lines.push(news_line(
-                Icon::Skull,
-                Tone::Bad,
-                &format!("Votre espion a été pris en {}", on.name()),
-                &format!(
-                    "{} sait désormais que vous l'observez",
-                    room.game.kingdom(on).full_title()
-                ),
-            ));
-        }
-    }
-    lines
 }
 
 /// A palace by its completion in tenths, after "un palais".
