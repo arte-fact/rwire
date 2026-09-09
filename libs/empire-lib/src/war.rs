@@ -1,5 +1,6 @@
 use std::cmp::max;
 
+use crate::front::garrison_strength;
 use crate::game::EmpireGame;
 use crate::kingdom::{Fate, Kingdom, Kingdoms};
 use crate::random::random;
@@ -51,7 +52,7 @@ pub fn simulate_kingdom_battle(
 
     let mut attacker_soldiers = soldiers_sent;
     let attacking_strength = attacker.soldiers_efficiency;
-    let mut defending_strength = defender.soldiers_efficiency;
+    let mut defending_strength = garrison_strength(defender.soldiers_efficiency);
 
     let mut defender_soldiers = defender.soldiers;
     let mut defender_peasants = defender.peasants;
@@ -178,6 +179,8 @@ pub struct BarbarianBattleResult {
     pub attacker_won: bool,
     pub attacker_remaining_soldiers: i32,
     pub surface_conquered: i32,
+    /// The last barbarian arpent is taken: the survivors flee.
+    pub all_barbarians_conquered: bool,
 }
 
 /// Simulate an expedition against the barbarians without modifying state;
@@ -189,6 +192,7 @@ pub fn simulate_barbarian_battle(
     mut on_progress: impl FnMut(&BattleProgress),
 ) -> BarbarianBattleResult {
     let attacking_strength = game.kingdom(attacker).soldiers_efficiency;
+    let barbarian_surface = game.barbarians_surface;
 
     // Original: I2=INT(RND*INT(RND*(I1+1)*3)+1)+INT(RND*INT(RND*(I1+1.5)+1)+1)
     let inner1 = random(0, (soldiers_sent + 1) * 3);
@@ -219,11 +223,15 @@ pub fn simulate_barbarian_battle(
             population_defending: false,
         });
 
-        if defender_soldiers <= 0 {
+        let all_conquered = surface_conquered >= barbarian_surface;
+        let surface_conquered = surface_conquered.min(barbarian_surface);
+
+        if defender_soldiers <= 0 || all_conquered {
             return BarbarianBattleResult {
                 attacker_won: true,
                 attacker_remaining_soldiers: max(0, attacker_soldiers),
                 surface_conquered,
+                all_barbarians_conquered: all_conquered,
             };
         }
 
@@ -232,6 +240,7 @@ pub fn simulate_barbarian_battle(
                 attacker_won: false,
                 attacker_remaining_soldiers: 0,
                 surface_conquered: defeat_spoils(surface_conquered),
+                all_barbarians_conquered: false,
             };
         }
     }
@@ -295,6 +304,7 @@ pub fn apply_barbarian_battle_result(
     soldiers_sent: i32,
     result: &BarbarianBattleResult,
 ) {
+    game.barbarians_surface -= result.surface_conquered;
     let a = game.kingdom_mut(attacker);
     let remaining_home = a.soldiers - soldiers_sent;
     a.surface += result.surface_conquered;
@@ -420,11 +430,27 @@ mod tests {
     }
 
     #[test]
+    fn barbarian_conquest_never_exceeds_barbarian_land() {
+        let mut game = EmpireGame {
+            barbarians_surface: 50,
+            ..Default::default()
+        };
+        game.kingdom_mut(Kingdoms::France).soldiers = 5000;
+        for _ in 0..50 {
+            let r = simulate_barbarian_battle(&game, Kingdoms::France, 5000, |_| {});
+            assert!(r.surface_conquered <= 50);
+            assert_eq!(r.all_barbarians_conquered, r.surface_conquered == 50);
+        }
+    }
+
+    #[test]
     fn barbarian_expedition_updates_land_and_army() {
         let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 50;
         let result = simulate_barbarian_battle(&game, Kingdoms::France, 30, |_| {});
+        assert!(result.surface_conquered <= game.barbarians_surface);
         apply_barbarian_battle_result(&mut game, Kingdoms::France, 30, &result);
+        assert_eq!(game.barbarians_surface, 6000 - result.surface_conquered);
         let a = game.kingdom(Kingdoms::France);
         assert_eq!(a.surface, 10000 + result.surface_conquered);
         assert_eq!(a.soldiers, 20 + result.attacker_remaining_soldiers);

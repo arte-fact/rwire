@@ -14,12 +14,13 @@ Un **front** = un royaume défenseur + toutes les armées qui marchent sur lui c
 Le front se résout en **un seul calcul**, pas une simulation par expédition sur une copie du
 défenseur.
 
-- Le défenseur est **un pool unique** : sa garnison (soldats, efficacité `soldiers_efficiency`),
-  puis ses **serfs** (efficacité fixe 50) une fois la garnison tombée.
+- Le défenseur est **un pool unique** : sa garnison (soldats, efficacité
+  `soldiers_efficiency × 1,5` — `garrison_strength`, le bonus du défenseur), puis ses
+  **serfs** (efficacité fixe 50) une fois la garnison tombée.
 - Un **tour de bataille** : chaque armée attaquante encore debout joue une **manche** contre le
   pool, dans l'ordre du schéma (haut → bas ; à trancher : ordre aléatoire à chaque tour ?).
-  - manche : `random(1, att_i) >= random(1, def)` — `def` est l'efficacité du pool *à cet
-    instant* (garnison ou serfs) ;
+  - manche : `random(1, att_i) > random(1, def)` — `def` est l'efficacité du pool *à cet
+    instant* (garnison ×1,5 ou serfs), l'égalité va au défenseur ;
   - manche gagnée → le pool perd `tu_i` hommes (`tu_i = envoyés_i / 15 + 1`), l'attaquant tire
     un **butin** (§3) — ou rien tant que la garnison tient (§2) ;
   - manche perdue → l'attaquant *i* perd `tu_i` hommes.
@@ -312,10 +313,10 @@ Le schéma A complet, tous les traits éteints, les verdicts sous chaque armée 
 - **Annexion** : le reste du royaume (ce qu'aucune ligne n'a franchi) va à l'armée victorieuse la
   plus avancée (puis la plus nombreuse) ; les serfs répartis sur les lignes sont les survivants.
 - **Ligne entièrement franchie** : l'armée cesse de combattre (elle a tout pris de sa part).
-- **Barbares** : chaque expédition est son propre front (règle inchangée) sur des **terres sans
-  fin** — plus de surface barbare dans l'état du jeu, on y prend autant d'arpents qu'on en gagne,
-  jamais d'annexion. La ligne barbare est nue (ni biens ni bâtiments) ; sa longueur ne sert qu'à
-  la barre : ce que la bande valait au mieux (coups nécessaires × gain maximal d'un coup).
+- **Barbares** : chaque expédition est son propre front (règle inchangée) sur les **6 000
+  arpents barbares** de l'original (`EmpireGame::barbarians_surface`, regrossis par les terres
+  qu'on leur vend) : on y prend au plus ce qui reste, et la dernière prise fait fuir les barbares
+  (« Conquête »). La ligne barbare est nue (ni biens ni bâtiments) ; sa longueur est ce qui reste.
 - **Rythme** : batailles rejouées l'une après l'autre, 25 à 50 frames par front (100 ms),
   schéma 2 s, verdict 3 s + 1 s par armée supplémentaire ; aucun bouton avant le dernier
   schéma (`Staging::Done` → « Continuer »).

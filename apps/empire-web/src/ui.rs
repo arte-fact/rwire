@@ -3,13 +3,15 @@
 
 use std::borrow::Cow;
 
+use empire_lib::campaign::{EXPEDITION_GOLD_PER_MAN, EXPEDITION_GRAIN_PER_MAN, FIRST_WAR_YEAR};
 use empire_lib::demography::{army_losses_share, demography_outlook, Council, Outlook};
 use empire_lib::economy::{economy_outlook, Taxes};
 use empire_lib::events::RulerDeathCause;
 use empire_lib::investments::InvestmentType;
 use empire_lib::kingdom::RATION_SCALE;
 use empire_lib::trade::{
-    calculate_buy_cost, grain_value, max_land_sale, LAND_SELL_PRICE, MAX_GRAIN_PRICE,
+    calculate_buy_cost, grain_value, max_land_sale, price_text, LAND_SELL_PRICE, MAX_GRAIN_PRICE,
+    MIN_GRAIN_PRICE,
 };
 use empire_lib::{Criterion, Fate, Kingdom, Kingdoms, PlayerTitle, Requirement, Weather, KINGDOMS};
 use rwire::attr_tokens::{At, Av};
@@ -21,8 +23,8 @@ use rwire_components::{
 };
 
 use crate::room::{
-    self, buildings_fr, by, goods_fr, people_fr, Deal, Draft, Elsewhere, Entry, Field, News, Phase,
-    Room, Rooms, Seat, Side, Spot, Stage, Step,
+    self, buildings_fr, by, goods_fr, lost_fr, people_fr, Deal, Draft, Elsewhere, Entry, Field,
+    News, Phase, Room, Rooms, Seat, Side, Spot, Stage, Step,
 };
 
 type Label = Cow<'static, str>;
@@ -1866,7 +1868,11 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
             );
             if last_sale {
                 detail.push_str(&if *left > 0 {
-                    format!(" · {} restent au marché à {price}", fmt(*left))
+                    format!(
+                        " · {} restent au marché à {}",
+                        fmt(*left),
+                        price_text(*price)
+                    )
                 } else {
                     " · tout est vendu".to_string()
                 });
@@ -1955,6 +1961,7 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
                         .into_iter()
                         .map(|g| format!("−{g}")),
                 );
+                parts.extend(lost_fr(spoils, k.currency()));
                 parts.extend(people_fr(spoils, Side::Defender));
                 parts.extend(buildings_fr(spoils));
             }
@@ -2345,7 +2352,8 @@ fn buy_sheet(t: T, k: &Kingdom, seat: &Seat, o: Kingdoms) -> ElementBuilder {
     let cost = |n: i32| calculate_buy_cost(n, price);
     let mut body = vec![
         subtitle(vec![txt(&format!(
-            "{price} le cent · {} bx en vente · courtage 10 %",
+            "{} le boisseau · {} bx en vente · courtage 10 %",
+            price_text(price),
             fmt(s.for_sale())
         ))]),
         intro(&format!(
@@ -2423,11 +2431,10 @@ fn buy_sheet(t: T, k: &Kingdom, seat: &Seat, o: Kingdoms) -> ElementBuilder {
     )
 }
 
-/// List grain: amount and price the hundred, what it brings if it all sells,
+/// List grain: amount and price the bushel, what it brings if it all sells,
 /// what stays in the granaries and whether the year's bread is still covered.
 fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
-    // What isn't offered yet: the offered grain stays in the granaries too.
-    let stocks = k.grain_stocks - k.offered();
+    let stocks = k.grain_stocks;
     let cur = k.currency();
     let surplus = k.grain_stocks - k.peasants_grain_needs() - k.soldiers_grain_needs();
     let mut body = vec![
@@ -2438,21 +2445,14 @@ fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             fmt(surplus.abs())
         ))]),
         intro(
-            "Le lot est proposé au marché l'an prochain ; il se vend au fil de l'année, et chaque \
-             acheteur vous paie comptant. Jusque-là le grain reste aux greniers — nourrit vos gens \
-             et les rats comme le reste — et ce qui ne se vend pas y demeure. Au-delà du surplus, \
-             vous vendez le pain de vos sujets.",
+            "Le lot quitte les greniers aujourd'hui — il ne nourrit plus personne — et gagne le \
+             marché l'an prochain ; il se vend au fil de l'année, chaque acheteur vous paie \
+             comptant, et ce qui ne se vend pas reste à l'étal. Au-delà du surplus, vous vendez \
+             le pain de vos sujets.",
         ),
     ];
     if stocks < 1 {
-        body.extend(refused(
-            if k.grain_stocks < 1 {
-                "Les greniers sont vides."
-            } else {
-                "Tout le grain des greniers est déjà proposé."
-            },
-            "Mettre en vente",
-        ));
+        body.extend(refused("Les greniers sont vides.", "Mettre en vente"));
         return Stack::column().gap(Gap::Sm).children(body).build();
     }
     let amount = seat
@@ -2462,7 +2462,7 @@ fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     let price = seat
         .deal_price
         .unwrap_or(CUSTOMARY_PRICE)
-        .clamp(1, MAX_GRAIN_PRICE);
+        .clamp(MIN_GRAIN_PRICE, MAX_GRAIN_PRICE);
     let ch_a = rwire::builder::next_live_channel();
     let ch_p = rwire::builder::next_live_channel();
     let value = |a: i32, p: i32| grain_value(a, p);
@@ -2476,7 +2476,10 @@ fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
             ),
             (
                 ch_p,
-                vec![value(amount, 1) - now, value(amount, MAX_GRAIN_PRICE) - now],
+                vec![
+                    value(amount, MIN_GRAIN_PRICE) - now,
+                    value(amount, MAX_GRAIN_PRICE) - now,
+                ],
             ),
         ],
     };
@@ -2558,17 +2561,18 @@ fn sell_sheet(t: T, k: &Kingdom, seat: &Seat) -> ElementBuilder {
     body.extend([
         el(El::Div).append(lines),
         amount_slider.build(),
-        deal_slider(t, 1, ch_p, "Prix du cent")
-            .min(1)
+        deal_slider(t, 1, ch_p, "Prix du boisseau")
+            .min(MIN_GRAIN_PRICE)
             .max(MAX_GRAIN_PRICE)
             .value(price)
+            .decimals(2, price_text)
             .unit(cur)
             .build(),
         cta(vec![
             txt(verb),
             el(El::Span).text(&fmt(amount)).live_text_grouped(ch_a),
             txt(" boisseaux en vente à "),
-            el(El::Span).text(&price.to_string()).live_text(ch_p),
+            el(El::Span).text(&price_text(price)).live_decimal(ch_p, 2),
         ]),
     ]);
     form(
@@ -4927,7 +4931,10 @@ fn market_rows(t: T, id: Kingdoms) -> Vec<ElementBuilder> {
                 blazon(o),
                 &format!("Grain de la {}", o.name()),
                 vec![txt(&format!("{} bx · courtage 10 %", fmt(s.for_sale())))],
-                big(&fmt(s.grain_price.min(MAX_GRAIN_PRICE)), "le cent"),
+                big(
+                    &price_text(s.grain_price.min(MAX_GRAIN_PRICE)),
+                    "le boisseau",
+                ),
                 opener(t, "Acheter", Action::Buy(o)),
             )
         })
@@ -4937,11 +4944,15 @@ fn market_rows(t: T, id: Kingdoms) -> Vec<ElementBuilder> {
         stall.push(format!(
             "{} bx à l'étal, à {}",
             fmt(k.for_sale()),
-            k.grain_price.min(MAX_GRAIN_PRICE)
+            price_text(k.grain_price.min(MAX_GRAIN_PRICE))
         ));
     }
     if let Some((a, p)) = k.listing {
-        stall.push(format!("{} bx pour l'an prochain, à {p}", fmt(a)));
+        stall.push(format!(
+            "{} bx pour l'an prochain, à {}",
+            fmt(a),
+            price_text(p)
+        ));
     }
     let listed = if stall.is_empty() {
         "rien à l'étal".to_string()
@@ -5164,9 +5175,12 @@ fn war_step(t: T, id: Kingdoms) -> ElementBuilder {
         .chain(others.iter().map(|&o| Some(o)))
         .map(|target| kingdom_row(t, id, target));
     let returns = chronicle_lines(room, id, News::is_intelligence);
+    let purse = room.purse(id, None);
     let hint = if k.soldiers < 1 {
         "Vous n'avez plus d'hommes d'armes."
-    } else if year < 3 && left > 0 && garrison > 0 {
+    } else if garrison > 0 && purse < 1 {
+        "Vos coffres ou vos greniers ne peuvent plus payer de campagne : chaque homme envoyé coûte de l'or et du blé."
+    } else if year < FIRST_WAR_YEAR && left > 0 && garrison > 0 {
         "Une expédition par tranche de 4 nobles, plus une. Les autres royaumes ne peuvent être attaqués qu'à partir de la 3ème année."
     } else if garrison < 1 {
         "Tous vos hommes d'armes sont déjà en campagne. Toucher une armée rouvre son ordre."
@@ -5302,7 +5316,7 @@ fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
     let (name, land, known, rumours) = match target {
         None => (
             "Barbares".to_string(),
-            "terres sans fin ∞".to_string(),
+            format!("{} arp.", fmt(room.game.barbarians_surface)),
             "des bandes à la mesure de l'ost".to_string(),
             Vec::new(),
         ),
@@ -5319,8 +5333,8 @@ fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                         ""
                     }
                 ),
-                if year < 3 {
-                    "dès l'an 3".to_string()
+                if year < FIRST_WAR_YEAR {
+                    format!("dès l'an {FIRST_WAR_YEAR}")
                 } else {
                     format!("≈ {} arp.", fmt(arpents_heard(k.surface)))
                 },
@@ -5716,6 +5730,11 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
             }
         }
     };
+    let cur = k.currency();
+    let mut chips = chips;
+    chips.push(format!(
+        "{EXPEDITION_GOLD_PER_MAN} {cur} + {EXPEDITION_GRAIN_PER_MAN} boisseaux par homme"
+    ));
     let mut body = vec![
         subtitle(vec![txt(&sub)]),
         intro(rule),
@@ -5724,10 +5743,12 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
             .append(chips.iter().map(|c| Badge::new().text(c.clone()).build())),
     ];
     if max < 1 {
-        body.extend(refused(
-            "Vous n'avez plus d'hommes d'armes à envoyer.",
-            "Envoyer",
-        ));
+        let why = if room.garrison(id) + planned.map_or(0, |(_, e)| e.soldiers) < 1 {
+            "Vous n'avez plus d'hommes d'armes à envoyer."
+        } else {
+            "Vos coffres ou vos greniers ne peuvent payer cette campagne."
+        };
+        body.extend(refused(why, "Envoyer"));
         return Stack::column().gap(Gap::Sm).children(body).build();
     }
     body.push(ost_bar(t, id, Some((target, ch, value, max))));
@@ -5842,6 +5863,23 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                     ]),
             )
             .build(),
+    );
+    body.push(
+        el(El::Div)
+            .st([St::TextSm, St::TextMuted, St::TabularNums])
+            .append([
+                txt("Coûte "),
+                el(El::Span)
+                    .st([St::TextDefault])
+                    .text(&fmt(value * EXPEDITION_GOLD_PER_MAN))
+                    .live_scaled_grouped(ch, EXPEDITION_GOLD_PER_MAN as u32, 1),
+                txt(&format!(" {cur} et ")),
+                el(El::Span)
+                    .st([St::TextDefault])
+                    .text(&fmt(value * EXPEDITION_GRAIN_PER_MAN))
+                    .live_scaled_grouped(ch, EXPEDITION_GRAIN_PER_MAN as u32, 1),
+                txt(" boisseaux, payés au départ."),
+            ]),
     );
     body.push(
         Button::destructive("")
@@ -6226,7 +6264,7 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
     if let Some(hint) = agent_hint {
         body.push(Text::caption(hint).muted().build());
     }
-    let cannot = if year < 3 {
+    let cannot = if year < FIRST_WAR_YEAR {
         Some("Les autres royaumes ne peuvent être attaqués qu'à partir de la 3ème année.")
     } else if planned.is_none() && room.game.kingdom(id).soldiers < 1 {
         Some("Vous n'avez plus d'hommes d'armes.")

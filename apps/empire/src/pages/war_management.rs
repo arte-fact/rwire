@@ -1,6 +1,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
+use empire_lib::campaign::FIRST_WAR_YEAR;
 use empire_lib::war::{
     apply_barbarian_battle_result, apply_kingdom_battle_result, simulate_barbarian_battle,
     simulate_kingdom_battle, BarbarianBattleResult, BattleProgress, BattleResult, CollateralDamage,
@@ -110,7 +111,13 @@ fn display_barbarian_battle_result(
     clear_screen();
     print_at(5, 20, "Expédition terminée");
 
-    if result.attacker_won {
+    if result.all_barbarians_conquered {
+        print_at(
+            7,
+            10,
+            "Toutes les terres barbares ont été conquises. Les barbares restants ont fui.",
+        );
+    } else if result.attacker_won {
         print_at(7, 16, &format!("{} gagne.", attacker_title));
         print_at(
             8,
@@ -235,6 +242,10 @@ fn prompt_kingdom_to_attack(game: &EmpireGame, id: Kingdoms) -> Option<Attack> {
         }
 
         if number == 1 {
+            if game.barbarians_surface <= 0 {
+                print_at(20, 16, "Tous les pays barbares ont été conquis.");
+                continue;
+            }
             return Some(Attack {
                 soldiers: prompt_number_of_soldiers_to_send(game, soldiers),
                 defender: AttackDefender::Barbarians,
@@ -246,7 +257,7 @@ fn prompt_kingdom_to_attack(game: &EmpireGame, id: Kingdoms) -> Option<Attack> {
             print_at(20, 16, "Ce joueur n'existe pas.");
             continue;
         };
-        if game.year < 3 {
+        if game.year < FIRST_WAR_YEAR {
             print_at(
                 20,
                 16,
@@ -311,7 +322,11 @@ fn print_page(game: &EmpireGame) {
     clear_screen();
     print_at(4, 16, &black_on_gray(" Terres vassales "));
     print_at(6, 16, "1) Barbares");
-    print_at(6, 40, "sans fin");
+    print_at(
+        6,
+        40,
+        &format!("{:>6}", large_number(game.barbarians_surface)),
+    );
 
     for (index, id) in game.alive_kingdoms().into_iter().enumerate() {
         print_at(7 + index, 16, &format!("{}) {}", index + 2, id.name()));

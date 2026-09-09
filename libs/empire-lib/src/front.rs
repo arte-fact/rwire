@@ -4,8 +4,14 @@
 //! on, each on its own line of arpents, taking whatever lies on the ground it
 //! crosses — the people met on the way rally one time in three and fight one
 //! man of arms otherwise: serfs and merchants as a militia, the nobles with
-//! the realm's ardour. The realm is laid out from the frontier (arpent 1) to
-//! the capital (arpent N) and split equally between the lines.
+//! the realm's ardour. Of the grain and gold lying there the army carries off
+//! a third, a third burns or is scattered, and a third the fleeing people
+//! save. The realm is laid out from the frontier (arpent 1) to the capital
+//! (arpent N) and split equally between the lines. A man can hold no more
+//! than [`ARPENTS_PER_MAN`]: an army marches while the men it has left can
+//! hold more ground than it has crossed, then the survivors turn home with
+//! the spoils — the take of a raid is bounded by its size, and a garrison the
+//! size of the raid stops it at the gate.
 
 use std::cmp::max;
 
@@ -20,6 +26,18 @@ use crate::random::random;
 /// the start of a game — what the original battle yields per man lost, once
 /// the men fallen before the garrison are counted.
 pub const MILITIA_EFFICIENCY: i32 = 50;
+
+/// What a garrison fights with: its soldiers' efficiency and a half, for
+/// the walls and the ground it knows. The militia and the nobles met on the
+/// march fight bare.
+pub fn garrison_strength(soldiers_efficiency: i32) -> i32 {
+    soldiers_efficiency * 3 / 2
+}
+
+/// The ground one man of arms can hold: an army's advance never exceeds this
+/// many arpents per man still standing. Annexing a realm of 10 000 arpents
+/// takes 500 men alive at its capital.
+pub const ARPENTS_PER_MAN: i32 = 20;
 
 /// The buildings a realm has along its line, in the order of the spoils arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,8 +128,12 @@ pub struct Line {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Spoils {
     pub arpents: i32,
+    /// Carried off: a third of what lay on the ground.
     pub grain: i32,
     pub treasury: i32,
+    /// Burned or scattered on the way: lost to both sides, another third.
+    pub grain_lost: i32,
+    pub treasury_lost: i32,
     /// Met on the way and rallied: they change sides.
     pub rallied: People,
     /// Met on the way, fought and put to the sword.
@@ -126,6 +148,8 @@ impl Spoils {
         self.arpents += o.arpents;
         self.grain += o.grain;
         self.treasury += o.treasury;
+        self.grain_lost += o.grain_lost;
+        self.treasury_lost += o.treasury_lost;
         self.rallied.add(&o.rallied);
         self.killed.add(&o.killed);
         for (t, o) in self.taken.iter_mut().zip(&o.taken) {
@@ -156,13 +180,18 @@ impl Line {
     }
 
     /// The ground and goods on the first `advance` arpents of the line (the
-    /// people met there are the army's affair).
+    /// people met there are the army's affair): a third of the goods taken, a
+    /// third lost, the last third saved by those who fled.
     pub fn ground(&self, advance: i32) -> Spoils {
         let x = advance.clamp(0, self.arpents);
+        let grain = self.even(self.grain, x);
+        let treasury = self.deep(self.treasury, x);
         let mut s = Spoils {
             arpents: x,
-            grain: self.even(self.grain, x),
-            treasury: self.deep(self.treasury, x),
+            grain: grain / 3,
+            treasury: treasury / 3,
+            grain_lost: grain / 3,
+            treasury_lost: treasury / 3,
             ..Spoils::default()
         };
         for b in self.buildings.iter().take_while(|b| b.at <= x) {
@@ -437,6 +466,7 @@ fn fight(
         })
         .collect();
     let mut garrison = d.soldiers.max(0);
+    let held = garrison_strength(d.soldiers_efficiency);
     let mut victory: Vec<bool> = vec![garrison == 0; n];
     let mut rounds = vec![Round {
         garrison,
@@ -449,8 +479,10 @@ fn fight(
             if garrison == 0 || stands[i].men == 0 {
                 continue;
             }
-            // Original: IF INT(RND*I4+1)<INT(RND*I3+1) THEN 148 (defender wins the round)
-            if random(1, strength[i]) >= random(1, d.soldiers_efficiency) {
+            // Original: IF INT(RND*I4+1)<INT(RND*I3+1) THEN 148 (defender wins
+            // the round) — here the tie goes to the defender too, and the
+            // garrison fights at a half more.
+            if random(1, strength[i]) > random(1, held) {
                 garrison = max(0, garrison - units[i]);
                 if garrison == 0 {
                     for (v, s) in victory.iter_mut().zip(&stands) {
@@ -469,10 +501,15 @@ fn fight(
         }
     }
 
-    // The march: an army advances while it has men and ground left to take,
-    // meeting whoever lives on the ground it crosses.
+    // The march: an army advances while its men can hold more ground than
+    // they have crossed, meeting whoever lives on the ground it crosses.
+    let reach = |i: usize, stands: &[Stand]| {
+        lines[i]
+            .arpents
+            .min(stands[i].men.saturating_mul(ARPENTS_PER_MAN))
+    };
     let marching = |i: usize, stands: &[Stand]| {
-        garrison == 0 && stands[i].men > 0 && stands[i].advance < lines[i].arpents
+        garrison == 0 && stands[i].men > 0 && stands[i].advance < reach(i, stands)
     };
     while (0..n).any(|i| marching(i, &stands)) {
         for i in 0..n {
@@ -483,13 +520,13 @@ fn fight(
             // Original: I5=I5+INT(RND*I7*26+1)-INT(RND*(I7+5)+1)
             let gained = (random(1, tu * 26) - random(1, tu + 5)).max(0);
             let from = stands[i].advance;
-            let to = (from + gained).min(lines[i].arpents);
+            let to = (from + gained).min(reach(i, &stands));
             let people = met(&lines[i], from, to);
             let mut reached = to;
             for (k, who) in people.iter().enumerate() {
                 if random(0, 3) == 0 {
                     who.count(&mut stands[i].rallied);
-                } else if random(1, strength[i]) >= random(1, who.ardour(d)) {
+                } else if random(1, strength[i]) > random(1, who.ardour(d)) {
                     who.count(&mut stands[i].killed);
                 } else {
                     stands[i].men -= 1;
@@ -549,18 +586,21 @@ fn fight(
 }
 
 /// Apply a fought front: the defender loses what lies on the ground crossed
-/// (and its fallen), every living attacker brings home its men and spoils, and
+/// (its fallen, and the goods taken or lost), every living attacker brings home its men and spoils, and
 /// a realm crossed to its capital falls to the army that took the most.
 pub fn apply_front(game: &mut EmpireGame, defender: Kingdoms, r: &FrontResult) {
     let total = r.spoils();
     let d = game.kingdom_mut(defender);
-    d.soldiers = r.garrison_left;
+    // The fallen are taken off the garrison, not the garrison set to what
+    // stood: a front applied earlier may have brought the defender's own
+    // expedition home meanwhile.
+    d.soldiers = (d.soldiers - r.garrison_fallen()).max(0);
     d.peasants = (d.peasants - total.rallied.peasants - total.killed.peasants).max(0);
     d.merchants = (d.merchants - total.rallied.merchants - total.killed.merchants).max(0);
     d.nobles = (d.nobles - total.rallied.nobles - total.killed.nobles).max(0);
     d.surface = (d.surface - total.arpents).max(0);
-    d.grain_stocks = (d.grain_stocks - total.grain).max(0);
-    d.treasury = (d.treasury - total.treasury).max(0);
+    d.grain_stocks = (d.grain_stocks - total.grain - total.grain_lost).max(0);
+    d.treasury = (d.treasury - total.treasury - total.treasury_lost).max(0);
     for kind in BuildingKind::ALL {
         let c = kind.count_mut(d);
         *c = (*c - total.taken[kind.index()] - total.burned[kind.index()]).max(0);
@@ -656,16 +696,17 @@ mod tests {
         // Nothing crossed, nothing taken, no one met.
         assert_eq!(line.ground(0), Spoils::default());
         assert_eq!(line.people(0), People::default());
-        // A tenth of the ground: a tenth of the serfs, a hundredth of the gold.
+        // A tenth of the ground: a tenth of the serfs, a hundredth of the
+        // gold — a third of the goods taken, a third lost.
         let s = line.ground(1000);
         assert_eq!(s.arpents, 1000);
-        assert_eq!(s.grain, 2000);
-        assert_eq!(s.treasury, 50);
+        assert_eq!((s.grain, s.grain_lost), (666, 666));
+        assert_eq!((s.treasury, s.treasury_lost), (16, 16));
         let p = line.people(1000);
         assert_eq!((p.peasants, p.merchants, p.nobles), (200, 4, 0));
         // The whole line: everything, every building taken or burned.
         let all = line.ground(10_000);
-        assert_eq!(all.treasury, 5000);
+        assert_eq!(all.treasury + all.treasury_lost, 3332);
         assert_eq!(line.people(10_000).nobles, 10);
         assert_eq!(all.buildings_taken() + all.buildings_burned(), 23);
         assert_eq!(all.taken[0] + all.burned[0], 12);
@@ -751,8 +792,10 @@ mod tests {
         let met = a.rallied.total() + a.killed.total();
         assert!(met > 0);
         assert!(a.rallied.peasants + a.killed.peasants <= a.line.people(a.advance).peasants);
-        // Fought to the end: the army died on the ground or crossed its line.
-        assert!(a.men == 0 || a.advance == a.line.arpents);
+        // Marched to the end: the army died on the ground, crossed its line,
+        // or holds all the ground its men can.
+        assert!(a.men == 0 || a.advance == a.line.arpents || a.advance >= a.men * ARPENTS_PER_MAN);
+        assert!(a.advance <= a.line.arpents.min(a.sent * ARPENTS_PER_MAN));
         assert_eq!(r.annexed_by.is_some(), a.advance == a.line.arpents);
         // The rounds tell the same story, garrison first.
         let fell = r.rounds.iter().position(|x| x.garrison == 0).unwrap();
@@ -791,6 +834,26 @@ mod tests {
             a.lost(),
             a.killed.peasants
         );
+    }
+
+    #[test]
+    fn the_garrison_fights_at_a_half_more() {
+        assert_eq!(garrison_strength(100), 150);
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::France).soldiers = 1000;
+        game.kingdom_mut(Kingdoms::France).soldiers_efficiency = 100;
+        let s = game.kingdom_mut(Kingdoms::Spain);
+        s.soldiers = 1000;
+        s.soldiers_efficiency = 100;
+        // Man for man at the same efficiency, the walls decide: a duel at
+        // 100 against 150 is lost two times in three.
+        let held = (0..20)
+            .filter(|_| {
+                simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 1000)]).garrison_left
+                    > 0
+            })
+            .count();
+        assert!(held >= 18, "held {held}");
     }
 
     #[test]
@@ -833,9 +896,30 @@ mod tests {
             assert!(r.annexed_by.is_none());
             total += r.armies[0].advance;
         }
-        // About 45 arpents a man at 150 against the militia's 50.
+        // Bounded by the ground ten men can hold, and most of it taken: the
+        // militia costs a man about every 45 arpents.
         let mean = total / 50;
-        assert!((200..800).contains(&mean), "mean advance {mean}");
+        assert!((100..=200).contains(&mean), "mean advance {mean}");
+    }
+
+    #[test]
+    fn the_take_of_a_raid_is_bounded_by_its_size() {
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::France).soldiers = 100;
+        game.kingdom_mut(Kingdoms::Spain).soldiers = 0;
+        for _ in 0..20 {
+            let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 100)]);
+            let a = &r.armies[0];
+            assert!(a.advance <= 100 * ARPENTS_PER_MAN);
+            // The men who could hold no more ground come home.
+            assert!(a.men > 0);
+            assert!(a.advance >= a.men * ARPENTS_PER_MAN || a.advance == a.line.arpents);
+            assert!(r.annexed_by.is_none());
+        }
+        // Enough men to hold the realm take it whole.
+        game.kingdom_mut(Kingdoms::France).soldiers = 2000;
+        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 2000)]);
+        assert_eq!(r.annexed_by, Some(0));
     }
 
     #[test]
@@ -861,8 +945,8 @@ mod tests {
         if r.garrison_fell() {
             assert!(r.armies.iter().any(|a| a.victory));
         }
-        // Conservation: what the lines yield plus what the defender keeps is the realm.
-        // The men have left their garrisons.
+        // Conservation: what the lines yield plus what the defender keeps is
+        // the realm, less what burned. The men have left their garrisons.
         let mut g = game.clone();
         g.kingdom_mut(Kingdoms::France).soldiers = 0;
         g.kingdom_mut(Kingdoms::Germany).soldiers = 0;
@@ -875,8 +959,8 @@ mod tests {
         let grain = d.grain_stocks
             + (f.grain_stocks - game.kingdom(Kingdoms::France).grain_stocks)
             + (ge.grain_stocks - game.kingdom(Kingdoms::Germany).grain_stocks);
-        assert_eq!(grain, 20_000);
         let s = r.spoils();
+        assert_eq!(grain, 20_000 - s.grain_lost);
         let serfs = d.peasants + (f.peasants - 2000) + (ge.peasants - 2000);
         assert_eq!(serfs, 2000 - s.killed.peasants);
         let mills = d.grain_mills + f.grain_mills + ge.grain_mills + s.burned[0];
@@ -894,7 +978,7 @@ mod tests {
         let line = lay_out(&k, 1).remove(0);
         assert_eq!(line.ground(900).treasury, 0);
         assert_eq!(line.people(900).nobles, 0);
-        assert_eq!(line.ground(5000).treasury, 25);
+        assert_eq!(line.ground(5000).treasury, 8);
     }
 
     #[test]
@@ -919,7 +1003,7 @@ mod tests {
         let f = game.kingdom(Kingdoms::France);
         let s = r.spoils();
         assert_eq!(f.surface, 20_000);
-        assert_eq!(f.treasury, 6000);
+        assert_eq!(f.treasury, 6000 - s.treasury_lost);
         assert_eq!(f.merchants, 65 - s.killed.merchants);
         assert_eq!(f.nobles, 11 - s.killed.nobles);
         assert_eq!(f.grain_mills, 12 - s.burned[0]);

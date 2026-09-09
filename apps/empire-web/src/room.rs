@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use empire_lib::campaign::{apply_battle, forecast, march, Expedition, Fought};
+use empire_lib::campaign::{
+    apply_battle, expedition_cost, forecast, march, Expedition, Fought, EXPEDITION_GOLD_PER_MAN,
+    EXPEDITION_GRAIN_PER_MAN, FIRST_WAR_YEAR,
+};
 use empire_lib::demography::{affordable_ration, apply_feed, Council, YearDemography};
 use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, YearEconomy};
 use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
@@ -16,7 +19,8 @@ use empire_lib::investments::{apply_investment, InvestmentType};
 use empire_lib::kingdom::RATION_SCALE;
 use empire_lib::mind::{Mind, Seen, Temper};
 use empire_lib::trade::{
-    apply_trade, calculate_buy_cost, max_land_sale, Trade, LAND_SELL_PRICE, MAX_GRAIN_PRICE,
+    apply_trade, calculate_buy_cost, max_land_sale, price_text, Trade, LAND_SELL_PRICE,
+    MAX_GRAIN_PRICE, MIN_GRAIN_PRICE,
 };
 use empire_lib::{EmpireGame, Fate, Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
 use rand::Rng;
@@ -706,10 +710,29 @@ impl Room {
             .find(|(_, e)| e.target == target)
     }
 
+    /// Men `id` can still pay for, the army ordered on `target` aside: what
+    /// the coffers and granaries hold once the other expeditions are paid.
+    pub fn purse(&self, id: Kingdoms, target: Option<Kingdoms>) -> i32 {
+        let k = self.game.kingdom(id);
+        let others: i32 = self
+            .seat(id)
+            .planned
+            .iter()
+            .filter(|e| e.target != target)
+            .map(|e| e.soldiers)
+            .sum();
+        let (gold, grain) = expedition_cost(others);
+        ((k.treasury - gold) / EXPEDITION_GOLD_PER_MAN)
+            .min((k.grain_stocks - grain) / EXPEDITION_GRAIN_PER_MAN)
+            .max(0)
+    }
+
     /// Men `id` may send on `target`: the garrison, plus the army already
-    /// ordered there (settling the target again replaces it).
+    /// ordered there (settling the target again replaces it) — no more than
+    /// the purse pays for.
     pub fn available(&self, id: Kingdoms, target: Option<Kingdoms>) -> i32 {
-        self.garrison(id) + self.planned_on(id, target).map_or(0, |(_, e)| e.soldiers)
+        (self.garrison(id) + self.planned_on(id, target).map_or(0, |(_, e)| e.soldiers))
+            .min(self.purse(id, target))
     }
 
     /// Foretell what `id` would bring back from `target`, for every size of
@@ -1436,8 +1459,9 @@ impl Room {
             self.journal(
                 [id],
                 format!(
-                    "La {} mettra {amount} boisseaux en vente à {price} le cent l'an prochain.",
-                    id.name()
+                    "La {} mettra {amount} boisseaux en vente à {} le boisseau l'an prochain.",
+                    id.name(),
+                    price_text(price)
                 ),
             );
         }
@@ -1498,19 +1522,28 @@ impl Room {
         if self.garrison(id) < 1 {
             return Err("Vous n'avez plus d'hommes d'armes.".into());
         }
+        if self.purse(id, e.target) < 1 {
+            return Err(format!(
+                "Vos coffres ou vos greniers ne peuvent payer une campagne : {EXPEDITION_GOLD_PER_MAN} {} et {EXPEDITION_GRAIN_PER_MAN} boisseaux par homme.",
+                self.game.kingdom(id).currency()
+            ));
+        }
         if self.expeditions_left(id) < 1 {
             return Err("Vos nobles ne peuvent mener davantage d'expéditions cette année.".into());
         }
         match e.target {
+            None if self.game.barbarians_surface <= 0 => {
+                return Err("Toutes les terres barbares ont déjà été conquises.".into());
+            }
             Some(t) if t == id || self.game.kingdom(t).is_dead => {
                 return Err("Ce royaume n'est plus.".into());
             }
-            Some(_) if self.game.year < 3 => {
+            Some(_) if self.game.year < FIRST_WAR_YEAR => {
                 return Err("Nul ne peut attaquer un autre royaume avant la 3ème année.".into());
             }
             _ => {}
         }
-        let soldiers = e.soldiers.clamp(1, self.garrison(id));
+        let soldiers = e.soldiers.clamp(1, self.available(id, e.target));
         self.seat_mut(id).planned.push(Expedition { soldiers, ..e });
         Ok(())
     }
@@ -1523,13 +1556,17 @@ impl Room {
             None => "les Barbares".to_string(),
         };
         for e in fought.expeditions() {
-            let attacker = self.game.kingdom(e.attacker).titled_name();
+            let k = self.game.kingdom(e.attacker);
+            let (attacker, cur) = (k.titled_name(), k.currency());
+            let (gold, grain) = expedition_cost(e.soldiers);
             self.confide(
                 [e.attacker].into_iter().chain(e.target),
                 format!("{attacker} marche sur {foe}."),
                 Some(format!(
-                    "{attacker} marche sur {foe} avec {}.",
-                    hommes_darmes(e.soldiers)
+                    "{attacker} marche sur {foe} avec {}, pour {} et {} boisseaux.",
+                    hommes_darmes(e.soldiers),
+                    coins(gold, cur),
+                    fmt(grain)
                 )),
             );
         }
@@ -1619,6 +1656,12 @@ impl Room {
                     },
                 ),
             }
+        } else if let Some(by) = annexed {
+            let by = self.game.kingdom(by).titled_name();
+            self.journal(
+                KINGDOMS,
+                format!("{by} conquiert les dernières terres barbares ; les survivants ont fui."),
+            );
         }
     }
 }
@@ -1687,6 +1730,19 @@ fn verdict(attacker: &str, cur: &str, a: &Army) -> String {
         m.push_str(&format!(" {}.", buildings.join(", ")));
     }
     m
+}
+
+/// The goods that went up in smoke or were scattered on the way: "1 200
+/// livres et 3 000 boisseaux brûlés ou dispersés" — nothing if nothing was.
+pub fn lost_fr(s: &Spoils, cur: &str) -> Option<String> {
+    let mut v = Vec::new();
+    if s.treasury_lost > 0 {
+        v.push(coins(s.treasury_lost, cur));
+    }
+    if s.grain_lost > 0 {
+        v.push(format!("{} boisseaux", fmt(s.grain_lost)));
+    }
+    (!v.is_empty()).then(|| format!("{} brûlés ou dispersés", v.join(" et ")))
 }
 
 /// The goods carried off, the land aside: "1 200 livres", "3 000 boisseaux" —
@@ -2169,11 +2225,12 @@ fn sell_grain(room: &mut Room, id: Kingdoms, amount: i32, price: i32) -> Result<
         return Err("Les greniers sont vides.".to_string());
     }
     let amount = amount.clamp(1, stocks);
-    let price = price.clamp(1, MAX_GRAIN_PRICE);
+    let price = price.clamp(MIN_GRAIN_PRICE, MAX_GRAIN_PRICE);
     apply_trade(&mut room.game, id, Trade::Sell { amount, price });
     Ok(format!(
-        "{} boisseaux mis en vente à {price} le cent ; ils seront au marché l'an prochain.",
-        fmt(amount)
+        "{} boisseaux mis en vente à {} le boisseau ; ils seront au marché l'an prochain.",
+        fmt(amount),
+        price_text(price)
     ))
 }
 
@@ -2517,15 +2574,18 @@ mod tests {
         assert_eq!(room.phase, Phase::Campaign);
         assert_eq!(room.game.kingdom(f).soldiers, 70);
         assert_eq!(room.game.kingdom(s).soldiers, 60);
-        let human: Vec<Kingdoms> = room
+        // The realms march in a fresh order every year.
+        let mut human: Vec<Kingdoms> = room
             .battles
             .iter()
             .flat_map(|b| b.expeditions().map(|e| e.attacker))
             .filter(|a| [f, s].contains(a))
             .collect();
+        human.sort_by_key(|k| k.index());
         assert_eq!(human, vec![f, s]);
         // Each front was fought against the reduced garrison.
-        assert_eq!(room.battles[0].result.garrison_start, 60);
+        let on_spain = room.battles.iter().find(|b| b.target == Some(s)).unwrap();
+        assert_eq!(on_spain.result.garrison_start, 60);
         // Every seigneur reads on their own clock: the order of battle holds
         // a moment, then the first front moves by itself.
         assert_eq!(room.seat(f).replay, Replay::opening());
@@ -2642,6 +2702,39 @@ mod tests {
                 soldiers: 5,
             })
             .is_err());
+    }
+
+    #[test]
+    fn the_purse_bounds_the_armies_sent() {
+        let mut room = playing(&[Kingdoms::France]);
+        let f = Kingdoms::France;
+        finish_intendance(&mut room, f);
+        let k = room.game.kingdom_mut(f);
+        k.soldiers = 500;
+        k.nobles = 8;
+        k.treasury = 1500;
+        k.grain_stocks = 10_000;
+        assert_eq!(room.purse(f, None), 150);
+        assert_eq!(room.available(f, None), 150);
+        room.order(Expedition {
+            attacker: f,
+            target: None,
+            soldiers: 400,
+        })
+        .unwrap();
+        assert_eq!(room.seat(f).planned[0].soldiers, 150);
+        // Paid for, the purse is empty: 350 men stay home, none may leave.
+        assert_eq!(room.garrison(f), 350);
+        assert_eq!(room.purse(f, Some(Kingdoms::Spain)), 0);
+        assert!(room
+            .order(Expedition {
+                attacker: f,
+                target: Some(Kingdoms::Spain),
+                soldiers: 1,
+            })
+            .is_err());
+        // Settling the same target again has the whole purse back.
+        assert_eq!(room.available(f, None), 150);
     }
 
     #[test]
@@ -2817,6 +2910,7 @@ mod tests {
     fn a_battle_is_told_to_both_sides() {
         let mut room = playing(&[Kingdoms::France, Kingdoms::Spain]);
         let (a, d) = (Kingdoms::France, Kingdoms::Spain);
+        room.game.year = FIRST_WAR_YEAR;
         room.game.kingdom_mut(a).soldiers = 100;
         let def = room.game.kingdom_mut(d);
         def.soldiers = 400;
@@ -2878,6 +2972,7 @@ mod tests {
     fn a_war_is_heard_everywhere_but_its_headcount_stays_on_the_field() {
         let mut room = playing(&[Kingdoms::France, Kingdoms::Spain, Kingdoms::Germany]);
         let (a, d, other) = (Kingdoms::France, Kingdoms::Spain, Kingdoms::Germany);
+        room.game.year = FIRST_WAR_YEAR;
         room.game.kingdom_mut(a).soldiers = 100;
         room.game.kingdom_mut(d).soldiers = 5;
         room.seat_mut(other).news.clear();

@@ -1,4 +1,6 @@
-use empire_lib::trade::{max_land_sale, Trade, LAND_SELL_PRICE, MAX_GRAIN_PRICE};
+use empire_lib::trade::{
+    max_land_sale, price_text, Trade, LAND_SELL_PRICE, MAX_GRAIN_PRICE, MIN_GRAIN_PRICE,
+};
 use empire_lib::{EmpireGame, Kingdom, Kingdoms, KINGDOMS};
 
 use crate::ui::{
@@ -61,7 +63,7 @@ fn draw_resource_management_page(game: &EmpireGame, id: Kingdoms) {
         "╚═══════════════╧═══════════════╧═══════════════╧═══════════════╧═════════════╝",
     );
     print_at(11, 15, "* * * Grain à vendre :");
-    print_at(12, 29, &black_on_gray("Pays            Boisseaux  Le cent"));
+    print_at(12, 29, &black_on_gray("Pays            Boisseaux  Le bx  "));
     for (i, seller) in KINGDOMS.iter().enumerate() {
         let s = game.kingdom(*seller);
         print_at(
@@ -72,7 +74,7 @@ fn draw_resource_management_page(game: &EmpireGame, id: Kingdoms) {
                 i + 1,
                 s.name(),
                 large_number(s.for_sale()),
-                s.grain_price.min(MAX_GRAIN_PRICE)
+                price_text(s.grain_price.min(MAX_GRAIN_PRICE))
             ),
         );
     }
@@ -155,8 +157,8 @@ fn prompt_grain_to_sell(game: &EmpireGame, id: Kingdoms) -> Trade {
             game.kingdom(id).grain_stocks.max(1),
         ),
         price: bottom_input_number_with_range(
-            Some("A quel prix le cent de boisseaux ?"),
-            1,
+            Some("A quel prix le boisseau, en centimes (10 à 100) ?"),
+            MIN_GRAIN_PRICE,
             MAX_GRAIN_PRICE,
         ),
     }

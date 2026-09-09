@@ -3,7 +3,7 @@ use crate::intel::{SCOUT_CAUGHT, SCOUT_PRICE};
 use crate::kingdom::{Kingdom, Kingdoms};
 use crate::mind::{Mind, Seen};
 use crate::random::random;
-use crate::trade::{apply_trade, calculate_buy_cost, Trade, MAX_GRAIN_PRICE};
+use crate::trade::{apply_trade, calculate_buy_cost, Trade, MAX_GRAIN_PRICE, MIN_GRAIN_PRICE};
 use crate::war::{
     apply_barbarian_battle_result, apply_kingdom_battle_result, simulate_barbarian_battle,
     simulate_kingdom_battle,
@@ -144,12 +144,12 @@ pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision
         .collect();
     if !humans.is_empty() {
         let n = humans.len() as i32;
-        // Q3/Q4: human averages with noise (±1000 bushels, ±5 on the price
-        // of the hundred — the original's ±1 on the bushel).
+        // Q3/Q4: human averages with noise (±1000 bushels, ±5 centimes on
+        // the bushel — the original's ±1 franc).
         let q3 = (humans.iter().map(|h| h.0).sum::<i32>() / n + random(1, 1001) - random(1, 1001))
             .max(0);
         let mut q4 = (humans.iter().map(|h| h.1).sum::<i32>() / n + random(0, 6) - random(0, 6))
-            .clamp(0, MAX_GRAIN_PRICE);
+            .clamp(MIN_GRAIN_PRICE, MAX_GRAIN_PRICE);
         // Bad years push the asking price up (original: +RND/1.5 when NW<3).
         if game.kingdom(id).weather.value() < 3 {
             q4 = (q4 + 10).min(MAX_GRAIN_PRICE);
@@ -159,14 +159,14 @@ pub fn plan_ai_intendance(game: &mut EmpireGame, id: Kingdoms) -> AiTurnDecision
         // like theirs, the listing reaches the stall next year.
         let listed = k.offered();
         if q3 > listed && random(1, 10) > 6 {
-            let add = (q3 - listed).min(k.grain_stocks - listed) / MIN_LOT * MIN_LOT;
+            let add = (q3 - listed).min(k.grain_stocks) / MIN_LOT * MIN_LOT;
             if add > 0 {
-                k.list_grain(add, q4.max(1));
-                decision.grain_listed = Some((add, q4.max(1)));
+                k.list_grain(add, q4);
+                decision.grain_listed = Some((add, q4));
             }
         }
         // Grain already on the stall follows the market's price.
-        k.grain_price = if k.for_sale() > 0 { q4.max(1) } else { q4 };
+        k.grain_price = q4;
     }
 
     // Original lines 228–232: shop at one random kingdom's stall, buying a
@@ -210,7 +210,11 @@ pub fn plan_ai_war(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> AiWa
     let (nobles, soldiers) = (k.nobles, k.soldiers);
     if game.year < 3 {
         let mut attacks_allowed = nobles / 4 + 1;
-        while random(1, 5) >= 2 && attacks_allowed > 0 && soldiers > 0 {
+        while random(1, 5) >= 2
+            && attacks_allowed > 0
+            && soldiers > 0
+            && game.barbarians_surface > 0
+        {
             war.barbarian_attacks.push(random(1, soldiers).max(1));
             attacks_allowed -= 1;
         }
@@ -251,7 +255,7 @@ pub fn execute_ai_turn(game: &mut EmpireGame, id: Kingdoms, mind: &mut Mind) -> 
 
     for &soldiers in &decision.barbarian_attacks {
         let soldiers = soldiers.min(game.kingdom(id).soldiers);
-        if soldiers <= 0 {
+        if soldiers <= 0 || game.barbarians_surface <= 0 {
             break;
         }
         let result = simulate_barbarian_battle(game, id, soldiers, |_| {});
@@ -341,7 +345,7 @@ mod tests {
                 listed = true;
                 let k = game.kingdom(Kingdoms::Germany);
                 assert!(amount >= MIN_LOT && amount % MIN_LOT == 0, "{amount}");
-                assert!((1..=MAX_GRAIN_PRICE).contains(&price));
+                assert!((MIN_GRAIN_PRICE..=MAX_GRAIN_PRICE).contains(&price));
                 // The listing waits for next year's market.
                 assert_eq!(k.grain_to_sell, before.grain_to_sell);
                 assert_eq!(

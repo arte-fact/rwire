@@ -9,15 +9,34 @@ pub fn random(from: i32, to: i32) -> i32 {
     rand::thread_rng().gen_range(from..to)
 }
 
+/// The items in a fresh random order.
+pub fn shuffled<T, const N: usize>(mut items: [T; N]) -> [T; N] {
+    items.shuffle(&mut rand::thread_rng());
+    items
+}
+
 #[cfg(test)]
 mod tests {
-    use super::random;
+    use super::{random, shuffled};
 
     #[test]
     fn empty_and_inverted_ranges_yield_zero() {
         assert_eq!(random(0, 0), 0);
         assert_eq!(random(5, 5), 0);
         assert_eq!(random(5, 1), 0);
+    }
+
+    #[test]
+    fn shuffling_keeps_every_item() {
+        let mut seen = [false; 6];
+        for _ in 0..200 {
+            let order = shuffled([0, 1, 2, 3, 4, 5]);
+            let mut sorted = order;
+            sorted.sort();
+            assert_eq!(sorted, [0, 1, 2, 3, 4, 5]);
+            seen[order[0]] = true;
+        }
+        assert!(seen.iter().all(|&s| s), "every item leads at least once");
     }
 
     #[test]

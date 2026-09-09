@@ -17,8 +17,8 @@ use crate::random::random;
 const OST_TENTHS: i32 = 15;
 /// …and never less than this many quarters of the men at hand. The force
 /// alone beats the garrison but takes little ground: without the floor the
-/// games last three times longer than the original's (see the calibration
-/// test); at three quarters half again as long, at every man a fifth.
+/// games lasted three times longer than the original's; at three quarters
+/// half again as long, at every man a fifth.
 const OST_FLOOR_QUARTERS: i32 = 3;
 /// One serf in this many takes up arms against an army that meets no
 /// garrison: what an empty realm weighs in a computer's reckoning.

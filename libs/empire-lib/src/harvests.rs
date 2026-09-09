@@ -32,12 +32,12 @@ pub fn apply_seed_grain(kingdom: &mut Kingdom) {
     kingdom.grain_stocks -= surface / 3;
 }
 
+/// The rats take their share of the granaries and of the stall alike.
 pub fn apply_rat_loss_rate(kingdom: &mut Kingdom) {
     let loss_rate = random(1, 30);
-    kingdom.grain_stocks = max(
-        0,
-        kingdom.grain_stocks - kingdom.grain_stocks * loss_rate / 100,
-    );
+    let gnawed = |grain: i32| max(0, grain - grain * loss_rate / 100);
+    kingdom.grain_stocks = gnawed(kingdom.grain_stocks);
+    kingdom.grain_to_sell = gnawed(kingdom.grain_to_sell);
     kingdom.rats_loss_rate = loss_rate;
 }
 
@@ -61,6 +61,16 @@ mod tests {
         apply_seed_grain(&mut k);
         // surface capped to peasants*5 = 50 → consumes 16
         assert_eq!(before - k.grain_stocks, 50 / 3);
+    }
+
+    #[test]
+    fn rats_gnaw_the_stall_too() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        k.grain_stocks = 10_000;
+        k.grain_to_sell = 10_000;
+        apply_rat_loss_rate(&mut k);
+        assert_eq!(k.grain_to_sell, k.grain_stocks);
+        assert_eq!(k.grain_to_sell, 10_000 - 100 * k.rats_loss_rate);
     }
 
     #[test]

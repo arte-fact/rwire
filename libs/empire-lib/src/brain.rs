@@ -6,12 +6,16 @@
 //! human's. Nothing here knows how to play: the weights are found by
 //! evolution (see `apps/empire-train`) on tables of [`crate::arena`].
 
+use crate::campaign::FIRST_WAR_YEAR;
 use crate::demography::{affordable_ration, Council, YearDemography};
 use crate::economy::{Taxes, YearEconomy};
+use crate::game::{EmpireGame, BARBARIAN_LANDS};
 use crate::intel::{Dossier, Heard, SCOUT_PRICE};
 use crate::investments::InvestmentType;
 use crate::kingdom::{Kingdom, Kingdoms, PlayerTitle, Requirement, KINGDOMS, RATION_SCALE};
-use crate::trade::{calculate_buy_cost, max_land_sale, GRAIN_LOT, MAX_GRAIN_PRICE};
+use crate::trade::{
+    calculate_buy_cost, max_land_sale, GRAIN_LOT, MAX_GRAIN_PRICE, MIN_GRAIN_PRICE,
+};
 
 /// Neurons of the hidden layer of each network.
 pub const HIDDEN: usize = 32;
@@ -22,14 +26,16 @@ const HEARD_ROUNDING: i32 = 500;
 
 // -- what a seigneur sees ---------------------------------------------------
 
-/// Figures of the seigneur's own realm, the year opened (harvest in).
-const OWN: usize = 37;
+/// Figures of the seigneur's own realm, the year opened (harvest in), and
+/// the barbarian lands left to take.
+const OWN: usize = 38;
 /// The Chronique: last year's census and ledger.
 const CHRONICLE: usize = 12;
-/// Per rival: what is public, the stall, the rumours, the éclaireur's report.
-const RIVAL: usize = 15;
+/// Per rival: what is public, the stall, the rumours, the éclaireur's
+/// report, the agent's letter.
+pub const RIVAL: usize = 19;
 /// The rivals, in the order they sit from the seigneur's own seat.
-const RIVALS: usize = 5;
+pub const RIVALS: usize = 5;
 /// The Intendance's answer of the year, the Extérieur's of the year before.
 pub const A_OUT: usize = 15;
 pub const B_OUT: usize = 18;
@@ -107,7 +113,9 @@ fn criteria(k: &Kingdom) -> [f32; 7] {
 
 /// What a seigneur sees as the year's Intendance opens, as the networks
 /// read it: shares as they are, counts on a log scale (see [`count`]).
-pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Vec<f32> {
+pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
+    let kingdoms = &game.kingdoms;
+    let year = game.year;
     let k = &kingdoms[id.index()];
     let mut v = Vec::with_capacity(SIGHT);
     let needs = k.peasants_grain_needs() + k.soldiers_grain_needs();
@@ -145,6 +153,7 @@ pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Ve
             .map_or(0.0, |(_, p)| p as f32 / MAX_GRAIN_PRICE as f32),
     ]);
     v.extend(criteria(k));
+    v.push(count(game.barbarians_surface, BARBARIAN_LANDS as f32));
     debug_assert_eq!(v.len(), OWN);
     // The Chronique.
     let pop = k.population().max(1);
@@ -194,6 +203,8 @@ pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Ve
                 / 2.0
         };
         let report = m.dossiers[i].report.filter(|_| !r.is_dead);
+        let ledger = m.dossiers[i].ledger.filter(|_| !r.is_dead);
+        let age = |y: i32| 1.0 / (1.0 + (year - y) as f32);
         v.extend([
             f32::from(u8::from(!r.is_dead)),
             title_level(r.title()),
@@ -206,15 +217,19 @@ pub fn sight(kingdoms: &[Kingdom; 6], year: i32, id: Kingdoms, m: &Memory) -> Ve
             others(&theirs.marched_on),
             others(&theirs.marched_by),
             count(theirs.lost_to[id.index()], 1_000.0),
-            f32::from(u8::from(report.is_some())),
+            // The report's age rides on the "known" flag: a report read
+            // this year reads 1, an old one fades. The letter likewise.
+            report.map_or(0.0, |r| age(r.year)),
             report.map_or(0.0, |r| count(r.garrison, 400.0)),
             report.map_or(0.0, |r| r.efficiency as f32 / 150.0),
             report.map_or(0.0, |r| count(r.subjects(), 3_000.0)),
+            ledger.map_or(0.0, |l| age(l.year)),
+            ledger.map_or(0.0, |l| signed_count(l.treasury, 10_000.0)),
+            ledger.map_or(0.0, |l| count(l.grain_stocks, 10_000.0)),
+            ledger.map_or(0.0, |l| {
+                l.aim.map_or(1.0, |(_, met, all)| met as f32 / all as f32)
+            }),
         ]);
-        // The report's age rides on the "known" flag: a report read this
-        // year reads 1, an old one fades.
-        let last = v.len() - 4;
-        v[last] = report.map_or(0.0, |r| 1.0 / (1.0 + (year - r.year) as f32));
     }
     v.extend(m.last_orders);
     debug_assert_eq!(v.len(), SIGHT);
@@ -290,7 +305,7 @@ pub struct Brain {
 
 impl Brain {
     /// Weights of both networks laid end to end: the genome evolution works on.
-    pub const GENOME: usize = Net::len(A_IN, A_OUT) + Net::len(B_IN, B_OUT);
+    pub const GENOME: usize = Self::genome_with(OWN, RIVAL);
 
     pub fn from_genome(g: &[f32]) -> Brain {
         assert_eq!(g.len(), Self::GENOME);
@@ -301,11 +316,76 @@ impl Brain {
         }
     }
 
+    /// Today's [`OWN`] and [`RIVAL`] widths.
+    pub const OWN: usize = OWN;
+    pub const RIVAL: usize = RIVAL;
+
+    /// The length of a genome laid out for `own` entries of the seigneur's
+    /// own and `rival` per rival.
+    pub const fn genome_with(own: usize, rival: usize) -> usize {
+        let sight = own + CHRONICLE + RIVALS * rival + B_OUT;
+        Net::len(sight, A_OUT) + Net::len(sight + A_OUT, B_OUT)
+    }
+
+    /// A genome schooled when the seigneur's own took `own_was` entries of
+    /// the sight and each rival `rival_was`, laid out for today's [`OWN`]
+    /// and [`RIVAL`]: the weights it had where they were, nothing on the
+    /// entries it never saw — so it plays on exactly as it did until
+    /// evolution finds a use for them. New entries are appended to their
+    /// block.
+    pub fn grown(g: &[f32], own_was: usize, rival_was: usize) -> Vec<f32> {
+        assert!(own_was <= OWN && rival_was <= RIVAL);
+        assert_eq!(g.len(), Self::genome_with(own_was, rival_was));
+        let sight_was = own_was + CHRONICLE + RIVALS * rival_was + B_OUT;
+        let moved = |i: usize| {
+            let base_was = own_was + CHRONICLE;
+            let base = OWN + CHRONICLE;
+            if i < own_was {
+                i
+            } else if i < base_was {
+                i + OWN - own_was
+            } else if i < base_was + RIVALS * rival_was {
+                base + (i - base_was) / rival_was * RIVAL + (i - base_was) % rival_was
+            } else {
+                i - base_was - RIVALS * rival_was + base + RIVALS * RIVAL
+            }
+        };
+        let net = |w: &[f32], inputs_was: usize, inputs: usize, outputs: usize| {
+            let (w1, w2) = w.split_at((inputs_was + 1) * HIDDEN);
+            let mut out = vec![0.0; (inputs + 1) * HIDDEN];
+            for j in 0..HIDDEN {
+                let row = &w1[j * (inputs_was + 1)..(j + 1) * (inputs_was + 1)];
+                let to = &mut out[j * (inputs + 1)..(j + 1) * (inputs + 1)];
+                for (i, &x) in row[..inputs_was].iter().enumerate() {
+                    to[moved(i)] = x;
+                }
+                to[inputs] = row[inputs_was];
+            }
+            debug_assert_eq!(w2.len(), (HIDDEN + 1) * outputs);
+            out.extend_from_slice(w2);
+            out
+        };
+        let (a, b) = g.split_at(Net::len(sight_was, A_OUT));
+        let mut grown = net(a, sight_was, A_IN, A_OUT);
+        grown.extend(net(b, sight_was + A_OUT, B_IN, B_OUT));
+        assert_eq!(grown.len(), Self::GENOME);
+        grown
+    }
+
     /// The starting scale of every weight of the genome.
     pub fn scales() -> Vec<f32> {
         let mut s = Net::scales(A_IN, A_OUT);
         s.extend(Net::scales(B_IN, B_OUT));
         s
+    }
+
+    /// Where in the genome the Extérieur's output `o` lives: its `HIDDEN`
+    /// weights, then its bias. So a school may open an answer the brain
+    /// never gave, or seed one it should.
+    pub fn exterieur_output(o: usize) -> std::ops::Range<usize> {
+        assert!(o < B_OUT);
+        let start = Net::len(A_IN, A_OUT) + (B_IN + 1) * HIDDEN + o * (HIDDEN + 1);
+        start..start + HIDDEN + 1
     }
 }
 
@@ -321,7 +401,10 @@ pub enum Stage {
     Emperor,
     /// The grain market.
     Market,
-    /// War on the neighbours, the éclaireur.
+    /// The éclaireur and the agents, a garrison kept against the
+    /// neighbours' armies: hold.
+    Guard,
+    /// War on the neighbours.
     War,
 }
 
@@ -332,6 +415,11 @@ impl Stage {
 
     pub fn market(self) -> bool {
         self >= Stage::Market
+    }
+
+    /// Spies are sent, and the neighbours' armies may come.
+    pub fn guard(self) -> bool {
+        self >= Stage::Guard
     }
 
     pub fn war(self) -> bool {
@@ -345,7 +433,7 @@ impl Stage {
 /// construction against the realm it was read on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Intendance {
-    /// Grain listed: `(bushels, price the hundred)`.
+    /// Grain listed: `(bushels, centimes the bushel)`.
     pub listed: Option<(i32, i32)>,
     /// Grain bought: `(seller, bushels)`.
     pub bought: Option<(Kingdoms, i32)>,
@@ -390,7 +478,8 @@ pub fn decode_intendance(
         let bushels = lots((on(5) * stocks as f32) as i32);
         (bushels > 0).then(|| {
             stocks -= bushels;
-            (bushels, ((out[6] * MAX_GRAIN_PRICE as f32) as i32).max(1))
+            let span = (MAX_GRAIN_PRICE - MIN_GRAIN_PRICE) as f32;
+            (bushels, MIN_GRAIN_PRICE + (out[6] * span) as i32)
         })
     } else {
         None
@@ -483,22 +572,54 @@ pub fn bound_council(c: Council, k: &Kingdom) -> Council {
 // -- the Extérieur -----------------------------------------------------------
 
 /// The year's Extérieur, decoded: expeditions within the realm's right and
-/// its garrison, an éclaireur it can pay.
+/// its garrison, an éclaireur it can pay, the agents it means to keep.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Orders {
     /// `(target, men)`; `None` = the barbarians.
     pub expeditions: Vec<(Option<Kingdoms>, i32)>,
     pub scout: Option<Kingdoms>,
+    /// The living rivals an agent is wanted in next year: kept where he
+    /// stands, bought where a fresh report allows, dismissed elsewhere.
+    pub agents: Vec<Kingdoms>,
 }
 
 /// Read the Extérieur's answer `out` for `k` among `kingdoms`.
-pub fn decode_orders(out: &[f32], k: &Kingdom, kingdoms: &[Kingdom; 6], stage: Stage) -> Orders {
+/// Which intelligence the table gives away — the school of letters, where
+/// a brain learns to read reports before it has to pay for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Letters {
+    #[default]
+    None,
+    /// The éclaireurs go for nothing.
+    Scouts,
+    /// The éclaireurs go and the agents are kept for nothing.
+    All,
+}
+
+impl Letters {
+    pub fn scouts(self) -> bool {
+        self != Letters::None
+    }
+
+    pub fn agents(self) -> bool {
+        self == Letters::All
+    }
+}
+
+pub fn decode_orders(
+    out: &[f32],
+    k: &Kingdom,
+    game: &EmpireGame,
+    stage: Stage,
+    letters: Letters,
+) -> Orders {
     debug_assert_eq!(out.len(), B_OUT);
+    let kingdoms = &game.kingdoms;
     let mut orders = Orders::default();
     let rivals = rivals(k.id);
     // Targets by the men wanted on them, the strongest first.
     let mut wants: Vec<(Option<Kingdoms>, f32)> = Vec::new();
-    if stage.war() {
+    if stage.war() && game.year >= FIRST_WAR_YEAR {
         wants.extend(
             rivals
                 .iter()
@@ -507,7 +628,7 @@ pub fn decode_orders(out: &[f32], k: &Kingdom, kingdoms: &[Kingdom; 6], stage: S
                 .map(|(j, &o)| (Some(o), out[j])),
         );
     }
-    if stage.barbarians() {
+    if stage.barbarians() && game.barbarians_surface > 0 {
         wants.push((None, out[5]));
     }
     wants.retain(|w| w.1 >= DEADBAND);
@@ -522,16 +643,25 @@ pub fn decode_orders(out: &[f32], k: &Kingdom, kingdoms: &[Kingdom; 6], stage: S
         garrison -= men;
         orders.expeditions.push((target, men));
     }
-    if stage.war() && k.treasury >= SCOUT_PRICE {
-        // A softmax over the five rivals and "no one": the loudest wins.
+    if stage.guard() && (letters.scouts() || k.treasury >= SCOUT_PRICE) {
+        // The loudest of the five rivals still standing and "no one" wins.
         let (best, _) = out[6..12]
             .iter()
             .enumerate()
+            .filter(|&(j, _)| j == RIVALS || !kingdoms[rivals[j].index()].is_dead)
             .max_by(|a, b| a.1.total_cmp(b.1))
             .unwrap();
-        if best < RIVALS && !kingdoms[rivals[best].index()].is_dead {
+        if best < RIVALS {
             orders.scout = Some(rivals[best]);
         }
+    }
+    if stage.guard() {
+        orders.agents = rivals
+            .iter()
+            .enumerate()
+            .filter(|&(j, o)| out[12 + j] >= 0.5 && !kingdoms[o.index()].is_dead)
+            .map(|(_, &o)| o)
+            .collect();
     }
     orders
 }
@@ -549,7 +679,7 @@ mod tests {
     fn the_sight_has_its_length_and_stays_bounded() {
         let game = EmpireGame::default();
         for id in KINGDOMS {
-            let v = sight(&game.kingdoms, 1, id, &Memory::default());
+            let v = sight(&game, id, &Memory::default());
             assert_eq!(v.len(), SIGHT);
             assert!(v.iter().all(|x| x.is_finite() && (-1.0..=2.0).contains(x)));
         }
@@ -561,7 +691,7 @@ mod tests {
         k.grain_stocks = 2_000_000;
         k.treasury = -50_000;
         k.grain_to_sell = 500_000;
-        let v = sight(&game.kingdoms, 1, Kingdoms::France, &Memory::default());
+        let v = sight(&game, Kingdoms::France, &Memory::default());
         assert!(
             v.iter().all(|x| x.is_finite() && (-3.0..=5.0).contains(x)),
             "{v:?}"
@@ -572,7 +702,7 @@ mod tests {
     fn the_networks_answer_in_zero_one() {
         let game = EmpireGame::default();
         let b = brain(0.3);
-        let s = sight(&game.kingdoms, 1, Kingdoms::France, &Memory::default());
+        let s = sight(&game, Kingdoms::France, &Memory::default());
         let a = b.intendance.forward(&s);
         assert_eq!(a.len(), A_OUT);
         let mut x = s.clone();
@@ -616,15 +746,18 @@ mod tests {
         assert!(i.listed.is_none() && i.bought.is_none());
         assert!(!i.purchases.is_empty());
         let game = EmpireGame::default();
-        let o = decode_orders(&[1.0; B_OUT], &k, &game.kingdoms, Stage::Survive);
+        let o = decode_orders(&[1.0; B_OUT], &k, &game, Stage::Survive, Letters::None);
         assert!(o.expeditions.is_empty() && o.scout.is_none());
-        let o = decode_orders(&[1.0; B_OUT], &k, &game.kingdoms, Stage::Emperor);
+        let o = decode_orders(&[1.0; B_OUT], &k, &game, Stage::Emperor, Letters::None);
         assert_eq!(o.expeditions, vec![(None, k.soldiers)]);
     }
 
     #[test]
     fn expeditions_stay_within_the_right_and_the_garrison() {
-        let mut game = EmpireGame::default();
+        let mut game = EmpireGame {
+            year: FIRST_WAR_YEAR,
+            ..EmpireGame::default()
+        };
         let k = game.kingdom_mut(Kingdoms::France);
         k.nobles = 8; // three expeditions
         k.soldiers = 100;
@@ -636,7 +769,9 @@ mod tests {
         out[5] = 0.7; // barbarians
         out[2] = 0.4; // Spain, fourth: dropped
         out[7] = 0.9; // scout Germany
-        let o = decode_orders(&out, &k, &game.kingdoms, Stage::War);
+        out[13] = 0.7; // an agent in Germany
+        out[14] = 0.4; // none in Spain
+        let o = decode_orders(&out, &k, &game, Stage::War, Letters::None);
         // The barbarians first (70 of 100), Britanny on what is left, no
         // one for Germany; Spain would have been a fourth anyway.
         assert_eq!(
@@ -644,6 +779,70 @@ mod tests {
             vec![(None, 70), (Some(Kingdoms::Britanny), 30)]
         );
         assert_eq!(o.scout, Some(Kingdoms::Germany));
+        assert_eq!(o.agents, vec![Kingdoms::Germany]);
+        let o = decode_orders(&out, &k, &game, Stage::Market, Letters::None);
+        assert!(o.agents.is_empty());
+        // Before the third year only the barbarians can be marched on.
+        game.year = FIRST_WAR_YEAR - 1;
+        let o = decode_orders(&out, &k, &game, Stage::War, Letters::None);
+        assert_eq!(o.expeditions, vec![(None, 70)]);
+    }
+
+    #[test]
+    fn a_grown_genome_plays_as_it_did() {
+        // A genome laid out for narrower rivals, grown: the new entries
+        // weigh nothing, so on a sight where they are zero the answers
+        // are the same as the narrower net's on the narrower sight.
+        let was = RIVAL - 2;
+        let own_was = OWN - 1;
+        let sight_was = own_was + CHRONICLE + RIVALS * was + B_OUT;
+        let old: Vec<f32> = (0..Net::len(sight_was, A_OUT) + Net::len(sight_was + A_OUT, B_OUT))
+            .map(|i| ((i * 7919) % 101) as f32 / 101.0 - 0.5)
+            .collect();
+        let grown = Brain::grown(&old, own_was, was);
+        let brain = Brain::from_genome(&grown);
+        let (a, b) = old.split_at(Net::len(sight_was, A_OUT));
+        let old_a = Net::new(sight_was, A_OUT, a);
+        let old_b = Net::new(sight_was + A_OUT, B_OUT, b);
+        let game = EmpireGame {
+            year: 5,
+            ..Default::default()
+        };
+        let m = Memory {
+            last_orders: [0.3; B_OUT],
+            ..Default::default()
+        };
+        let full = sight(&game, Kingdoms::France, &m);
+        // The narrower sight: the own block without its last entry, each
+        // rival block without its last two.
+        let base = OWN + CHRONICLE;
+        let mut narrow: Vec<f32> = full[..own_was].to_vec();
+        narrow.extend(&full[OWN..base]);
+        for r in 0..RIVALS {
+            narrow.extend(&full[base + r * RIVAL..base + r * RIVAL + was]);
+        }
+        narrow.extend(&full[base + RIVALS * RIVAL..]);
+        let full_zeroed: Vec<f32> = full
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| {
+                let in_rivals = (base..base + RIVALS * RIVAL).contains(&i);
+                if (own_was..OWN).contains(&i) || in_rivals && (i - base) % RIVAL >= was {
+                    0.0
+                } else {
+                    x
+                }
+            })
+            .collect();
+        let a_new = brain.intendance.forward(&full_zeroed);
+        let a_old = old_a.forward(&narrow);
+        assert_eq!(a_new, a_old);
+        let mut x_new = full_zeroed.clone();
+        x_new.extend(&a_new);
+        let mut x_old = narrow.clone();
+        x_old.extend(&a_old);
+        assert_eq!(brain.exterieur.forward(&x_new), old_b.forward(&x_old));
+        assert_eq!(Brain::grown(&grown, OWN, RIVAL), grown);
     }
 
     #[test]
