@@ -3,10 +3,7 @@
 //! Extérieur orders, the armies march together, the year ends. What each
 //! seat made of it comes back as an [`Outcome`], scored for evolution.
 
-use crate::brain::{
-    bound_council, decode_intendance, decode_orders, sight, Brain, Intendance, Letters, Memory,
-    Stage, A_OUT,
-};
+use crate::brain::{bound_council, decode_intendance, Brain, Intendance, Letters, Memory, Stage};
 use crate::campaign::{apply_battle, march, Expedition};
 use crate::demography::apply_feed;
 use crate::economy::{apply_economy, apply_taxes, economy_report};
@@ -237,19 +234,15 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
         }
         // The Intendances sit one after the other at the same stalls, in an
         // order drawn every year: the first served buys the cheapest grain.
-        let mut answers = [[0.0f32; A_OUT]; 6];
         for id in shuffled(KINGDOMS) {
             if game.kingdom(id).is_dead {
                 continue;
             }
             let i = id.index();
-            let s = sight(&game, id, &memories[i]);
-            let a = brains[i].intendance.forward(&s);
-            answers[i].copy_from_slice(&a);
             intendance(
+                brains[i],
                 &mut game,
                 id,
-                &a,
                 seats[i],
                 &mut memories[i],
                 &mut bought[i],
@@ -316,11 +309,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
                 continue;
             }
             let i = id.index();
-            let mut x = sight(&game, id, &memories[i]);
-            x.extend(answers[i]);
-            let o = brains[i].exterieur.forward(&x);
-            let orders = decode_orders(&o, k, &game, seats[i], table.letters);
-            memories[i].last_orders.copy_from_slice(&o);
+            let orders = brains[i].orders(&game, id, &mut memories[i], seats[i], table.letters);
             if outcomes[i].crowned.is_some() {
                 continue;
             }
@@ -414,23 +403,26 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
     outcomes
 }
 
-/// One seat's Intendance: the answer applied as a seigneur's roll is sealed
-/// — market, purchases, then the council promulgated and its census read.
-fn intendance(
+/// One seat's Intendance: the brain's answer applied as a seigneur's roll
+/// is sealed — market, purchases, then the council promulgated and its
+/// census read; `bought` counts the bushels bought by seller. What was
+/// done is left in `m` (`intendance`, `demo`, `eco`).
+pub fn intendance(
+    brain: &Brain,
     game: &mut EmpireGame,
     id: Kingdoms,
-    answer: &[f32],
     stage: Stage,
     m: &mut Memory,
     bought: &mut [i32; 6],
 ) {
+    let answer = brain.answer(game, id, m);
     let stalls: Vec<(Kingdoms, i32, i32)> = game
         .kingdoms
         .iter()
         .filter(|s| s.id != id && !s.is_dead)
         .map(|s| (s.id, s.for_sale(), s.grain_price))
         .collect();
-    let d = decode_intendance(answer, game.kingdom(id), &stalls, stage);
+    let d = decode_intendance(&answer, game.kingdom(id), &stalls, stage);
     if let Some((amount, price)) = d.listed {
         apply_trade(game, id, Trade::Sell { amount, price });
     }

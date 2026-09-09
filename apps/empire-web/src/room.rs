@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use empire_lib::arena;
+use empire_lib::brain::{self, Brain, Letters, Memory};
 use empire_lib::campaign::{
     apply_battle, expedition_cost, forecast, march, Expedition, Fought, EXPEDITION_GOLD_PER_MAN,
     EXPEDITION_GRAIN_PER_MAN, FIRST_WAR_YEAR,
@@ -11,13 +13,12 @@ use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, Yea
 use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
 use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Round, Spoils};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
-use empire_lib::ia::{plan_ai_intendance, plan_ai_war};
+use empire_lib::intel::heard;
 pub use empire_lib::intel::{
     Dossier, Ledger, Mission, Report, Rumour, Scouting, Writing, AGENT_PRICE, SCOUT_PRICE,
 };
 use empire_lib::investments::{apply_investment, InvestmentType};
 use empire_lib::kingdom::RATION_SCALE;
-use empire_lib::mind::{Mind, Seen, Temper};
 use empire_lib::trade::{
     apply_trade, calculate_buy_cost, max_land_sale, price_text, Trade, LAND_SELL_PRICE,
     MAX_GRAIN_PRICE, MIN_GRAIN_PRICE,
@@ -418,8 +419,9 @@ pub struct Seat {
     /// Bumped when a sheet's form concludes, so the sheet opened for the
     /// previous generation closes on its own.
     pub sheet_gen: u16,
-    /// The computer's temperament and eye (kept, unused, under a seigneur).
-    pub mind: Mind,
+    /// What the computer's brain remembers of its years (kept, unused,
+    /// under a seigneur).
+    pub memory: Memory,
 }
 
 /// Where a seat's notice shows: under the roll's block it answers, inside
@@ -650,6 +652,8 @@ pub struct Room {
     /// Bushels bought this year, by buyer then seller: what the agents read
     /// in the registers.
     bought: [[i32; 6]; 6],
+    /// The brain every computer seat plays with.
+    pub brain: Brain,
 }
 
 impl Room {
@@ -785,11 +789,6 @@ impl Room {
 
     pub fn dossier(&self, id: Kingdoms, on: Kingdoms) -> &Dossier {
         &self.seat(id).dossiers[on.index()]
-    }
-
-    /// How a computer's council leans; `None` under a seigneur.
-    pub fn temper(&self, id: Kingdoms) -> Option<Temper> {
-        self.is_computer(id).then(|| self.seat(id).mind.temper)
     }
 
     /// Whether `id` has an éclaireur leaving for `on` this year.
@@ -1280,19 +1279,18 @@ impl Room {
     fn end_year(&mut self) {
         self.battles.clear();
         for id in KINGDOMS {
-            // A computer's abstract growth knows no famine (original line 206).
             let starvation_deaths = self
                 .seat(id)
                 .demo
                 .as_ref()
                 .map_or(0, |d| d.starvation_victims);
-            let computer = self.is_computer(id);
             let k = self.game.kingdom_mut(id);
             if k.is_dead {
                 continue;
             }
             let title = k.full_title();
-            let (plague, death) = check_random_events(k, starvation_deaths, computer);
+            let (plague, death) = check_random_events(k, starvation_deaths);
+            self.seat_mut(id).memory.plague = plague.is_some();
             if let Some(plague) = plague {
                 self.journal(
                     [id],
@@ -1451,11 +1449,34 @@ impl Room {
         changed
     }
 
-    /// The computer's council as the year opens: its growth and trade. Its
-    /// war waits for the Extérieur, like everyone's — see `run_computer_war`.
+    /// A computer's memory brought up to the day: what its spies wrote and
+    /// what the heralds tell of the last campaign.
+    fn remember(&self, id: Kingdoms) -> Memory {
+        let seat = self.seat(id);
+        Memory {
+            dossiers: seat.dossiers,
+            heard: heard(&self.rumours),
+            ..seat.memory.clone()
+        }
+    }
+
+    /// The computer's council as the year opens: its brain's Intendance
+    /// sealed as a seigneur's roll is, and told the same way — the market,
+    /// the purchases, the census. Its war waits for the Extérieur, like
+    /// everyone's — see `run_computer_war`.
     fn run_computer_intendance(&mut self, id: Kingdoms) {
-        let decision = plan_ai_intendance(&mut self.game, id);
-        if let Some((amount, price)) = decision.grain_listed {
+        let mut memory = self.remember(id);
+        let mut bought = [0; 6];
+        arena::intendance(
+            &self.brain,
+            &mut self.game,
+            id,
+            brain::Stage::War,
+            &mut memory,
+            &mut bought,
+        );
+        let done = memory.intendance.clone().expect("an intendance sealed");
+        if let Some((amount, price)) = done.listed {
             self.journal(
                 [id],
                 format!(
@@ -1465,55 +1486,71 @@ impl Room {
                 ),
             );
         }
-        if let Some((seller, amount)) = decision.grain_bought {
-            self.journal(
-                [id, seller],
-                format!(
-                    "La {} achète {amount} boisseaux à la {}.",
-                    id.name(),
-                    seller.name()
-                ),
-            );
-            self.report_sale(seller, id, amount);
+        for seller in KINGDOMS {
+            let amount = bought[seller.index()];
+            if amount > 0 {
+                self.journal(
+                    [id, seller],
+                    format!(
+                        "La {} achète {amount} boisseaux à la {}.",
+                        id.name(),
+                        seller.name()
+                    ),
+                );
+                self.report_sale(seller, id, amount);
+            }
         }
+        let demo = memory.demo.clone().expect("a census");
+        let eco = memory.eco.clone().expect("the accounts");
+        self.journal(
+            [id],
+            format!(
+                "La {} a {}.",
+                id.name(),
+                subjects_delta(demo.population_delta(), "ses")
+            ),
+        );
+        let k = self.game.kingdom(id);
+        let (population_after, treasury_after) = (k.population(), k.treasury);
+        let seat = self.seat_mut(id);
+        seat.demo = Some(demo);
+        seat.eco = Some(eco);
+        seat.population_after = population_after;
+        seat.treasury_after = treasury_after;
+        seat.memory = memory;
     }
 
-    /// The computer's war orders as the Extérieur opens, on the éclaireur's
-    /// report of this very day; the spy it sends is ordered like a
-    /// seigneur's (taken, journaled and told alike).
+    /// The computer's war orders as the Extérieur opens, read on the day's
+    /// reports; the spies it sends are ordered like a seigneur's (paid,
+    /// taken, journaled and told alike).
     fn run_computer_war(&mut self, id: Kingdoms) {
-        let year = self.game.year;
-        let mut mind = self.seat(id).mind;
-        mind.seen = mind.eye.and_then(|on| {
-            let report = self.dossier(id, on).report.filter(|r| r.year == year)?;
-            Some(Seen {
-                garrison: report.garrison,
-                efficiency: report.efficiency,
-                serfs: report.serfs,
-            })
-        });
-        let war = plan_ai_war(&mut self.game, id, &mut mind);
-        self.seat_mut(id).mind = mind;
-        if let Some(on) = war.scout {
-            self.seat_mut(id).missions.push(Mission::Scout(on));
-        }
-        let barbarians = war
-            .barbarian_attacks
-            .into_iter()
-            .map(|soldiers| Expedition {
-                attacker: id,
-                target: None,
-                soldiers,
-            });
-        let kingdoms = war
-            .kingdom_attacks
+        let mut memory = self.remember(id);
+        let orders = self.brain.orders(
+            &self.game,
+            id,
+            &mut memory,
+            brain::Stage::War,
+            Letters::None,
+        );
+        self.seat_mut(id).memory = memory;
+        self.seat_mut(id).planned = orders
+            .expeditions
             .into_iter()
             .map(|(target, soldiers)| Expedition {
                 attacker: id,
-                target: Some(target),
+                target,
                 soldiers,
-            });
-        self.seat_mut(id).planned = barbarians.chain(kingdoms).collect();
+            })
+            .collect();
+        if let Some(on) = orders.scout {
+            let _ = self.toggle_scout(id, on);
+        }
+        for on in brain::rivals(id) {
+            let wanted = orders.agents.contains(&on);
+            if wanted != self.dossier(id, on).agent {
+                let _ = self.toggle_agent(id, on);
+            }
+        }
     }
 
     /// Add an expedition to a seigneur's orders.
@@ -2477,6 +2514,21 @@ pub fn withdraw(rooms: &mut Rooms, ctx: &EventContext) {
     }
 }
 
+/// A brain deaf to the world: only the Extérieur's biases given speak
+/// (every other weight naught, the answers sit at one half — half the
+/// garrison wanted on every target; no agent, whatever the biases).
+#[cfg(test)]
+fn deaf_brain(biases: &[(usize, f32)]) -> Brain {
+    let mut g = vec![0.0; Brain::GENOME];
+    for o in 12..17 {
+        g[Brain::exterieur_output(o).end - 1] = -3.0;
+    }
+    for &(o, b) in biases {
+        g[Brain::exterieur_output(o).end - 1] = b;
+    }
+    Brain::from_genome(&g)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3139,27 +3191,14 @@ mod tests {
     #[test]
     fn computers_give_their_war_orders_as_the_exterior_opens() {
         let mut room = playing(&[Kingdoms::France]);
-        // A bold council, year three, with a fresh report on a weak realm:
-        // it strikes for sure (a coup de sang may march first and take men).
-        let (id, on) = (Kingdoms::Britanny, Kingdoms::Spain);
+        // A brain that wants half its men on every target, year three: it
+        // marches for sure.
+        room.brain = deaf_brain(&[]);
+        let id = Kingdoms::Britanny;
         room.game.year = 3;
-        room.seat_mut(id).mind = Mind {
-            temper: Temper::Bold,
-            eye: Some(on),
-            seen: None,
-        };
         let k = room.game.kingdom_mut(id);
         k.soldiers = 60;
         k.soldiers_efficiency = 100;
-        room.seat_mut(id).dossiers[on.index()].report = Some(Report {
-            year: 3,
-            garrison: 20,
-            efficiency: 100,
-            nobles: 1,
-            merchants: 100,
-            serfs: 1000,
-            surface: 10_000,
-        });
         assert!(room.seat(id).planned.is_empty());
         finish_intendance(&mut room, Kingdoms::France);
         assert_eq!(room.phase, Phase::Exterieur);
@@ -3457,74 +3496,33 @@ mod scouting {
         assert!(room.war_forecast(id, Some(on)).is_none());
     }
 
-    /// A computer at year three with a report of the year on its eye.
-    fn watching(temper: Temper, garrison: i32) -> (Room, Kingdoms, Kingdoms) {
+    /// A computer at year three whose brain has an eye on `on` and wants
+    /// no one else watched; its treasury pays the éclaireur.
+    fn watching() -> (Room, Kingdoms, Kingdoms) {
         let mut room = table();
         let (id, on) = (Kingdoms::Germany, Kingdoms::Spain);
+        let j = brain::rivals(id).iter().position(|&r| r == on).unwrap();
+        room.brain = deaf_brain(&[(6 + j, 3.0), (11, -3.0)]);
         room.game.year = 3;
-        room.seat_mut(id).mind = Mind {
-            temper,
-            eye: Some(on),
-            seen: None,
-        };
         let k = room.game.kingdom_mut(id);
         k.soldiers = 60;
         k.soldiers_efficiency = 100;
         k.treasury = 1_000;
-        room.seat_mut(id).dossiers[on.index()].report = Some(Report {
-            year: 3,
-            garrison,
-            efficiency: 100,
-            nobles: 1,
-            merchants: 100,
-            serfs: 1000,
-            surface: 10_000,
-        });
         (room, id, on)
     }
 
     #[test]
-    fn a_computer_reads_its_dossier_and_strikes_on_a_favourable_report() {
-        let (mut room, id, on) = watching(Temper::Bold, 20);
+    fn a_computer_s_scout_is_paid_like_a_seigneur_s() {
+        let (mut room, id, on) = watching();
+        let before = room.game.kingdom(id).treasury;
         room.run_computer_war(id);
-        // 1.5 × 20 × 100 / 100 = 30 men, or three quarters of the 60: 45.
-        let planned = &room.seat(id).planned;
-        assert!(
-            planned
-                .iter()
-                .any(|e| e.target == Some(on) && e.soldiers == 45),
-            "{planned:?}"
-        );
         assert!(room.scout_ordered(id, on));
-        assert_eq!(room.seat(id).mind.eye, Some(on));
-        assert_eq!(room.seat(id).mind.seen, None);
-    }
-
-    #[test]
-    fn a_computer_looks_elsewhere_on_an_unfavourable_report() {
-        let (mut room, id, on) = watching(Temper::Cautious, 200);
-        // The watched realm is a speck: the new eye all but surely lands
-        // elsewhere.
-        room.game.kingdom_mut(on).surface = 1;
+        assert_eq!(room.game.kingdom(id).treasury, before - SCOUT_PRICE);
+        // Without the price, no éclaireur leaves.
+        let (mut room, id, on) = watching();
+        room.game.kingdom_mut(id).treasury = SCOUT_PRICE - 1;
         room.run_computer_war(id);
-        let eye = room.seat(id).mind.eye.expect("an eye");
-        assert!(eye != id && eye != on, "{eye:?}");
-        assert!(room.scout_ordered(id, eye));
         assert!(!room.scout_ordered(id, on));
-    }
-
-    #[test]
-    fn a_stale_report_is_not_read() {
-        let (mut room, id, on) = watching(Temper::Bold, 1);
-        room.seat_mut(id).dossiers[on.index()]
-            .report
-            .as_mut()
-            .unwrap()
-            .year = 2;
-        room.run_computer_war(id);
-        // Only the coup de sang could have marched: never an ost cut to the
-        // report (1.5 × 100 / 100 = 2 men).
-        assert!(!room.seat(id).planned.iter().any(|e| e.soldiers == 2));
     }
 
     #[test]
@@ -3532,7 +3530,7 @@ mod scouting {
         let (id, on) = (Kingdoms::Germany, Kingdoms::Spain);
         let (mut back, mut caught) = (false, false);
         for _ in 0..200 {
-            let (mut room, _, _) = watching(Temper::Measured, 20);
+            let (mut room, _, _) = watching();
             room.seat_mut(on).news.clear();
             room.run_computer_war(id);
             assert!(room.scout_ordered(id, on));
@@ -3551,12 +3549,5 @@ mod scouting {
             }
         }
         assert!(back && caught);
-    }
-
-    #[test]
-    fn the_letter_tells_the_council_s_temper() {
-        let (room, id, _) = watching(Temper::Cautious, 20);
-        assert_eq!(room.temper(id), Some(Temper::Cautious));
-        assert_eq!(room.temper(Kingdoms::France), None);
     }
 }

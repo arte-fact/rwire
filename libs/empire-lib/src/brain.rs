@@ -6,6 +6,8 @@
 //! human's. Nothing here knows how to play: the weights are found by
 //! evolution (see `apps/empire-train`) on tables of [`crate::arena`].
 
+use std::sync::LazyLock;
+
 use crate::campaign::FIRST_WAR_YEAR;
 use crate::demography::{affordable_ration, Council, YearDemography};
 use crate::economy::{Taxes, YearEconomy};
@@ -57,6 +59,8 @@ pub struct Memory {
     pub plague: bool,
     /// What everyone heard of the last campaign, indexed by realm.
     pub heard: [Heard; 6],
+    /// The Intendance's answer of the year, read again by the Extérieur.
+    pub answer: [f32; A_OUT],
     /// The Extérieur's raw answer of last year.
     pub last_orders: [f32; B_OUT],
     /// What the seat knows of each realm.
@@ -296,11 +300,17 @@ impl Net {
     }
 }
 
-/// The two networks of one computer.
+/// The two networks of one computer; [`Brain::schooled`] by default.
 #[derive(Debug, Clone)]
 pub struct Brain {
     pub intendance: Net,
     pub exterieur: Net,
+}
+
+impl Default for Brain {
+    fn default() -> Brain {
+        Brain::schooled().clone()
+    }
 }
 
 impl Brain {
@@ -370,6 +380,46 @@ impl Brain {
         grown.extend(net(b, sight_was + A_OUT, B_IN, B_OUT));
         assert_eq!(grown.len(), Self::GENOME);
         grown
+    }
+
+    /// The brain the computers sit down with: schooled at the arena
+    /// (`apps/empire-train`) up to the war rung — 2 300 generations, six
+    /// tables of six, a hall of eight, a rank cost of forty, no letters —
+    /// and kept as `brains/schooled.f32`, its genome in little-endian floats.
+    pub fn schooled() -> &'static Brain {
+        static SCHOOLED: LazyLock<Brain> = LazyLock::new(|| {
+            let genome: Vec<f32> = include_bytes!("../brains/schooled.f32")
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+            Brain::from_genome(&genome)
+        });
+        &SCHOOLED
+    }
+
+    /// The Intendance's answer as the year opens, kept in `m` for the
+    /// Extérieur to read again.
+    pub fn answer(&self, game: &EmpireGame, id: Kingdoms, m: &mut Memory) -> [f32; A_OUT] {
+        let a = self.intendance.forward(&sight(game, id, m));
+        m.answer.copy_from_slice(&a);
+        m.answer
+    }
+
+    /// The Extérieur's orders, on the year's sight and the Intendance's
+    /// answer; the raw answer is kept in `m` for next year's sight.
+    pub fn orders(
+        &self,
+        game: &EmpireGame,
+        id: Kingdoms,
+        m: &mut Memory,
+        stage: Stage,
+        letters: Letters,
+    ) -> Orders {
+        let mut x = sight(game, id, m);
+        x.extend(m.answer);
+        let o = self.exterieur.forward(&x);
+        m.last_orders.copy_from_slice(&o);
+        decode_orders(&o, game.kingdom(id), game, stage, letters)
     }
 
     /// The starting scale of every weight of the genome.
@@ -583,7 +633,6 @@ pub struct Orders {
     pub agents: Vec<Kingdoms>,
 }
 
-/// Read the Extérieur's answer `out` for `k` among `kingdoms`.
 /// Which intelligence the table gives away — the school of letters, where
 /// a brain learns to read reports before it has to pay for them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -606,6 +655,7 @@ impl Letters {
     }
 }
 
+/// Read the Extérieur's answer `out` for `k` among `kingdoms`.
 pub fn decode_orders(
     out: &[f32],
     k: &Kingdom,

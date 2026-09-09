@@ -3,7 +3,9 @@
 //! - Ruler death (lines 187-194), two independent draws after the year's
 //!   demography: a starving mother's revenge, as likely as the year's
 //!   starvation deaths are many; then 1 % of a death among four causes.
-//! - A computer (lines 206-207) knows neither plague nor famine: only the 1 %.
+//!
+//! Empire.bas spared its computers plague and famine (lines 206-207); ours
+//! face them like everyone else.
 
 use serde::{Deserialize, Serialize};
 
@@ -94,15 +96,11 @@ pub fn check_ruler_death(
 }
 
 /// The year's random events for a living kingdom: plague, then the ruler's
-/// death. A computer only risks the 1 % death.
+/// death.
 pub fn check_random_events(
     kingdom: &mut Kingdom,
     starvation_deaths: i32,
-    computer: bool,
 ) -> (Option<PlagueEvent>, Option<RulerDeathCause>) {
-    if computer {
-        return (None, check_ruler_death(kingdom, 0, true));
-    }
     let plague = check_plague(kingdom);
     let death = check_ruler_death(kingdom, starvation_deaths, true);
     (plague, death)
@@ -163,16 +161,5 @@ mod tests {
         assert!(k.is_dead);
         assert_eq!(cause, RulerDeathCause::StarvationAssassination);
         assert_eq!(k.fate, Some(Fate::RulerDied(cause)));
-    }
-
-    #[test]
-    fn a_computer_knows_neither_plague_nor_famine() {
-        let mut k = Kingdom::new(Kingdoms::France);
-        for _ in 0..2_000 {
-            let (plague, death) = check_random_events(&mut k, 100_000, true);
-            assert!(plague.is_none());
-            assert_ne!(death, Some(RulerDeathCause::StarvationAssassination));
-            k.is_dead = false;
-        }
     }
 }

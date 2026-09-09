@@ -3,8 +3,8 @@
 État : **implémenté** (`empire-lib/front.rs`, `empire-lib/campaign.rs`, `empire-web/room.rs`,
 `empire-web/ui/campaign.rs`). Les règles ci-dessous remplacent `simulate_kingdom_battle`
 (empire-lib `war.rs`) pour les fronts entre royaumes joués sur le web. Les expéditions contre
-les barbares gardent la règle actuelle ; le terminal (`apps/empire`) et `ia.rs::execute_ai_turn`
-restent sur l'ancienne règle. Les décisions prises à l'implémentation sont en fin de document ;
+les barbares gardent la règle actuelle ; le terminal (`apps/empire`) reste sur l'ancienne
+règle. Les décisions prises à l'implémentation sont en fin de document ;
 la **simplification** qui a suivi (plus de carte ni de pool de serfs : une marche avec
 rencontres) est décrite dans la dernière section et prime sur les §1–5 quand ils divergent.
 
@@ -308,7 +308,7 @@ Le schéma A complet, tous les traits éteints, les verdicts sous chaque armée 
   dans les ordres, puis ordre des armées sur ce front).
 - **Nobles franchis** : tués (`Spoils::nobles_killed`), pas rançonnés. **Palais** : ignoré par la
   ligne (ni pris ni brûlé).
-- **Terminal et `execute_ai_turn`** : gardent `war.rs` (ancienne règle) ; seul le web passe par
+- **Terminal** : garde `war.rs` (ancienne règle) ; seul le web passe par
   `campaign::march` + `front::simulate_front`.
 - **Annexion** : le reste du royaume (ce qu'aucune ligne n'a franchi) va à l'armée victorieuse la
   plus avancée (puis la plus nombreuse) ; les serfs répartis sur les lignes sont les survivants.
