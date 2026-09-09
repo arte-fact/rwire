@@ -195,21 +195,7 @@ pub struct Entry {
     pub year: i32,
     /// Kingdoms this entry concerns (empty = everyone).
     pub about: Vec<Kingdoms>,
-    /// The line as everyone reads it.
     pub text: String,
-    /// The fuller line the kingdoms it concerns read instead: the figures
-    /// that stay inside the walls (an army's headcount, a loot).
-    pub secret: Option<String>,
-}
-
-impl Entry {
-    /// The line as `reader` reads it.
-    pub fn told_to(&self, reader: Option<Kingdoms>) -> &str {
-        match &self.secret {
-            Some(s) if reader.is_some_and(|r| self.about.contains(&r)) => s,
-            _ => &self.text,
-        }
-    }
 }
 
 /// One of the council's five sliders.
@@ -513,6 +499,8 @@ pub enum Elsewhere {
     Marched {
         by: Kingdoms,
         on: Kingdoms,
+        sent: i32,
+        lost: i32,
         victory: bool,
         arpents: i32,
     },
@@ -948,22 +936,10 @@ impl Room {
     /// Append a journal entry; `about` names the kingdoms it concerns so the
     /// viewer's own news can be marked.
     pub fn journal(&mut self, about: impl IntoIterator<Item = Kingdoms>, line: impl Into<String>) {
-        self.confide(about, line, None);
-    }
-
-    /// Append a journal entry whose fuller telling is kept for the kingdoms
-    /// it concerns; everyone else reads `line`.
-    fn confide(
-        &mut self,
-        about: impl IntoIterator<Item = Kingdoms>,
-        line: impl Into<String>,
-        secret: Option<String>,
-    ) {
         self.log.push(Entry {
             year: self.game.year,
             about: about.into_iter().collect(),
             text: line.into(),
-            secret,
         });
         if self.log.len() > JOURNAL_LEN {
             self.log.remove(0);
@@ -1596,15 +1572,14 @@ impl Room {
             let k = self.game.kingdom(e.attacker);
             let (attacker, cur) = (k.titled_name(), k.currency());
             let (gold, grain) = expedition_cost(e.soldiers);
-            self.confide(
+            self.journal(
                 [e.attacker].into_iter().chain(e.target),
-                format!("{attacker} marche sur {foe}."),
-                Some(format!(
+                format!(
                     "{attacker} marche sur {foe} avec {}, pour {} et {} boisseaux.",
                     hommes_darmes(e.soldiers),
                     coins(gold, cur),
                     fmt(grain)
-                )),
+                ),
             );
         }
         let rounds = &fought.result.rounds;
@@ -1643,11 +1618,7 @@ impl Room {
             let k = self.game.kingdom(a.attacker);
             let name = k.titled_name();
             let line = verdict(&name, k.currency(), a);
-            self.confide(
-                audience.iter().copied(),
-                verdict_heard(&name, a),
-                Some(line),
-            );
+            self.journal(audience.iter().copied(), line);
             self.rumours.push(Rumour {
                 year: self.game.year,
                 attacker: a.attacker,
@@ -1662,6 +1633,8 @@ impl Room {
                     Elsewhere::Marched {
                         by: a.attacker,
                         on,
+                        sent: a.sent,
+                        lost: a.lost(),
                         victory: a.victory,
                         arpents: spoils.arpents,
                     },
@@ -1734,19 +1707,6 @@ impl Room {
 }
 
 /// One army's line of the journal.
-/// The verdict as the other courts hear it: the outcome and the land, no
-/// loot and no headcount.
-fn verdict_heard(attacker: &str, a: &Army) -> String {
-    let arpents = a.spoils().arpents;
-    if !a.victory {
-        format!("{attacker} perd toute son expédition sans garder un arpent.")
-    } else if arpents == 0 {
-        format!("{attacker} repousse l'ennemi sans gagner un arpent.")
-    } else {
-        format!("{attacker} gagne : {} arpents conquis.", fmt(arpents))
-    }
-}
-
 fn verdict(attacker: &str, cur: &str, a: &Army) -> String {
     if !a.victory {
         // The expedition is wiped out: whatever it overran is lost with it.
@@ -3021,7 +2981,7 @@ mod tests {
     }
 
     #[test]
-    fn a_war_is_heard_everywhere_but_its_headcount_stays_on_the_field() {
+    fn a_war_is_heard_everywhere_with_its_headcount() {
         let mut room = playing(&[Kingdoms::France, Kingdoms::Spain, Kingdoms::Germany]);
         let (a, d, other) = (Kingdoms::France, Kingdoms::Spain, Kingdoms::Germany);
         room.game.year = FIRST_WAR_YEAR;
@@ -3039,28 +2999,23 @@ mod tests {
         .remove(0);
         room.start_battle(fought);
         room.finish_battle(0);
-        // The march: the field knows the headcount, the court next door not.
+        // The march and its headcount are journaled for every court.
         let march_line = room
             .log
             .iter()
             .find(|e| e.text.contains("marche sur"))
             .expect("the march is journaled");
-        assert!(march_line.told_to(Some(a)).contains("60 hommes d'armes"));
-        assert!(march_line.told_to(Some(d)).contains("60 hommes d'armes"));
-        assert!(!march_line.told_to(Some(other)).contains("hommes"));
-        assert!(!march_line.told_to(None).contains("hommes"));
-        // The verdict: the land is public, the loot is not.
-        let verdict_line = room.log.last().unwrap();
-        assert!(verdict_line.told_to(Some(other)).contains("arpent"));
-        assert!(!verdict_line.told_to(Some(other)).contains("Butin"));
-        // The heralds keep the front, without a headcount…
+        assert!(march_line.text.contains("60 hommes d'armes"));
+        // The verdict tells the land to every court.
+        assert!(room.log.last().unwrap().text.contains("arpent"));
+        // The heralds keep the front…
         assert_eq!(room.rumours.len(), 1);
         let r = room.rumours[0];
         assert_eq!((r.attacker, r.target, r.year), (a, Some(d), room.game.year));
-        // …and the third court reads it in its chronicle.
+        // …and the third court reads it in its chronicle, headcount included.
         assert!(room.seat(other).news.iter().any(|n| matches!(
             n,
-            News::Elsewhere(Elsewhere::Marched { by, on, .. }) if *by == a && *on == d
+            News::Elsewhere(Elsewhere::Marched { by, on, sent: 60, .. }) if *by == a && *on == d
         )));
         assert!(!room
             .seat(a)
@@ -3284,10 +3239,8 @@ mod scouting {
                         room.seat(on).news.as_slice(),
                         [News::SpyCaught { by, agent: false }] if *by == id
                     ));
-                    let line = room.log.last().expect("a journal line");
-                    let heard = line.told_to(Some(Kingdoms::Germany));
+                    let heard = &room.log.last().expect("a journal line").text;
                     assert!(heard.contains("éclaireur de la France"), "{heard}");
-                    assert!(line.secret.is_none());
                 }
                 other => panic!("unexpected news {other:?}"),
             }
@@ -3391,7 +3344,7 @@ mod scouting {
                         room.seat(on).news.as_slice(),
                         [News::SpyCaught { by, agent: true }] if *by == id
                     ));
-                    let heard = room.log.last().unwrap().told_to(Some(Kingdoms::Germany));
+                    let heard = &room.log.last().unwrap().text;
                     assert!(
                         heard.contains("agent de la France a été démasqué"),
                         "{heard}"

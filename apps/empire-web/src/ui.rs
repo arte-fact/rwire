@@ -719,7 +719,7 @@ fn journal_line(e: &Entry, me: Option<Kingdoms>) -> ElementBuilder {
             el(El::Span)
                 .st([St::W05rem, St::H05rem, St::RoundedFull, St::FlexShrink0])
                 .st(if mine { [St::BgWarning] } else { [St::BgMuted] }),
-            el(El::Span).text(e.told_to(me)),
+            el(El::Span).text(&e.text),
         ])
 }
 
@@ -2108,18 +2108,25 @@ fn tell(room: &Room, k: &Kingdom, news: &News, last_sale: bool) -> ElementBuilde
                 Elsewhere::Marched {
                     by,
                     on,
+                    sent,
+                    lost,
                     victory,
                     arpents,
                 } => format!(
-                    "Ailleurs : la {} a marché sur la {} · {}.",
+                    "Ailleurs : la {} a marché sur la {} avec {} · {}.",
                     by.name(),
                     on.name(),
+                    hommes_darmes(sent),
                     if !victory {
                         "l'expédition y est anéantie".to_string()
                     } else if arpents == 0 {
-                        "victoire sans un arpent".to_string()
+                        format!("victoire sans un arpent, {} perdus", fmt(lost))
                     } else {
-                        format!("victoire, {} arpents pris", fmt(arpents))
+                        format!(
+                            "victoire, {} arpents pris, {} perdus",
+                            fmt(arpents),
+                            fmt(lost)
+                        )
                     }
                 ),
                 Elsewhere::Annexed { id, by } => {
@@ -5258,11 +5265,6 @@ fn letter(
     line
 }
 
-/// Land as the heralds tell it: to the hundred.
-fn arpents_heard(surface: i32) -> i32 {
-    (surface + 50) / 100 * 100
-}
-
 /// What everyone heard of `id` in the last campaign: whom it marched on and
 /// how, what it lost.
 fn rumours_about(room: &Room, id: Kingdoms) -> Vec<String> {
@@ -5333,7 +5335,7 @@ fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                 if year < FIRST_WAR_YEAR {
                     format!("dès l'an {FIRST_WAR_YEAR}")
                 } else {
-                    format!("≈ {} arp.", fmt(arpents_heard(k.surface)))
+                    format!("{} arp.", fmt(k.surface))
                 },
                 match room.dossier(id, o).report {
                     Some(r) => format!(
@@ -5698,32 +5700,30 @@ fn war_sheet(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
         Some(o) => {
             let d = room.game.kingdom(o);
             let rule = "L'armée force la garnison, puis marche le long des terres : les gens rencontrés se rallient une fois sur trois et se battent sinon — serfs et marchands en milice, les nobles avec l'ardeur du royaume. Prendre toutes les terres annexe le royaume.";
+            let land = fmt(d.surface);
+            let sub = format!(
+                "{} · {land} arpents · {}",
+                d.player_name,
+                report_dated(room.dossier(id, o), room.game.year)
+            );
             match report {
                 Some(r) => (
-                    format!(
-                        "{} · {} arpents · {}",
-                        d.player_name,
-                        fmt(r.surface),
-                        report_dated(room.dossier(id, o), room.game.year)
-                    ),
+                    sub,
                     rule,
                     vec![
                         format!("garnison {}", fmt(r.garrison)),
                         format!("efficacité {}", r.efficiency),
-                        format!("annexion à {}", fmt(r.surface)),
+                        format!("annexion à {land}"),
                     ],
                 ),
-                None => {
-                    let land = fmt(arpents_heard(d.surface));
-                    (
-                        format!("{} · ≈ {land} arpents · aucun rapport", d.player_name),
-                        rule,
-                        vec![
-                            format!("annexion vers {land}"),
-                            "brûle 1 bâtiment sur 3".to_string(),
-                        ],
-                    )
-                }
+                None => (
+                    sub,
+                    rule,
+                    vec![
+                        format!("annexion à {land}"),
+                        "brûle 1 bâtiment sur 3".to_string(),
+                    ],
+                ),
             }
         }
     };
@@ -6030,9 +6030,9 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
     let treasury = room.game.kingdom(id).treasury;
     let ordered = room.scout_ordered(id, o);
     let planned = room.planned_on(id, o.into()).map(|(_, e)| e.soldiers);
-    let land = fmt(arpents_heard(k.surface));
+    let land = fmt(k.surface);
     let sub = format!(
-        "{} · ≈ {land} arpents · {}{}",
+        "{} · {land} arpents · {}{}",
         k.player_name,
         if d.report.is_some() {
             "d'après votre "
@@ -6066,11 +6066,7 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
                 ))],
                 None,
             ),
-            war_cell(
-                "Terres",
-                vec![txt(&format!("{} arpents{}", fmt(r.surface), dated(&r)))],
-                None,
-            ),
+            war_cell("Terres", vec![txt(&format!("{land} arpents"))], None),
         ],
         None => [
             "Garnison",
@@ -6081,7 +6077,7 @@ fn kingdom_sheet(t: T, id: Kingdoms, o: Kingdoms) -> ElementBuilder {
         .map(|l| war_cell(l, vec![txt("? ? ?")], None))
         .chain([war_cell(
             "Terres",
-            vec![txt(&format!("≈ {land} arpents"))],
+            vec![txt(&format!("{land} arpents"))],
             None,
         )])
         .collect(),
