@@ -52,7 +52,8 @@ pub fn simulate_kingdom_battle(
 
     let mut attacker_soldiers = soldiers_sent;
     let attacking_strength = attacker.soldiers_efficiency;
-    let mut defending_strength = garrison_strength(defender.soldiers_efficiency);
+    let mut defending_strength =
+        garrison_strength(defender.soldiers_efficiency, defender.fortifications);
 
     let mut defender_soldiers = defender.soldiers;
     let mut defender_peasants = defender.peasants;

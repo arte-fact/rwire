@@ -291,6 +291,7 @@ fn order_of_battle(
             .filter(|(_, army)| army.attacker == a)
             .collect();
         let sent: i32 = mine.iter().map(|(_, a)| a.sent).sum();
+        let rams: i32 = mine.iter().map(|(_, a)| a.rams).sum();
         let all_told = mine.iter().all(|(i, _)| replay.settled(*i));
         let won: i32 = mine
             .iter()
@@ -304,9 +305,16 @@ fn order_of_battle(
             el(El::Span)
                 .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
                 .append(
-                    [Some(el(El::Span).text(&hommes(sent))), you(Some(a))]
-                        .into_iter()
-                        .flatten(),
+                    [
+                        Some(el(El::Span).text(&if rams > 0 {
+                            format!("{} · {}", hommes(sent), beliers(rams))
+                        } else {
+                            hommes(sent)
+                        })),
+                        you(Some(a)),
+                    ]
+                    .into_iter()
+                    .flatten(),
                 ),
         ]);
         if all_told {
@@ -344,9 +352,12 @@ fn order_of_battle(
                     ),
             );
         }
-        lines.push(el(El::Span).text(&arpents(
-            r.armies.iter().map(|a| a.line.arpents).sum::<i32>(),
-        )));
+        let land = arpents(r.armies.iter().map(|a| a.line.arpents).sum::<i32>());
+        lines.push(el(El::Span).text(&if r.walls_start > 0 {
+            format!("{land} · murs {}/10", r.walls_start)
+        } else {
+            land
+        }));
         if let Some(by) = annexed {
             lines.push(verdict(
                 match target {
@@ -640,8 +651,8 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
     let r = &b.result;
     let round = replay.frame(b);
     let target = b.target;
-    let attackers = r.armies.iter().zip(&round.armies).map(|(a, s)| {
-        Gauge {
+    let attackers = r.armies.iter().zip(&round.armies).flat_map(|(a, s)| {
+        let gauge = Gauge {
             party: Some(a.attacker),
             name: a.attacker.name(),
             kind: "",
@@ -649,7 +660,10 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
             start: a.sent,
             right: false,
         }
-        .build(me)
+        .build(me);
+        [Some(gauge), (a.rams > 0).then(|| rams_line(s, round))]
+            .into_iter()
+            .flatten()
     });
     let garrison_kind = match (target, r.garrison_start, round.garrison) {
         (None, _, _) => "bande",
@@ -657,7 +671,7 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
         (Some(_), _, 0) => "garnison balayée",
         _ => "garnison",
     };
-    let pool = vec![Gauge {
+    let mut pool = vec![Gauge {
         party: target,
         name: party_name(target),
         kind: garrison_kind,
@@ -666,6 +680,9 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
         right: true,
     }
     .build(me)];
+    if target.is_some() && r.walls_start > 0 {
+        pool.push(walls_gauge(target, round.walls, r.walls_start));
+    }
     let column = |g: Vec<ElementBuilder>| {
         el(El::Div)
             .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::MinW0])
@@ -716,6 +733,61 @@ fn battle(room: &Room, replay: Replay, me: Option<Kingdoms>) -> ElementBuilder {
     el(El::Div)
         .st([St::DisplayFlex, St::FlexCol, St::GapMd])
         .append(body)
+}
+
+/// An army's rams under its gauge: how many stand and when they strike
+/// next, how many are broken so far (in red).
+fn rams_line(s: &Stand, round: &Round) -> ElementBuilder {
+    let mut parts = vec![el(El::Span).text(&if s.rams > 0 {
+        format!(
+            "{} · coup dans {} échange{}",
+            beliers(s.rams),
+            round.blow_in(),
+            if round.blow_in() == 1 { "" } else { "s" }
+        )
+    } else {
+        "plus de bélier".to_string()
+    })];
+    if s.rams_broken > 0 {
+        parts.push(el(El::Span).st([St::TextError]).text(&format!(
+            " · {} brisé{}",
+            fmt(s.rams_broken),
+            if s.rams_broken == 1 { "" } else { "s" }
+        )));
+    }
+    el(El::Div)
+        .st([St::TextXs, St::TextMuted, St::TabularNums, St::MtXs])
+        .append(parts)
+}
+
+/// The defender's walls under its gauge: ten notches, the standing ones in
+/// the party's colour, the fallen ones in red; "murs 3/10 · ×1,3".
+fn walls_gauge(party: Party, walls: i32, start: i32) -> ElementBuilder {
+    let notches = (0..10).map(|i| {
+        el(El::Span).st([
+            St::Flex1,
+            St::H025rem,
+            St::RoundedFull,
+            if i < walls {
+                St::BgParty
+            } else if i < start {
+                St::BgError
+            } else {
+                St::BgMuted
+            },
+        ])
+    });
+    el(El::Div)
+        .st([St::MinW0, St::MtXs])
+        .style(Style::new().set("--kc", party_color(party)))
+        .append([
+            el(El::Div)
+                .st([St::TextXs, St::TextMuted, St::TabularNums, St::TextRight])
+                .text(&format!("murs {walls}/10 · ×{}", tenths(10 + walls))),
+            el(El::Div)
+                .st([St::DisplayFlex, St::GapXs, St::MtXs])
+                .append(notches),
+        ])
 }
 
 /// The realm under attack: each army's march along its share of it, with
@@ -965,6 +1037,29 @@ fn army_verdict(
         ])
         .style(Style::new().set("--kc", party_color(Some(a.attacker))))
         .append([who]);
+    if a.rams > 0 {
+        let home = a.rams_home();
+        let fate = if a.men == 0 {
+            format!("{} perdus avec l'armée", beliers(a.rams))
+        } else if home == a.rams {
+            format!(
+                "{} rentre{}",
+                beliers(home),
+                if home == 1 { "" } else { "nt" }
+            )
+        } else {
+            format!(
+                "{} rentre{} · {} brisé{}",
+                beliers(home),
+                if home == 1 { "" } else { "nt" },
+                fmt(a.rams_broken),
+                if a.rams_broken == 1 { "" } else { "s" }
+            )
+        };
+        card = card.append([el(El::Div)
+            .st([St::TextXs, St::TextMuted, St::TabularNums])
+            .text(&fate)]);
+    }
     if a.victory {
         let s = a.spoils();
         let mut loot: Vec<(String, &str)> = Vec::new();
@@ -1032,6 +1127,11 @@ fn defender_verdict(room: &Room, b: &Fought) -> ElementBuilder {
             let k = room.game.kingdom(t);
             if r.garrison_start > 0 {
                 parts.push(format!("{} d'armes tombés", hommes(r.garrison_fallen())));
+            }
+            if r.walls_fallen() > 0 {
+                parts.push(format!("murs {}/10 → {}/10", r.walls_start, r.walls_left));
+            } else if r.walls_start > 0 {
+                parts.push(format!("murs {}/10 intacts", r.walls_start));
             }
             parts.extend(people_fr(&r.spoils(), Side::Defender));
             parts.extend(lost_fr(&r.spoils(), k.currency()));

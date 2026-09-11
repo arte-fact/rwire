@@ -28,11 +28,23 @@ use crate::random::random;
 pub const MILITIA_EFFICIENCY: i32 = 50;
 
 /// What a garrison fights with: its soldiers' efficiency and a half, for
-/// the walls and the ground it knows. The militia and the nobles met on the
-/// march fight bare.
-pub fn garrison_strength(soldiers_efficiency: i32) -> i32 {
-    soldiers_efficiency * 3 / 2
+/// the ground it knows, and a tenth more for every tenth of fortification
+/// (`walls`) — twice the efficiency and a half behind full walls. The
+/// militia and the nobles met on the march fight bare.
+pub fn garrison_strength(soldiers_efficiency: i32, walls: i32) -> i32 {
+    soldiers_efficiency * 3 * (TENTHS + walls.clamp(0, TENTHS)) / 20
 }
+
+/// Fortifications are counted in tenths, up to this.
+pub const TENTHS: i32 = crate::investments::TENTHS;
+
+/// Every this many exchanges of blows before the garrison, each ram still
+/// standing knocks a tenth off the walls.
+pub const RAM_PACE: i32 = 4;
+
+/// Men of the army standing by each ram for it to be safe: below, every
+/// missing man is a chance in ten of losing the ram at its blow.
+pub const RAM_ESCORT: i32 = 10;
 
 /// The ground one man of arms can hold: an army's advance never exceeds this
 /// many arpents per man still standing. Annexing a realm of 10 000 arpents
@@ -259,6 +271,28 @@ fn lay_out(k: &Kingdom, n: usize) -> Vec<Line> {
     lines
 }
 
+/// An army as it sets out: who sends it, its men and the rams it brings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Host {
+    pub attacker: Kingdoms,
+    pub men: i32,
+    pub rams: i32,
+}
+
+impl Host {
+    pub fn new(attacker: Kingdoms, men: i32) -> Self {
+        Host {
+            attacker,
+            men,
+            rams: 0,
+        }
+    }
+
+    pub fn with_rams(self, rams: i32) -> Self {
+        Host { rams, ..self }
+    }
+}
+
 /// One army of the front, as it fought.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Army {
@@ -266,6 +300,10 @@ pub struct Army {
     pub sent: i32,
     /// Men still standing at the end.
     pub men: i32,
+    /// Rams brought along.
+    pub rams: i32,
+    /// Rams broken at their blows.
+    pub rams_broken: i32,
     /// Alive when the garrison fell: whatever happens next, the day is won.
     pub victory: bool,
     /// Arpents of its line crossed.
@@ -287,6 +325,20 @@ impl Army {
     pub fn lost(&self) -> i32 {
         self.sent - self.men
     }
+
+    /// Rams coming home: those not broken, if anyone is left to bring them.
+    pub fn rams_home(&self) -> i32 {
+        if self.men > 0 {
+            self.rams - self.rams_broken
+        } else {
+            0
+        }
+    }
+
+    /// Rams lost, broken or left with the dead.
+    pub fn rams_lost(&self) -> i32 {
+        self.rams - self.rams_home()
+    }
 }
 
 /// One army as it stands after an exchange of blows.
@@ -297,13 +349,29 @@ pub struct Stand {
     pub advance: i32,
     pub rallied: People,
     pub killed: People,
+    /// Rams still standing.
+    pub rams: i32,
+    /// Rams broken so far.
+    pub rams_broken: i32,
 }
 
-/// The state of the front after one exchange of blows.
+/// The state of the front after one exchange of blows (or one round of ram
+/// blows, when [`RAM_PACE`] exchanges are up).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Round {
     pub garrison: i32,
+    /// Tenths of fortification still standing.
+    pub walls: i32,
+    /// Exchanges of blows fought before the garrison so far.
+    pub exchange: i32,
     pub armies: Vec<Stand>,
+}
+
+impl Round {
+    /// Exchanges left before the rams strike again.
+    pub fn blow_in(&self) -> i32 {
+        RAM_PACE - self.exchange % RAM_PACE
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,6 +381,9 @@ pub struct FrontResult {
     pub rounds: Vec<Round>,
     pub garrison_start: i32,
     pub garrison_left: i32,
+    /// Tenths of fortification before and after the rams.
+    pub walls_start: i32,
+    pub walls_left: i32,
     /// Every line crossed to its end: the army (by index) that takes what
     /// remains of the realm.
     pub annexed_by: Option<usize>,
@@ -325,6 +396,11 @@ impl FrontResult {
 
     pub fn garrison_fallen(&self) -> i32 {
         self.garrison_start - self.garrison_left
+    }
+
+    /// Tenths of fortification the rams knocked down, for good.
+    pub fn walls_fallen(&self) -> i32 {
+        self.walls_start - self.walls_left
     }
 
     /// Everything taken or burned, all armies together.
@@ -383,13 +459,9 @@ impl Met {
 }
 
 /// Fight the front without touching the game; apply it with [`apply_front`].
-/// `armies` are `(attacker, men sent)`, fighting in that order within a round.
-pub fn simulate_front(
-    game: &EmpireGame,
-    defender: Kingdoms,
-    armies: &[(Kingdoms, i32)],
-) -> FrontResult {
-    fight(game, defender, armies, true)
+/// The hosts fight in the order given within a round.
+pub fn simulate_front(game: &EmpireGame, defender: Kingdoms, hosts: &[Host]) -> FrontResult {
+    fight(game, defender, hosts, true)
 }
 
 /// The outcome of one army sent alone against `defender`, fought once per
@@ -402,6 +474,10 @@ pub struct Forecast {
     pub victories: i32,
     /// How often the whole realm fell to the army (never, for the bands).
     pub annexations: i32,
+    /// Tenths of fortification left standing.
+    pub walls: (i32, i32),
+    /// Rams lost, broken or left with the dead.
+    pub rams_lost: (i32, i32),
 }
 
 /// Deciles of `v` (sorted in place): the first and the ninth.
@@ -419,18 +495,21 @@ pub(crate) fn deciles(v: &mut [i32]) -> (i32, i32) {
 pub fn forecast_front<'a>(
     games: impl IntoIterator<Item = &'a EmpireGame>,
     defender: Kingdoms,
-    attacker: Kingdoms,
-    sent: i32,
+    host: Host,
 ) -> Forecast {
     let mut arpents = Vec::new();
     let mut lost = Vec::new();
+    let mut walls = Vec::new();
+    let mut rams_lost = Vec::new();
     let mut victories = 0;
     let mut annexations = 0;
     for game in games {
-        let r = fight(game, defender, &[(attacker, sent)], false);
+        let r = fight(game, defender, &[host], false);
         let a = &r.armies[0];
         arpents.push(a.advance);
         lost.push(a.lost());
+        walls.push(r.walls_left);
+        rams_lost.push(a.rams_lost());
         victories += i32::from(a.victory);
         annexations += i32::from(r.annexed_by.is_some());
     }
@@ -439,39 +518,45 @@ pub fn forecast_front<'a>(
         lost: deciles(&mut lost),
         victories,
         annexations,
+        walls: deciles(&mut walls),
+        rams_lost: deciles(&mut rams_lost),
     }
 }
 
 /// The fight itself; `record` keeps every round for the replay.
-fn fight(
-    game: &EmpireGame,
-    defender: Kingdoms,
-    armies: &[(Kingdoms, i32)],
-    record: bool,
-) -> FrontResult {
+fn fight(game: &EmpireGame, defender: Kingdoms, hosts: &[Host], record: bool) -> FrontResult {
     let d = game.kingdom(defender);
-    let n = armies.len();
+    let n = hosts.len();
     let lines = lay_out(d, n);
-    let strength: Vec<i32> = armies
+    let strength: Vec<i32> = hosts
         .iter()
-        .map(|&(a, _)| game.kingdom(a).soldiers_efficiency)
+        .map(|h| game.kingdom(h.attacker).soldiers_efficiency)
         .collect();
     // Original: I7=INT(I1/15)+1 — the men that fall to one blow.
-    let units: Vec<i32> = armies.iter().map(|&(_, sent)| sent / 15 + 1).collect();
-    let mut stands: Vec<Stand> = armies
+    let units: Vec<i32> = hosts.iter().map(|h| h.men / 15 + 1).collect();
+    let mut stands: Vec<Stand> = hosts
         .iter()
-        .map(|&(_, sent)| Stand {
-            men: sent,
+        .map(|h| Stand {
+            men: h.men,
+            rams: h.rams.max(0),
             ..Stand::default()
         })
         .collect();
     let mut garrison = d.soldiers.max(0);
-    let held = garrison_strength(d.soldiers_efficiency);
+    let walls_start = d.fortifications.clamp(0, TENTHS);
+    let mut walls = walls_start;
+    let mut exchange = 0;
     let mut victory: Vec<bool> = vec![garrison == 0; n];
-    let mut rounds = vec![Round {
-        garrison,
-        armies: stands.clone(),
-    }];
+    let mut rounds = Vec::new();
+    let mut push = |garrison: i32, walls: i32, exchange: i32, stands: &[Stand]| {
+        rounds.push(Round {
+            garrison,
+            walls,
+            exchange,
+            armies: stands.to_vec(),
+        });
+    };
+    push(garrison, walls, exchange, &stands);
 
     // The garrison: every army hits it until it falls or none stands.
     while garrison > 0 && stands.iter().any(|s| s.men > 0) {
@@ -481,8 +566,8 @@ fn fight(
             }
             // Original: IF INT(RND*I4+1)<INT(RND*I3+1) THEN 148 (defender wins
             // the round) — here the tie goes to the defender too, and the
-            // garrison fights at a half more.
-            if random(1, strength[i]) > random(1, held) {
+            // garrison fights at a half more, and more behind its walls.
+            if random(1, strength[i]) > random(1, garrison_strength(d.soldiers_efficiency, walls)) {
                 garrison = max(0, garrison - units[i]);
                 if garrison == 0 {
                     for (v, s) in victory.iter_mut().zip(&stands) {
@@ -493,10 +578,29 @@ fn fight(
                 stands[i].men = max(0, stands[i].men - units[i]);
             }
             if record {
-                rounds.push(Round {
-                    garrison,
-                    armies: stands.clone(),
-                });
+                push(garrison, walls, exchange, &stands);
+            }
+        }
+        exchange += 1;
+        // The rams: every RAM_PACE exchanges each one still standing knocks
+        // a tenth off the walls, then takes its risk — a chance in ten per
+        // man missing from its escort.
+        if garrison > 0 && exchange % RAM_PACE == 0 && stands.iter().any(|s| s.rams > 0) {
+            for s in stands.iter_mut().filter(|s| s.rams > 0) {
+                let escort = s.men / s.rams;
+                let missing = (RAM_ESCORT - escort).max(0);
+                let mut broken = 0;
+                for _ in 0..s.rams {
+                    walls = max(0, walls - 1);
+                    if random(1, RAM_ESCORT) <= missing {
+                        broken += 1;
+                    }
+                }
+                s.rams -= broken;
+                s.rams_broken += broken;
+            }
+            if record {
+                push(garrison, walls, exchange, &stands);
             }
         }
     }
@@ -540,10 +644,7 @@ fn fight(
             }
             stands[i].advance = reached;
             if record {
-                rounds.push(Round {
-                    garrison,
-                    armies: stands.clone(),
-                });
+                push(garrison, walls, exchange, &stands);
             }
         }
     }
@@ -560,15 +661,17 @@ fn fight(
                 .max_by_key(|&i| (stands[i].advance, stands[i].men))
         })
         .flatten();
-    let armies = armies
+    let armies = hosts
         .iter()
         .zip(lines)
         .zip(&stands)
         .zip(victory)
-        .map(|(((&(attacker, sent), line), s), victory)| Army {
-            attacker,
-            sent,
+        .map(|(((h, line), s), victory)| Army {
+            attacker: h.attacker,
+            sent: h.men,
             men: s.men,
+            rams: h.rams.max(0),
+            rams_broken: s.rams_broken,
             victory,
             advance: s.advance,
             rallied: s.rallied,
@@ -581,13 +684,16 @@ fn fight(
         rounds,
         garrison_start: d.soldiers.max(0),
         garrison_left: garrison,
+        walls_start,
+        walls_left: walls,
         annexed_by,
     }
 }
 
 /// Apply a fought front: the defender loses what lies on the ground crossed
-/// (its fallen, and the goods taken or lost), every living attacker brings home its men and spoils, and
-/// a realm crossed to its capital falls to the army that took the most.
+/// (its fallen, the walls knocked down, and the goods taken or lost), every
+/// living attacker brings home its men, rams and spoils, and a realm crossed
+/// to its capital falls to the army that took the most.
 pub fn apply_front(game: &mut EmpireGame, defender: Kingdoms, r: &FrontResult) {
     let total = r.spoils();
     let d = game.kingdom_mut(defender);
@@ -595,6 +701,7 @@ pub fn apply_front(game: &mut EmpireGame, defender: Kingdoms, r: &FrontResult) {
     // stood: a front applied earlier may have brought the defender's own
     // expedition home meanwhile.
     d.soldiers = (d.soldiers - r.garrison_fallen()).max(0);
+    d.fortifications = (d.fortifications - r.walls_fallen()).max(0);
     d.peasants = (d.peasants - total.rallied.peasants - total.killed.peasants).max(0);
     d.merchants = (d.merchants - total.rallied.merchants - total.killed.merchants).max(0);
     d.nobles = (d.nobles - total.rallied.nobles - total.killed.nobles).max(0);
@@ -614,6 +721,7 @@ pub fn apply_front(game: &mut EmpireGame, defender: Kingdoms, r: &FrontResult) {
         }
         let s = a.spoils();
         k.soldiers += a.men;
+        k.rams += a.rams_home();
         k.surface += s.arpents;
         k.peasants += s.rallied.peasants;
         k.merchants += s.rallied.merchants;
@@ -643,6 +751,10 @@ pub fn apply_front(game: &mut EmpireGame, defender: Kingdoms, r: &FrontResult) {
         d.treasury = 0;
         d.soldiers = 0;
         d.nobles = 0;
+        d.fortifications = 0;
+        d.hospices = 0;
+        d.rams = 0;
+        d.scouts = 0;
         for kind in BuildingKind::ALL {
             *kind.count_mut(d) = 0;
         }
@@ -766,7 +878,7 @@ mod tests {
         game.kingdom_mut(Kingdoms::France).soldiers = 3;
         game.kingdom_mut(Kingdoms::Spain).soldiers = 5000;
         for _ in 0..20 {
-            let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 3)]);
+            let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 3)]);
             assert!(!r.garrison_fell());
             assert!(!r.armies[0].victory);
             assert_eq!(r.armies[0].men, 0);
@@ -783,7 +895,7 @@ mod tests {
         let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 300;
         game.kingdom_mut(Kingdoms::Spain).soldiers = 2;
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 300)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 300)]);
         assert!(r.garrison_fell());
         let a = &r.armies[0];
         assert!(a.victory);
@@ -819,7 +931,7 @@ mod tests {
         let s = game.kingdom_mut(Kingdoms::Spain);
         s.soldiers = 0;
         s.peasants = 30_000;
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 5000)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 5000)]);
         let a = &r.armies[0];
         // Everyone met either rallied, was killed, or killed the man he fought.
         let met = a.rallied.peasants + a.killed.peasants + a.lost();
@@ -838,7 +950,9 @@ mod tests {
 
     #[test]
     fn the_garrison_fights_at_a_half_more() {
-        assert_eq!(garrison_strength(100), 150);
+        assert_eq!(garrison_strength(100, 0), 150);
+        assert_eq!(garrison_strength(100, 10), 300);
+        assert_eq!(garrison_strength(100, 3), 195);
         let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 1000;
         game.kingdom_mut(Kingdoms::France).soldiers_efficiency = 100;
@@ -847,13 +961,92 @@ mod tests {
         s.soldiers_efficiency = 100;
         // Man for man at the same efficiency, the walls decide: a duel at
         // 100 against 150 is lost two times in three.
+        let held = (0..200)
+            .filter(|_| {
+                simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 1000)])
+                    .garrison_left
+                    > 0
+            })
+            .count();
+        assert!(held >= 180, "held {held}");
+    }
+
+    #[test]
+    fn walls_hold_and_rams_bring_them_down() {
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::France).soldiers = 500;
+        let s = game.kingdom_mut(Kingdoms::Spain);
+        s.soldiers = 500;
+        s.fortifications = 10;
+        // Full walls: a duel at 150 against 300 is lost three times in four.
         let held = (0..20)
             .filter(|_| {
-                simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 1000)]).garrison_left
+                simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 500)])
+                    .garrison_left
                     > 0
             })
             .count();
         assert!(held >= 18, "held {held}");
+        // An army at 900 wins five duels in six: the garrison falls in some
+        // twenty exchanges, the escort never short — ten rams raze the
+        // walls at their first blow and none is broken.
+        game.kingdom_mut(Kingdoms::France).soldiers_efficiency = 900;
+        let r = simulate_front(
+            &game,
+            Kingdoms::Spain,
+            &[Host::new(Kingdoms::France, 500).with_rams(10)],
+        );
+        assert_eq!(r.walls_start, 10);
+        let a = &r.armies[0];
+        assert_eq!((a.rams, a.rams_broken), (10, 0));
+        // The first blows land after RAM_PACE exchanges, all ten at once.
+        let first = r.rounds.iter().position(|x| x.walls < 10).unwrap();
+        assert_eq!(r.rounds[first].exchange, RAM_PACE);
+        assert_eq!(r.rounds[first].walls, 0);
+        assert_eq!(r.rounds[first - 1].blow_in(), 1);
+        assert_eq!(r.rounds[0].blow_in(), RAM_PACE);
+        assert!(r.rounds.iter().all(|x| x.armies[0].rams == 10));
+        assert!(r.rounds.windows(2).all(|w| w[0].walls >= w[1].walls));
+        assert_eq!(r.walls_left, 0);
+        // Applied, the walls stay down and the rams come home.
+        let mut g = game.clone();
+        g.kingdom_mut(Kingdoms::France).soldiers = 0;
+        apply_front(&mut g, Kingdoms::Spain, &r);
+        assert_eq!(g.kingdom(Kingdoms::Spain).fortifications, 0);
+        assert_eq!(g.kingdom(Kingdoms::France).rams, a.rams_home());
+        assert_eq!(a.rams_home(), if a.men > 0 { 10 } else { 0 });
+    }
+
+    #[test]
+    fn a_ram_without_escort_is_lost_at_its_blow() {
+        let mut game = EmpireGame::default();
+        game.kingdom_mut(Kingdoms::France).soldiers = 3;
+        let s = game.kingdom_mut(Kingdoms::Spain);
+        s.soldiers = 5000;
+        s.fortifications = 0;
+        let mut broken = 0;
+        let mut blows = 0;
+        for _ in 0..50 {
+            let r = simulate_front(
+                &game,
+                Kingdoms::Spain,
+                &[Host::new(Kingdoms::France, 3).with_rams(3)],
+            );
+            // No walls to break, the risk is taken all the same; wiped out,
+            // the army leaves every ram behind.
+            assert_eq!(r.walls_fallen(), 0);
+            assert_eq!(r.armies[0].rams_home(), 0);
+            assert_eq!(r.armies[0].rams_lost(), 3);
+            if r.rounds.iter().any(|x| x.exchange >= RAM_PACE) {
+                blows += 1;
+                broken += r.armies[0].rams_broken;
+            }
+        }
+        // Three men for three rams: one each, nine missing — nine chances in
+        // ten of breaking at the first blow.
+        if blows > 0 {
+            assert!(broken * 10 >= blows * 3 * 7, "broken {broken} in {blows}");
+        }
     }
 
     #[test]
@@ -866,7 +1059,7 @@ mod tests {
         s.soldiers = 0;
         s.soldiers_efficiency = 300;
         s.peasants = 30_000;
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 5000)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 5000)]);
         let a = &r.armies[0];
         // Duels at 100 against 50: about three in four won, not one in six as
         // against the realm's own soldiers.
@@ -879,7 +1072,7 @@ mod tests {
         let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 10;
         game.kingdom_mut(Kingdoms::Spain).soldiers = 0;
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 10)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 10)]);
         assert!(r.armies[0].victory);
         assert_eq!(r.garrison_start, 0);
         assert!(r.armies[0].advance > 0);
@@ -892,7 +1085,7 @@ mod tests {
         game.kingdom_mut(Kingdoms::Spain).soldiers = 0;
         let mut total = 0;
         for _ in 0..50 {
-            let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 10)]);
+            let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 10)]);
             assert!(r.annexed_by.is_none());
             total += r.armies[0].advance;
         }
@@ -908,7 +1101,7 @@ mod tests {
         game.kingdom_mut(Kingdoms::France).soldiers = 100;
         game.kingdom_mut(Kingdoms::Spain).soldiers = 0;
         for _ in 0..20 {
-            let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 100)]);
+            let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 100)]);
             let a = &r.armies[0];
             assert!(a.advance <= 100 * ARPENTS_PER_MAN);
             // The men who could hold no more ground come home.
@@ -918,7 +1111,7 @@ mod tests {
         }
         // Enough men to hold the realm take it whole.
         game.kingdom_mut(Kingdoms::France).soldiers = 2000;
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 2000)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 2000)]);
         assert_eq!(r.annexed_by, Some(0));
     }
 
@@ -933,7 +1126,10 @@ mod tests {
         let r = simulate_front(
             &game,
             Kingdoms::Spain,
-            &[(Kingdoms::France, 200), (Kingdoms::Germany, 100)],
+            &[
+                Host::new(Kingdoms::France, 200),
+                Host::new(Kingdoms::Germany, 100),
+            ],
         );
         assert_eq!(r.armies.len(), 2);
         assert_eq!(r.armies[0].line.arpents + r.armies[1].line.arpents, 10_000);
@@ -989,7 +1185,7 @@ mod tests {
         s.soldiers = 1;
         s.peasants = 5;
         rich(s);
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 5000)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 5000)]);
         assert_eq!(r.annexed_by, Some(0));
         game.kingdom_mut(Kingdoms::France).soldiers = 0;
         apply_front(&mut game, Kingdoms::Spain, &r);
@@ -1015,7 +1211,7 @@ mod tests {
         let mut game = EmpireGame::default();
         game.kingdom_mut(Kingdoms::France).soldiers = 300;
         game.kingdom_mut(Kingdoms::Spain).soldiers = 2;
-        let r = simulate_front(&game, Kingdoms::Spain, &[(Kingdoms::France, 300)]);
+        let r = simulate_front(&game, Kingdoms::Spain, &[Host::new(Kingdoms::France, 300)]);
         game.kingdom_mut(Kingdoms::France)
             .fall(Fate::Annexed(Kingdoms::Germany));
         let before = game.kingdom(Kingdoms::France).clone();

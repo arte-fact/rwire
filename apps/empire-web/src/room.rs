@@ -11,11 +11,11 @@ use empire_lib::campaign::{
 use empire_lib::demography::{affordable_ration, apply_feed, Council, YearDemography};
 use empire_lib::economy::{apply_economy, apply_taxes, economy_report, Taxes, YearEconomy};
 use empire_lib::events::{check_random_events, PlagueEvent, RulerDeathCause};
-use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Round, Spoils};
+use empire_lib::front::{Army, BuildingKind, Forecast, FrontResult, Host, Round, Spoils};
 use empire_lib::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
 use empire_lib::intel::heard;
 pub use empire_lib::intel::{
-    Dossier, Ledger, Mission, Report, Rumour, Scouting, Writing, AGENT_PRICE, SCOUT_PRICE,
+    Dossier, Ledger, Report, Rumour, Scouting, Writing, AGENT_PRICE, SCOUT_PRICE,
 };
 use empire_lib::investments::{apply_investment, InvestmentType};
 use empire_lib::kingdom::RATION_SCALE;
@@ -334,6 +334,8 @@ impl Draft {
 pub struct WarForecast {
     pub target: Option<Kingdoms>,
     pub max: i32,
+    /// The rams every row marches with.
+    pub rams: i32,
     pub sent: Vec<i32>,
     pub rows: Vec<Forecast>,
     /// How wide of the truth the report it rests on may be, in per cent.
@@ -382,9 +384,6 @@ pub struct Seat {
     /// re-centre on them; `None` = the sheet's defaults.
     pub deal_amount: Option<i32>,
     pub deal_price: Option<i32>,
-    /// The spies sent this year, one realm each; they report as the next
-    /// year opens.
-    pub missions: Vec<Mission>,
     /// What this seat knows of every realm, by kingdom index.
     pub dossiers: [Dossier; 6],
     /// The target whose sheet is open (kingdom number, 0 = barbarians).
@@ -392,8 +391,12 @@ pub struct Seat {
     /// The open sheet is the war form (a kingdom's sheet opens on what is
     /// known of it first).
     pub attack: bool,
-    /// What the open war sheet foretells, computed as it opens.
+    /// What the open war sheet foretells, computed as it opens and again
+    /// when its rams slider is released.
     pub forecast: Option<WarForecast>,
+    /// The war sheet's rams slider as last released; `None` = the army
+    /// ordered there, or none.
+    pub rams_draft: Option<i32>,
     /// The title held at the last year's end, so a change can be announced;
     /// `None` until the first year opens.
     pub title: Option<PlayerTitle>,
@@ -447,6 +450,8 @@ pub enum News {
         /// The realm had no army: the people took up arms from the start.
         levy: bool,
         garrison_fallen: i32,
+        /// Tenths of fortification the rams knocked down.
+        walls_fallen: i32,
         spoils: Spoils,
     },
     Plague(PlagueEvent),
@@ -456,12 +461,12 @@ pub enum News {
     },
     /// Something that changed the map or the hierarchy elsewhere.
     Elsewhere(Elsewhere),
-    /// This seat's éclaireur sent to `at` last year.
+    /// This seat's éclaireur sent to `at` this year, back or taken.
     Scout {
         at: Kingdoms,
         outcome: Scouting,
     },
-    /// This seat's agent in `at`, as the year ends.
+    /// This seat's agent sent to `at` this year, read or unmasked.
     Agent {
         at: Kingdoms,
         outcome: Writing,
@@ -727,22 +732,31 @@ impl Room {
             .min(self.purse(id, target))
     }
 
-    /// Foretell what `id` would bring back from `target`, for every size of
-    /// army it can send. The bands are foretold on sight; a realm only as its
-    /// report tells it, wider of the truth as the report ages — and not at
-    /// all without one, or on one too old.
-    pub fn war_forecast(&self, id: Kingdoms, target: Option<Kingdoms>) -> Option<WarForecast> {
+    /// Foretell what `id` would bring back from `target` with `rams`, for
+    /// every size of army it can send. The bands are foretold on sight; a
+    /// realm only as its dossier tells it, wider of the truth as the report
+    /// ages — and not at all without one, or on one too old.
+    pub fn war_forecast(
+        &self,
+        id: Kingdoms,
+        target: Option<Kingdoms>,
+        rams: i32,
+    ) -> Option<WarForecast> {
         let mut games = Vec::new();
         let mut spread = 0;
         if let Some(t) = target {
-            let report = self.dossier(id, t).report?;
-            spread = report.spread(self.game.year)?;
+            let dossier = self.dossier(id, t);
+            spread = dossier.report?.spread(self.game.year)?;
             let mut rng = rand::thread_rng();
-            games.extend((0..FORECAST_DRAWS).map(|_| {
-                let mut g = self.game.clone();
-                *g.kingdom_mut(t) = report.kingdom(t, rng.gen_range(-spread..=spread));
-                g
-            }));
+            games.extend(
+                (0..FORECAST_DRAWS)
+                    .map(|_| {
+                        let mut g = self.game.clone();
+                        *g.kingdom_mut(t) = dossier.kingdom(t, rng.gen_range(-spread..=spread))?;
+                        Some(g)
+                    })
+                    .collect::<Option<Vec<_>>>()?,
+            );
         }
         let draws = || {
             if target.is_some() {
@@ -762,13 +776,15 @@ impl Room {
                 }
             })
             .collect();
+        let rams = if target.is_some() { rams } else { 0 };
         let rows = sent
             .iter()
-            .map(|&n| forecast(draws(), target, id, n))
+            .map(|&n| forecast(draws(), target, Host::new(id, n).with_rams(rams)))
             .collect();
         Some(WarForecast {
             target,
             max,
+            rams,
             sent,
             rows,
             spread,
@@ -779,122 +795,102 @@ impl Room {
         &self.seat(id).dossiers[on.index()]
     }
 
-    /// Whether `id` has an éclaireur leaving for `on` this year.
-    pub fn scout_ordered(&self, id: Kingdoms, on: Kingdoms) -> bool {
-        self.seat(id).missions.contains(&Mission::Scout(on))
+    /// Rams `id` may take on `target`: the stock, plus those already ordered
+    /// there (settling the target again replaces them) — none on the bands.
+    pub fn rams_available(&self, id: Kingdoms, target: Option<Kingdoms>) -> i32 {
+        if target.is_none() {
+            return 0;
+        }
+        self.rams_home(id) + self.planned_on(id, target).map_or(0, |(_, e)| e.rams)
     }
 
-    /// Whether `id` is buying an agent in `on` this year.
-    pub fn agent_ordered(&self, id: Kingdoms, on: Kingdoms) -> bool {
-        self.seat(id).missions.contains(&Mission::Agent(on))
+    /// The rams the war sheet on `target` stands at: the slider as last
+    /// released, else the army ordered there, else none.
+    pub fn rams_planned(&self, id: Kingdoms, target: Option<Kingdoms>) -> i32 {
+        self.seat(id)
+            .rams_draft
+            .unwrap_or_else(|| self.planned_on(id, target).map_or(0, |(_, e)| e.rams))
+            .clamp(0, self.rams_available(id, target))
     }
 
-    /// Send an éclaireur to `on`, or call back the one ordered there (the
-    /// price comes back with him).
-    fn toggle_scout(&mut self, id: Kingdoms, on: Kingdoms) -> Result<(), String> {
+    /// Rams of `id` not yet ordered on an expedition.
+    pub fn rams_home(&self, id: Kingdoms) -> i32 {
+        let ordered: i32 = self.seat(id).planned.iter().map(|e| e.rams).sum();
+        self.game.kingdom(id).rams - ordered
+    }
+
+    /// Why `id` cannot send anyone to `on` right now, if so.
+    fn nobody_to_send(&self, id: Kingdoms, on: Kingdoms) -> Result<(), String> {
         if on == id || self.game.kingdom(on).is_dead {
-            return Err("Il n'y a rien à éclairer là.".to_string());
+            return Err("Il n'y a rien à apprendre là.".to_string());
         }
-        self.toggle_mission(id, Mission::Scout(on), "Un éclaireur")
-    }
-
-    /// Buy an agent in `on`, or give up the purchase (the price comes back);
-    /// once he is in place, dismiss him (the year's pay is spent).
-    fn toggle_agent(&mut self, id: Kingdoms, on: Kingdoms) -> Result<(), String> {
-        if on == id || self.game.kingdom(on).is_dead {
-            return Err("Il n'y a personne à acheter là.".to_string());
-        }
-        if self.dossier(id, on).agent {
-            self.seat_mut(id).dossiers[on.index()].agent = false;
-            return Ok(());
-        }
-        let fresh = self
-            .dossier(id, on)
-            .report
-            .is_some_and(|r| r.year == self.game.year);
-        if !fresh && !self.agent_ordered(id, on) {
-            return Err("Un agent ne s'achète que sur un rapport de l'année.".to_string());
-        }
-        self.toggle_mission(id, Mission::Agent(on), "Un agent")
-    }
-
-    /// Order a mission, paid up front, or cancel it and take the price back.
-    fn toggle_mission(&mut self, id: Kingdoms, m: Mission, who: &str) -> Result<(), String> {
-        if self.seat(id).missions.contains(&m) {
-            self.seat_mut(id).missions.retain(|&o| o != m);
-            self.game.kingdom_mut(id).treasury += m.price();
-            return Ok(());
-        }
-        let k = self.game.kingdom_mut(id);
-        if k.treasury < m.price() {
-            return Err(format!(
-                "{who} coûte {} francs ; le trésor n'en a que {}.",
-                m.price(),
-                k.treasury
-            ));
-        }
-        k.treasury -= m.price();
-        self.seat_mut(id).missions.push(m);
         Ok(())
     }
 
-    /// The spies report as the Extérieur opens. Each éclaireur reads the realm as
-    /// it stands, or is taken (one in six); the agents bought this year take
-    /// their place, then every agent is unmasked (one in eight) or, paid for
-    /// the year, writes his letter — a taken spy is told to that seigneur and
-    /// to everyone reading the journal.
-    fn resolve_missions(&mut self) {
-        for id in KINGDOMS {
-            let missions = std::mem::take(&mut self.seat_mut(id).missions);
-            if self.game.kingdom(id).is_dead {
-                continue;
-            }
-            let mut hired = Vec::new();
-            for m in missions {
-                match m {
-                    Mission::Scout(on) => self.resolve_scout(id, on),
-                    Mission::Agent(on) => {
-                        self.seat_mut(id).dossiers[on.index()].agent = true;
-                        hired.push(on);
-                    }
-                }
-            }
-            for on in KINGDOMS {
-                if self.dossier(id, on).agent {
-                    self.resolve_agent(id, on, !hired.contains(&on));
-                }
-            }
-        }
-    }
-
-    fn resolve_scout(&mut self, id: Kingdoms, on: Kingdoms) {
+    /// An éclaireur rides to `on` and answers at once: bought if none waits
+    /// in reserve, the mission paid, then back with his report or taken.
+    fn send_scout(&mut self, id: Kingdoms, on: Kingdoms) -> Result<(), String> {
+        self.nobody_to_send(id, on)?;
         let year = self.game.year;
+        if !self.dossier(id, on).can_scout(year) {
+            return Err(format!(
+                "Un éclaireur est déjà allé en {} cette année.",
+                on.name()
+            ));
+        }
+        if !arena::send_scout(self.game.kingdom_mut(id), false) {
+            let k = self.game.kingdom(id);
+            let man = if k.scouts > 0 {
+                0
+            } else {
+                InvestmentType::Scouts.cost()
+            };
+            return Err(format!(
+                "La mission coûte {SCOUT_PRICE} francs{} ; le trésor n'en a que {}.",
+                if man > 0 {
+                    format!(" et l'éclaireur {man}")
+                } else {
+                    String::new()
+                },
+                k.treasury
+            ));
+        }
         let outcome =
             self.seats[id.index()].dossiers[on.index()].scout(self.game.kingdom(on), year);
         if outcome == Scouting::Caught {
             self.spy_taken(id, on, false);
         }
         self.report(id, News::Scout { at: on, outcome });
+        Ok(())
     }
 
-    /// An agent's year: gone with the realm, unmasked, unpaid, or writing.
-    /// `standing` agents pay their year now; a new one paid on purchase.
-    fn resolve_agent(&mut self, id: Kingdoms, on: Kingdoms, standing: bool) {
+    /// An agent goes to `on` and answers at once: the errand paid, then the
+    /// registers read or the man unmasked.
+    fn send_agent(&mut self, id: Kingdoms, on: Kingdoms) -> Result<(), String> {
+        self.nobody_to_send(id, on)?;
         let year = self.game.year;
+        if !self.dossier(id, on).can_read(year) {
+            return Err(format!(
+                "Un agent a déjà été envoyé en {} cette année.",
+                on.name()
+            ));
+        }
+        let k = self.game.kingdom_mut(id);
+        if k.treasury < AGENT_PRICE {
+            return Err(format!(
+                "Un agent coûte {AGENT_PRICE} francs ; le trésor n'en a que {}.",
+                k.treasury
+            ));
+        }
+        k.treasury -= AGENT_PRICE;
         let bought = self.bought[on.index()];
-        let mut treasury = self.game.kingdom(id).treasury;
-        let outcome = self.seats[id.index()].dossiers[on.index()].agent_year(
-            self.game.kingdom(on),
-            year,
-            bought,
-            &mut treasury,
-            standing,
-        );
-        self.game.kingdom_mut(id).treasury = treasury;
-        if outcome == Writing::Unmasked {
+        let outcome =
+            self.seats[id.index()].dossiers[on.index()].agent(self.game.kingdom(on), year, bought);
+        if outcome == Writing::Caught {
             self.spy_taken(id, on, true);
         }
         self.report(id, News::Agent { at: on, outcome });
+        Ok(())
     }
 
     /// A spy of `id` taken in `on` (the dossier already notes it): `on`
@@ -1053,6 +1049,7 @@ impl Room {
                 seat.target = None;
                 seat.attack = false;
                 seat.forecast = None;
+                seat.rams_draft = None;
                 seat.planned.clear();
             }
         }
@@ -1072,10 +1069,6 @@ impl Room {
             return;
         }
         self.phase = Phase::Exterieur;
-        // The éclaireurs and letters come in as the Extérieur opens: every
-        // court has held its intendance, the figures are those the campaign
-        // will be fought with.
-        self.resolve_missions();
         for id in KINGDOMS {
             if self.game.kingdom(id).is_dead {
                 continue;
@@ -1091,6 +1084,7 @@ impl Room {
             seat.target = None;
             seat.attack = false;
             seat.forecast = None;
+            seat.rams_draft = None;
             seat.planned.clear();
         }
         self.try_march();
@@ -1496,37 +1490,28 @@ impl Room {
         seat.memory = memory;
     }
 
-    /// The computer's war orders as the Extérieur opens, read on the day's
-    /// reports; the spies it sends are ordered like a seigneur's (paid,
-    /// taken, journaled and told alike).
+    /// The computer's war orders as the Extérieur opens, in two readings
+    /// like a seigneur's turn: the spies it sends answer at once (paid,
+    /// taken, journaled and told alike), then its expeditions are ordered
+    /// on what they saw.
     fn run_computer_war(&mut self, id: Kingdoms) {
+        let memory = self.remember(id);
+        let missions =
+            self.brain
+                .missions(&self.game, id, &memory, brain::Stage::War, Letters::None);
+        if let Some(on) = missions.scout {
+            let _ = self.send_scout(id, on);
+        }
+        for on in missions.agents {
+            let _ = self.send_agent(id, on);
+        }
         let mut memory = self.remember(id);
-        let orders = self.brain.orders(
-            &self.game,
-            id,
-            &mut memory,
-            brain::Stage::War,
-            Letters::None,
-        );
-        self.seat_mut(id).memory = memory;
-        self.seat_mut(id).planned = orders
-            .expeditions
-            .into_iter()
-            .map(|(target, soldiers)| Expedition {
-                attacker: id,
-                target,
-                soldiers,
-            })
-            .collect();
-        if let Some(on) = orders.scout {
-            let _ = self.toggle_scout(id, on);
-        }
-        for on in brain::rivals(id) {
-            let wanted = orders.agents.contains(&on);
-            if wanted != self.dossier(id, on).agent {
-                let _ = self.toggle_agent(id, on);
-            }
-        }
+        let planned = self
+            .brain
+            .expeditions(&self.game, id, &mut memory, brain::Stage::War);
+        let seat = self.seat_mut(id);
+        seat.memory = memory;
+        seat.planned = planned;
     }
 
     /// Add an expedition to a seigneur's orders.
@@ -1557,7 +1542,12 @@ impl Room {
             _ => {}
         }
         let soldiers = e.soldiers.clamp(1, self.available(id, e.target));
-        self.seat_mut(id).planned.push(Expedition { soldiers, ..e });
+        let rams = e.rams.clamp(0, self.rams_available(id, e.target));
+        self.seat_mut(id).planned.push(Expedition {
+            soldiers,
+            rams,
+            ..e
+        });
         Ok(())
     }
 
@@ -1662,9 +1652,22 @@ impl Room {
                         repelled: !r.garrison_fell(),
                         levy: fought.levy(),
                         garrison_fallen: r.garrison_fallen(),
+                        walls_fallen: r.walls_fallen(),
                         spoils: r.spoils(),
                     },
                 ),
+            }
+            if r.walls_fallen() > 0 {
+                self.journal(
+                    audience.iter().copied(),
+                    format!(
+                        "Les béliers abattent {} des murs de la {} ({}/10 → {}/10).",
+                        dixiemes(r.walls_fallen()),
+                        t.name(),
+                        r.walls_start,
+                        r.walls_left
+                    ),
+                );
             }
         } else if let Some(by) = annexed {
             let by = self.game.kingdom(by).titled_name();
@@ -1706,8 +1709,39 @@ impl Room {
     }
 }
 
+/// "1 dixième" / "3 dixièmes".
+pub fn dixiemes(n: i32) -> String {
+    format!("{n} dixième{}", if n == 1 { "" } else { "s" })
+}
+
 /// One army's line of the journal.
 fn verdict(attacker: &str, cur: &str, a: &Army) -> String {
+    let mut m = verdict_arms(attacker, cur, a);
+    if a.rams > 0 {
+        let home = a.rams_home();
+        m.push_str(&if a.men == 0 {
+            format!(" Ses {} béliers sont perdus avec elle.", a.rams)
+        } else if a.rams_broken == 0 {
+            format!(
+                " {} bélier{} rentre{}.",
+                if home == 1 { "Son" } else { "Ses" },
+                if home == 1 { "" } else { "s" },
+                if home == 1 { "" } else { "nt" }
+            )
+        } else {
+            format!(
+                " Béliers : {home} rentre{}, {} brisé{}.",
+                if home == 1 { "" } else { "nt" },
+                a.rams_broken,
+                if a.rams_broken == 1 { "" } else { "s" }
+            )
+        });
+    }
+    m
+}
+
+/// The arms of one army's line: the ground and the loot.
+fn verdict_arms(attacker: &str, cur: &str, a: &Army) -> String {
     if !a.victory {
         // The expedition is wiped out: whatever it overran is lost with it.
         return format!("{attacker} perd toute son expédition sans garder un arpent.");
@@ -1877,6 +1911,10 @@ pub fn invest_fr(kind: InvestmentType) -> &'static str {
         InvestmentType::Shipyards => "chantiers navals",
         InvestmentType::Soldiers => "hommes d'armes",
         InvestmentType::Palaces => "dixièmes de palais",
+        InvestmentType::Fortifications => "dixièmes de fortifications",
+        InvestmentType::Hospices => "dixièmes d'hospice",
+        InvestmentType::Rams => "béliers",
+        InvestmentType::Scouts => "éclaireurs",
     }
 }
 
@@ -2292,11 +2330,12 @@ pub fn pick_target(rooms: &mut Rooms, ctx: &EventContext) {
     };
     let picked = extra.first().copied().filter(|&n| n <= 6);
     let attack = picked == Some(0);
-    let forecast = attack.then(|| room.war_forecast(id, None)).flatten();
+    let forecast = attack.then(|| room.war_forecast(id, None, 0)).flatten();
     let seat = room.seat_mut(id);
     seat.target = picked;
     seat.attack = attack;
     seat.forecast = forecast;
+    seat.rams_draft = None;
     seat.notice = None;
 }
 
@@ -2312,14 +2351,39 @@ pub fn open_attack(rooms: &mut Rooms, ctx: &EventContext) {
     let Some(target) = sheet_kingdom(room, id) else {
         return;
     };
-    let forecast = room.war_forecast(id, Some(target));
+    let rams = room.rams_planned(id, Some(target));
+    let forecast = room.war_forecast(id, Some(target), rams);
     let seat = room.seat_mut(id);
     seat.attack = true;
     seat.forecast = forecast;
+    seat.rams_draft = None;
     seat.notice = None;
 }
 
-/// "Envoyer un éclaireur" on a kingdom's sheet, or his recall.
+/// The war sheet's rams slider released: the forecast is fought again with
+/// that many rams.
+#[handler]
+pub fn rams_draft(rooms: &mut Rooms, ctx: &EventContext) {
+    let Some((token, _, room)) = table(rooms, ctx) else {
+        return;
+    };
+    let Some(id) = acting(room, token, Step::War) else {
+        return;
+    };
+    let Some(target) = sheet_kingdom(room, id) else {
+        return;
+    };
+    let Some(value) = ctx.text().and_then(|v| v.trim().parse::<i32>().ok()) else {
+        return;
+    };
+    let rams = value.clamp(0, room.rams_available(id, Some(target)));
+    let forecast = room.war_forecast(id, Some(target), rams);
+    let seat = room.seat_mut(id);
+    seat.rams_draft = Some(rams);
+    seat.forecast = forecast;
+}
+
+/// "Envoyer un éclaireur" on a kingdom's sheet: he answers at once.
 #[handler]
 pub fn scout(rooms: &mut Rooms, ctx: &EventContext) {
     let Some((token, _, room)) = table(rooms, ctx) else {
@@ -2332,12 +2396,12 @@ pub fn scout(rooms: &mut Rooms, ctx: &EventContext) {
         return;
     };
     room.seat_mut(id).notice = None;
-    if let Err(msg) = room.toggle_scout(id, target) {
+    if let Err(msg) = room.send_scout(id, target) {
         room.note_at(id, Spot::Sheet, msg);
     }
 }
 
-/// "Acheter un agent" on a kingdom's sheet, his recall, or his dismissal.
+/// "Envoyer un agent" on a kingdom's sheet: he answers at once.
 #[handler]
 pub fn agent(rooms: &mut Rooms, ctx: &EventContext) {
     let Some((token, _, room)) = table(rooms, ctx) else {
@@ -2350,7 +2414,7 @@ pub fn agent(rooms: &mut Rooms, ctx: &EventContext) {
         return;
     };
     room.seat_mut(id).notice = None;
-    if let Err(msg) = room.toggle_agent(id, target) {
+    if let Err(msg) = room.send_agent(id, target) {
         room.note_at(id, Spot::Sheet, msg);
     }
 }
@@ -2430,11 +2494,7 @@ pub fn attack(rooms: &mut Rooms, ctx: &EventContext) {
     if let Some((i, _)) = was {
         room.seat_mut(id).planned.remove(i);
     }
-    let e = Expedition {
-        attacker: id,
-        target,
-        soldiers: num(ctx, "soldiers"),
-    };
+    let e = Expedition::new(id, target, num(ctx, "soldiers")).with_rams(num(ctx, "rams"));
     room.seat_mut(id).notice = None;
     match room.order(e) {
         Ok(()) => {
@@ -2442,6 +2502,7 @@ pub fn attack(rooms: &mut Rooms, ctx: &EventContext) {
             seat.target = None;
             seat.attack = false;
             seat.forecast = None;
+            seat.rams_draft = None;
         }
         Err(msg) => {
             if let Some((i, e)) = was {
@@ -2471,6 +2532,7 @@ pub fn withdraw(rooms: &mut Rooms, ctx: &EventContext) {
         seat.target = None;
         seat.attack = false;
         seat.forecast = None;
+        seat.rams_draft = None;
     }
 }
 
@@ -2567,6 +2629,7 @@ mod tests {
             attacker: f,
             target: Some(s),
             soldiers: 30,
+            rams: 0,
         })
         .unwrap();
         assert_eq!(room.garrison(f), 70);
@@ -2579,6 +2642,7 @@ mod tests {
             attacker: s,
             target: Some(f),
             soldiers: 40,
+            rams: 0,
         })
         .unwrap();
         room.advance(s);
@@ -2693,6 +2757,7 @@ mod tests {
             attacker: f,
             target: None,
             soldiers: 50,
+            rams: 0,
         })
         .unwrap();
         assert_eq!(room.seat(f).planned[0].soldiers, 10);
@@ -2702,6 +2767,7 @@ mod tests {
                 attacker: f,
                 target: None,
                 soldiers: 1,
+                rams: 0,
             })
             .is_err());
         room.seat_mut(f).planned.remove(0);
@@ -2712,6 +2778,7 @@ mod tests {
                 attacker: f,
                 target: Some(Kingdoms::Spain),
                 soldiers: 5,
+                rams: 0,
             })
             .is_err());
     }
@@ -2732,6 +2799,7 @@ mod tests {
             attacker: f,
             target: None,
             soldiers: 400,
+            rams: 0,
         })
         .unwrap();
         assert_eq!(room.seat(f).planned[0].soldiers, 150);
@@ -2743,6 +2811,7 @@ mod tests {
                 attacker: f,
                 target: Some(Kingdoms::Spain),
                 soldiers: 1,
+                rams: 0,
             })
             .is_err());
         // Settling the same target again has the whole purse back.
@@ -2796,6 +2865,8 @@ mod tests {
         k.grain_mills = 4;
         k.marketplaces = 8;
         k.palaces = 2;
+        k.fortifications = 1;
+        k.hospices = 1;
         room.judge_title(id);
         let seat = room.seat(id);
         assert_eq!(seat.title, Some(PlayerTitle::Prince));
@@ -2841,6 +2912,8 @@ mod tests {
         k.marketplaces = 14;
         k.foundries = 1;
         k.palaces = 10;
+        k.fortifications = 5;
+        k.hospices = 5;
     }
 
     #[test]
@@ -2938,6 +3011,7 @@ mod tests {
                     attacker: a,
                     target: Some(d),
                     soldiers: 20,
+                    rams: 0,
                 }],
             )
             .remove(0);
@@ -2994,6 +3068,7 @@ mod tests {
                 attacker: a,
                 target: Some(d),
                 soldiers: 60,
+                rams: 0,
             }],
         )
         .remove(0);
@@ -3040,6 +3115,8 @@ mod tests {
         k.grain_mills = 4;
         k.marketplaces = 8;
         k.palaces = 2;
+        k.fortifications = 1;
+        k.hospices = 1;
         room.judge_title(id);
         assert_eq!(
             room.seat(Kingdoms::Spain).news.last(),
@@ -3119,15 +3196,12 @@ mod tests {
     }
 
     #[test]
-    fn an_eclaireur_sent_at_the_exterior_reports_at_the_next_one() {
+    fn an_eclaireur_sent_at_the_exterior_answers_at_once() {
         let mut room = playing(&[Kingdoms::France]);
         let (id, on) = (Kingdoms::France, Kingdoms::Spain);
         finish_intendance(&mut room, id);
         room.game.kingdom_mut(id).treasury = 100_000;
-        room.toggle_scout(id, on).unwrap();
-        turn_year(&mut room, id);
-        assert_eq!(room.phase, Phase::Exterieur);
-        assert!(!room.scout_ordered(id, on), "the mission lingers");
+        room.send_scout(id, on).unwrap();
         let d = room.dossier(id, on);
         let year = room.game.year;
         let read = d.report.is_some_and(|r| r.year == year);
@@ -3137,10 +3211,15 @@ mod tests {
         if read {
             let r = d.report.unwrap();
             let k = room.game.kingdom(on);
-            assert_eq!((r.garrison, r.serfs), (k.soldiers, k.peasants));
+            assert_eq!((r.garrison, r.surface), (k.soldiers, k.surface));
         }
         // Told at the Extérieur, not in a Chronique a year late.
         assert!(room.seat(id).news.iter().any(News::is_intelligence));
+        // One a year: the next waits for next year's Extérieur.
+        assert!(room.send_scout(id, on).is_err());
+        turn_year(&mut room, id);
+        assert_eq!(room.phase, Phase::Exterieur);
+        assert!(room.dossier(id, on).can_scout(room.game.year));
     }
 
     #[test]
@@ -3183,21 +3262,22 @@ mod scouting {
     }
 
     #[test]
-    fn a_scout_is_paid_on_order_and_refunded_on_recall() {
+    fn a_scout_is_bought_when_none_waits_and_the_mission_paid() {
         let mut room = table();
         let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        let before = room.game.kingdom(id).treasury;
-        assert_eq!(room.toggle_scout(id, on), Ok(()));
-        assert!(room.scout_ordered(id, on));
-        assert_eq!(room.game.kingdom(id).treasury, before - SCOUT_PRICE);
-        assert_eq!(room.toggle_scout(id, on), Ok(()));
-        assert!(!room.scout_ordered(id, on));
-        assert_eq!(room.game.kingdom(id).treasury, before);
-        // Nothing to scout at home, and no scout without the price.
-        assert!(room.toggle_scout(id, id).is_err());
-        room.game.kingdom_mut(id).treasury = SCOUT_PRICE - 1;
-        assert!(room.toggle_scout(id, on).is_err());
-        assert!(!room.scout_ordered(id, on));
+        let man = InvestmentType::Scouts.cost();
+        room.game.kingdom_mut(id).treasury = SCOUT_PRICE + man - 1;
+        assert!(room.send_scout(id, on).is_err());
+        assert!(room.dossier(id, on).can_scout(room.game.year));
+        room.game.kingdom_mut(id).scouts = 1;
+        assert_eq!(room.send_scout(id, on), Ok(()));
+        let k = room.game.kingdom(id);
+        assert_eq!((k.scouts, k.treasury), (0, man - 1));
+        // Nothing to scout at home; one a year elsewhere.
+        assert!(room.send_scout(id, id).is_err());
+        room.game.kingdom_mut(id).treasury = 10_000;
+        assert!(room.send_scout(id, on).is_err());
+        assert_eq!(room.game.kingdom(id).treasury, 10_000);
     }
 
     #[test]
@@ -3207,139 +3287,78 @@ mod scouting {
         for _ in 0..200 {
             let mut room = table();
             room.game.kingdom_mut(on).soldiers = 77;
+            room.game.kingdom_mut(on).fortifications = 3;
             room.game.kingdom_mut(id).treasury = 10_000;
             room.seat_mut(id).news.clear();
             room.seat_mut(on).news.clear();
-            room.toggle_scout(id, on).unwrap();
-            room.game.increment_year();
-            room.resolve_missions();
+            room.send_scout(id, on).unwrap();
             let year = room.game.year;
-            assert!(room.seat(id).missions.is_empty());
             match room.seat(id).news.as_slice() {
                 [News::Scout {
                     at,
-                    outcome: Scouting::Back { garrison },
+                    outcome: Scouting::Back(r),
                 }] => {
-                    back = true;
-                    assert_eq!((*at, *garrison), (on, 77));
-                    let r = room.dossier(id, on).report.expect("a report");
-                    assert_eq!((r.year, r.garrison), (year, 77));
-                    assert!(room.seat(on).news.is_empty());
+                    assert_eq!(*at, on);
+                    assert_eq!((r.garrison, r.fortifications, r.year), (77, 3, year));
+                    assert_eq!(room.dossier(id, on).report, Some(*r));
                     assert!(room.dossier(id, on).caught.is_none());
+                    assert!(room.seat(on).news.is_empty());
+                    back = true;
                 }
                 [News::Scout {
-                    at,
                     outcome: Scouting::Caught,
+                    ..
                 }] => {
-                    caught = true;
-                    assert_eq!(*at, on);
                     assert!(room.dossier(id, on).report.is_none());
                     assert_eq!(room.dossier(id, on).caught, Some(year));
                     assert!(matches!(
                         room.seat(on).news.as_slice(),
                         [News::SpyCaught { by, agent: false }] if *by == id
                     ));
-                    let heard = &room.log.last().expect("a journal line").text;
-                    assert!(heard.contains("éclaireur de la France"), "{heard}");
+                    let heard = &room.log.last().unwrap().text;
+                    assert!(
+                        heard.contains("éclaireur de la France a été pris"),
+                        "{heard}"
+                    );
+                    caught = true;
                 }
-                other => panic!("unexpected news {other:?}"),
-            }
-            if back && caught {
-                return;
+                news => panic!("{news:?}"),
             }
         }
-        panic!("both outcomes should show up in 200 draws (back {back}, caught {caught})");
-    }
-
-    /// A fresh report on `on`, as an éclaireur home this year would leave.
-    fn fresh_report(room: &mut Room, id: Kingdoms, on: Kingdoms) {
-        let year = room.game.year;
-        room.seat_mut(id).dossiers[on.index()].report =
-            Some(Report::read(room.game.kingdom(on), year));
+        assert!(back && caught);
     }
 
     #[test]
-    fn an_agent_is_bought_on_a_fresh_report_only() {
-        let mut room = table();
+    fn an_agent_reads_the_registers_or_is_unmasked() {
         let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        room.game.kingdom_mut(id).treasury = 1_000;
-        assert!(room.toggle_agent(id, on).is_err());
-        fresh_report(&mut room, id, on);
-        assert_eq!(room.toggle_agent(id, on), Ok(()));
-        assert!(room.agent_ordered(id, on));
-        assert_eq!(room.game.kingdom(id).treasury, 1_000 - AGENT_PRICE);
-        assert_eq!(room.toggle_agent(id, on), Ok(()));
-        assert!(!room.agent_ordered(id, on));
-        assert_eq!(room.game.kingdom(id).treasury, 1_000);
-        room.game.kingdom_mut(id).treasury = AGENT_PRICE - 1;
-        assert!(room.toggle_agent(id, on).is_err());
-        assert!(room.toggle_agent(id, id).is_err());
-    }
-
-    #[test]
-    fn an_agent_writes_each_year_he_is_paid_or_is_unmasked() {
-        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        let (mut wrote, mut unmasked) = (false, false);
+        let (mut read, mut caught) = (false, false);
         for _ in 0..200 {
             let mut room = table();
+            room.game.kingdom_mut(on).treasury = 4_321;
             room.game.kingdom_mut(id).treasury = 10_000;
-            room.game.kingdom_mut(on).soldiers = 30;
-            fresh_report(&mut room, id, on);
-            room.toggle_agent(id, on).unwrap();
-            room.game.kingdom_mut(on).soldiers = 70;
-            room.game.kingdom_mut(on).treasury = 6_200;
-            room.report_sale(Kingdoms::Germany, on, 300);
+            room.bought[on.index()][id.index()] = 250;
             room.seat_mut(id).news.clear();
             room.seat_mut(on).news.clear();
-            room.game.increment_year();
-            room.resolve_missions();
+            assert_eq!(room.send_agent(id, on), Ok(()));
+            assert_eq!(room.game.kingdom(id).treasury, 10_000 - AGENT_PRICE);
             let year = room.game.year;
-            assert!(room.seat(id).missions.is_empty());
             match room.seat(id).news.as_slice() {
                 [News::Agent {
                     at,
-                    outcome:
-                        Writing::Letter {
-                            ledger,
-                            levied,
-                            spent,
-                        },
+                    outcome: Writing::Read(l),
                 }] => {
-                    wrote = true;
                     assert_eq!(*at, on);
-                    // The first letter is paid by the purchase.
-                    assert_eq!(room.game.kingdom(id).treasury, 10_000 - AGENT_PRICE);
-                    assert_eq!((ledger.year, ledger.treasury), (year, 6_200));
-                    assert_eq!(ledger.bought[Kingdoms::Germany.index()], 300);
-                    assert_eq!((*levied, *spent), (Some(40), None));
-                    let d = room.dossier(id, on);
-                    assert!(d.agent);
-                    assert_eq!(d.report.map(|r| (r.year, r.garrison)), Some((year, 70)));
-                    assert_eq!(d.ledger, Some(*ledger));
-                    // The next year he is paid as he writes; unpaid, he leaves.
-                    room.game.kingdom_mut(id).treasury = AGENT_PRICE - 1;
-                    room.seat_mut(id).news.clear();
-                    room.game.increment_year();
-                    room.resolve_missions();
-                    assert!(matches!(
-                        room.seat(id).news.as_slice(),
-                        [News::Agent {
-                            outcome: Writing::Unpaid | Writing::Unmasked,
-                            ..
-                        }]
-                    ));
-                    assert!(!room.dossier(id, on).agent);
+                    assert_eq!((l.treasury, l.year), (4_321, year));
+                    assert_eq!(l.bought[id.index()], 250);
+                    assert_eq!(room.dossier(id, on).ledger, Some(*l));
+                    read = true;
                 }
                 [News::Agent {
-                    at,
-                    outcome: Writing::Unmasked,
+                    outcome: Writing::Caught,
+                    ..
                 }] => {
-                    unmasked = true;
-                    assert_eq!(*at, on);
-                    let d = room.dossier(id, on);
-                    assert!(!d.agent);
-                    assert!(d.ledger.is_none());
-                    assert_eq!(d.caught, Some(year));
+                    assert!(room.dossier(id, on).ledger.is_none());
+                    assert_eq!(room.dossier(id, on).caught, Some(year));
                     assert!(matches!(
                         room.seat(on).news.as_slice(),
                         [News::SpyCaught { by, agent: true }] if *by == id
@@ -3349,91 +3368,38 @@ mod scouting {
                         heard.contains("agent de la France a été démasqué"),
                         "{heard}"
                     );
+                    caught = true;
                 }
-                other => panic!("unexpected news {other:?}"),
+                news => panic!("{news:?}"),
             }
-            if wrote && unmasked {
-                return;
-            }
+            // One a year, and the price stays in the coffers.
+            assert!(room.send_agent(id, on).is_err());
+            assert_eq!(room.game.kingdom(id).treasury, 10_000 - AGENT_PRICE);
         }
-        panic!("both outcomes should show up in 200 draws (wrote {wrote}, unmasked {unmasked})");
+        assert!(read && caught);
     }
 
     #[test]
-    fn a_standing_agent_pays_his_year_and_tells_what_moved() {
-        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        for _ in 0..100 {
-            let mut room = table();
-            room.game.kingdom_mut(id).treasury = 10_000;
-            let year = room.game.year;
-            let report = Report::read(room.game.kingdom(on), year);
-            let ledger = Ledger::read(room.game.kingdom(on), year, [0; 6]);
-            let d = &mut room.seat_mut(id).dossiers[on.index()];
-            d.agent = true;
-            d.report = Some(report);
-            d.ledger = Some(ledger);
-            room.game.kingdom_mut(on).treasury -= 500;
-            room.seat_mut(id).news.clear();
-            room.game.increment_year();
-            room.resolve_missions();
-            if let [News::Agent {
-                outcome: Writing::Letter { spent, .. },
-                ..
-            }] = room.seat(id).news.as_slice()
-            {
-                assert_eq!(room.game.kingdom(id).treasury, 10_000 - AGENT_PRICE);
-                assert_eq!(*spent, Some(500));
-                return;
-            }
-        }
-        panic!("an agent should write at least once in 100 draws");
-    }
-
-    #[test]
-    fn an_agent_is_dismissed_at_once_and_lost_with_the_realm() {
+    fn an_agent_needs_the_price_and_a_living_court() {
         let mut room = table();
         let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        room.seat_mut(id).dossiers[on.index()].agent = true;
-        assert_eq!(room.toggle_agent(id, on), Ok(()));
-        assert!(!room.dossier(id, on).agent);
-        room.seat_mut(id).dossiers[on.index()].agent = true;
+        room.game.kingdom_mut(id).treasury = AGENT_PRICE - 1;
+        assert!(room.send_agent(id, on).is_err());
+        assert!(room.dossier(id, on).can_read(room.game.year));
+        assert!(room.send_agent(id, id).is_err());
+        room.game.kingdom_mut(id).treasury = 10_000;
         room.game.kingdom_mut(on).is_dead = true;
-        room.seat_mut(id).news.clear();
-        room.resolve_missions();
-        assert!(matches!(
-            room.seat(id).news.as_slice(),
-            [News::Agent {
-                outcome: Writing::Gone,
-                ..
-            }]
-        ));
-        assert!(!room.dossier(id, on).agent);
-    }
-
-    #[test]
-    fn a_scout_finds_only_ruins_in_an_annexed_realm() {
-        let mut room = table();
-        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        room.toggle_scout(id, on).unwrap();
-        room.game.kingdom_mut(on).is_dead = true;
-        room.seat_mut(id).news.clear();
-        room.resolve_missions();
-        assert!(matches!(
-            room.seat(id).news.as_slice(),
-            [News::Scout {
-                outcome: Scouting::Gone,
-                ..
-            }]
-        ));
-        assert!(room.dossier(id, on).report.is_none());
+        assert!(room.send_agent(id, on).is_err());
+        assert!(room.send_scout(id, on).is_err());
+        assert_eq!(room.game.kingdom(id).treasury, 10_000);
     }
 
     #[test]
     fn a_forecast_needs_a_report_and_the_report_ages_out() {
         let mut room = table();
         let (id, on) = (Kingdoms::France, Kingdoms::Spain);
-        assert!(room.war_forecast(id, Some(on)).is_none());
-        assert!(room.war_forecast(id, None).is_some());
+        assert!(room.war_forecast(id, Some(on), 0).is_none());
+        assert!(room.war_forecast(id, None, 0).is_some());
         let year = room.game.year;
         let report = Report::read(room.game.kingdom(on), year);
         assert_eq!(report.spread(year), Some(0));
@@ -3441,12 +3407,39 @@ mod scouting {
         assert_eq!(report.spread(year + 2), Some(40));
         assert_eq!(report.spread(year + 3), None);
         room.seat_mut(id).dossiers[on.index()].report = Some(report);
-        let fc = room.war_forecast(id, Some(on)).expect("a forecast");
-        assert_eq!((fc.target, fc.spread), (Some(on), 0));
+        let fc = room.war_forecast(id, Some(on), 2).expect("a forecast");
+        assert_eq!((fc.target, fc.spread, fc.rams), (Some(on), 0, 2));
         for _ in 0..3 {
             room.game.increment_year();
         }
-        assert!(room.war_forecast(id, Some(on)).is_none());
+        assert!(room.war_forecast(id, Some(on), 0).is_none());
+    }
+
+    #[test]
+    fn rams_march_from_the_stock_and_never_on_the_barbarians() {
+        let mut room = table();
+        let (id, on) = (Kingdoms::France, Kingdoms::Spain);
+        room.game.year = FIRST_WAR_YEAR;
+        let k = room.game.kingdom_mut(id);
+        k.rams = 3;
+        k.treasury = 100_000;
+        k.grain_stocks = 100_000;
+        k.soldiers = 40;
+        k.nobles = 4;
+        room.seat_mut(id).planned.clear();
+        assert_eq!(room.rams_available(id, None), 0);
+        assert_eq!(room.rams_available(id, Some(on)), 3);
+        room.order(Expedition::new(id, None, 10).with_rams(2))
+            .unwrap();
+        assert_eq!(room.seat(id).planned[0].rams, 0);
+        room.order(Expedition::new(id, Some(on), 10).with_rams(5))
+            .unwrap();
+        assert_eq!(room.seat(id).planned[1].rams, 3);
+        assert_eq!(room.rams_home(id), 0);
+        assert_eq!(room.rams_available(id, Some(on)), 3);
+        assert_eq!(room.rams_planned(id, Some(on)), 3);
+        room.seat_mut(id).rams_draft = Some(1);
+        assert_eq!(room.rams_planned(id, Some(on)), 1);
     }
 
     /// A computer at year three whose brain has an eye on `on` and wants
@@ -3469,13 +3462,16 @@ mod scouting {
         let (mut room, id, on) = watching();
         let before = room.game.kingdom(id).treasury;
         room.run_computer_war(id);
-        assert!(room.scout_ordered(id, on));
-        assert_eq!(room.game.kingdom(id).treasury, before - SCOUT_PRICE);
+        assert!(!room.dossier(id, on).can_scout(3));
+        assert_eq!(
+            room.game.kingdom(id).treasury,
+            before - SCOUT_PRICE - InvestmentType::Scouts.cost()
+        );
         // Without the price, no éclaireur leaves.
         let (mut room, id, on) = watching();
         room.game.kingdom_mut(id).treasury = SCOUT_PRICE - 1;
         room.run_computer_war(id);
-        assert!(!room.scout_ordered(id, on));
+        assert!(room.dossier(id, on).can_scout(3));
     }
 
     #[test]
@@ -3486,14 +3482,11 @@ mod scouting {
             let (mut room, _, _) = watching();
             room.seat_mut(on).news.clear();
             room.run_computer_war(id);
-            assert!(room.scout_ordered(id, on));
-            room.game.increment_year();
-            room.resolve_missions();
             let d = room.dossier(id, on);
-            if d.report.is_some_and(|r| r.year == 4) {
+            if d.report.is_some_and(|r| r.year == 3) {
                 back = true;
             } else {
-                assert_eq!(d.caught, Some(4));
+                assert_eq!(d.caught, Some(3));
                 assert!(room.seat(on).news.contains(&News::SpyCaught {
                     by: id,
                     agent: false

@@ -11,11 +11,18 @@ pub enum InvestmentType {
     Shipyards,
     Soldiers,
     Palaces,
+    Fortifications,
+    Hospices,
+    Rams,
+    Scouts,
 }
+
+/// A palace, fortifications and a hospice are built by tenths, up to ten.
+pub const TENTHS: i32 = 10;
 
 impl InvestmentType {
     /// Cost per unit.
-    pub fn cost(self) -> i32 {
+    pub const fn cost(self) -> i32 {
         match self {
             InvestmentType::Marketplaces => 1000,
             InvestmentType::GrainMills => 2000,
@@ -23,6 +30,20 @@ impl InvestmentType {
             InvestmentType::Shipyards => 8000,
             InvestmentType::Soldiers => 8,
             InvestmentType::Palaces => 5000,
+            InvestmentType::Fortifications => 5000,
+            InvestmentType::Hospices => 5000,
+            InvestmentType::Rams => 2500,
+            InvestmentType::Scouts => 16,
+        }
+    }
+
+    /// Where the kingdom stands on a purchase bought by tenths.
+    pub fn tenths(self, kingdom: &Kingdom) -> Option<i32> {
+        match self {
+            InvestmentType::Palaces => Some(kingdom.palaces),
+            InvestmentType::Fortifications => Some(kingdom.fortifications),
+            InvestmentType::Hospices => Some(kingdom.hospices),
+            _ => None,
         }
     }
 
@@ -34,13 +55,17 @@ impl InvestmentType {
             4 => Some(InvestmentType::Shipyards),
             5 => Some(InvestmentType::Soldiers),
             6 => Some(InvestmentType::Palaces),
+            7 => Some(InvestmentType::Fortifications),
+            8 => Some(InvestmentType::Hospices),
+            9 => Some(InvestmentType::Rams),
+            10 => Some(InvestmentType::Scouts),
             _ => None,
         }
     }
 
     /// Maximum amount the kingdom can afford (and, for soldiers, command:
-    /// twenty men a noble). Recruits eat nothing when hired; the council
-    /// feeds them with the rest of the army.
+    /// twenty men a noble; for the tenths, build: ten). Recruits eat nothing
+    /// when hired; the council feeds them with the rest of the army.
     pub fn max_investment(self, kingdom: &Kingdom) -> i32 {
         let max_by_treasury = kingdom.treasury / self.cost();
         match self {
@@ -48,7 +73,10 @@ impl InvestmentType {
                 let max_by_nobles = kingdom.nobles * 20 - kingdom.soldiers;
                 min(max_by_treasury, max_by_nobles).max(0)
             }
-            _ => max_by_treasury,
+            _ => match self.tenths(kingdom) {
+                Some(built) => min(max_by_treasury, TENTHS - built).max(0),
+                None => max_by_treasury,
+            },
         }
     }
 }
@@ -101,6 +129,15 @@ pub fn validate_investment(
         }
     }
 
+    if let Some(built) = investment_type.tenths(kingdom) {
+        if built + amount > TENTHS {
+            return failed(format!(
+                "Only {} tenths left to build",
+                (TENTHS - built).max(0)
+            ));
+        }
+    }
+
     InvestmentResult {
         success: true,
         amount,
@@ -142,6 +179,10 @@ pub fn apply_investment(
             kingdom.nobles += nobles_gained;
             side_effects.nobles_attracted = nobles_gained;
         }
+        InvestmentType::Fortifications => kingdom.fortifications += amount,
+        InvestmentType::Hospices => kingdom.hospices += amount,
+        InvestmentType::Rams => kingdom.rams += amount,
+        InvestmentType::Scouts => kingdom.scouts += amount,
     }
 
     kingdom.treasury -= validation.total_cost;
@@ -206,5 +247,28 @@ mod tests {
         assert_eq!(k.soldiers, 60);
         assert_eq!(k.treasury, 680);
         assert_eq!(k.grain_stocks, 500);
+    }
+
+    #[test]
+    fn tenths_stop_at_ten() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        k.treasury = 100_000;
+        k.fortifications = 8;
+        assert_eq!(InvestmentType::Fortifications.max_investment(&k), 2);
+        assert!(!apply_investment(&mut k, InvestmentType::Fortifications, 3).success);
+        assert!(apply_investment(&mut k, InvestmentType::Fortifications, 2).success);
+        assert_eq!(k.fortifications, 10);
+        assert_eq!(k.treasury, 90_000);
+        assert_eq!(InvestmentType::Hospices.max_investment(&k), 10);
+        assert_eq!(InvestmentType::Palaces.max_investment(&k), 10);
+    }
+
+    #[test]
+    fn rams_and_scouts_go_to_stock() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        k.treasury = 5016;
+        assert!(apply_investment(&mut k, InvestmentType::Rams, 2).success);
+        assert!(apply_investment(&mut k, InvestmentType::Scouts, 1).success);
+        assert_eq!((k.rams, k.scouts, k.treasury), (2, 1, 0));
     }
 }

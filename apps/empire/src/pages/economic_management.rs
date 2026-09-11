@@ -101,15 +101,35 @@ fn display_economic_report(kingdom: &Kingdom, year: i32, eco: &YearEconomy) {
             ),
         );
     }
-    print_at(
-        15,
-        3,
-        &format!(
-            "6) Palais              {:>8}% terminé             {:>8}",
-            large_number(kingdom.palaces * 10),
-            InvestmentType::Palaces.cost()
+    let tenths = [
+        (
+            "6) Palais           ",
+            kingdom.palaces,
+            InvestmentType::Palaces,
         ),
-    );
+        (
+            "7) Fortifications   ",
+            kingdom.fortifications,
+            InvestmentType::Fortifications,
+        ),
+        (
+            "8) Hospice          ",
+            kingdom.hospices,
+            InvestmentType::Hospices,
+        ),
+    ];
+    for (i, (label, built, kind)) in tenths.iter().enumerate() {
+        print_at(
+            15 + i,
+            3,
+            &format!(
+                "{}   {:>8}% terminé             {:>8}",
+                label,
+                large_number(built * 10),
+                kind.cost()
+            ),
+        );
+    }
 }
 
 fn prompt_tax_option(kingdom: &Kingdom, year: i32, eco: &YearEconomy) -> Option<TaxType> {
@@ -149,7 +169,7 @@ fn prompt_investment_option(
 ) -> Option<InvestmentType> {
     display_economic_report(kingdom, year, eco);
     print_at(20, 0, "↵ ou autre investissement (donner n°) :");
-    bottom_input_number_with_range_or_enter(error, 1, 6).and_then(InvestmentType::from_number)
+    bottom_input_number_with_range_or_enter(error, 1, 8).and_then(InvestmentType::from_number)
 }
 
 fn prompt_investment_amount(

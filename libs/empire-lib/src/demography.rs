@@ -5,6 +5,12 @@ use crate::economy::Taxes;
 use crate::kingdom::{Kingdom, GRAIN_PER_MOUTH, GRAIN_PER_SOLDIER, RATION_SCALE};
 use crate::random::random;
 
+/// `victims` of disease or plague less the share the hospice spares: a
+/// twentieth per tenth built, half at a full hospice.
+pub fn spared(victims: i32, hospices: i32) -> i32 {
+    victims * (20 - hospices.clamp(0, 10)) / 20
+}
+
 #[derive(Debug, Clone)]
 pub struct YearDemography {
     pub births: i32,
@@ -343,8 +349,9 @@ fn draws(kingdom: &Kingdom, council: Council) -> Draws {
     let ra = ration(council.soldiers_ration, Council::SOLDIERS_FULL);
     let (desertion, army_starvation) = army_losses_split(kingdom.soldiers, ra);
     let immigrants = Outlook::around(immigrants_expected(pop, r, x), IMMIGRATION_SPREAD);
-    // Original: DD=INT(RND*PO/22+1) where PO = serfs + merchants + nobles
-    let disease_cap = pop / 22;
+    // Original: DD=INT(RND*PO/22+1) where PO = serfs + merchants + nobles;
+    // the hospice spares a twentieth per tenth built.
+    let disease_cap = spared(pop / 22, kingdom.hospices);
     let disease = Outlook {
         low: disease_cap.min(1),
         expected: (disease_cap.max(1) + 1) / 2,

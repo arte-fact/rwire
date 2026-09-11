@@ -161,6 +161,10 @@ pub struct Requirements {
     pub marketplaces: i32,
     pub foundries: i32,
     pub palaces: i32,
+    /// Tenths of fortifications.
+    pub fortifications: i32,
+    /// Tenths of hospice.
+    pub hospices: i32,
 }
 
 /// Prince, King and Emperor, in that order.
@@ -173,6 +177,8 @@ const REQUIREMENTS: [Requirements; 3] = [
         marketplaces: 8,
         foundries: 0,
         palaces: 2,
+        fortifications: 1,
+        hospices: 1,
     },
     Requirements {
         peasants: 2600,
@@ -182,6 +188,8 @@ const REQUIREMENTS: [Requirements; 3] = [
         marketplaces: 14,
         foundries: 1,
         palaces: 6,
+        fortifications: 3,
+        hospices: 3,
     },
     Requirements {
         peasants: 3100,
@@ -191,6 +199,8 @@ const REQUIREMENTS: [Requirements; 3] = [
         marketplaces: 14,
         foundries: 1,
         palaces: 10,
+        fortifications: 5,
+        hospices: 5,
     },
 ];
 
@@ -206,10 +216,16 @@ pub enum Requirement {
     Foundries,
     /// Tenths of the palace built.
     Palaces,
+    /// Tenths of fortifications raised.
+    Fortifications,
+    /// Tenths of hospice built.
+    Hospices,
 }
 
 impl Requirement {
-    pub const ALL: [Requirement; 7] = [
+    /// Every requirement, the two newest last: the brain's view reads the
+    /// first seven.
+    pub const ALL: [Requirement; 9] = [
         Requirement::Peasants,
         Requirement::LandRatio,
         Requirement::Nobles,
@@ -217,6 +233,8 @@ impl Requirement {
         Requirement::Marketplaces,
         Requirement::Foundries,
         Requirement::Palaces,
+        Requirement::Fortifications,
+        Requirement::Hospices,
     ];
 
     fn need(self, r: &Requirements) -> i32 {
@@ -228,6 +246,8 @@ impl Requirement {
             Requirement::Marketplaces => r.marketplaces,
             Requirement::Foundries => r.foundries,
             Requirement::Palaces => r.palaces,
+            Requirement::Fortifications => r.fortifications,
+            Requirement::Hospices => r.hospices,
         }
     }
 }
@@ -306,6 +326,20 @@ pub struct Kingdom {
     pub shipyards: i32,
     /// Palace completion in tenths (10 = 100%).
     pub palaces: i32,
+    /// Fortifications in tenths: each adds a tenth to the garrison's
+    /// strength behind its walls; rams knock them down for good.
+    #[serde(default)]
+    pub fortifications: i32,
+    /// Hospice in tenths: each spares a twentieth of the disease and plague
+    /// dead.
+    #[serde(default)]
+    pub hospices: i32,
+    /// Rams in stock, taken along on an expedition against a kingdom.
+    #[serde(default)]
+    pub rams: i32,
+    /// Scouts in reserve, each good for one mission.
+    #[serde(default)]
+    pub scouts: i32,
     pub immigration_taxes: i32,
     pub commercial_taxes: i32,
     pub income_taxes: i32,
@@ -353,6 +387,10 @@ impl Kingdom {
             foundries: 0,
             shipyards: 0,
             palaces: 0,
+            fortifications: 0,
+            hospices: 0,
+            rams: 0,
+            scouts: 0,
             immigration_taxes: 20,
             commercial_taxes: 8,
             income_taxes: 20,
@@ -427,6 +465,8 @@ impl Kingdom {
             Requirement::Marketplaces => self.marketplaces,
             Requirement::Foundries => self.foundries,
             Requirement::Palaces => self.palaces,
+            Requirement::Fortifications => self.fortifications,
+            Requirement::Hospices => self.hospices,
         }
     }
 
@@ -554,6 +594,8 @@ mod tests {
         k.grain_mills = 4;
         k.marketplaces = 8;
         k.palaces = 2;
+        k.fortifications = 1;
+        k.hospices = 1;
         assert_eq!(k.title(), PlayerTitle::Prince);
 
         k.peasants = 2600;
@@ -563,15 +605,19 @@ mod tests {
         k.marketplaces = 14;
         k.foundries = 1;
         k.palaces = 6;
+        k.fortifications = 3;
+        k.hospices = 3;
         assert_eq!(k.title(), PlayerTitle::King);
 
         k.peasants = 3100;
         k.surface = 3100 * 6;
         k.nobles = 40;
         k.palaces = 10;
+        k.fortifications = 5;
+        k.hospices = 5;
         assert_eq!(k.title(), PlayerTitle::Emperor);
         assert_eq!(k.titled_name(), "Empereur Hugues");
-        assert_eq!(k.progress(PlayerTitle::Emperor).len(), 7);
+        assert_eq!(k.progress(PlayerTitle::Emperor).len(), 9);
         assert!(k.progress(PlayerTitle::Emperor).iter().all(Criterion::met));
     }
 
@@ -599,7 +645,7 @@ mod tests {
         assert!(k.progress(PlayerTitle::Duke).is_empty());
         let p = k.progress(PlayerTitle::Prince);
         // The Prince asks nothing of the foundry.
-        assert_eq!(p.len(), 6);
+        assert_eq!(p.len(), 8);
         assert!(!p.iter().any(|c| c.what == Requirement::Foundries));
         let serfs = p.iter().find(|c| c.what == Requirement::Peasants).unwrap();
         assert_eq!((serfs.have, serfs.need, serfs.met()), (2000, 2300, false));
@@ -636,6 +682,8 @@ mod tests {
         k.marketplaces = 14;
         k.foundries = 1;
         k.palaces = 6;
+        k.fortifications = 3;
+        k.hospices = 3;
         assert_eq!(k.title(), PlayerTitle::King);
         // One criterion lapsing takes the title away.
         k.foundries = 0;

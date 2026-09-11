@@ -6,7 +6,7 @@
 //! land the barbarians have left. Sending men costs gold and grain, per man, when they leave.
 
 use crate::front::{
-    apply_front, deciles, forecast_front, simulate_front, Army, Forecast, FrontResult, Line,
+    apply_front, deciles, forecast_front, simulate_front, Army, Forecast, FrontResult, Host, Line,
     People, Round, Stand,
 };
 use crate::game::EmpireGame;
@@ -48,6 +48,28 @@ pub struct Expedition {
     /// `None` = the barbarians.
     pub target: Option<Kingdoms>,
     pub soldiers: i32,
+    /// Rams taken along — of no use against the barbarians, who have no
+    /// walls: none go.
+    pub rams: i32,
+}
+
+impl Expedition {
+    pub fn new(attacker: Kingdoms, target: Option<Kingdoms>, soldiers: i32) -> Self {
+        Expedition {
+            attacker,
+            target,
+            soldiers,
+            rams: 0,
+        }
+    }
+
+    pub fn with_rams(self, rams: i32) -> Self {
+        Expedition { rams, ..self }
+    }
+
+    pub fn host(&self) -> Host {
+        Host::new(self.attacker, self.soldiers).with_rams(self.rams)
+    }
 }
 
 /// A front fought, to be applied with [`apply_battle`].
@@ -68,6 +90,7 @@ impl Fought {
             attacker: a.attacker,
             target: self.target,
             soldiers: a.sent,
+            rams: a.rams,
         })
     }
 
@@ -116,12 +139,17 @@ pub fn march(
                 None => game.barbarians_surface > 0,
             };
         e.soldiers = e.soldiers.min(affordable(a));
+        e.rams = match e.target {
+            Some(_) => e.rams.clamp(0, a.rams),
+            None => 0,
+        };
         if !sensible || e.soldiers < 1 {
             continue;
         }
         let (gold, grain) = expedition_cost(e.soldiers);
         let a = game.kingdom_mut(e.attacker);
         a.soldiers -= e.soldiers;
+        a.rams -= e.rams;
         a.treasury -= gold;
         a.grain_stocks -= grain;
         match fronts.iter_mut().find(|(t, _)| *t == e.target) {
@@ -134,11 +162,10 @@ pub fn march(
     for (target, armies) in fronts {
         match target {
             Some(t) => {
-                let armies: Vec<(Kingdoms, i32)> =
-                    armies.iter().map(|e| (e.attacker, e.soldiers)).collect();
+                let hosts: Vec<Host> = armies.iter().map(Expedition::host).collect();
                 fought.push(Fought {
                     target,
-                    result: simulate_front(&field, t, &armies),
+                    result: simulate_front(&field, t, &hosts),
                 });
             }
             // Every barbarian expedition is its own front, taking at most
@@ -175,6 +202,8 @@ fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
     let last = frames.len().saturating_sub(1).max(1);
     let mut rounds = vec![Round {
         garrison: band,
+        walls: 0,
+        exchange: 0,
         armies: vec![Stand {
             men: e.soldiers,
             ..Stand::default()
@@ -182,6 +211,8 @@ fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
     }];
     rounds.extend(frames.iter().enumerate().map(|(i, f)| Round {
         garrison: f.defender_soldiers.max(0),
+        walls: 0,
+        exchange: i as i32 + 1,
         armies: vec![Stand {
             men: f.attacker_soldiers.max(0),
             advance: (advance as i64 * i as i64 / last as i64) as i32,
@@ -194,6 +225,8 @@ fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
             attacker: e.attacker,
             sent: e.soldiers,
             men: r.attacker_remaining_soldiers,
+            rams: 0,
+            rams_broken: 0,
             victory: r.attacker_won,
             advance,
             rallied: People::default(),
@@ -206,21 +239,23 @@ fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
         rounds,
         garrison_start: band,
         garrison_left: band_left,
+        walls_start: 0,
+        walls_left: 0,
         annexed_by: (r.all_barbarians_conquered && land > 0).then_some(0),
     }
 }
 
-/// What `sent` men of `attacker` may bring back from `target` (`None` = the
-/// barbarians), fought once on every game given.
+/// What a host may bring back from `target` (`None` = the barbarians),
+/// fought once on every game given.
 pub fn forecast<'a>(
     games: impl IntoIterator<Item = &'a EmpireGame>,
     target: Option<Kingdoms>,
-    attacker: Kingdoms,
-    sent: i32,
+    host: Host,
 ) -> Forecast {
     match target {
-        Some(t) => forecast_front(games, t, attacker, sent),
+        Some(t) => forecast_front(games, t, host),
         None => {
+            let (attacker, sent) = (host.attacker, host.men);
             let mut arpents = Vec::new();
             let mut lost = Vec::new();
             let mut victories = 0;
@@ -239,6 +274,8 @@ pub fn forecast<'a>(
                 lost: deciles(&mut lost),
                 victories,
                 annexations: 0,
+                walls: (0, 0),
+                rams_lost: (0, 0),
             }
         }
     }
@@ -269,11 +306,36 @@ mod tests {
     use crate::kingdom::Fate;
 
     fn against(target: Option<Kingdoms>, attacker: Kingdoms, soldiers: i32) -> Expedition {
-        Expedition {
-            attacker,
-            target,
-            soldiers,
+        Expedition::new(attacker, target, soldiers)
+    }
+
+    #[test]
+    fn rams_leave_the_stock_and_never_march_on_the_barbarians() {
+        let mut game = rich_game();
+        game.kingdom_mut(Kingdoms::France).soldiers = 200;
+        game.kingdom_mut(Kingdoms::France).rams = 2;
+        game.kingdom_mut(Kingdoms::Spain).fortifications = 10;
+        let fought = march(
+            &mut game,
+            [
+                against(None, Kingdoms::France, 50).with_rams(5),
+                against(Some(Kingdoms::Spain), Kingdoms::France, 100).with_rams(5),
+            ],
+        );
+        let on = |t: Option<Kingdoms>| fought.iter().find(|f| f.target == t).unwrap();
+        assert_eq!(on(None).armies()[0].rams, 0);
+        // Capped by the stock, and gone from it.
+        assert_eq!(on(Some(Kingdoms::Spain)).armies()[0].rams, 2);
+        assert_eq!(game.kingdom(Kingdoms::France).rams, 0);
+        for f in &fought {
+            apply_battle(&mut game, f);
         }
+        let a = &on(Some(Kingdoms::Spain)).armies()[0];
+        assert_eq!(game.kingdom(Kingdoms::France).rams, a.rams_home());
+        assert_eq!(
+            game.kingdom(Kingdoms::Spain).fortifications,
+            10 - on(Some(Kingdoms::Spain)).result.walls_fallen()
+        );
     }
 
     /// A game whose realms can pay for any army they have.

@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::demography::spared;
 use crate::kingdom::{Fate, Kingdom};
 use crate::random::random;
 
@@ -50,10 +51,13 @@ pub fn check_plague(kingdom: &mut Kingdom) -> Option<PlagueEvent> {
 /// Lines 199-202: `INT(RND*serfs/2)`, a third of the others. The ruler is
 /// one of the nobles and survives.
 fn strike_plague(kingdom: &mut Kingdom) -> PlagueEvent {
-    let serfs_killed = random(0, kingdom.peasants / 2);
-    let merchants_killed = random(0, kingdom.merchants / 3);
-    let soldiers_killed = random(0, kingdom.soldiers / 3);
-    let nobles_killed = random(0, kingdom.nobles / 3).min(kingdom.nobles - 1).max(0);
+    let h = kingdom.hospices;
+    let serfs_killed = spared(random(0, kingdom.peasants / 2), h);
+    let merchants_killed = spared(random(0, kingdom.merchants / 3), h);
+    let soldiers_killed = spared(random(0, kingdom.soldiers / 3), h);
+    let nobles_killed = spared(random(0, kingdom.nobles / 3), h)
+        .min(kingdom.nobles - 1)
+        .max(0);
     kingdom.peasants -= serfs_killed;
     kingdom.merchants -= merchants_killed;
     kingdom.soldiers -= soldiers_killed;

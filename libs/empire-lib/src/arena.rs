@@ -4,14 +4,14 @@
 //! seat made of it comes back as an [`Outcome`], scored for evolution.
 
 use crate::brain::{bound_council, decode_intendance, Brain, Intendance, Letters, Memory, Stage};
-use crate::campaign::{apply_battle, march, Expedition};
+use crate::campaign::{apply_battle, march};
 use crate::demography::apply_feed;
 use crate::economy::{apply_economy, apply_taxes, economy_report};
 use crate::events::{check_plague, check_ruler_death, RulerDeathCause};
 use crate::game::EmpireGame;
 use crate::harvests::{apply_grain_harvest, apply_rat_loss_rate, apply_seed_grain};
-use crate::intel::{heard, Rumour, Writing, AGENT_PRICE, SCOUT_PRICE};
-use crate::investments::apply_investment;
+use crate::intel::{heard, Rumour, AGENT_PRICE, SCOUT_PRICE};
+use crate::investments::{apply_investment, InvestmentType};
 use crate::kingdom::{Kingdom, Kingdoms, PlayerTitle, Requirement, KINGDOMS};
 use crate::random::shuffled;
 use crate::trade::{apply_trade, Trade};
@@ -215,9 +215,6 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
     let mut game = EmpireGame::default();
     let mut memories: [Memory; 6] = Default::default();
     let mut outcomes = [Outcome::default(); 6];
-    let mut scouts: Vec<(Kingdoms, Kingdoms)> = Vec::new();
-    // The agents each seat wants in place, by seat then realm.
-    let mut agents = [[false; 6]; 6];
     while game.year <= longest && !over(&outcomes) {
         let year = game.year;
         // Bushels bought this year, by buyer then seller: what an agent reads.
@@ -248,88 +245,41 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
                 &mut bought[i],
             );
         }
-        // The éclaireurs sent last year report as the Extérieur opens; then
-        // the agents: kept where wanted and paid for the year, bought on a
-        // fresh report where wanted and absent, dismissed elsewhere.
-        for (id, on) in scouts.drain(..) {
-            memories[id.index()].dossiers[on.index()].scout(game.kingdom(on), year);
-            outcomes[id.index()].readings += 1;
-        }
-        for id in KINGDOMS {
-            let i = id.index();
-            if game.kingdom(id).is_dead {
-                continue;
-            }
-            for on in KINGDOMS {
-                if on == id {
-                    continue;
-                }
-                let d = &mut memories[i].dossiers[on.index()];
-                if !agents[i][on.index()] {
-                    d.agent = false;
-                    continue;
-                }
-                let standing = d.agent;
-                let free = table.letters.agents();
-                if !standing {
-                    let fresh = d.report.is_some_and(|r| r.year == year);
-                    let k = game.kingdom_mut(id);
-                    if !fresh || (!free && k.treasury < AGENT_PRICE) {
-                        continue;
-                    }
-                    if !free {
-                        k.treasury -= AGENT_PRICE;
-                    }
-                }
-                // A free agent is paid from a purse that is not the realm's.
-                let mut treasury = if free {
-                    i32::MAX / 2
-                } else {
-                    game.kingdom(id).treasury
-                };
-                let writing = d.agent_year(
-                    game.kingdom(on),
-                    year,
-                    bought[on.index()],
-                    &mut treasury,
-                    standing,
-                );
-                if !free {
-                    game.kingdom_mut(id).treasury = treasury;
-                }
-                if matches!(writing, Writing::Letter { .. }) {
-                    outcomes[i].readings += 1;
-                }
-            }
-        }
+        // The Extérieur, in two readings: the éclaireur and the agents go
+        // and answer at once, then the expeditions are ordered on what
+        // they saw.
         let mut expeditions = Vec::new();
         for id in KINGDOMS {
             let k = game.kingdom(id);
-            if k.is_dead {
+            if k.is_dead || outcomes[id.index()].crowned.is_some() {
                 continue;
             }
             let i = id.index();
-            let orders = brains[i].orders(&game, id, &mut memories[i], seats[i], table.letters);
-            if outcomes[i].crowned.is_some() {
-                continue;
-            }
-            expeditions.extend(orders.expeditions.into_iter().map(|(target, soldiers)| {
-                Expedition {
-                    attacker: id,
-                    target,
-                    soldiers,
+            let missions = brains[i].missions(&game, id, &memories[i], seats[i], table.letters);
+            if let Some(on) = missions.scout.filter(|&on| !game.kingdom(on).is_dead) {
+                if send_scout(game.kingdom_mut(id), table.letters.scouts()) {
+                    let target = game.kingdom(on).clone();
+                    memories[i].dossiers[on.index()].scout(&target, year);
+                    outcomes[i].readings += 1;
                 }
-            }));
-            if let Some(on) = orders.scout {
-                if !table.letters.scouts() {
-                    game.kingdom_mut(id).treasury -= SCOUT_PRICE;
+            }
+            for on in missions.agents {
+                if game.kingdom(on).is_dead {
+                    continue;
                 }
-                scouts.push((id, on));
+                let free = table.letters.agents();
+                let k = game.kingdom_mut(id);
+                if !free && k.treasury < AGENT_PRICE {
+                    continue;
+                }
+                if !free {
+                    k.treasury -= AGENT_PRICE;
+                }
+                let target = game.kingdom(on).clone();
+                memories[i].dossiers[on.index()].agent(&target, year, bought[on.index()]);
+                outcomes[i].readings += 1;
             }
-            agents[i] = [false; 6];
-            for on in orders.agents {
-                agents[i][on.index()] = true;
-            }
+            expeditions.extend(brains[i].expeditions(&game, id, &mut memories[i], seats[i]));
         }
         let fought = march(&mut game, expeditions);
         let mut rumours = Vec::new();
@@ -453,9 +403,45 @@ pub fn intendance(
     m.eco = Some(eco);
 }
 
+/// The éclaireur leaves: bought first (unless one waits in reserve), then
+/// the mission paid — or, at a school of letters, both for nothing. `false`
+/// when the coffers cannot.
+pub fn send_scout(k: &mut Kingdom, free: bool) -> bool {
+    if free {
+        return true;
+    }
+    let man = if k.scouts > 0 {
+        0
+    } else {
+        InvestmentType::Scouts.cost()
+    };
+    if k.treasury < SCOUT_PRICE + man {
+        return false;
+    }
+    if k.scouts > 0 {
+        k.scouts -= 1;
+    }
+    k.treasury -= SCOUT_PRICE + man;
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_eclaireur_is_bought_when_none_waits() {
+        let mut k = Kingdom::new(Kingdoms::France);
+        k.treasury = SCOUT_PRICE;
+        assert!(!send_scout(&mut k, false));
+        k.scouts = 1;
+        assert!(send_scout(&mut k, false));
+        assert_eq!((k.scouts, k.treasury), (0, 0));
+        k.treasury = SCOUT_PRICE + InvestmentType::Scouts.cost();
+        assert!(send_scout(&mut k, false));
+        assert_eq!((k.scouts, k.treasury), (0, 0));
+        assert!(send_scout(&mut k, true));
+    }
 
     fn brains(fill: f32) -> Vec<Brain> {
         (0..6)
@@ -500,9 +486,8 @@ mod tests {
             letters,
             ..Table::at(Stage::War, 40)
         };
-        // Free, the éclaireur goes every year (the last one reports after
-        // the game, or never to a court that fell) and the agents write
-        // on top of him.
+        // Free, the éclaireur goes every year the seat stands (never to a
+        // court that fell) and the agents read on top of him.
         for o in play(table, &at(Letters::Scouts)) {
             assert!(o.readings >= o.years - 2, "{o:?}");
         }
@@ -672,10 +657,11 @@ mod tests {
         k.palaces -= 1;
         k.marketplaces += 1;
         let marketplace = progress(&k, Stage::Emperor) - bare;
-        // A palace is one of ten asked, a marketplace one of fourteen.
-        assert!((palace - 1.0 / 10.0 / 7.0).abs() < 1e-6, "{palace}");
+        // A palace is one of ten asked, a marketplace one of fourteen, each
+        // one figure of nine.
+        assert!((palace - 1.0 / 10.0 / 9.0).abs() < 1e-6, "{palace}");
         assert!(
-            (marketplace - 1.0 / 14.0 / 7.0).abs() < 1e-6,
+            (marketplace - 1.0 / 14.0 / 9.0).abs() < 1e-6,
             "{marketplace}"
         );
         k.peasants = 10_000;
@@ -684,6 +670,8 @@ mod tests {
         k.grain_mills = 10;
         k.foundries = 2;
         k.palaces = 12;
+        k.fortifications = 5;
+        k.hospices = 5;
         k.surface = 1_000_000;
         assert!((progress(&k, Stage::Emperor) - WHOLE_ROAD).abs() < 1e-6);
     }
