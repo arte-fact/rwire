@@ -1,5 +1,10 @@
 # Fortifications, béliers, hospice
 
+Règle voisine (septembre 2026) : un royaume qui tombe **autrement que par conquête** — son
+souverain mort, le plus souvent sous le couteau d'une mère affamée — **rend ses terres aux
+barbares** (`EmpireGame::break_up`). Avant, elles disparaissaient de la carte et les sacres
+en manquaient ; seule une annexion fait passer des arpents d'une couronne à l'autre.
+
 État : **fait** (décidé le 10 septembre 2026, avec `RENSEIGNEMENT.md`) : règles d'`empire-lib`,
 web (`apps/empire-web`) ; au terminal (`apps/empire`), fortifications et hospice à l'Intendance,
 mais pas de béliers — son moteur `war.rs` n'a pas de siège. Les
@@ -7,7 +12,7 @@ valeurs en *italique* sont des propositions acceptées par défaut, à ajuster a
 
 ## 1. Fortifications
 
-- Achetées par **dixièmes**, comme le palais : **5 000 le dixième**, plafond 10
+- Achetées par **dixièmes**, comme le palais : **1 000 le dixième**, plafond 10
   (`kingdom.fortifications` en dixièmes).
 - **Bonus de garnison** : la garnison d'aujourd'hui vaut 100 % ; chaque dixième ajoute
   10 %. À 100 % de fortification la garnison se bat à **200 %** — le multiplicateur va
@@ -18,13 +23,13 @@ valeurs en *italique* sont des propositions acceptées par défaut, à ajuster a
 
 ## 2. Béliers
 
-- Achetés à l'Intendance, gardés en stock (`kingdom.rams`) ; *prix : 2 500 le bélier*.
+- Achetés à l'Intendance, gardés en stock (`kingdom.rams`) ; *prix : 1 500 le bélier*.
 - Chaque expédition contre un royaume emmène **0 à N béliers** (nouveau champ de l'ordre ;
   inutiles contre les barbares, qui n'ont pas de murs). On connaît les murs de
   l'adversaire par son éclaireur (`RENSEIGNEMENT.md`) — ou on marche à l'aveugle.
 - Les béliers travaillent **pendant le siège**, pas avant. La bataille se joue en
   échanges (à chaque tour, chaque armée tire un duel contre la garnison) ; **tous les
-  `RAM_PACE` échanges** (*4*), chaque bélier encore debout donne un coup :
+  `RAM_PACE` échanges** (*8*), chaque bélier encore debout donne un coup :
   - le coup **casse un dixième** de fortification, **durablement** (à racheter) ; la
     garnison se bat aussitôt avec le bonus réduit (×2 → ×1,9 → … → ×1) ;
   - au moment du coup, le bélier prend son risque : **escorte = soldats encore debout de
@@ -43,8 +48,8 @@ valeurs en *italique* sont des propositions acceptées par défaut, à ajuster a
   (« 2 béliers · coup dans 2 échanges », « ✕ un bélier détruit ») ; verdict et
   Chronique : « murs abattus : 4 dixièmes · 1 bélier perdu ».
 - Ordre de grandeur : une garnison de 100 face à 60 hommes tient ~40 échanges ; à un coup
-  tous les 4, un bélier seul rase des murs à 100 % sur toute la bataille, trois béliers en
-  un tiers de bataille.
+  tous les 8, un bélier seul abat jusqu'à cinq dixièmes sur toute la bataille — raser des
+  murs à 100 % demande une grosse escorte et plusieurs béliers.
 
 ## 3. Hospice
 

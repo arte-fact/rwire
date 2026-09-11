@@ -4,7 +4,7 @@
 //! seat made of it comes back as an [`Outcome`], scored for evolution.
 
 use crate::brain::{bound_council, decode_intendance, Brain, Intendance, Letters, Memory, Stage};
-use crate::campaign::{apply_battle, march};
+use crate::campaign::{apply_battle, march_quiet, Fought};
 use crate::demography::apply_feed;
 use crate::economy::{apply_economy, apply_taxes, economy_report};
 use crate::events::{check_plague, check_ruler_death, RulerDeathCause};
@@ -23,6 +23,9 @@ pub struct Outcome {
     pub crowned: Option<i32>,
     /// The year the realm fell.
     pub fell: Option<i32>,
+    /// The fall was the starving mother's: the ruler assassinated after a
+    /// famine, not a neighbour's conquest.
+    pub starved_out: bool,
     /// Years sat at the table.
     pub years: i32,
     /// The road to the crown (see [`progress`]), averaged over the years
@@ -45,21 +48,27 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// The score evolution climbs: a crown is worth everything, sooner is
-    /// better; short of it, staying alive, then the road covered. The
-    /// titles on the way are stairs up to it, each paid once, the sooner
-    /// the more. The people count every year, crowned or not: each birth,
+    /// The score evolution climbs: a crown is worth everything, and haste
+    /// is the point — a crown in the fiftieth year is worth twice one in
+    /// the hundred and fortieth; short of it, staying alive, then the road
+    /// covered. The titles on the way are stairs up to it, each paid once,
+    /// the sooner the more. The people count every year, crowned or not: each birth,
     /// each settler and each noble come to court pays, each serf dead of
     /// hunger and each noble gone costs — the crown's figures are reached
-    /// by a court that draws people, and the fall a famine may bring is
-    /// too rare a lesson.
+    /// by a court that draws people. Nothing else is judged: a lost
+    /// battle or the fall itself cost only the years they take (s37 and
+    /// s38 charged them, and nobody was left to look for the crown), and
+    /// the tools are not paid for being used (s39 paid the report read,
+    /// s40 the year of walls, rams and reports, and both were farmed —
+    /// twenty-five men and two hundred rams sent to be beaten, for the
+    /// year's fifth of a point).
     pub fn fitness(&self, longest: i32) -> f32 {
         let road = match self.crowned {
-            Some(year) => 1000.0 - year as f32,
+            Some(year) => CROWN_WORTH - CROWN_HASTE * year as f32,
             None => 100.0 * self.years as f32 / longest as f32 + ROAD_WORTH * self.progress,
         };
-        let prince = self.prince.map_or(0.0, |y| PRINCE_WORTH - y as f32 / 2.0);
-        let king = self.king.map_or(0.0, |y| KING_WORTH - y as f32);
+        let prince = self.prince.map_or(0.0, |y| PRINCE_WORTH - y as f32);
+        let king = self.king.map_or(0.0, |y| KING_WORTH - 2.0 * y as f32);
         let people = BIRTH_WORTH * self.born as f32 + SETTLER_WORTH * self.settled as f32
             - HUNGER_COST * self.starved as f32;
         let court = NOBLE_WORTH * (self.nobles_come - self.nobles_gone) as f32;
@@ -83,13 +92,23 @@ impl Outcome {
     }
 }
 
+/// What the crown is worth the year it is won, less this much a year:
+/// 900 in the fiftieth year, 300 in the last — still above the longest
+/// uncrowned game (a hundred and the road), so that a late crown is never
+/// shunned, but a quick one is what the school is for. (s35 to s46 paid
+/// 1000 less four a year; s47 steepens it, fifty years earlier is worth
+/// three hundred instead of two.)
+const CROWN_WORTH: f32 = 1200.0;
+const CROWN_HASTE: f32 = 6.0;
+
 /// What the road fully covered ([`progress`] at one) is worth against a
 /// hundred for a whole game survived.
 const ROAD_WORTH: f32 = 200.0;
 
-/// What standing as Prince is worth the year it is first reached, less
-/// half a point a year; as King, less a point a year. Stairs up to the
-/// crown, each of the order of a whole road.
+/// What standing as Prince is worth the year it is first reached, less a
+/// point a year; as King, less two points a year — nothing in the last
+/// year. Stairs up to the crown, each of the order of a whole road, and
+/// steep the same way the crown is.
 const PRINCE_WORTH: f32 = 150.0;
 const KING_WORTH: f32 = 300.0;
 
@@ -99,7 +118,9 @@ const KING_WORTH: f32 = 300.0;
 /// worth, well under a crown. A serf dead of hunger costs five settlers,
 /// so that a people drawn by a lavish ration and starved the next year is
 /// a loss, not a harvest; a noble come to court or gone from it weighs
-/// thirty settlers, so the last nobles to the crown pull.
+/// thirty settlers, so the last nobles to the crown pull. (The granary
+/// school, s42, paid the birth and the noble five times this and moved
+/// nothing: from s35's optimum there is no slope towards the grain.)
 const BIRTH_WORTH: f32 = 0.002;
 const SETTLER_WORTH: f32 = 0.01;
 const HUNGER_COST: f32 = 0.05;
@@ -142,6 +163,17 @@ pub struct YearEnd<'a> {
     pub game: &'a EmpireGame,
     pub memories: &'a [Memory; 6],
     pub deaths: [Option<RulerDeathCause>; 6],
+    /// The year's marches as they were fought: targets, armies, spoils, walls.
+    pub fought: &'a [Fought],
+    /// The intelligence each seat actually paid for this year.
+    pub sent: &'a [Sent; 6],
+}
+
+/// One seat's intelligence moves of the year, as they were actually sent.
+#[derive(Debug, Clone, Default)]
+pub struct Sent {
+    pub scout: Option<Kingdoms>,
+    pub agents: Vec<Kingdoms>,
 }
 
 /// How a game is set.
@@ -249,6 +281,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
         // and answer at once, then the expeditions are ordered on what
         // they saw.
         let mut expeditions = Vec::new();
+        let mut sent: [Sent; 6] = Default::default();
         for id in KINGDOMS {
             let k = game.kingdom(id);
             if k.is_dead || outcomes[id.index()].crowned.is_some() {
@@ -261,6 +294,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
                     let target = game.kingdom(on).clone();
                     memories[i].dossiers[on.index()].scout(&target, year);
                     outcomes[i].readings += 1;
+                    sent[i].scout = Some(on);
                 }
             }
             for on in missions.agents {
@@ -278,10 +312,11 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
                 let target = game.kingdom(on).clone();
                 memories[i].dossiers[on.index()].agent(&target, year, bought[on.index()]);
                 outcomes[i].readings += 1;
+                sent[i].agents.push(on);
             }
             expeditions.extend(brains[i].expeditions(&game, id, &mut memories[i], seats[i]));
         }
-        let fought = march(&mut game, expeditions);
+        let fought = march_quiet(&mut game, expeditions);
         let mut rumours = Vec::new();
         for f in &fought {
             apply_battle(&mut game, f);
@@ -317,7 +352,8 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             let starvation = m.demo.as_ref().map_or(0, |d| d.starvation_victims);
             // Plague is weathered; the 1 % death is spared, luck teaches nothing.
             m.plague = check_plague(k).is_some();
-            let death = check_ruler_death(k, starvation, false);
+            let death = check_ruler_death(&mut game, id, starvation, false);
+            let k = game.kingdom(id);
             outcomes[i].years = year;
             if let Some(d) = &m.demo {
                 let o = &mut outcomes[i];
@@ -333,6 +369,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             let title = k.title();
             if death.is_some() {
                 outcomes[i].fell = Some(year);
+                outcomes[i].starved_out = death == Some(RulerDeathCause::StarvationAssassination);
             } else if title == PlayerTitle::Emperor {
                 outcomes[i].crowned = Some(year);
             }
@@ -344,6 +381,8 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             }
         }
         watch(YearEnd {
+            fought: &fought,
+            sent: &sent,
             game: &game,
             memories: &memories,
             deaths,
@@ -527,16 +566,31 @@ mod tests {
             ..Outcome::default()
         };
         let famine = Outcome {
-            starved: 400,
+            starved: 1000,
             ..fed
         };
+        // A thousand starved cost a crown eight of its years.
         let later = Outcome {
-            crowned: Some(40),
-            years: 40,
+            crowned: Some(38),
+            years: 38,
             ..fed
         };
         assert!(famine.fitness(150) < fed.fitness(150));
         assert!(famine.fitness(150) < later.fitness(150));
+    }
+
+    #[test]
+    fn a_fall_costs_only_its_years() {
+        let stood = Outcome {
+            years: 40,
+            progress: 0.4,
+            ..Outcome::default()
+        };
+        let fell = Outcome {
+            fell: Some(40),
+            ..stood
+        };
+        assert_eq!(fell.fitness(150), stood.fitness(150));
     }
 
     #[test]

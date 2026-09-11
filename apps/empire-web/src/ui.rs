@@ -590,7 +590,7 @@ fn fate_fr(k: &Kingdom) -> String {
 }
 
 /// "⚜ France · Roy Hugues" for the kingdom lists; `suffix` follows the name
-/// in the muted run (" (ordinateur)").
+/// in the muted run (" (ordinateur, le soldat)").
 fn ruler(k: &Kingdom, suffix: &str) -> ElementBuilder {
     el(El::Span).st([St::MinW0]).append([
         rank_mark(k, 15, St::TextMuted).st([St::MrXs]),
@@ -1322,10 +1322,10 @@ fn waiting_row(room: &Room, id: Kingdoms, badge: Badge) -> ElementBuilder {
         .append([
             ruler(
                 k,
-                if room.is_computer(id) {
-                    " (ordinateur)"
+                &if room.is_computer(id) {
+                    format!(" (ordinateur, {})", room.school(id).name)
                 } else {
-                    ""
+                    String::new()
                 },
             ),
             badge.build(),
@@ -5462,9 +5462,9 @@ fn kingdom_row(t: T, id: Kingdoms, target: Option<Kingdoms>) -> ElementBuilder {
                     o.name(),
                     k.player_name,
                     if room.is_computer(o) {
-                        " · ordinateur"
+                        format!(" · ordinateur, {}", room.school(o).name)
                     } else {
-                        ""
+                        String::new()
                     }
                 ),
                 if let Some(r) = report {

@@ -15,6 +15,7 @@ use std::time::Instant;
 
 use empire_lib::arena::{play, watch, Outcome, Table, YearEnd};
 use empire_lib::brain::{Brain, Letters, Shape, Stage};
+use empire_lib::kingdom::{Kingdoms, KINGDOMS};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rayon::prelude::*;
@@ -358,6 +359,7 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
     sorted.sort_by(|a, b| b.total_cmp(a));
     let crowned: Vec<i32> = outcomes.iter().filter_map(|o| o.crowned).collect();
     let fell = outcomes.iter().filter(|o| o.fell.is_some()).count();
+    let starved_out = outcomes.iter().filter(|o| o.starved_out).count();
     let years: f32 = outcomes.iter().map(|o| o.years as f32).sum::<f32>() / outcomes.len() as f32;
     let progress: f32 = outcomes.iter().map(|o| o.progress).sum::<f32>() / outcomes.len() as f32;
     let seats = outcomes.len() as f32;
@@ -372,7 +374,7 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
     crown_years.sort_unstable();
     let pct = |n: usize| 100.0 * n as f32 / outcomes.len() as f32;
     format!(
-        "gen {generation:4} · best {:8.1} · elite {:8.1} · median {:8.1} · years {:5.1} · road {:4.2} · starved {:5.0} · nobles {:+5.1} · read {:4.1} · fell {:4.1}% · prince {:4.1}% · king {:4.1}% · crowned {:4.1}%{} · {:.1}s",
+        "gen {generation:4} · best {:8.1} · elite {:8.1} · median {:8.1} · years {:5.1} · road {:4.2} · starved {:5.0} · nobles {:+5.1} · read {:4.1} · fell {:4.1}% (mother {:4.1}%) · prince {:4.1}% · king {:4.1}% · crowned {:4.1}%{} · {:.1}s",
         sorted[0],
         sorted[..sorted.len().min(100)].iter().sum::<f32>() / sorted.len().min(100) as f32,
         sorted[sorted.len() / 2],
@@ -382,6 +384,7 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
         nobles,
         readings,
         pct(fell),
+        pct(starved_out),
         pct(outcomes.iter().filter(|o| o.prince.is_some()).count()),
         pct(outcomes.iter().filter(|o| o.king.is_some()).count()),
         pct(crowned.len()),
@@ -394,63 +397,171 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
     )
 }
 
-/// One table of the best genome, year by year, as France lived it.
+/// One table of the best genome, year by year. Clones around the table
+/// unless `--against` seats other schools: with exactly five it is a
+/// match — one of each, in order, and every seat is told — otherwise
+/// they are drawn at random and only France is.
 fn show(best: &[f32], a: &Args) {
     let b = Brain::from_genome(best);
     let rivals = rivals(a);
-    // Clones around the table unless `--against` seats other schools.
-    let seats = (!rivals.is_empty()).then(|| seat_rivals(&rivals));
+    let a_match = rivals.len() == 5;
+    let seats: Option<[usize; 6]> = match rivals.len() {
+        0 => None,
+        5 => Some(std::array::from_fn(|i| i.saturating_sub(1))),
+        _ => Some(seat_rivals(&rivals)),
+    };
     let table = a.table_of(|i| seats.filter(|_| i > 0).map(|s| rivals[s[i]].1));
     let brain = |i: usize| match seats {
         Some(s) if i > 0 => &rivals[s[i]].0,
         _ => &b,
     };
     let (o1, o2, o3, o4, o5) = (brain(1), brain(2), brain(3), brain(4), brain(5));
+    let told = if a_match { 0..6 } else { 0..1 };
+    if let Some(s) = seats {
+        let legend: Vec<String> = KINGDOMS
+            .iter()
+            .enumerate()
+            .map(|(i, k)| {
+                let school = if i == 0 { "--from" } else { &a.against[s[i]] };
+                format!("{k:?}: {school}")
+            })
+            .collect();
+        println!("{}", legend.join(" · "));
+    }
     println!(
-        "year wthr  surface peasants nobles merch soldiers eff treasury   stocks  harvest rat  peas sold taxes     starved title  listed@px bought fair mill fndr ship pal wall hosp rams"
+        "seat     year wthr  surface peasants nobles merch soldiers eff treasury   stocks  harvest rat  peas sold taxes     starved title  listed@px bought fair mill fndr ship pal wall hosp rams"
     );
     let outcomes = watch([&b, o1, o2, o3, o4, o5], &table, |y: YearEnd| {
-        let k = &y.game.kingdoms[0];
-        let m = &y.memories[0];
-        let d = m.demo.as_ref().unwrap();
-        let i = m.intendance.as_ref().unwrap();
-        let c = &i.council;
-        println!(
-            "{:4} {:4} {:8} {:8} {:6} {:5} {:8} {:3} {:8} {:8} {:8} {:3}  {:4} {:4} {:2}/{:2}/{:2} {:7} {:6} {:6}@{:<3} {:6} {:4} {:4} {:4} {:4} {:3} {:4} {:4} {:4}{}",
-            y.game.year,
-            k.weather as u8,
-            k.surface,
-            k.peasants,
-            k.nobles,
-            k.merchants,
-            k.soldiers,
-            k.soldiers_efficiency,
-            k.treasury,
-            k.grain_stocks,
-            k.grain_harvest,
-            k.rats_loss_rate,
-            c.peasants_ration,
-            c.soldiers_ration,
-            c.taxes.income,
-            c.taxes.sales,
-            c.taxes.customs,
-            d.starvation_victims,
-            format!("{:?}", k.title()),
-            i.listed.map_or(0, |(n, _)| n),
-            i.listed.map_or(0, |(_, p)| p),
-            i.bought.map_or(0, |(_, n)| n),
-            k.marketplaces,
-            k.grain_mills,
-            k.foundries,
-            k.shipyards,
-            k.palaces,
-            k.fortifications,
-            k.hospices,
-            k.rams,
-            y.deaths[0].map(|c| format!("  † {c:?}")).unwrap_or_default()
-        );
+        for seat in told.clone() {
+            row(&y, seat);
+            tell(&y, seat);
+        }
+        if a_match {
+            println!();
+        }
     });
-    println!("{:?}", outcomes[0]);
+    for seat in told {
+        println!("{:?}: {:?}", KINGDOMS[seat], outcomes[seat]);
+    }
+}
+
+/// A seat's state at the end of the year, on one row.
+fn row(y: &YearEnd, seat: usize) {
+    let k = &y.game.kingdoms[seat];
+    let m = &y.memories[seat];
+    let d = m.demo.as_ref().unwrap();
+    let i = m.intendance.as_ref().unwrap();
+    let c = &i.council;
+    println!(
+        "{:<8} {:4} {:4} {:8} {:8} {:6} {:5} {:8} {:3} {:8} {:8} {:8} {:3}  {:4} {:4} {:2}/{:2}/{:2} {:7} {:6} {:6}@{:<3} {:6} {:4} {:4} {:4} {:4} {:3} {:4} {:4} {:4}{}",
+        format!("{:?}", k.id),
+        y.game.year,
+        k.weather as u8,
+        k.surface,
+        k.peasants,
+        k.nobles,
+        k.merchants,
+        k.soldiers,
+        k.soldiers_efficiency,
+        k.treasury,
+        k.grain_stocks,
+        k.grain_harvest,
+        k.rats_loss_rate,
+        c.peasants_ration,
+        c.soldiers_ration,
+        c.taxes.income,
+        c.taxes.sales,
+        c.taxes.customs,
+        d.starvation_victims,
+        format!("{:?}", k.title()),
+        i.listed.map_or(0, |(n, _)| n),
+        i.listed.map_or(0, |(_, p)| p),
+        i.bought.map_or(0, |(_, n)| n),
+        k.marketplaces,
+        k.grain_mills,
+        k.foundries,
+        k.shipyards,
+        k.palaces,
+        k.fortifications,
+        k.hospices,
+        k.rams,
+        y.deaths[seat].map(|c| format!("  † {c:?}")).unwrap_or_default()
+    );
+}
+
+/// A seat's moves of the year, told under its row: purchases,
+/// intelligence, marches fought and sieges suffered.
+fn tell(y: &YearEnd, seat: usize) {
+    let us = KINGDOMS[seat];
+    let m = &y.memories[seat];
+    if let Some(i) = &m.intendance {
+        let buys: Vec<String> = i
+            .purchases
+            .iter()
+            .map(|(what, n)| format!("{what:?} +{n}"))
+            .collect();
+        if !buys.is_empty() {
+            println!("     ↳ buys: {}", buys.join(" · "));
+        }
+        if i.land_sold > 0 {
+            println!("     ↳ sells {} arpents to the barbarians", i.land_sold);
+        }
+    }
+    let sent = &y.sent[seat];
+    if sent.scout.is_some() || !sent.agents.is_empty() {
+        let scout = sent
+            .scout
+            .map_or(String::new(), |on| format!("scout→{on:?}"));
+        let agents = if sent.agents.is_empty() {
+            String::new()
+        } else {
+            format!("agents→{:?}", sent.agents)
+        };
+        println!("     ↳ intel: {scout} {agents}");
+    }
+    for f in y.fought {
+        let against =
+            |t: Option<Kingdoms>| t.map_or("the barbarians".to_string(), |t| format!("{t:?}"));
+        for a in f.armies().iter().filter(|a| a.attacker == us) {
+            let s = a.spoils();
+            let rams = if a.rams > 0 {
+                format!(" + {} rams ({} broken)", a.rams, a.rams_broken)
+            } else {
+                String::new()
+            };
+            println!(
+                "     ↳ marches on {} with {}{rams}: {} · +{} arpents, +{} grain, +{} gold · {} men lost · killed {} rallied {}",
+                against(f.target),
+                a.sent,
+                if a.victory { "victory" } else { "beaten" },
+                s.arpents,
+                s.grain,
+                s.treasury,
+                a.lost(),
+                s.killed.total(),
+                s.rallied.total(),
+            );
+        }
+        if f.target == Some(us) {
+            let r = &f.result;
+            let lost: i32 = r.armies.iter().map(|a| a.spoils().arpents).sum();
+            let by: Vec<String> = r
+                .armies
+                .iter()
+                .map(|a| format!("{:?} ({})", a.attacker, a.sent))
+                .collect();
+            println!(
+                "     ↳ besieged by {}: garrison {}→{} · walls {}→{} · {} arpents lost{}",
+                by.join(" and "),
+                r.garrison_start,
+                r.garrison_left,
+                r.walls_start,
+                r.walls_left,
+                lost,
+                r.annexed_by.map(|_| " · ANNEXED").unwrap_or_default(),
+            );
+        }
+    }
 }
 
 /// The crown years and the falls of a set of seats.
@@ -458,10 +569,11 @@ fn tally(label: &str, outcomes: &[Outcome], a: &Args) {
     let mut crowned: Vec<i32> = outcomes.iter().filter_map(|o| o.crowned).collect();
     crowned.sort_unstable();
     let fell = outcomes.iter().filter(|o| o.fell.is_some()).count();
+    let starved_out = outcomes.iter().filter(|o| o.starved_out).count();
     let pct = |n: usize| 100.0 * n as f32 / outcomes.len() as f32;
     let at = |q: usize| crowned.get(crowned.len() * q / 100).copied().unwrap_or(0);
     println!(
-        "{label} · {} seats · prince {:.1}% · king {:.1}% · crowned {:.1}% (years: p10 {} · median {} · p90 {}) · fell {:.1}% · starved {:.0}/seat · nobles {:+.1}/seat · read {:.1}/seat · fitness {:.1}",
+        "{label} · {} seats · prince {:.1}% · king {:.1}% · crowned {:.1}% (years: p10 {} · median {} · p90 {}) · fell {:.1}% (mother {:.1}%) · starved {:.0}/seat · nobles {:+.1}/seat · read {:.1}/seat · fitness {:.1}",
         outcomes.len(),
         pct(outcomes.iter().filter(|o| o.prince.is_some()).count()),
         pct(outcomes.iter().filter(|o| o.king.is_some()).count()),
@@ -470,6 +582,7 @@ fn tally(label: &str, outcomes: &[Outcome], a: &Args) {
         at(50),
         at(90),
         pct(fell),
+        pct(starved_out),
         outcomes.iter().map(|o| o.starved as f32).sum::<f32>() / outcomes.len() as f32,
         outcomes.iter().map(|o| (o.nobles_come - o.nobles_gone) as f32).sum::<f32>()
             / outcomes.len() as f32,

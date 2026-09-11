@@ -6,8 +6,8 @@
 //! land the barbarians have left. Sending men costs gold and grain, per man, when they leave.
 
 use crate::front::{
-    apply_front, deciles, forecast_front, simulate_front, Army, Forecast, FrontResult, Host, Line,
-    People, Round, Stand,
+    apply_front, deciles, fight, forecast_front, Army, Forecast, FrontResult, Host, Line, People,
+    Round, Stand,
 };
 use crate::game::EmpireGame;
 use crate::kingdom::{Kingdom, Kingdoms};
@@ -120,6 +120,23 @@ pub fn march(
     game: &mut EmpireGame,
     expeditions: impl IntoIterator<Item = Expedition>,
 ) -> Vec<Fought> {
+    march_with(game, expeditions, true)
+}
+
+/// [`march`], without keeping the rounds: the training tables never replay
+/// a battle, and recording clones every army at every blow.
+pub fn march_quiet(
+    game: &mut EmpireGame,
+    expeditions: impl IntoIterator<Item = Expedition>,
+) -> Vec<Fought> {
+    march_with(game, expeditions, false)
+}
+
+fn march_with(
+    game: &mut EmpireGame,
+    expeditions: impl IntoIterator<Item = Expedition>,
+    record: bool,
+) -> Vec<Fought> {
     let mut by_realm: Vec<Vec<Expedition>> = Vec::new();
     for e in expeditions {
         match by_realm.iter_mut().find(|v| v[0].attacker == e.attacker) {
@@ -165,14 +182,14 @@ pub fn march(
                 let hosts: Vec<Host> = armies.iter().map(Expedition::host).collect();
                 fought.push(Fought {
                     target,
-                    result: simulate_front(&field, t, &hosts),
+                    result: fight(&field, t, &hosts, record),
                 });
             }
             // Every barbarian expedition is its own front, taking at most
             // what the ones before left.
             None => {
                 for e in armies {
-                    let result = raid(&field, e);
+                    let result = raid(&field, e, record);
                     field.barbarians_surface -= result.spoils().arpents;
                     fought.push(Fought { target, result });
                 }
@@ -185,41 +202,50 @@ pub fn march(
 /// An expedition against the barbarians, told as a front with one army on a
 /// bare line of what land the barbarians have left; taken whole, the
 /// barbarians flee (an expedition arriving after them finds nothing).
-fn raid(field: &EmpireGame, e: Expedition) -> FrontResult {
+fn raid(field: &EmpireGame, e: Expedition, record: bool) -> FrontResult {
     let land = field.barbarians_surface;
     let mut frames = Vec::new();
-    let r = simulate_barbarian_battle(field, e.attacker, e.soldiers, |p| frames.push(p.clone()));
-    let band = frames
-        .iter()
-        .map(|f| f.defender_soldiers)
-        .max()
-        .unwrap_or(0);
+    let mut band = None;
+    let mut band_left = None;
+    let mut n_frames = 0usize;
+    let r = simulate_barbarian_battle(field, e.attacker, e.soldiers, |p| {
+        band = Some(band.unwrap_or(i32::MIN).max(p.defender_soldiers));
+        band_left = Some(p.defender_soldiers.max(0));
+        n_frames += 1;
+        if record {
+            frames.push(p.clone());
+        }
+    });
+    let band = band.unwrap_or(0);
     let advance = if r.attacker_won {
         r.surface_conquered
     } else {
         0
     };
-    let last = frames.len().saturating_sub(1).max(1);
-    let mut rounds = vec![Round {
-        garrison: band,
-        walls: 0,
-        exchange: 0,
-        armies: vec![Stand {
-            men: e.soldiers,
-            ..Stand::default()
-        }],
-    }];
-    rounds.extend(frames.iter().enumerate().map(|(i, f)| Round {
-        garrison: f.defender_soldiers.max(0),
-        walls: 0,
-        exchange: i as i32 + 1,
-        armies: vec![Stand {
-            men: f.attacker_soldiers.max(0),
-            advance: (advance as i64 * i as i64 / last as i64) as i32,
-            ..Stand::default()
-        }],
-    }));
-    let band_left = frames.last().map_or(band, |f| f.defender_soldiers.max(0));
+    let last = n_frames.saturating_sub(1).max(1);
+    let mut rounds = Vec::new();
+    if record {
+        rounds.push(Round {
+            garrison: band,
+            walls: 0,
+            exchange: 0,
+            armies: vec![Stand {
+                men: e.soldiers,
+                ..Stand::default()
+            }],
+        });
+        rounds.extend(frames.iter().enumerate().map(|(i, f)| Round {
+            garrison: f.defender_soldiers.max(0),
+            walls: 0,
+            exchange: i as i32 + 1,
+            armies: vec![Stand {
+                men: f.attacker_soldiers.max(0),
+                advance: (advance as i64 * i as i64 / last as i64) as i32,
+                ..Stand::default()
+            }],
+        }));
+    }
+    let band_left = band_left.unwrap_or(band);
     FrontResult {
         armies: vec![Army {
             attacker: e.attacker,

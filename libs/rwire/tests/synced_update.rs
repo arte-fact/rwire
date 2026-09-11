@@ -60,8 +60,15 @@ fn test_handler_deduplication_by_fn_id() {
 
 #[test]
 fn test_handler_fn_id_different_functions() {
-    fn handler_a(_state: &mut TestState) {}
-    fn handler_b(_state: &mut TestState) {}
+    // The bodies must differ: two identical functions may be folded to one
+    // address by the release optimizer (ICF), and the fn-pointer fallback id
+    // only promises distinctness for genuinely distinct code.
+    fn handler_a(_state: &mut TestState) {
+        std::hint::black_box(1);
+    }
+    fn handler_b(_state: &mut TestState) {
+        std::hint::black_box(2);
+    }
 
     let h1 = HandlerFn::new(handler_a);
     let h2 = HandlerFn::new(handler_b);

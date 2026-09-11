@@ -1,7 +1,8 @@
 use rwire::State;
 use serde::{Deserialize, Serialize};
 
-use crate::kingdom::{Kingdom, Kingdoms, KINGDOMS};
+use crate::events::RulerDeathCause;
+use crate::kingdom::{Fate, Kingdom, Kingdoms, KINGDOMS};
 use crate::weather::Weather;
 
 /// Complete state of one Empire game: the calendar, the barbarian lands and
@@ -48,6 +49,17 @@ impl EmpireGame {
             .filter(|k| !k.is_dead)
             .map(|k| k.id)
             .collect()
+    }
+
+    /// The ruler dead, the realm breaks up: nobody holds its land, which
+    /// goes back to the barbarians — a conqueror's spoils are its
+    /// neighbour's, a widow's realm is everyone's — and the seat is out of
+    /// the game.
+    pub fn break_up(&mut self, id: Kingdoms, cause: RulerDeathCause) {
+        let k = self.kingdom_mut(id);
+        let surface = std::mem::take(&mut k.surface);
+        k.fall(Fate::RulerDied(cause));
+        self.barbarians_surface += surface;
     }
 
     /// Roll the year's weather, a sky for every realm.

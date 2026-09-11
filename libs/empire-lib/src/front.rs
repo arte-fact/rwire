@@ -40,7 +40,7 @@ pub const TENTHS: i32 = crate::investments::TENTHS;
 
 /// Every this many exchanges of blows before the garrison, each ram still
 /// standing knocks a tenth off the walls.
-pub const RAM_PACE: i32 = 4;
+pub const RAM_PACE: i32 = 8;
 
 /// Men of the army standing by each ram for it to be safe: below, every
 /// missing man is a chance in ten of losing the ram at its blow.
@@ -413,24 +413,16 @@ impl FrontResult {
     }
 }
 
-/// Who an army meets crossing a stretch of its line, frontier end first.
-fn met(line: &Line, from: i32, to: i32) -> Vec<Met> {
+/// Who an army meets crossing a stretch of its line: how many of each,
+/// duelled frontier end first — peasants, then merchants, then nobles.
+fn met(line: &Line, from: i32, to: i32) -> People {
     let a = line.people(from);
     let b = line.people(to);
-    let mut v = Vec::new();
-    v.extend(std::iter::repeat_n(
-        Met::Peasant,
-        (b.peasants - a.peasants) as usize,
-    ));
-    v.extend(std::iter::repeat_n(
-        Met::Merchant,
-        (b.merchants - a.merchants) as usize,
-    ));
-    v.extend(std::iter::repeat_n(
-        Met::Noble,
-        (b.nobles - a.nobles) as usize,
-    ));
-    v
+    People {
+        peasants: b.peasants - a.peasants,
+        merchants: b.merchants - a.merchants,
+        nobles: b.nobles - a.nobles,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -524,7 +516,12 @@ pub fn forecast_front<'a>(
 }
 
 /// The fight itself; `record` keeps every round for the replay.
-fn fight(game: &EmpireGame, defender: Kingdoms, hosts: &[Host], record: bool) -> FrontResult {
+pub(crate) fn fight(
+    game: &EmpireGame,
+    defender: Kingdoms,
+    hosts: &[Host],
+    record: bool,
+) -> FrontResult {
     let d = game.kingdom(defender);
     let n = hosts.len();
     let lines = lay_out(d, n);
@@ -626,20 +623,28 @@ fn fight(game: &EmpireGame, defender: Kingdoms, hosts: &[Host], record: bool) ->
             let from = stands[i].advance;
             let to = (from + gained).min(reach(i, &stands));
             let people = met(&lines[i], from, to);
+            let total = people.total();
             let mut reached = to;
-            for (k, who) in people.iter().enumerate() {
-                if random(0, 3) == 0 {
-                    who.count(&mut stands[i].rallied);
-                } else if random(1, strength[i]) > random(1, who.ardour(d)) {
-                    who.count(&mut stands[i].killed);
-                } else {
-                    stands[i].men -= 1;
-                    if stands[i].men == 0 {
-                        // Fallen at this one's door: the rest of the stretch stands.
-                        reached =
-                            from + ((to - from) as i64 * k as i64 / people.len() as i64) as i32;
-                        break;
+            let mut k = 0;
+            'duels: for (who, met) in [
+                (Met::Peasant, people.peasants),
+                (Met::Merchant, people.merchants),
+                (Met::Noble, people.nobles),
+            ] {
+                for _ in 0..met.max(0) {
+                    if random(0, 3) == 0 {
+                        who.count(&mut stands[i].rallied);
+                    } else if random(1, strength[i]) > random(1, who.ardour(d)) {
+                        who.count(&mut stands[i].killed);
+                    } else {
+                        stands[i].men -= 1;
+                        if stands[i].men == 0 {
+                            // Fallen at this one's door: the rest of the stretch stands.
+                            reached = from + ((to - from) as i64 * k as i64 / total as i64) as i32;
+                            break 'duels;
+                        }
                     }
+                    k += 1;
                 }
             }
             stands[i].advance = reached;
@@ -862,14 +867,11 @@ mod tests {
         let line = lay_out(&k, 1).remove(0);
         // Serfs are spread evenly, nobles live by the capital.
         let near = met(&line, 0, 1000);
-        assert_eq!(near.len(), 204);
-        assert!(near.iter().all(|m| !matches!(m, Met::Noble)));
+        assert_eq!(near.total(), 204);
+        assert_eq!(near.nobles, 0);
         let far = met(&line, 9000, 10_000);
-        assert_eq!(
-            far.iter().filter(|m| matches!(m, Met::Noble)).count(),
-            10 - 8
-        );
-        assert!(met(&line, 500, 500).is_empty());
+        assert_eq!(far.nobles, 10 - 8);
+        assert_eq!(met(&line, 500, 500).total(), 0);
     }
 
     #[test]

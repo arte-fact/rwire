@@ -30,9 +30,9 @@ impl InvestmentType {
             InvestmentType::Shipyards => 8000,
             InvestmentType::Soldiers => 8,
             InvestmentType::Palaces => 5000,
-            InvestmentType::Fortifications => 5000,
+            InvestmentType::Fortifications => 1000,
             InvestmentType::Hospices => 5000,
-            InvestmentType::Rams => 2500,
+            InvestmentType::Rams => 1500,
             InvestmentType::Scouts => 16,
         }
     }
@@ -258,7 +258,7 @@ mod tests {
         assert!(!apply_investment(&mut k, InvestmentType::Fortifications, 3).success);
         assert!(apply_investment(&mut k, InvestmentType::Fortifications, 2).success);
         assert_eq!(k.fortifications, 10);
-        assert_eq!(k.treasury, 90_000);
+        assert_eq!(k.treasury, 98_000);
         assert_eq!(InvestmentType::Hospices.max_investment(&k), 10);
         assert_eq!(InvestmentType::Palaces.max_investment(&k), 10);
     }
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn rams_and_scouts_go_to_stock() {
         let mut k = Kingdom::new(Kingdoms::France);
-        k.treasury = 5016;
+        k.treasury = 3016;
         assert!(apply_investment(&mut k, InvestmentType::Rams, 2).success);
         assert!(apply_investment(&mut k, InvestmentType::Scouts, 1).success);
         assert_eq!((k.rams, k.scouts, k.treasury), (2, 1, 0));

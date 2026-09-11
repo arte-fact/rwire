@@ -103,15 +103,17 @@ fn title_level(t: PlayerTitle) -> f32 {
 /// Where the realm stands on each requirement of its next rank, as a share
 /// of what is asked (1 once reached); all ones for an Emperor.
 fn criteria(k: &Kingdom) -> [f32; 9] {
-    let Some(next) = k.title().next() else {
+    let Some(r) = k.title().next().and_then(|next| next.requirements()) else {
         return [1.0; 9];
     };
-    let progress = k.progress(next);
     std::array::from_fn(|i| {
-        progress
-            .iter()
-            .find(|c| c.what == Requirement::ALL[i])
-            .map_or(1.0, |c| share(c.have, c.need).min(1.0))
+        let what = Requirement::ALL[i];
+        let need = what.need(r);
+        if need <= 0 {
+            1.0
+        } else {
+            share(k.have(what), need).min(1.0)
+        }
     })
 }
 
@@ -121,7 +123,7 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
     let kingdoms = &game.kingdoms;
     let year = game.year;
     let k = &kingdoms[id.index()];
-    let mut v = Vec::with_capacity(SIGHT);
+    let mut v = Vec::with_capacity(B_IN);
     let needs = k.peasants_grain_needs() + k.soldiers_grain_needs();
     v.extend([
         year as f32 / 100.0,
@@ -247,6 +249,20 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
 // -- the networks ------------------------------------------------------------
 
 /// A dense network with one hidden layer: `tanh` inside, sigmoids out.
+/// `a · b`, summed on eight lanes so the loop vectorizes: strict left-to-right
+/// float addition would forbid SIMD, and this dot is where training lives.
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let mut lanes = [0.0f32; 8];
+    let (a8, a_tail) = a.split_at(a.len() / 8 * 8);
+    let (b8, b_tail) = b.split_at(a8.len());
+    for (a, b) in a8.chunks_exact(8).zip(b8.chunks_exact(8)) {
+        for ((l, a), b) in lanes.iter_mut().zip(a).zip(b) {
+            *l += a * b;
+        }
+    }
+    lanes.iter().sum::<f32>() + a_tail.iter().zip(b_tail).map(|(a, b)| a * b).sum::<f32>()
+}
+
 #[derive(Debug, Clone)]
 pub struct Net {
     inputs: usize,
@@ -281,40 +297,33 @@ impl Net {
         debug_assert_eq!(x.len(), self.inputs);
         let (w1, w2) = self.w.split_at((self.inputs + 1) * HIDDEN);
         let mut h = [0.0f32; HIDDEN];
-        for (j, hj) in h.iter_mut().enumerate() {
-            let row = &w1[j * (self.inputs + 1)..(j + 1) * (self.inputs + 1)];
-            let mut s = row[self.inputs];
-            for (wi, xi) in row[..self.inputs].iter().zip(x) {
-                s += wi * xi;
-            }
-            *hj = s.tanh();
+        for (hj, row) in h.iter_mut().zip(w1.chunks_exact(self.inputs + 1)) {
+            *hj = (dot(&row[..self.inputs], x) + row[self.inputs]).tanh();
         }
         (0..self.outputs)
             .map(|o| {
                 let row = &w2[o * (HIDDEN + 1)..(o + 1) * (HIDDEN + 1)];
-                let s = row[HIDDEN]
-                    + row[..HIDDEN]
-                        .iter()
-                        .zip(&h)
-                        .map(|(w, h)| w * h)
-                        .sum::<f32>();
+                let s = dot(&row[..HIDDEN], &h) + row[HIDDEN];
                 1.0 / (1.0 + (-s).exp())
             })
             .collect()
     }
 }
 
-/// The two networks of one computer; [`Brain::schooled`] by default.
+/// The two networks of one computer; the computers sit down with one of
+/// the [`Brain::schools`].
 #[derive(Debug, Clone)]
 pub struct Brain {
     pub intendance: Net,
     pub exterieur: Net,
 }
 
-impl Default for Brain {
-    fn default() -> Brain {
-        Brain::schooled().clone()
-    }
+/// A brain the computers sit down with, and the temperament the heralds
+/// know it by.
+#[derive(Debug)]
+pub struct School {
+    pub name: &'static str,
+    pub brain: Brain,
 }
 
 /// The widths a genome is laid out for: the seigneur's own entries of the
@@ -426,19 +435,34 @@ impl Brain {
         grown
     }
 
-    /// The brain the computers sit down with: schooled at the arena
-    /// (`apps/empire-train`) from scratch up to the war rung — 3 500 generations, six
-    /// tables of six, a hall of eight, a rank cost of forty, no letters —
-    /// and kept as `brains/schooled.f32`, its genome in little-endian floats.
-    pub fn schooled() -> &'static Brain {
-        static SCHOOLED: LazyLock<Brain> = LazyLock::new(|| {
-            let genome: Vec<f32> = include_bytes!("../brains/schooled.f32")
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                .collect();
-            Brain::from_genome(&genome)
+    /// The brains the computers sit down with: the four sisters of s46,
+    /// schooled at the arena (`apps/empire-train`) from scratch against
+    /// s35 — 300 generations, six tables of six, no hall, a rank cost of
+    /// forty, no letters — and kept as `brains/s46a.f32` to `s46d.f32`,
+    /// their genomes in little-endian floats. One recipe, four
+    /// temperaments: the soldier buys men and neglects the walls, the
+    /// builder hoards grain, mills and rams, the garrison keeps the
+    /// largest standing army, the shopkeeper opens her market first and
+    /// marches the most.
+    pub fn schools() -> &'static [School; 4] {
+        static SCHOOLS: LazyLock<[School; 4]> = LazyLock::new(|| {
+            let school = |name, bytes: &[u8]| School {
+                name,
+                brain: Brain::from_genome(
+                    &bytes
+                        .chunks_exact(4)
+                        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                        .collect::<Vec<f32>>(),
+                ),
+            };
+            [
+                school("le soldat", include_bytes!("../brains/s46a.f32")),
+                school("la bâtisseuse", include_bytes!("../brains/s46b.f32")),
+                school("la garnison", include_bytes!("../brains/s46c.f32")),
+                school("la boutiquière", include_bytes!("../brains/s46d.f32")),
+            ]
         });
-        &SCHOOLED
+        &SCHOOLS
     }
 
     /// The Intendance's answer as the year opens, kept in `m` for the
@@ -992,9 +1016,14 @@ mod tests {
                 }
             })
             .collect();
+        // The zeros padded into the wider row land on other summing lanes,
+        // so the answers match to float noise, not to the bit.
+        let close = |a: &[f32], b: &[f32]| {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5)
+        };
         let a_new = brain.intendance.forward(&full_zeroed);
         let a_old = old_a.forward(&narrow);
-        assert_eq!(&a_new[..was.a_out], &a_old[..]);
+        assert!(close(&a_new[..was.a_out], &a_old[..]));
         assert!(a_new[was.a_out..].iter().all(|&y| y == 0.5));
         let mut x_new = full_zeroed.clone();
         x_new.extend(&a_old);
@@ -1002,7 +1031,7 @@ mod tests {
         let mut x_old = narrow.clone();
         x_old.extend(&a_old);
         let b_new = brain.exterieur.forward(&x_new);
-        assert_eq!(&b_new[..was.b_out], &old_b.forward(&x_old)[..]);
+        assert!(close(&b_new[..was.b_out], &old_b.forward(&x_old)[..]));
         assert_eq!(b_new[was.b_out], 0.5);
         assert_eq!(Brain::grown(&grown, Shape::NOW), grown);
     }

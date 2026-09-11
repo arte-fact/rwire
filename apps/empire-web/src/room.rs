@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use empire_lib::arena;
-use empire_lib::brain::{self, Brain, Letters, Memory};
+use empire_lib::brain::{self, Brain, Letters, Memory, School};
 use empire_lib::campaign::{
     apply_battle, expedition_cost, forecast, march, Expedition, Fought, EXPEDITION_GOLD_PER_MAN,
     EXPEDITION_GRAIN_PER_MAN, FIRST_WAR_YEAR,
@@ -24,6 +24,7 @@ use empire_lib::trade::{
     MAX_GRAIN_PRICE, MIN_GRAIN_PRICE,
 };
 use empire_lib::{EmpireGame, Fate, Kingdom, Kingdoms, PlayerTitle, KINGDOMS};
+use rand::seq::SliceRandom;
 use rand::Rng;
 use rwire::{handler, EventContext, HandlerSpec, State};
 
@@ -645,8 +646,26 @@ pub struct Room {
     /// Bushels bought this year, by buyer then seller: what the agents read
     /// in the registers.
     bought: [[i32; 6]; 6],
-    /// The brain every computer seat plays with.
-    pub brain: Brain,
+    /// The school each seat plays with when a computer holds it.
+    pub schools: Schooling,
+}
+
+/// Which of the [`Brain::schools`] each seat plays with when a computer
+/// holds it: the four sisters once each and two of them again, shuffled.
+#[derive(Clone, Copy)]
+pub struct Schooling(pub [&'static School; 6]);
+
+impl Default for Schooling {
+    fn default() -> Schooling {
+        let mut rng = rand::thread_rng();
+        let schools = Brain::schools();
+        let mut seats: [&'static School; 6] = std::array::from_fn(|i| match i {
+            0..=3 => &schools[i],
+            _ => &schools[rng.gen_range(0..schools.len())],
+        });
+        seats.shuffle(&mut rng);
+        Schooling(seats)
+    }
 }
 
 impl Room {
@@ -920,6 +939,11 @@ impl Room {
 
     pub fn is_computer(&self, id: Kingdoms) -> bool {
         self.seat(id).owner.is_none()
+    }
+
+    /// The school a computer plays `id` with.
+    pub fn school(&self, id: Kingdoms) -> &'static School {
+        self.schools.0[id.index()]
     }
 
     /// The council's sliders for `id`, as last released or where they start.
@@ -1259,7 +1283,7 @@ impl Room {
                 continue;
             }
             let title = k.full_title();
-            let (plague, death) = check_random_events(k, starvation_deaths);
+            let (plague, death) = check_random_events(&mut self.game, id, starvation_deaths);
             self.seat_mut(id).memory.plague = plague.is_some();
             if let Some(plague) = plague {
                 self.journal(
@@ -1438,7 +1462,7 @@ impl Room {
         let mut memory = self.remember(id);
         let mut bought = [0; 6];
         arena::intendance(
-            &self.brain,
+            &self.school(id).brain,
             &mut self.game,
             id,
             brain::Stage::War,
@@ -1496,9 +1520,13 @@ impl Room {
     /// on what they saw.
     fn run_computer_war(&mut self, id: Kingdoms) {
         let memory = self.remember(id);
-        let missions =
-            self.brain
-                .missions(&self.game, id, &memory, brain::Stage::War, Letters::None);
+        let missions = self.school(id).brain.missions(
+            &self.game,
+            id,
+            &memory,
+            brain::Stage::War,
+            Letters::None,
+        );
         if let Some(on) = missions.scout {
             let _ = self.send_scout(id, on);
         }
@@ -1506,9 +1534,10 @@ impl Room {
             let _ = self.send_agent(id, on);
         }
         let mut memory = self.remember(id);
-        let planned = self
-            .brain
-            .expeditions(&self.game, id, &mut memory, brain::Stage::War);
+        let planned =
+            self.school(id)
+                .brain
+                .expeditions(&self.game, id, &mut memory, brain::Stage::War);
         let seat = self.seat_mut(id);
         seat.memory = memory;
         seat.planned = planned;
@@ -2536,6 +2565,16 @@ pub fn withdraw(rooms: &mut Rooms, ctx: &EventContext) {
     }
 }
 
+/// Every seat schooled by a [`deaf_brain`].
+#[cfg(test)]
+fn deaf_schooling(biases: &[(usize, f32)]) -> Schooling {
+    let school = Box::leak(Box::new(School {
+        name: "la sourde",
+        brain: deaf_brain(biases),
+    }));
+    Schooling([school; 6])
+}
+
 /// A brain deaf to the world: only the Extérieur's biases given speak
 /// (every other weight naught, the answers sit at one half — half the
 /// garrison wanted on every target; no agent, whatever the biases).
@@ -3227,7 +3266,7 @@ mod tests {
         let mut room = playing(&[Kingdoms::France]);
         // A brain that wants half its men on every target, year three: it
         // marches for sure.
-        room.brain = deaf_brain(&[]);
+        room.schools = deaf_schooling(&[]);
         let id = Kingdoms::Britanny;
         room.game.year = 3;
         let k = room.game.kingdom_mut(id);
@@ -3448,7 +3487,7 @@ mod scouting {
         let mut room = table();
         let (id, on) = (Kingdoms::Germany, Kingdoms::Spain);
         let j = brain::rivals(id).iter().position(|&r| r == on).unwrap();
-        room.brain = deaf_brain(&[(6 + j, 3.0), (11, -3.0)]);
+        room.schools = deaf_schooling(&[(6 + j, 3.0), (11, -3.0)]);
         room.game.year = 3;
         let k = room.game.kingdom_mut(id);
         k.soldiers = 60;

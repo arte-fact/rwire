@@ -237,7 +237,7 @@ impl Requirement {
         Requirement::Hospices,
     ];
 
-    fn need(self, r: &Requirements) -> i32 {
+    pub(crate) fn need(self, r: &Requirements) -> i32 {
         match self {
             Requirement::Peasants => r.peasants,
             Requirement::LandRatio => r.land_ratio,
@@ -456,7 +456,7 @@ impl Kingdom {
         }
     }
 
-    fn have(&self, what: Requirement) -> i32 {
+    pub(crate) fn have(&self, what: Requirement) -> i32 {
         match what {
             Requirement::Peasants => self.peasants,
             Requirement::LandRatio => self.land_ratio(),
@@ -494,6 +494,24 @@ impl Kingdom {
         self.fate = Some(fate);
     }
 
+    /// Every requirement of `title` is met — allocation-free, because the
+    /// networks' sight judges the titles of all six realms every year.
+    fn meets(&self, title: PlayerTitle) -> bool {
+        let Some(r) = title.requirements() else {
+            return true;
+        };
+        Requirement::ALL.into_iter().all(|what| {
+            let need = what.need(r);
+            need <= 0
+                || Criterion {
+                    what,
+                    have: self.have(what),
+                    need,
+                }
+                .met()
+        })
+    }
+
     /// Current title: the highest rank whose every requirement is met. It is
     /// judged afresh each time, so a title can be lost — until the imperial
     /// crown, which ends the game.
@@ -501,7 +519,7 @@ impl Kingdom {
         PlayerTitle::ALL
             .into_iter()
             .rev()
-            .find(|&t| self.progress(t).iter().all(Criterion::met))
+            .find(|&t| self.meets(t))
             .unwrap_or(PlayerTitle::Duke)
     }
 

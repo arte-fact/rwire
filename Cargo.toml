@@ -21,3 +21,6 @@ members = [
     "examples/router",
 ]
 resolver = "2"
+
+[profile.release]
+debug = "line-tables-only"

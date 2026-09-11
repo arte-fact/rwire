@@ -5,12 +5,16 @@
 //!   starvation deaths are many; then 1 % of a death among four causes.
 //!
 //! Empire.bas spared its computers plague and famine (lines 206-207); ours
-//! face them like everyone else.
+//! face them like everyone else. A ruler's death breaks the realm up and
+//! its land goes back to the barbarians ([`EmpireGame::break_up`]): the
+//! map keeps its arpents, only a conquest moves them from one crown to
+//! another.
 
 use serde::{Deserialize, Serialize};
 
 use crate::demography::spared;
-use crate::kingdom::{Fate, Kingdom};
+use crate::game::EmpireGame;
+use crate::kingdom::{Kingdom, Kingdoms};
 use crate::random::random;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -80,11 +84,12 @@ fn chance_death() -> Option<RulerDeathCause> {
     (random(0, 100) < 1).then(|| CHANCE_DEATHS[random(0, 4) as usize])
 }
 
-/// The ruler's death draws for the year; the kingdom falls when one hits.
-/// The 1 % `chance` can be spared — the arena does, having nothing to
-/// teach from luck.
+/// The ruler's death draws for the year; the realm breaks up when one
+/// hits ([`EmpireGame::break_up`]). The 1 % `chance` can be spared — the
+/// arena does, having nothing to teach from luck.
 pub fn check_ruler_death(
-    kingdom: &mut Kingdom,
+    game: &mut EmpireGame,
+    id: Kingdoms,
     starvation_deaths: i32,
     chance: bool,
 ) -> Option<RulerDeathCause> {
@@ -95,25 +100,26 @@ pub fn check_ruler_death(
     } else {
         None
     }?;
-    kingdom.fall(Fate::RulerDied(cause));
+    game.break_up(id, cause);
     Some(cause)
 }
 
 /// The year's random events for a living kingdom: plague, then the ruler's
 /// death.
 pub fn check_random_events(
-    kingdom: &mut Kingdom,
+    game: &mut EmpireGame,
+    id: Kingdoms,
     starvation_deaths: i32,
 ) -> (Option<PlagueEvent>, Option<RulerDeathCause>) {
-    let plague = check_plague(kingdom);
-    let death = check_ruler_death(kingdom, starvation_deaths, true);
+    let plague = check_plague(game.kingdom_mut(id));
+    let death = check_ruler_death(game, id, starvation_deaths, true);
     (plague, death)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kingdom::Kingdoms;
+    use crate::kingdom::Fate;
 
     #[test]
     fn plague_keeps_population_non_negative_and_the_ruler_alive() {
@@ -159,11 +165,18 @@ mod tests {
     }
 
     #[test]
-    fn ruler_death_eliminates_kingdom_with_a_cause() {
-        let mut k = Kingdom::new(Kingdoms::France);
-        let cause = check_ruler_death(&mut k, 100_000, true).unwrap();
+    fn ruler_death_breaks_the_realm_up_and_its_land_goes_to_the_barbarians() {
+        let mut game = EmpireGame::default();
+        let barbarians = game.barbarians_surface;
+        let land = game.kingdom(Kingdoms::France).surface;
+        let cause = check_ruler_death(&mut game, Kingdoms::France, 100_000, true).unwrap();
+        let k = game.kingdom(Kingdoms::France);
         assert!(k.is_dead);
         assert_eq!(cause, RulerDeathCause::StarvationAssassination);
         assert_eq!(k.fate, Some(Fate::RulerDied(cause)));
+        assert_eq!(k.surface, 0);
+        assert_eq!(game.barbarians_surface, barbarians + land);
+        assert!(check_ruler_death(&mut game, Kingdoms::Spain, 0, false).is_none());
+        assert!(!game.kingdom(Kingdoms::Spain).is_dead);
     }
 }

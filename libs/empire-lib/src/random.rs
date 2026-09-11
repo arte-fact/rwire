@@ -1,4 +1,13 @@
+use std::cell::RefCell;
+
 use rand::prelude::*;
+use rand::rngs::SmallRng;
+
+thread_local! {
+    /// One cheap generator per thread: the battles draw a duel per man met,
+    /// and the cryptographic `thread_rng` was the tax on every blow.
+    static RNG: RefCell<SmallRng> = RefCell::new(SmallRng::from_entropy());
+}
 
 /// Random integer in `from..to` (exclusive upper bound). Returns 0 when the
 /// range is empty or inverted, mirroring the original BASIC `INT(RND*n)` use.
@@ -6,12 +15,12 @@ pub fn random(from: i32, to: i32) -> i32 {
     if to <= from {
         return 0;
     }
-    rand::thread_rng().gen_range(from..to)
+    RNG.with(|r| r.borrow_mut().gen_range(from..to))
 }
 
 /// The items in a fresh random order.
 pub fn shuffled<T, const N: usize>(mut items: [T; N]) -> [T; N] {
-    items.shuffle(&mut rand::thread_rng());
+    RNG.with(|r| items.shuffle(&mut *r.borrow_mut()));
     items
 }
 
