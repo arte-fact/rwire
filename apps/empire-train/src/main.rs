@@ -14,17 +14,65 @@ use std::fs;
 use std::time::Instant;
 
 use empire_lib::arena::{play, watch, Outcome, Table, YearEnd};
-use empire_lib::brain::{Brain, Letters, Stage};
+use empire_lib::brain::{Brain, Letters, Shape, Stage};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+
+/// The widths a school's genomes were laid out for, as written in its
+/// file; the schools written before the walls (s26 and older) carry none
+/// and were all of one shape.
+#[derive(Clone, Copy, Serialize, Deserialize)]
+struct Widths {
+    own: usize,
+    rival: usize,
+    a_out: usize,
+    b_out: usize,
+}
+
+impl Widths {
+    const BEFORE_THE_WALLS: Widths = Widths {
+        own: 38,
+        rival: 19,
+        a_out: 15,
+        b_out: 18,
+    };
+
+    fn now() -> Widths {
+        Widths::from(Shape::NOW)
+    }
+}
+
+impl From<Shape> for Widths {
+    fn from(s: Shape) -> Widths {
+        Widths {
+            own: s.own,
+            rival: s.rival,
+            a_out: s.a_out,
+            b_out: s.b_out,
+        }
+    }
+}
+
+impl From<Widths> for Shape {
+    fn from(w: Widths) -> Shape {
+        Shape {
+            own: w.own,
+            rival: w.rival,
+            a_out: w.a_out,
+            b_out: w.b_out,
+        }
+    }
+}
 
 /// What is carried from one run to the next.
 #[derive(Serialize, Deserialize)]
 struct School {
     stage: String,
     generation: usize,
+    #[serde(default = "Widths::now")]
+    widths: Widths,
     mean: Vec<f32>,
     sigma: Vec<f32>,
     /// The best genome seen, with its fitness.
@@ -99,6 +147,9 @@ struct Args {
     rank: f32,
     /// What intelligence costs nothing (`--letters scouts|all`).
     letters: Letters,
+    /// Write the best genome of `--from` as the game reads it (floats,
+    /// little-endian) to this path, and stop.
+    deliver: Option<String>,
 }
 
 impl Args {
@@ -148,6 +199,7 @@ fn args() -> Args {
         hall: 0,
         rank: 0.0,
         letters: Letters::None,
+        deliver: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -178,6 +230,7 @@ fn args() -> Args {
                 }
             }
             "--out" => a.out = value,
+            "--deliver" => a.deliver = Some(value),
             other => panic!("unknown flag {other}"),
         }
     }
@@ -345,12 +398,16 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
 fn show(best: &[f32], a: &Args) {
     let b = Brain::from_genome(best);
     let rivals = rivals(a);
-    let seats = seat_rivals(&rivals);
-    let table = a.table_of(|i| (i > 0).then(|| rivals[seats[i]].1));
-    let brain = |i: usize| if i == 0 { &b } else { &rivals[seats[i]].0 };
+    // Clones around the table unless `--against` seats other schools.
+    let seats = (!rivals.is_empty()).then(|| seat_rivals(&rivals));
+    let table = a.table_of(|i| seats.filter(|_| i > 0).map(|s| rivals[s[i]].1));
+    let brain = |i: usize| match seats {
+        Some(s) if i > 0 => &rivals[s[i]].0,
+        _ => &b,
+    };
     let (o1, o2, o3, o4, o5) = (brain(1), brain(2), brain(3), brain(4), brain(5));
     println!(
-        "year wthr  surface peasants nobles merch soldiers eff treasury   stocks  harvest rat  peas sold taxes     starved title  listed@px bought fair mill fndr ship pal"
+        "year wthr  surface peasants nobles merch soldiers eff treasury   stocks  harvest rat  peas sold taxes     starved title  listed@px bought fair mill fndr ship pal wall hosp rams"
     );
     let outcomes = watch([&b, o1, o2, o3, o4, o5], &table, |y: YearEnd| {
         let k = &y.game.kingdoms[0];
@@ -359,7 +416,7 @@ fn show(best: &[f32], a: &Args) {
         let i = m.intendance.as_ref().unwrap();
         let c = &i.council;
         println!(
-            "{:4} {:4} {:8} {:8} {:6} {:5} {:8} {:3} {:8} {:8} {:8} {:3}  {:4} {:4} {:2}/{:2}/{:2} {:7} {:6} {:6}@{:<3} {:6} {:4} {:4} {:4} {:4} {:3}{}",
+            "{:4} {:4} {:8} {:8} {:6} {:5} {:8} {:3} {:8} {:8} {:8} {:3}  {:4} {:4} {:2}/{:2}/{:2} {:7} {:6} {:6}@{:<3} {:6} {:4} {:4} {:4} {:4} {:3} {:4} {:4} {:4}{}",
             y.game.year,
             k.weather as u8,
             k.surface,
@@ -387,6 +444,9 @@ fn show(best: &[f32], a: &Args) {
             k.foundries,
             k.shipyards,
             k.palaces,
+            k.fortifications,
+            k.hospices,
+            k.rams,
             y.deaths[0].map(|c| format!("  † {c:?}")).unwrap_or_default()
         );
     });
@@ -489,37 +549,47 @@ fn wake(mean: &mut [f32], sigma: &mut [f32], best: &mut [f32], letters: Letters)
     }
 }
 
-/// A school saved by an earlier run — grown to today's sight if it was
-/// schooled on a narrower one (the new entries start blind, at their
-/// starting spread).
+/// A school saved by an earlier run — grown to today's widths if it was
+/// schooled on narrower ones (the new entries start blind, at their
+/// starting spread; the new answers blank).
 fn load(path: &str) -> School {
     let mut s: School = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
-    if s.mean.len() == Brain::GENOME {
+    if s.mean.len() != Shape::from(s.widths).genome() {
+        // Written before the widths were: one shape for all of them.
+        s.widths = Widths::BEFORE_THE_WALLS;
+    }
+    let was = Shape::from(s.widths);
+    assert_eq!(
+        s.mean.len(),
+        was.genome(),
+        "{path} is not a genome of the shape it claims"
+    );
+    if was == Shape::NOW {
         return s;
     }
-    let (own, rival) = (0..=Brain::OWN)
-        .flat_map(|own| (0..=Brain::RIVAL).map(move |rival| (own, rival)))
-        .find(|&(own, rival)| Brain::genome_with(own, rival) == s.mean.len())
-        .unwrap_or_else(|| panic!("{path} is not a genome of any known shape"));
-    let seen = Brain::grown(&vec![1.0; s.mean.len()], own, rival);
+    let seen = Brain::grown(&vec![1.0; s.mean.len()], was);
     let scales = Brain::scales();
-    s.mean = Brain::grown(&s.mean, own, rival);
-    s.best = Brain::grown(&s.best, own, rival);
-    s.sigma = Brain::grown(&s.sigma, own, rival)
+    s.mean = Brain::grown(&s.mean, was);
+    s.best = Brain::grown(&s.best, was);
+    s.sigma = Brain::grown(&s.sigma, was)
         .into_iter()
         .zip(seen)
         .zip(scales)
         .map(|((sigma, seen), scale)| if seen > 0.0 { sigma } else { scale })
         .collect();
     for l in &mut s.hall {
-        l.genome = Brain::grown(&l.genome, own, rival);
+        l.genome = Brain::grown(&l.genome, was);
     }
-    eprintln!(
-        "{path}: grown from {own} own and {rival} rival entries to {} and {}",
-        Brain::OWN,
-        Brain::RIVAL
-    );
+    s.widths = Widths::now();
+    eprintln!("{path}: grown from {was:?} to {:?}", Shape::NOW);
     s
+}
+
+/// The best genome as the game reads it: floats, little-endian.
+fn deliver(best: &[f32], path: &str) {
+    let bytes: Vec<u8> = best.iter().flat_map(|w| w.to_le_bytes()).collect();
+    fs::write(path, &bytes).unwrap();
+    eprintln!("{path}: {} weights delivered", best.len());
 }
 
 fn main() {
@@ -538,6 +608,10 @@ fn main() {
             0,
         ),
     };
+    if let Some(path) = &a.deliver {
+        deliver(&best, path);
+        return;
+    }
     if a.show {
         show(&best, &a);
         return;
@@ -621,6 +695,7 @@ fn main() {
         let school = School {
             stage: format!("{:?}", a.stage).to_lowercase(),
             generation,
+            widths: Widths::now(),
             mean: mean.clone(),
             sigma: sigma.clone(),
             best: best.clone(),

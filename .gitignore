@@ -21,3 +21,7 @@
 .worktrees/
 .security-key
 logs/security/
+
+# Empire schools: genomes and logs stay local (megabytes of floats, rewritten every generation)
+apps/empire-train/schools/*.json
+apps/empire-train/schools/*.log
