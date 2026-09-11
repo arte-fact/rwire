@@ -124,6 +124,14 @@ pub enum Icon {
     Castle,
     Bowl,
     Coins,
+    /// Crenellated wall (fortifications).
+    Wall,
+    /// A cross on a roof (hospice).
+    Hospice,
+    /// A battering ram under its frame.
+    Ram,
+    /// An eye (éclaireur).
+    Eye,
 }
 
 impl Icon {
@@ -233,6 +241,10 @@ impl Icon {
             Icon::Castle => "M4 21V9h3V6h3v3h4V6h3v3h3v12z M10 21v-5h4v5",
             Icon::Bowl => "M3 11h18a9 9 0 0 1-18 0z M7 20h10 M9 4c0 2 2 2 2 4 M13 4c0 2 2 2 2 4",
             Icon::Coins => "M3 8a5 3 0 1 0 10 0a5 3 0 1 0-10 0 M3 8v4c0 1.7 2.2 3 5 3s5-1.3 5-3V8 M13 11c3 .3 5 1.5 5 3v4c0 1.7-2.2 3-5 3s-5-1.3-5-3v-3",
+            Icon::Wall => "M3 21V8h3V5h3v3h6V5h3v3h3v13z M3 14h18 M8 14v7 M16 14v7 M12 8v6",
+            Icon::Hospice => "M4 21V10l8-6 8 6v11z M12 12v6 M9 15h6",
+            Icon::Ram => "M4 20h16 M6 20V9l6-5 6 5v11 M4 13h13 M17 11l3 2-3 2 M9 9v11 M15 9v11",
+            Icon::Eye => "M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
         }
     }
 
@@ -445,6 +457,10 @@ mod tests {
             Icon::Castle,
             Icon::Bowl,
             Icon::Coins,
+            Icon::Wall,
+            Icon::Hospice,
+            Icon::Ram,
+            Icon::Eye,
         ];
 
         for icon in &icons {
