@@ -16,7 +16,7 @@ fn secs(t: Instant) -> f64 {
 #[test]
 #[ignore = "a stopwatch, not a check"]
 fn where_the_time_goes() {
-    let brain = &Brain::schools()[0].brain;
+    let brain = &Brain::schools()[0];
     let table = Table {
         rank_cost: 40.0,
         ..Table::at(Stage::War, 150)

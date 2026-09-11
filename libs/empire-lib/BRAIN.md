@@ -134,8 +134,8 @@ L'agressivité **n'est pas une personnalité**, c'est la fitness.
 `Brain::schools()` : **le soldat** (s46a), **la bâtisseuse** (s46b), **la garnison** (s46c),
 **la boutiquière** (s46d) — quatre génomes de la même recette (§5, s46) aux tempéraments
 stables. En ligne (`apps/empire-web`), chaque table tire une école par siège d'ordinateur :
-les quatre une fois, deux autres au hasard, le tout mélangé (`Schooling`) ; le hérault
-nomme l'école à côté du souverain (« ordinateur, la garnison »). Au terminal
+les quatre une fois, deux autres au hasard, le tout mélangé (`Schooling`) ; rien ne dit
+aux joueurs qui est qui, c'est à deviner sur le style. Au terminal
 (`apps/empire`), le siège n° i joue l'école i mod 4. Ce qu'elles valent : § 5, lignes s46
 (match à six) et 8e enseignement. s28, le brain livré avant elles, reste en
 `schools/s28-war.json`.

@@ -318,14 +318,6 @@ pub struct Brain {
     pub exterieur: Net,
 }
 
-/// A brain the computers sit down with, and the temperament the heralds
-/// know it by.
-#[derive(Debug)]
-pub struct School {
-    pub name: &'static str,
-    pub brain: Brain,
-}
-
 /// The widths a genome is laid out for: the seigneur's own entries of the
 /// sight, the entries per rival, the Intendance's and the Extérieur's
 /// answers.
@@ -440,26 +432,26 @@ impl Brain {
     /// s35 — 300 generations, six tables of six, no hall, a rank cost of
     /// forty, no letters — and kept as `brains/s46a.f32` to `s46d.f32`,
     /// their genomes in little-endian floats. One recipe, four
-    /// temperaments: the soldier buys men and neglects the walls, the
-    /// builder hoards grain, mills and rams, the garrison keeps the
-    /// largest standing army, the shopkeeper opens her market first and
-    /// marches the most.
-    pub fn schools() -> &'static [School; 4] {
-        static SCHOOLS: LazyLock<[School; 4]> = LazyLock::new(|| {
-            let school = |name, bytes: &[u8]| School {
-                name,
-                brain: Brain::from_genome(
+    /// temperaments the players are left to guess at the table: a, the
+    /// soldier, buys men and neglects the walls; b, the builder, hoards
+    /// grain, mills and rams; c, the garrison, keeps the largest standing
+    /// army; d, the shopkeeper, opens her market first and marches the
+    /// most.
+    pub fn schools() -> &'static [Brain; 4] {
+        static SCHOOLS: LazyLock<[Brain; 4]> = LazyLock::new(|| {
+            let school = |bytes: &[u8]| {
+                Brain::from_genome(
                     &bytes
                         .chunks_exact(4)
                         .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
                         .collect::<Vec<f32>>(),
-                ),
+                )
             };
             [
-                school("le soldat", include_bytes!("../brains/s46a.f32")),
-                school("la bâtisseuse", include_bytes!("../brains/s46b.f32")),
-                school("la garnison", include_bytes!("../brains/s46c.f32")),
-                school("la boutiquière", include_bytes!("../brains/s46d.f32")),
+                school(include_bytes!("../brains/s46a.f32")),
+                school(include_bytes!("../brains/s46b.f32")),
+                school(include_bytes!("../brains/s46c.f32")),
+                school(include_bytes!("../brains/s46d.f32")),
             ]
         });
         &SCHOOLS

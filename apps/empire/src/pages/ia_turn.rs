@@ -28,7 +28,7 @@ pub fn ia_turn(game: &mut EmpireGame, id: Kingdoms, memory: &mut Memory) {
     sleep(Duration::from_millis(2500));
 
     // Each seat keeps its school: the four sisters, then the first two again.
-    let brain = &Brain::schools()[id.index() % 4].brain;
+    let brain = &Brain::schools()[id.index() % 4];
     let mut bought = [0; 6];
     arena::intendance(brain, game, id, Stage::War, memory, &mut bought);
     let missions = brain.missions(game, id, memory, Stage::War, Letters::None);

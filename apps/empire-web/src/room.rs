@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use empire_lib::arena;
-use empire_lib::brain::{self, Brain, Letters, Memory, School};
+use empire_lib::brain::{self, Brain, Letters, Memory};
 use empire_lib::campaign::{
     apply_battle, expedition_cost, forecast, march, Expedition, Fought, EXPEDITION_GOLD_PER_MAN,
     EXPEDITION_GRAIN_PER_MAN, FIRST_WAR_YEAR,
@@ -653,13 +653,13 @@ pub struct Room {
 /// Which of the [`Brain::schools`] each seat plays with when a computer
 /// holds it: the four sisters once each and two of them again, shuffled.
 #[derive(Clone, Copy)]
-pub struct Schooling(pub [&'static School; 6]);
+pub struct Schooling(pub [&'static Brain; 6]);
 
 impl Default for Schooling {
     fn default() -> Schooling {
         let mut rng = rand::thread_rng();
         let schools = Brain::schools();
-        let mut seats: [&'static School; 6] = std::array::from_fn(|i| match i {
+        let mut seats: [&'static Brain; 6] = std::array::from_fn(|i| match i {
             0..=3 => &schools[i],
             _ => &schools[rng.gen_range(0..schools.len())],
         });
@@ -942,7 +942,7 @@ impl Room {
     }
 
     /// The school a computer plays `id` with.
-    pub fn school(&self, id: Kingdoms) -> &'static School {
+    pub fn school(&self, id: Kingdoms) -> &'static Brain {
         self.schools.0[id.index()]
     }
 
@@ -1462,7 +1462,7 @@ impl Room {
         let mut memory = self.remember(id);
         let mut bought = [0; 6];
         arena::intendance(
-            &self.school(id).brain,
+            self.school(id),
             &mut self.game,
             id,
             brain::Stage::War,
@@ -1520,13 +1520,9 @@ impl Room {
     /// on what they saw.
     fn run_computer_war(&mut self, id: Kingdoms) {
         let memory = self.remember(id);
-        let missions = self.school(id).brain.missions(
-            &self.game,
-            id,
-            &memory,
-            brain::Stage::War,
-            Letters::None,
-        );
+        let missions =
+            self.school(id)
+                .missions(&self.game, id, &memory, brain::Stage::War, Letters::None);
         if let Some(on) = missions.scout {
             let _ = self.send_scout(id, on);
         }
@@ -1534,10 +1530,9 @@ impl Room {
             let _ = self.send_agent(id, on);
         }
         let mut memory = self.remember(id);
-        let planned =
-            self.school(id)
-                .brain
-                .expeditions(&self.game, id, &mut memory, brain::Stage::War);
+        let planned = self
+            .school(id)
+            .expeditions(&self.game, id, &mut memory, brain::Stage::War);
         let seat = self.seat_mut(id);
         seat.memory = memory;
         seat.planned = planned;
@@ -2568,11 +2563,7 @@ pub fn withdraw(rooms: &mut Rooms, ctx: &EventContext) {
 /// Every seat schooled by a [`deaf_brain`].
 #[cfg(test)]
 fn deaf_schooling(biases: &[(usize, f32)]) -> Schooling {
-    let school = Box::leak(Box::new(School {
-        name: "la sourde",
-        brain: deaf_brain(biases),
-    }));
-    Schooling([school; 6])
+    Schooling([Box::leak(Box::new(deaf_brain(biases))); 6])
 }
 
 /// A brain deaf to the world: only the Extérieur's biases given speak
