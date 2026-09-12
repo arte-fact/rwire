@@ -1,8 +1,9 @@
 # Le Brain — point d'arrêt (septembre 2026)
 
-État : **livré** (`brains/s46a.f32` à `s46d.f32`, les quatre sœurs de l'école s46 — de zéro
-contre s35, sous les murs, l'hospice, les béliers et le renseignement immédiat de
-`BATIMENTS.md` / `RENSEIGNEMENT.md` ; `Brain::schools()`, une par tempérament). Ce document
+État : **livré** (`brains/soldat.f32`, `batisseuse.f32`, `garnison.f32`, `boutiquiere.f32` —
+s46a et s48b–d, quatre sœurs de zéro contre s35, sous les murs, l'hospice, les béliers et le
+renseignement immédiat de `BATIMENTS.md` / `RENSEIGNEMENT.md` ; `Brain::schools()`, une par
+tempérament). Ce document
 fige ce que les ordinateurs d'Empire savent faire, comment ils l'ont appris, ce qui a été
 essayé et ce qui reste ouvert — pour pouvoir reprendre l'entraînement plus tard sans rien
 redécouvrir.
@@ -20,7 +21,7 @@ cachée de 32 neurones (`tanh` dedans, sigmoïdes en sortie), lus une fois par a
 | `exterieur` | `SIGHT` + 18 | `B_OUT` = 19 | éclaireur, agents, puis expéditions (5 voisins + barbares) et béliers |
 
 Génome : `Brain::GENOME` = 12 677 poids (les deux réseaux bout à bout, floats
-little-endian dans `brains/s46*.f32`). Il n'y a **aucune règle codée à la main** dans le jeu
+little-endian dans `brains/<tempérament>.f32`). Il n'y a **aucune règle codée à la main** dans le jeu
 de l'ordinateur en dehors du décodage ci-dessous : tout ce qu'il fait sort des réseaux.
 
 ### La vue (`sight`, 169 entrées)
@@ -100,7 +101,7 @@ ordres. Le web la reconstruit chaque an (`Room::remember`), le terminal la garde
   les murs (s26 : 38 / 19 / 15 / 18).
 - Sortie : `<out>.json` (moyenne, sigma, Hall, meilleur, `widths`) pour reprendre,
   `<out>.best.json` le meilleur génome ; `--deliver <chemin>` écrit le meilleur en
-  floats LE, ce sont les `brains/s46*.f32`.
+  floats LE, ce sont les `brains/<tempérament>.f32`.
 - ≈ 1,1 s la génération sur 10 threads (`RAYON_NUM_THREADS=10`) ; 1 200 générations ≈ 22 min.
 - `--measure N --show` : joue N tables de clones (ou contre `--against`) et imprime le
   bilan ; `--show` déroule les années du siège 0.
@@ -129,11 +130,13 @@ L'agressivité **n'est pas une personnalité**, c'est la fitness.
 
 ## 4. Les brains livrés — ce qu'ils valent
 
-### Les quatre sœurs de s46 (livrées le 12 septembre 2026)
+### Les quatre sœurs (livrées le 12 septembre 2026)
 
-`Brain::schools()` : **le soldat** (s46a), **la bâtisseuse** (s46b), **la garnison** (s46c),
-**la boutiquière** (s46d) — quatre génomes de la même recette (§5, s46) aux tempéraments
-stables. En ligne (`apps/empire-web`), chaque table tire une école par siège d'ordinateur :
+`Brain::schools()` : **le soldat** (s46a), **la bâtisseuse** (s48b), **la garnison** (s48c),
+**la boutiquière** (s48d) — quatre génomes de la même recette (§5, s46) aux tempéraments
+stables ; trois d'entre eux repris par s48 (quarante manches entre sœurs et s35 aux tables
+de 100 ans), qui sacrent plus souvent et plus tôt que leurs versions s46 ; le soldat s48
+ayant reculé (15 → 10,5 % contre s35), c'est le s46 qui est livré. En ligne (`apps/empire-web`), chaque table tire une école par siège d'ordinateur :
 les quatre une fois, deux autres au hasard, le tout mélangé (`Schooling`) ; rien ne dit
 aux joueurs qui est qui, c'est à deviner sur le style. Au terminal
 (`apps/empire`), le siège n° i joue l'école i mod 4. Ce qu'elles valent : § 5, lignes s46
@@ -210,7 +213,7 @@ chacun, avec leurs `run-s*.sh`).
 | s45 | **de zéro contre un mélange sans pacifique** : la note de s35, une population de zéro, chaque chaise libre tirée au hasard entre les meilleurs figés de **s35 et s43** (`--against` ×2, `--hall 0`) — deux conquérants de styles différents, la pression à chaque table sans un seul adversaire à apprendre par cœur ; sous la règle des terres | **arrêtée à la gén. 100 : plateau pacifique**, la courbe de s44 (Princes 1 % gén. 50, plus rien après, tables 99 ans). Mesurée : annexée 95–100 % du temps par ses rivaux, ne survit qu'entre clones. **Contre-épreuve** : la recette exacte de s43 rejouée (autre graine, 150 gén.) donne le même plateau — Princes 0,6 % gén. 40, zéro dès la gén. 70. **s43 était un coup de dés** : sous la règle des terres, la lignée des titres naît vers la gén. 45 à 1–3 % de Princes et doit devenir Rois avant que la survie aux longues tables ne prenne l'élite ; elle a gagné cette course une fois sur huit (s37–s41, s44, s45, la contre-épreuve) et six fois sur six avant la règle |
 | s46 | **la recette de s43 rejouée jusqu'à quatre écoles valides** (`run-s46.py`) : de zéro, note de s35, `--against s35-war.json --hall 0`, 300 gén., cinq essais à la fois ; un essai est jeté si la gén. 80 passe sans sacre, gardé s'il finit à ≥ 5 % | **3 gagnantes sur 35 essais** (+ s46a d'avant) : sacres finaux à leurs tables d'école 20,7 % (a), 21,7 % (b), 24,2 % (c), 17,4 % (d), médiane an 110–125. **Quatre tempéraments stables** (mêmes chiffres en match à six et entre clones) : **a le soldat** (le plus de soldats achetés, quatre fois moins de moulins, murs négligés — la seule annexée dans les deux parties), **b la bâtisseuse** (moulins, marchés, murs et grain en tête, le moins de soldats, mais 33 victoires aux béliers ; sacrée an 123 du match), **c la garnison** (172 soldats entretenus contre 66–101, paysans sacrifiés), **d la boutiquière** (marché dès l'an 8, le plus de marches, sacrée an 128 entre clones). Match à six (`--show` avec cinq `--against` = une école par chaise, tous les sièges racontés) contre s35 et s43 : les deux conquérants vendent leur terre et meurent de faim l'an 9 et l'an 11 ; les quatre sœurs jettent 50 000 hommes contre des murs à 10 pendant 85 ans, puis la famine de la Germanie (an 106) ouvre le bal : France annexée an 121, Bretagne (b) Empereur an 123, Castille (d) et Germanie (c) mortes de faim ans 130 et 134 |
 | s47 | **les quatre sœurs l'une contre l'autre** (`run-s47.py`) : chacune reprise de s46, `--against` les trois autres figées, `--hall 0`, par manches de 25 gén. (chaque manche relit les sœurs), quatre entraîneurs à 3 threads ; sacre **`1200 − 6·an`** pour presser le sacre | **arrêtée à la manche 5 (gén. 424)** : entre sœurs murées, les sacres reculent à l'an 138–146 et deux sœurs sur quatre glissent vers le plateau pacifique (a : chutes 63 → 24 %, Princes 37 → 5 %, sacres 0,2 % ; d : 3,3 %) ; b et c tiennent à 18–20 % sans avancer. La survie (~210 points sûrs sur 150 ans) bat un sacre à 4 % après l'an 138 ; la note pressée ne raccourcit pas un sacre qui n'existe plus |
-| s48 | **s47 aux tables courtes avec s35 sur une chaise** (`run-s48.py`) : mêmes manches, reprises de s46, `--against` les trois sœurs **et s35** (un conquérant sans murs à chaque table), **`--longest 100`** : survivre ne rapporte plus rien après l'an 100, il faut sacrer avant | lancée 2026-09-11, journal `s48.log` |
+| s48 | **s47 aux tables courtes avec s35 sur une chaise** (`run-s48.py`) : mêmes manches, reprises de s46, `--against` les trois sœurs **et s35** (un conquérant sans murs à chaque table), **`--longest 100`** : survivre ne rapporte plus rien après l'an 100, il faut sacrer avant | **finie (40 manches, gén. 1299)** : aux tables d'école les sacres montent de 3–5 % à **a 8,0 · b 6,7 · c 9,6 · d 9,4 %** (la moitié du gain dans les dix premières manches, palier dès la 25e), médianes figées à l'an 80–93. Mesure à 150 ans, chaque sœur seule contre cinq s35 (200 tables), s46 → s48 : **a 15 → 10,5 %** (médiane 78 → 74), **b 5,5 → 11 %** (96 → 73), **c 19 → 26 %** (80 → 72), **d 4 → 7,5 %** (93 → 76) — trois sœurs sur quatre sacrent plus souvent, toutes sacrent plus tôt, le soldat recule. Match à six contre s35 et s43 : s35 annexe le soldat (France) l'an 16, s43 meurt de faim l'an 16, s35 l'an 40 ; **deux sacres l'an 89** (b et d, contre un seul l'an 123 chez s46), puis la garnison (c) annexe la boutiquière l'an 123 avant de mourir de faim l'an 127 |
 
 Enseignements (détail dans la mémoire `empire-intel-findings`) :
 
@@ -265,13 +268,17 @@ target/release/empire-train --stage war --from s46a-war.json --against s46b-war.
 # les sœurs l'une contre l'autre par manches (s48 : `run-s48.py`, quatre entraîneurs à la fois)
 python3 apps/empire-train/schools/run-s48.py
 
+# une sœur seule contre cinq s35, 200 tables de 150 ans (le bilan de s48)
+target/release/empire-train --stage war --from s48c-war.json --against s35-war.json \
+  --measure 200 --rank 40
+
 # mesurer une école contre une autre
 cargo run --release -p empire-train -- --stage war --from s29-war.json \
   --against apps/empire-train/schools/s28-war.best.json --measure 200 --show
 
-# livrer : le meilleur génome d'une école devient un brains/s46x.f32 (floats LE)
-cargo run --release -p empire-train -- --stage war --from s46a-war.json \
-  --deliver libs/empire-lib/brains/s46a.f32
+# livrer : le meilleur génome d'une école devient un brains/<tempérament>.f32 (floats LE)
+cargo run --release -p empire-train -- --stage war --from s48c-war.json \
+  --deliver libs/empire-lib/brains/garnison.f32
 ```
 
 Si la vue ou les sorties s'élargissent (`OWN`, `RIVAL`, `A_OUT`, `B_OUT`), `load` grandit

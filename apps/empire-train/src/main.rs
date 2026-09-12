@@ -14,7 +14,7 @@ use std::fs;
 use std::time::Instant;
 
 use empire_lib::arena::{play, watch, Outcome, Table, YearEnd};
-use empire_lib::brain::{Brain, Letters, Shape, Stage};
+use empire_lib::brain::{Brain, Letters, Shape, Stage, ORDERS};
 use empire_lib::kingdom::{Kingdoms, KINGDOMS};
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -74,6 +74,11 @@ struct School {
     generation: usize,
     #[serde(default = "Widths::now")]
     widths: Widths,
+    /// Whether its brains are told the Chronique, last year's orders and
+    /// their old reports ([`Brain::told`]): the schools grown from before
+    /// the recall are, one schooled with a recall is not.
+    #[serde(default)]
+    told: bool,
     mean: Vec<f32>,
     sigma: Vec<f32>,
     /// The best genome seen, with its fitness.
@@ -146,6 +151,8 @@ struct Args {
     hall: usize,
     /// What a seat finishing ahead costs at war (none unless `--rank` is set).
     rank: f32,
+    /// What a tenth of wall kept costs at war (none unless `--walls` is set).
+    walls: f32,
     /// What intelligence costs nothing (`--letters scouts|all`).
     letters: Letters,
     /// Write the best genome of `--from` as the game reads it (floats,
@@ -158,6 +165,7 @@ impl Args {
     fn table(&self) -> Table {
         Table {
             rank_cost: self.rank,
+            walls_cost: self.walls,
             letters: self.letters,
             ..Table::at(self.stage, self.longest)
         }
@@ -199,6 +207,7 @@ fn args() -> Args {
         against: Vec::new(),
         hall: 0,
         rank: 0.0,
+        walls: 0.0,
         letters: Letters::None,
         deliver: None,
     };
@@ -222,6 +231,7 @@ fn args() -> Args {
             "--against" => a.against.push(value),
             "--hall" => a.hall = value.parse().unwrap(),
             "--rank" => a.rank = value.parse().unwrap(),
+            "--walls" => a.walls = value.parse().unwrap(),
             "--letters" => {
                 a.letters = match value.as_str() {
                     "none" => Letters::None,
@@ -268,8 +278,16 @@ struct Seating {
 /// or a different other on each — so no fixed set of rivals can be
 /// farmed. Each genome sits
 /// `tables` tables; its fitness is the mean of its scores.
-fn evaluate(genomes: &[Vec<f32>], others: &[(Brain, Stage)], a: &Args) -> (Vec<f32>, Vec<Outcome>) {
-    let brains: Vec<Brain> = genomes.par_iter().map(|g| Brain::from_genome(g)).collect();
+fn evaluate(
+    genomes: &[Vec<f32>],
+    told: bool,
+    others: &[(Brain, Stage)],
+    a: &Args,
+) -> (Vec<f32>, Vec<Outcome>) {
+    let brains: Vec<Brain> = genomes
+        .par_iter()
+        .map(|g| Brain::from_genome(g, told))
+        .collect();
     let n = brains.len();
     // Every seat a genome sat: its score at that table, and the outcome.
     let played: Vec<Vec<(f32, Outcome)>> = if a.stage.market() {
@@ -370,11 +388,12 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
         .sum::<f32>()
         / seats;
     let readings: f32 = outcomes.iter().map(|o| o.readings as f32).sum::<f32>() / seats;
+    let walls: f32 = outcomes.iter().map(|o| o.walls).sum::<f32>() / seats;
     let mut crown_years = crowned.clone();
     crown_years.sort_unstable();
     let pct = |n: usize| 100.0 * n as f32 / outcomes.len() as f32;
     format!(
-        "gen {generation:4} · best {:8.1} · elite {:8.1} · median {:8.1} · years {:5.1} · road {:4.2} · starved {:5.0} · nobles {:+5.1} · read {:4.1} · fell {:4.1}% (mother {:4.1}%) · prince {:4.1}% · king {:4.1}% · crowned {:4.1}%{} · {:.1}s",
+        "gen {generation:4} · best {:8.1} · elite {:8.1} · median {:8.1} · years {:5.1} · road {:4.2} · starved {:5.0} · nobles {:+5.1} · read {:4.1} · walls {:4.1} · fell {:4.1}% (mother {:4.1}%) · prince {:4.1}% · king {:4.1}% · crowned {:4.1}%{} · {:.1}s",
         sorted[0],
         sorted[..sorted.len().min(100)].iter().sum::<f32>() / sorted.len().min(100) as f32,
         sorted[sorted.len() / 2],
@@ -383,6 +402,7 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
         starved,
         nobles,
         readings,
+        walls,
         pct(fell),
         pct(starved_out),
         pct(outcomes.iter().filter(|o| o.prince.is_some()).count()),
@@ -401,8 +421,8 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
 /// unless `--against` seats other schools: with exactly five it is a
 /// match — one of each, in order, and every seat is told — otherwise
 /// they are drawn at random and only France is.
-fn show(best: &[f32], a: &Args) {
-    let b = Brain::from_genome(best);
+fn show(best: &[f32], told: bool, a: &Args) {
+    let b = Brain::from_genome(best, told);
     let rivals = rivals(a);
     let a_match = rivals.len() == 5;
     let seats: Option<[usize; 6]> = match rivals.len() {
@@ -597,7 +617,10 @@ fn rivals(a: &Args) -> Vec<(Brain, Stage)> {
         .iter()
         .map(|path| {
             let school = load(path);
-            (Brain::from_genome(&school.best), stage(&school.stage))
+            (
+                Brain::from_genome(&school.best, school.told),
+                stage(&school.stage),
+            )
         })
         .collect()
 }
@@ -611,8 +634,8 @@ fn seat_rivals(rivals: &[(Brain, Stage)]) -> [usize; 6] {
 
 /// Many tables of one genome — clones, or one seat against five of
 /// the `--against` schools — at `--stage`.
-fn measure(best: &[f32], a: &Args) {
-    let b = Brain::from_genome(best);
+fn measure(best: &[f32], told: bool, a: &Args) {
+    let b = Brain::from_genome(best, told);
     let rivals = rivals(a);
     if rivals.is_empty() {
         let outcomes: Vec<Outcome> = (0..a.measure)
@@ -664,7 +687,8 @@ fn wake(mean: &mut [f32], sigma: &mut [f32], best: &mut [f32], letters: Letters)
 
 /// A school saved by an earlier run — grown to today's widths if it was
 /// schooled on narrower ones (the new entries start blind, at their
-/// starting spread; the new answers blank).
+/// starting spread; the new answers blank). A school from before the
+/// recall was told everything, and stays so.
 fn load(path: &str) -> School {
     let mut s: School = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
     if s.mean.len() != Shape::from(s.widths).genome() {
@@ -680,6 +704,7 @@ fn load(path: &str) -> School {
     if was == Shape::NOW {
         return s;
     }
+    s.told = was.b_out == ORDERS;
     let seen = Brain::grown(&vec![1.0; s.mean.len()], was);
     let scales = Brain::scales();
     s.mean = Brain::grown(&s.mean, was);
@@ -707,10 +732,18 @@ fn deliver(best: &[f32], path: &str) {
 
 fn main() {
     let a = args();
-    let (mut mean, mut sigma, mut best, mut best_fitness, mut hall, start) = match &a.from {
+    let (mut mean, mut sigma, mut best, mut best_fitness, mut hall, start, told) = match &a.from {
         Some(path) => {
             let s = load(path);
-            (s.mean, s.sigma, s.best, f32::MIN, s.hall, s.generation + 1)
+            (
+                s.mean,
+                s.sigma,
+                s.best,
+                f32::MIN,
+                s.hall,
+                s.generation + 1,
+                s.told,
+            )
         }
         None => (
             vec![0.0; Brain::GENOME],
@@ -719,6 +752,7 @@ fn main() {
             f32::MIN,
             Vec::new(),
             0,
+            false,
         ),
     };
     if let Some(path) = &a.deliver {
@@ -726,11 +760,11 @@ fn main() {
         return;
     }
     if a.show {
-        show(&best, &a);
+        show(&best, told, &a);
         return;
     }
     if a.measure > 0 {
-        measure(&best, &a);
+        measure(&best, told, &a);
         return;
     }
     if a.letters.scouts() {
@@ -772,10 +806,10 @@ fn main() {
             .cloned()
             .chain(
                 hall.iter()
-                    .map(|l| (Brain::from_genome(&l.genome), a.stage)),
+                    .map(|l| (Brain::from_genome(&l.genome, told), a.stage)),
             )
             .collect();
-        let (fitness, outcomes) = evaluate(&genomes, &others, &a);
+        let (fitness, outcomes) = evaluate(&genomes, told, &others, &a);
         let mut order: Vec<usize> = (0..size).collect();
         order.sort_by(|&i, &j| fitness[j].total_cmp(&fitness[i]));
         let elite = &order[..a.elite.min(size)];
@@ -809,6 +843,7 @@ fn main() {
             stage: format!("{:?}", a.stage).to_lowercase(),
             generation,
             widths: Widths::now(),
+            told,
             mean: mean.clone(),
             sigma: sigma.clone(),
             best: best.clone(),

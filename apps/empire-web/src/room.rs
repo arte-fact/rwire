@@ -651,20 +651,14 @@ pub struct Room {
 }
 
 /// Which of the [`Brain::schools`] each seat plays with when a computer
-/// holds it: the four sisters once each and two of them again, shuffled.
+/// holds it: six of the seven, drawn without replacement and shuffled.
 #[derive(Clone, Copy)]
 pub struct Schooling(pub [&'static Brain; 6]);
 
 impl Default for Schooling {
     fn default() -> Schooling {
-        let mut rng = rand::thread_rng();
-        let schools = Brain::schools();
-        let mut seats: [&'static Brain; 6] = std::array::from_fn(|i| match i {
-            0..=3 => &schools[i],
-            _ => &schools[rng.gen_range(0..schools.len())],
-        });
-        seats.shuffle(&mut rng);
-        Schooling(seats)
+        let mut drawn = Brain::schools().choose_multiple(&mut rand::thread_rng(), 6);
+        Schooling(std::array::from_fn(|_| drawn.next().unwrap()))
     }
 }
 
@@ -2578,7 +2572,7 @@ fn deaf_brain(biases: &[(usize, f32)]) -> Brain {
     for &(o, b) in biases {
         g[Brain::exterieur_output(o).end - 1] = b;
     }
-    Brain::from_genome(&g)
+    Brain::from_genome(&g, false)
 }
 
 #[cfg(test)]

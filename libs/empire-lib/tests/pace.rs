@@ -45,10 +45,10 @@ fn where_the_time_goes() {
     let t = Instant::now();
     let mut sink = 0.0f32;
     for _ in 0..n {
-        sink += sight(&game, Kingdoms::France, &m)[0];
+        sink += sight(&game, Kingdoms::France, &m, true)[0];
     }
     let sight_s = secs(t);
-    let view = sight(&game, Kingdoms::France, &m);
+    let view = sight(&game, Kingdoms::France, &m, true);
     let mut wide = view.clone();
     wide.extend([0.0; A_OUT]);
     let t = Instant::now();

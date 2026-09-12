@@ -23,7 +23,7 @@ use crate::trade::{
 /// Neurons of the hidden layer of each network.
 pub const HIDDEN: usize = 32;
 /// An answer under this is "nothing": sigmoids never quite reach zero.
-const DEADBAND: f32 = 0.05;
+pub const DEADBAND: f32 = 0.05;
 
 // -- what a seigneur sees ---------------------------------------------------
 
@@ -40,7 +40,15 @@ pub const RIVAL: usize = 19;
 pub const RIVALS: usize = 5;
 /// The Intendance's answer of the year, the Extérieur's of the year before.
 pub const A_OUT: usize = 18;
-pub const B_OUT: usize = 19;
+/// The Extérieur's orders: the expeditions, the éclaireur, the agents, the rams.
+pub const ORDERS: usize = 19;
+/// What the Extérieur writes down after its orders and reads again the
+/// next year, with the Intendance — a memory it is left to fill: nothing
+/// says what it should keep, evolution alone finds a use for it. A brain
+/// with a recall is not told the Chronique, last year's orders nor its
+/// old reports (see [`sight`]): what it wants of them, it must keep itself.
+pub const RECALL: usize = 32;
+pub const B_OUT: usize = ORDERS + RECALL;
 /// What both networks see.
 pub const SIGHT: usize = OWN + CHRONICLE + RIVALS * RIVAL + B_OUT;
 /// The Intendance sees the sight; the Extérieur sees it and the Intendance's
@@ -50,7 +58,7 @@ pub const B_IN: usize = SIGHT + A_OUT;
 
 /// What the seat remembers from one year to the next, as a seigneur would
 /// from the Chronique and the last campaign.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Memory {
     /// The last Intendance sealed, as applied.
     pub intendance: Option<Intendance>,
@@ -61,10 +69,27 @@ pub struct Memory {
     pub heard: [Heard; 6],
     /// The Intendance's answer of the year, read again by the Extérieur.
     pub answer: [f32; A_OUT],
-    /// The Extérieur's raw answer of last year.
+    /// The Extérieur's raw answer of last year: its orders, then what it
+    /// chose to remember.
     pub last_orders: [f32; B_OUT],
     /// What the seat knows of each realm.
     pub dossiers: [Dossier; 6],
+}
+
+impl Default for Memory {
+    /// A seat that remembers nothing yet.
+    fn default() -> Memory {
+        Memory {
+            intendance: None,
+            demo: None,
+            eco: None,
+            plague: false,
+            heard: [Heard::default(); 6],
+            answer: [0.0; A_OUT],
+            last_orders: [0.0; B_OUT],
+            dossiers: [Dossier::default(); 6],
+        }
+    }
 }
 
 /// The rivals of `id`, in the order they sit from its seat.
@@ -119,7 +144,11 @@ fn criteria(k: &Kingdom) -> [f32; 9] {
 
 /// What a seigneur sees as the year's Intendance opens, as the networks
 /// read it: shares as they are, counts on a log scale (see [`count`]).
-pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
+/// A seigneur `told` reads the Chronique, last year's orders and the
+/// reports of past years as well — the delivered brains were schooled
+/// so; one not told reads zeros there and this year's reports only, and
+/// has its recall to remember with.
+pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory, told: bool) -> Vec<f32> {
     let kingdoms = &game.kingdoms;
     let year = game.year;
     let k = &kingdoms[id.index()];
@@ -171,7 +200,7 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
     debug_assert_eq!(v.len(), OWN);
     // The Chronique.
     let pop = k.population().max(1);
-    match &m.demo {
+    match m.demo.as_ref().filter(|_| told) {
         Some(d) => v.extend([
             share(d.births, pop),
             share(d.immigrants, pop),
@@ -188,14 +217,14 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
         ]),
         None => v.extend([0.0; 9]),
     }
-    match &m.eco {
+    match m.eco.as_ref().filter(|_| told) {
         Some(e) => v.extend([
             signed_count(e.net(), 10_000.0),
             count(e.soldiers_maintenance, 10_000.0),
         ]),
         None => v.extend([0.0; 2]),
     }
-    v.push(f32::from(u8::from(m.plague)));
+    v.push(f32::from(u8::from(told && m.plague)));
     debug_assert_eq!(v.len(), OWN + CHRONICLE);
     // The rivals.
     for o in rivals(id) {
@@ -211,8 +240,9 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
                 .count() as f32
                 / 2.0
         };
-        let report = m.dossiers[i].report.filter(|_| !r.is_dead);
-        let ledger = m.dossiers[i].ledger.filter(|_| !r.is_dead);
+        let kept = |y: i32| !r.is_dead && (told || y == year);
+        let report = m.dossiers[i].report.filter(|p| kept(p.year));
+        let ledger = m.dossiers[i].ledger.filter(|l| kept(l.year));
         let age = |y: i32| 1.0 / (1.0 + (year - y) as f32);
         v.extend([
             f32::from(u8::from(!r.is_dead)),
@@ -241,7 +271,14 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
             }),
         ]);
     }
-    v.extend(m.last_orders);
+    // Last year's orders, then the recall.
+    let (orders, recall) = m.last_orders.split_at(ORDERS);
+    if told {
+        v.extend(orders);
+    } else {
+        v.extend([0.0; ORDERS]);
+    }
+    v.extend(recall);
     debug_assert_eq!(v.len(), SIGHT);
     v
 }
@@ -316,6 +353,10 @@ impl Net {
 pub struct Brain {
     pub intendance: Net,
     pub exterieur: Net,
+    /// Whether the seat is told the Chronique, last year's orders and its
+    /// old reports (see [`sight`]): the delivered brains were schooled so,
+    /// a brain schooled with a recall is not.
+    pub told: bool,
 }
 
 /// The widths a genome is laid out for: the seigneur's own entries of the
@@ -336,6 +377,12 @@ impl Shape {
         rival: RIVAL,
         a_out: A_OUT,
         b_out: B_OUT,
+    };
+
+    /// The widths the delivered brains were schooled at: before the recall.
+    pub const SCHOOLED: Shape = Shape {
+        b_out: ORDERS,
+        ..Shape::NOW
     };
 
     const fn sight(self) -> usize {
@@ -359,12 +406,14 @@ impl Brain {
     /// Weights of both networks laid end to end: the genome evolution works on.
     pub const GENOME: usize = Shape::NOW.genome();
 
-    pub fn from_genome(g: &[f32]) -> Brain {
+    /// The brain of a genome; `told` as [`Brain::told`].
+    pub fn from_genome(g: &[f32], told: bool) -> Brain {
         assert_eq!(g.len(), Self::GENOME);
         let (a, b) = g.split_at(Net::len(A_IN, A_OUT));
         Brain {
             intendance: Net::new(A_IN, A_OUT, a),
             exterieur: Net::new(B_IN, B_OUT, b),
+            told,
         }
     }
 
@@ -427,31 +476,40 @@ impl Brain {
         grown
     }
 
-    /// The brains the computers sit down with: the four sisters of s46,
-    /// schooled at the arena (`apps/empire-train`) from scratch against
-    /// s35 — 300 generations, six tables of six, no hall, a rank cost of
-    /// forty, no letters — and kept as `brains/s46a.f32` to `s46d.f32`,
-    /// their genomes in little-endian floats. One recipe, four
-    /// temperaments the players are left to guess at the table: a, the
-    /// soldier, buys men and neglects the walls; b, the builder, hoards
-    /// grain, mills and rams; c, the garrison, keeps the largest standing
-    /// army; d, the shopkeeper, opens her market first and marches the
-    /// most.
-    pub fn schools() -> &'static [Brain; 4] {
-        static SCHOOLS: LazyLock<[Brain; 4]> = LazyLock::new(|| {
+    /// The brains the computers sit down with, one per temperament,
+    /// their genomes in little-endian floats under `brains/`, at the
+    /// widths of [`Shape::SCHOOLED`] (none has a recall: all are told). All were
+    /// schooled at the arena (`apps/empire-train`) from scratch, six
+    /// tables of six, no hall, a rank cost of forty, no letters. The
+    /// first four came out of s46 (against s35); three then played forty
+    /// rounds against their sisters and s35 at hundred-year tables (s48).
+    /// The last three came out of s53 (against those four, hundred-year
+    /// tables): two rushers and a careful one. The players are left to
+    /// guess who is who: the soldier (s46a) buys men and neglects the
+    /// walls; the builder (s48b) hoards grain, mills and rams; the
+    /// garrison (s48c) keeps the largest standing army; the shopkeeper
+    /// (s48d) opens her market first and marches the most; the charger
+    /// (s53, trial 18) and the conqueror (s53, trial 9) sell land for
+    /// seven years, then raise hundreds of men a year and take two walled
+    /// neighbours at a time — crowned by the year 20 against the first
+    /// four; the careful one (s53a) outlives everyone and crowns late.
+    pub fn schools() -> &'static [Brain; 7] {
+        static SCHOOLS: LazyLock<[Brain; 7]> = LazyLock::new(|| {
             let school = |bytes: &[u8]| {
-                Brain::from_genome(
-                    &bytes
-                        .chunks_exact(4)
-                        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                        .collect::<Vec<f32>>(),
-                )
+                let genome: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .collect();
+                Brain::from_genome(&Brain::grown(&genome, Shape::SCHOOLED), true)
             };
             [
-                school(include_bytes!("../brains/s46a.f32")),
-                school(include_bytes!("../brains/s46b.f32")),
-                school(include_bytes!("../brains/s46c.f32")),
-                school(include_bytes!("../brains/s46d.f32")),
+                school(include_bytes!("../brains/soldat.f32")),
+                school(include_bytes!("../brains/batisseuse.f32")),
+                school(include_bytes!("../brains/garnison.f32")),
+                school(include_bytes!("../brains/boutiquiere.f32")),
+                school(include_bytes!("../brains/fonceuse.f32")),
+                school(include_bytes!("../brains/conquerante.f32")),
+                school(include_bytes!("../brains/prudente.f32")),
             ]
         });
         &SCHOOLS
@@ -460,7 +518,7 @@ impl Brain {
     /// The Intendance's answer as the year opens, kept in `m` for the
     /// Extérieur to read again.
     pub fn answer(&self, game: &EmpireGame, id: Kingdoms, m: &mut Memory) -> [f32; A_OUT] {
-        let a = self.intendance.forward(&sight(game, id, m));
+        let a = self.intendance.forward(&sight(game, id, m, self.told));
         m.answer.copy_from_slice(&a);
         m.answer
     }
@@ -495,7 +553,7 @@ impl Brain {
     }
 
     fn exterieur_sight(&self, game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
-        let mut x = sight(game, id, m);
+        let mut x = sight(game, id, m, self.told);
         x.extend(m.answer);
         x
     }
@@ -824,17 +882,56 @@ pub fn decode_missions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_delivered_schools_grow_to_today() {
+        // Each `.f32` under `brains/` is a genome of `Shape::SCHOOLED`.
+        assert_eq!(Brain::schools().len(), 7);
+    }
     use crate::game::EmpireGame;
+    use crate::intel::Report;
 
     fn brain(fill: f32) -> Brain {
-        Brain::from_genome(&vec![fill; Brain::GENOME])
+        Brain::from_genome(&vec![fill; Brain::GENOME], true)
+    }
+
+    #[test]
+    fn a_seat_not_told_keeps_only_its_recall_and_this_years_reports() {
+        let game = EmpireGame {
+            year: 5,
+            ..Default::default()
+        };
+        let mut m = Memory {
+            plague: true,
+            last_orders: [0.3; B_OUT],
+            ..Default::default()
+        };
+        // A report read this year on the first rival, an old one on the second.
+        let [first, second, ..] = rivals(Kingdoms::France);
+        let fresh = Report::read(game.kingdom(first), 5);
+        m.dossiers[first.index()].report = Some(fresh);
+        m.dossiers[second.index()].report = Some(Report::read(game.kingdom(second), 3));
+        let told = sight(&game, Kingdoms::France, &m, true);
+        let kept = sight(&game, Kingdoms::France, &m, false);
+        // The Chronique is blank, the recall stays, the orders go.
+        assert!(told[OWN..OWN + CHRONICLE].iter().any(|&x| x != 0.0));
+        assert!(kept[OWN..OWN + CHRONICLE].iter().all(|&x| x == 0.0));
+        let orders = SIGHT - B_OUT;
+        assert!(kept[orders..orders + ORDERS].iter().all(|&x| x == 0.0));
+        assert_eq!(&kept[orders + ORDERS..], &told[orders + ORDERS..]);
+        // This year's report is read, last years' is not.
+        let base = OWN + CHRONICLE;
+        assert_eq!(&kept[base..base + RIVAL], &told[base..base + RIVAL]);
+        assert_eq!(kept[base + 11], 1.0);
+        assert_eq!(told[base + RIVAL + 11], 1.0 / 3.0);
+        assert_eq!(kept[base + RIVAL + 11], 0.0);
     }
 
     #[test]
     fn the_sight_has_its_length_and_stays_bounded() {
         let game = EmpireGame::default();
         for id in KINGDOMS {
-            let v = sight(&game, id, &Memory::default());
+            let v = sight(&game, id, &Memory::default(), true);
             assert_eq!(v.len(), SIGHT);
             assert!(v.iter().all(|x| x.is_finite() && (-1.0..=2.0).contains(x)));
         }
@@ -846,7 +943,7 @@ mod tests {
         k.grain_stocks = 2_000_000;
         k.treasury = -50_000;
         k.grain_to_sell = 500_000;
-        let v = sight(&game, Kingdoms::France, &Memory::default());
+        let v = sight(&game, Kingdoms::France, &Memory::default(), true);
         assert!(
             v.iter().all(|x| x.is_finite() && (-3.0..=5.0).contains(x)),
             "{v:?}"
@@ -857,7 +954,7 @@ mod tests {
     fn the_networks_answer_in_zero_one() {
         let game = EmpireGame::default();
         let b = brain(0.3);
-        let s = sight(&game, Kingdoms::France, &Memory::default());
+        let s = sight(&game, Kingdoms::France, &Memory::default(), true);
         let a = b.intendance.forward(&s);
         assert_eq!(a.len(), A_OUT);
         let mut x = s.clone();
@@ -971,7 +1068,7 @@ mod tests {
             .map(|i| ((i * 7919) % 101) as f32 / 101.0 - 0.5)
             .collect();
         let grown = Brain::grown(&old, was);
-        let brain = Brain::from_genome(&grown);
+        let brain = Brain::from_genome(&grown, true);
         let (a, b) = old.split_at(Net::len(was.sight(), was.a_out));
         let old_a = Net::new(was.sight(), was.a_out, a);
         let old_b = Net::new(was.sight() + was.a_out, was.b_out, b);
@@ -985,7 +1082,7 @@ mod tests {
             last_orders,
             ..Default::default()
         };
-        let full = sight(&game, Kingdoms::France, &m);
+        let full = sight(&game, Kingdoms::France, &m, true);
         // The narrower sight: the own block without its last entry, each
         // rival block without its last two, the last orders without the
         // last.

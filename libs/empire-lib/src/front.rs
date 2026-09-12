@@ -17,7 +17,7 @@ use std::cmp::max;
 
 use crate::game::EmpireGame;
 use crate::kingdom::{Fate, Kingdom, Kingdoms};
-use crate::random::random;
+use crate::random::{lot, mix, random};
 
 /// How serfs and merchants fight when the army meets them on its march: a
 /// militia, whatever the realm's soldiers are worth (the peasants defending in
@@ -91,16 +91,6 @@ impl BuildingKind {
     }
 }
 
-/// A building standing at its arpent of a line; crossed, it is burned — or
-/// taken, one time in three.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Building {
-    pub kind: BuildingKind,
-    /// 1 = the frontier end of the line.
-    pub at: i32,
-    pub burned: bool,
-}
-
 /// Those living on a line, or met on it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct People {
@@ -132,8 +122,12 @@ pub struct Line {
     pub merchants: i32,
     pub treasury: i32,
     pub nobles: i32,
-    /// Sorted by arpent.
-    pub buildings: Vec<Building>,
+    /// Per [`BuildingKind`], spread evenly along the line.
+    pub buildings: [i32; 4],
+    /// Drawn as the realm is laid out: which buildings burn when crossed,
+    /// one in three being taken instead (a hash of the lot). Settled
+    /// once, so a building taken stays taken however far the army goes on.
+    pub lot: u32,
 }
 
 /// What an army carries off — or leaves in ashes — of the ground it crossed.
@@ -182,13 +176,42 @@ impl Spoils {
 }
 
 impl Line {
+    /// How many of `c` buildings of a kind stand on the first `x` arpents.
+    /// They are spread evenly, the `j`th at arpent `max(1, ⌊len(2j+1) / 2c⌋)`
+    /// (1 = the frontier end of the line), so those crossed are the `j` with
+    /// `len(2j+1) < 2c(x+1)`, counted in closed form.
+    fn crossed(&self, c: i32, x: i32) -> i32 {
+        if c <= 0 || x < 1 {
+            return 0;
+        }
+        let (len, c, x) = (self.arpents as i64, c as i64, x as i64);
+        let n = 2 * c * (x + 1) - len;
+        let d = 2 * len;
+        if n <= 0 {
+            0
+        } else {
+            ((n + d - 1) / d).min(c) as i32
+        }
+    }
+
+    /// Whether the `j`th building of a kind burns when crossed — or is
+    /// taken, one time in three: a hash of the line's lot, so the answer
+    /// never changes.
+    fn burns(&self, kind: BuildingKind, j: i32) -> bool {
+        let z = mix(self.lot ^ ((kind.index() as u32) << 28) ^ (j as u32));
+        !z.is_multiple_of(3)
+    }
+
+    /// The share of `total` on the first `x` arpents, spread evenly.
     fn even(&self, total: i32, x: i32) -> i32 {
         (total as i64 * x as i64 / self.arpents.max(1) as i64) as i32
     }
 
+    /// The share of `total` on the first `x` arpents when it gathers
+    /// deep in the realm, as the square of the way in: the even share,
+    /// taken evenly again.
     fn deep(&self, total: i32, x: i32) -> i32 {
-        let n = self.arpents.max(1) as i64;
-        (total as i64 * x as i64 * x as i64 / (n * n)) as i32
+        self.even(self.even(total, x), x)
     }
 
     /// The ground and goods on the first `advance` arpents of the line (the
@@ -206,11 +229,14 @@ impl Line {
             treasury_lost: treasury / 3,
             ..Spoils::default()
         };
-        for b in self.buildings.iter().take_while(|b| b.at <= x) {
-            if b.burned {
-                s.burned[b.kind.index()] += 1;
-            } else {
-                s.taken[b.kind.index()] += 1;
+        for kind in BuildingKind::ALL {
+            let i = kind.index();
+            for j in 0..self.crossed(self.buildings[i], x) {
+                if self.burns(kind, j) {
+                    s.burned[i] += 1;
+                } else {
+                    s.taken[i] += 1;
+                }
             }
         }
         s
@@ -249,24 +275,15 @@ fn lay_out(k: &Kingdom, n: usize) -> Vec<Line> {
                 merchants,
                 treasury,
                 nobles,
-                buildings: Vec::new(),
+                buildings: [0; 4],
+                lot: lot(),
             },
         )
         .collect();
     for kind in BuildingKind::ALL {
         for (line, count) in lines.iter_mut().zip(shares(kind.count(k), n)) {
-            let len = line.arpents as i64;
-            for j in 0..count as i64 {
-                line.buildings.push(Building {
-                    kind,
-                    at: ((len * (2 * j + 1)) / (2 * count as i64)).max(1) as i32,
-                    burned: random(0, 3) != 0,
-                });
-            }
+            line.buildings[kind.index()] = count;
         }
-    }
-    for line in &mut lines {
-        line.buildings.sort_by_key(|b| b.at);
     }
     lines
 }
@@ -807,9 +824,7 @@ mod tests {
         rich(&mut k);
         let line = lay_out(&k, 1).remove(0);
         assert_eq!(line.arpents, 10_000);
-        assert_eq!(line.buildings.len(), 23);
-        assert!(line.buildings.windows(2).all(|w| w[0].at <= w[1].at));
-        assert!(line.buildings.iter().all(|b| (1..=10_000).contains(&b.at)));
+        assert_eq!(line.buildings, [12, 3, 6, 2]);
         // Nothing crossed, nothing taken, no one met.
         assert_eq!(line.ground(0), Spoils::default());
         assert_eq!(line.people(0), People::default());
@@ -840,24 +855,78 @@ mod tests {
         assert_eq!((lines[0].arpents, lines[1].arpents), (5001, 5000));
         assert_eq!(lines[0].treasury + lines[1].treasury, 5000);
         assert_eq!(lines[0].grain, lines[1].grain);
+        let on = |l: &Line| l.buildings.iter().sum::<i32>();
         assert_eq!(
-            lines[0].buildings.len() + lines[1].buildings.len(),
+            on(&lines[0]) + on(&lines[1]),
             23,
             "every building is on one line"
         );
-        assert_eq!(lines[0].buildings.len(), 12);
-        assert!(lines
-            .iter()
-            .all(|l| l.buildings.iter().all(|b| b.at <= l.arpents)));
+        assert_eq!(on(&lines[0]), 12);
+        for l in &lines {
+            for (i, &c) in l.buildings.iter().enumerate() {
+                assert_eq!(l.crossed(c, l.arpents), c, "all crossed at the end");
+                assert_eq!(
+                    l.ground(l.arpents).taken[i] + l.ground(l.arpents).burned[i],
+                    c
+                );
+            }
+        }
     }
 
     #[test]
-    fn about_a_building_in_three_is_taken_the_rest_burn() {
+    fn the_buildings_crossed_are_counted_as_they_stand() {
+        // The arpent of the `j`th of `c` buildings on a line of `len`.
+        let at = |len: i32, c: i32, j: i32| {
+            ((len as i64 * (2 * j as i64 + 1)) / (2 * c as i64)).max(1) as i32
+        };
+        // The closed form agrees with the buildings taken one by one, on
+        // every length, count and advance tried — a wide line with few
+        // buildings, a short one packed with them.
+        for arpents in [0, 1, 2, 3, 7, 100, 1001, 10_000] {
+            let line = Line {
+                arpents,
+                ..Line::default()
+            };
+            for c in [0, 1, 2, 3, 5, 12, 50, 3000] {
+                for x in [0, 1, 2, 3, 49, 50, 51, 500, 999, 1000, 5000, 10_000] {
+                    let x = x.min(arpents);
+                    let one_by_one = (0..c).filter(|&j| at(arpents, c, j) <= x).count() as i32;
+                    assert_eq!(
+                        line.crossed(c, x),
+                        one_by_one,
+                        "{arpents} arpents, {c} buildings, {x} crossed"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn about_a_building_in_three_is_taken_the_rest_burn_for_good() {
         let mut k = Kingdom::new(Kingdoms::Spain);
         k.grain_mills = 3000;
         let line = lay_out(&k, 1).remove(0);
-        let burned = line.buildings.iter().filter(|b| b.burned).count();
-        assert!((1800..2200).contains(&burned), "{burned} burned");
+        let all = line.ground(line.arpents);
+        assert_eq!(all.taken[0] + all.burned[0], 3000);
+        assert!(
+            (1800..2200).contains(&all.burned[0]),
+            "{} burned",
+            all.burned[0]
+        );
+        // Whatever is settled on the first arpents stays so further on.
+        let (mut taken, mut burned) = (0, 0);
+        for x in (0..=line.arpents).step_by(97) {
+            let s = line.ground(x);
+            assert!(s.taken[0] >= taken && s.burned[0] >= burned);
+            (taken, burned) = (s.taken[0], s.burned[0]);
+        }
+        // Two lots, two draws.
+        let other = Line {
+            lot: line.lot.wrapping_add(1),
+            ..line.clone()
+        };
+        let kind = BuildingKind::ALL[0];
+        assert!((0..3000).any(|j| line.burns(kind, j) != other.burns(kind, j)));
     }
 
     #[test]
@@ -1182,7 +1251,11 @@ mod tests {
     #[test]
     fn a_realm_crossed_to_its_capital_falls_to_the_army_that_took_the_most() {
         let mut game = EmpireGame::default();
-        game.kingdom_mut(Kingdoms::France).soldiers = 5000;
+        let f = game.kingdom_mut(Kingdoms::France);
+        f.soldiers = 5000;
+        // Fifteen blows lost to a garrison of one before winning a single
+        // one is one chance in 400 at equal efficiency: not with this one.
+        f.soldiers_efficiency = 1500;
         let s = game.kingdom_mut(Kingdoms::Spain);
         s.soldiers = 1;
         s.peasants = 5;

@@ -11,8 +11,8 @@ use crate::front::{
 };
 use crate::game::EmpireGame;
 use crate::kingdom::{Kingdom, Kingdoms};
+use crate::random::shuffle;
 use crate::war::simulate_barbarian_battle;
-use rand::seq::SliceRandom;
 
 /// What a campaign costs per man sent, paid when the men leave — the road's
 /// pay and the wagons' provisions, over the recruit's eight francs and his
@@ -144,7 +144,7 @@ fn march_with(
             None => by_realm.push(vec![e]),
         }
     }
-    by_realm.shuffle(&mut rand::thread_rng());
+    shuffle(&mut by_realm);
     let mut fronts: Vec<(Option<Kingdoms>, Vec<Expedition>)> = Vec::new();
     for mut e in by_realm.into_iter().flatten() {
         let a = game.kingdom(e.attacker);

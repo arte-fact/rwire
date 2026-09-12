@@ -45,6 +45,8 @@ pub struct Outcome {
     pub king: Option<i32>,
     /// Reports read: the éclaireurs' on their return, the agents' letters.
     pub readings: i32,
+    /// The walls kept, in tenths, averaged over the years sat.
+    pub walls: f32,
 }
 
 impl Outcome {
@@ -167,6 +169,8 @@ pub struct YearEnd<'a> {
     pub fought: &'a [Fought],
     /// The intelligence each seat actually paid for this year.
     pub sent: &'a [Sent; 6],
+    /// The seats' outcomes so far, this year counted.
+    pub outcomes: &'a [Outcome; 6],
 }
 
 /// One seat's intelligence moves of the year, as they were actually sent.
@@ -191,6 +195,10 @@ pub struct Table {
     /// taught. Nothing by default: each seat is scored on its own road,
     /// so that war pays only what it brings to one's own crown.
     pub rank_cost: f32,
+    /// What every tenth of wall kept, averaged over the years sat, costs
+    /// at war. Nothing by default: a school of haste pays it, so that a
+    /// realm that walls up rather than marches out is told so.
+    pub walls_cost: f32,
     /// What intelligence costs nothing: a school of letters. A brain that
     /// never bought a report cannot learn to read one, and a report it
     /// cannot read only muddles it, so it never buys one — the letters
@@ -205,6 +213,7 @@ impl Table {
             seats: [stage; 6],
             longest,
             rank_cost: 0.0,
+            walls_cost: 0.0,
             letters: Letters::None,
         }
     }
@@ -214,7 +223,12 @@ impl Table {
     /// ahead of it.
     pub fn scores(&self, outcomes: &[Outcome; 6]) -> [f32; 6] {
         std::array::from_fn(|i| {
-            let own = outcomes[i].fitness(self.longest);
+            let own = outcomes[i].fitness(self.longest)
+                - if self.stage.war() {
+                    self.walls_cost * outcomes[i].walls
+                } else {
+                    0.0
+                };
             if !self.stage.war() || self.rank_cost == 0.0 {
                 return own;
             }
@@ -365,6 +379,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             }
             let p = progress(k, stage);
             outcomes[i].progress += (p - outcomes[i].progress) / year as f32;
+            outcomes[i].walls += (k.fortifications as f32 - outcomes[i].walls) / year as f32;
             deaths[i] = death;
             let title = k.title();
             if death.is_some() {
@@ -386,6 +401,7 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             game: &game,
             memories: &memories,
             deaths,
+            outcomes: &outcomes,
         });
         game.increment_year();
     }
@@ -484,7 +500,7 @@ mod tests {
 
     fn brains(fill: f32) -> Vec<Brain> {
         (0..6)
-            .map(|i| Brain::from_genome(&vec![fill * (i as f32 + 1.0) / 6.0; Brain::GENOME]))
+            .map(|i| Brain::from_genome(&vec![fill * (i as f32 + 1.0) / 6.0; Brain::GENOME], false))
             .collect()
     }
 
@@ -517,7 +533,7 @@ mod tests {
                 for o in 12..17 {
                     g[Brain::exterieur_output(o).end - 1] = 3.0;
                 }
-                Brain::from_genome(&g)
+                Brain::from_genome(&g, false)
             })
             .collect();
         let table: [&Brain; 6] = std::array::from_fn(|i| &bs[i]);
@@ -694,6 +710,29 @@ mod tests {
     }
 
     #[test]
+    fn walls_kept_cost_what_the_table_says_at_war_only() {
+        let open = Outcome {
+            years: 150,
+            progress: 0.5,
+            ..Outcome::default()
+        };
+        let walled = Outcome { walls: 8.0, ..open };
+        let outcomes = [open, walled, open, open, open, open];
+        let haste = Table {
+            walls_cost: 30.0,
+            ..Table::at(Stage::War, 150)
+        };
+        let scores = haste.scores(&outcomes);
+        assert!((scores[0] - scores[1] - 240.0).abs() < 1e-3, "{scores:?}");
+        let peace = Table {
+            walls_cost: 30.0,
+            ..Table::at(Stage::Market, 150)
+        };
+        let scores = peace.scores(&outcomes);
+        assert_eq!(scores[0], scores[1]);
+    }
+
+    #[test]
     fn the_land_ratio_counts_only_once_the_barbarians_are_taught() {
         let k = Kingdom::new(Kingdoms::France);
         assert!(progress(&k, Stage::Emperor) > progress(&k, Stage::Survive));
@@ -772,7 +811,7 @@ mod tests {
 
     #[test]
     fn the_titles_reached_are_dated_at_the_table() {
-        let brain = Brain::from_genome(&vec![0.0; Brain::GENOME]);
+        let brain = Brain::from_genome(&vec![0.0; Brain::GENOME], false);
         let outcomes = play([&brain; 6], &Table::at(Stage::War, 30));
         for o in outcomes {
             assert!(o.prince.is_none_or(|y| (1..=30).contains(&y)));

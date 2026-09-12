@@ -6,6 +6,7 @@ members = [
     "libs/rwire-markdown",
     "libs/rwire-themes",
     "libs/empire-lib",
+    "libs/empire-gpu",
     "apps/rwire-website",
     "apps/rwire-docs",
     "apps/rwire-design-system",
