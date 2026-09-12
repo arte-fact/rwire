@@ -7,4 +7,5 @@ edition = "2021"
 bytemuck = "1.24"
 empire-lib = { path = "../empire-lib" }
 pollster = "0.4"
+rayon = "1.10"
 wgpu = { version = "27", default-features = false, features = ["wgsl", "vulkan"] }

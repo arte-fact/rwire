@@ -9,6 +9,7 @@ pub mod state;
 
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use wgpu::util::DeviceExt;
 
 /// The device the kernels run on.
@@ -176,6 +177,11 @@ pub mod shaders {
 /// The tables a workgroup plays, one per lane.
 pub const TABLES_PER_WORKGROUP: usize = 32;
 
+/// How many table-years one dispatch plays at most: a job the driver
+/// lets run to its end (amdgpu resets the ring after about two seconds,
+/// and a fresh table plays a million table-years a second or so).
+const TABLE_YEARS_PER_DISPATCH: usize = 200_000;
+
 /// How many years one dispatch plays before the tables come back.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -183,41 +189,56 @@ pub struct Params {
     pub years: u32,
 }
 
-/// The year kernel on a batch of genomes: tables are played in place, as
-/// many years at a time as asked.
+/// The year kernel: tables are played in place, as many years at a time
+/// as asked, on the genomes of a [`Pool`].
 pub struct Arena<'a> {
     gpu: &'a Gpu,
     pipeline: wgpu::ComputePipeline,
-    genomes: wgpu::Buffer,
+}
+
+/// A batch of genomes on the device, each of `Brain::GENOME` weights in
+/// the CPU's layout when given; a table's seats index into it.
+pub struct Pool {
+    buffer: wgpu::Buffer,
 }
 
 impl<'a> Arena<'a> {
-    /// The kernel, compiled, over `genomes` (each of `Brain::GENOME`
-    /// weights, in the CPU's layout).
-    pub fn new(gpu: &'a Gpu, genomes: &[Vec<f32>]) -> Arena<'a> {
-        let pipeline = gpu.pipeline("year", &shaders::year());
-        let laid: Vec<f32> = genomes.iter().flat_map(|g| layout::laid(g)).collect();
-        let genomes = gpu.upload("genomes", &laid);
+    /// The kernel, compiled.
+    pub fn new(gpu: &'a Gpu) -> Arena<'a> {
         Arena {
             gpu,
-            pipeline,
-            genomes,
+            pipeline: gpu.pipeline("year", &shaders::year()),
+        }
+    }
+
+    /// `genomes` laid out for the kernel and uploaded.
+    pub fn pool(&self, genomes: &[&[f32]]) -> Pool {
+        let laid: Vec<Vec<f32>> = genomes.par_iter().map(|g| layout::laid(g)).collect();
+        Pool {
+            buffer: self.gpu.upload("genomes", &laid.concat()),
         }
     }
 
     /// `tables` after `years` more years each (fewer once a table is
-    /// done).
-    pub fn play(&self, tables: &[state::Table], years: u32) -> Vec<state::Table> {
+    /// done), the years played a slice at a time so that no dispatch
+    /// outlasts the driver's patience.
+    pub fn play(&self, pool: &Pool, tables: &[state::Table], years: u32) -> Vec<state::Table> {
         let buffer = self.gpu.output("tables", std::mem::size_of_val(tables) / 4);
         self.gpu
             .queue
             .write_buffer(&buffer, 0, bytemuck::cast_slice(tables));
-        let params = self.gpu.upload("params", &[Params { years }]);
-        self.gpu.dispatch(
-            &self.pipeline,
-            &[&self.genomes, &buffer, &params],
-            tables.len().div_ceil(TABLES_PER_WORKGROUP) as u32,
-        );
+        let slice = (TABLE_YEARS_PER_DISPATCH / tables.len().max(1)).max(1) as u32;
+        let mut left = years;
+        while left > 0 {
+            let step = slice.min(left);
+            let params = self.gpu.upload("params", &[Params { years: step }]);
+            self.gpu.dispatch(
+                &self.pipeline,
+                &[&pool.buffer, &buffer, &params],
+                tables.len().div_ceil(TABLES_PER_WORKGROUP) as u32,
+            );
+            left -= step;
+        }
         self.gpu.download(&buffer)
     }
 }

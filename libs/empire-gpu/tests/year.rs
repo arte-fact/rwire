@@ -3,7 +3,7 @@
 //! CPU's own state of the year before, and the two ends compared.
 
 use empire_gpu::state::{Seating, Table};
-use empire_gpu::{Arena, Gpu};
+use empire_gpu::{Arena, Gpu, Pool};
 use empire_lib::arena;
 use empire_lib::brain::{Brain, Letters, Shape, Stage};
 use empire_lib::game::EmpireGame;
@@ -30,6 +30,10 @@ fn genomes() -> Vec<Vec<f32>> {
             Brain::grown(&g, Shape::SCHOOLED)
         })
         .collect()
+}
+
+fn slices(genomes: &[Vec<f32>]) -> Vec<&[f32]> {
+    genomes.iter().map(Vec::as_slice).collect()
 }
 
 /// A war table of `pool` genomes, fresh, its seating, realms and dice
@@ -127,7 +131,8 @@ fn the_gpu_plays_the_cpu_years() {
         return;
     };
     let genomes = genomes();
-    let arena = Arena::new(&gpu, &genomes);
+    let arena = Arena::new(&gpu);
+    let pool = arena.pool(&slices(&genomes));
     let stages = [
         Stage::Survive,
         Stage::Emperor,
@@ -158,7 +163,7 @@ fn the_gpu_plays_the_cpu_years() {
         };
         let years = cpu_years(seed, &seating, &genomes);
         let starts: Vec<Table> = years[..years.len() - 1].to_vec();
-        let ends = arena.play(&starts, 1);
+        let ends = arena.play(&pool, &starts, 1);
         for (y, (got, want)) in ends.iter().zip(&years[1..]).enumerate() {
             played += 1;
             let differences = got.differences(want, 1e-4);
@@ -195,7 +200,7 @@ fn whole_games_throughput() {
         return;
     };
     let genomes = genomes();
-    let arena = Arena::new(&gpu, &genomes);
+    let arena = Arena::new(&gpu);
     let brains: Vec<Brain> = genomes
         .iter()
         .map(|g| Brain::from_genome(g, true))
@@ -221,21 +226,23 @@ fn whole_games_throughput() {
         "CPU, {threads} threads: 512 tables in {took:?}: {:.0} tables/s",
         512.0 / took.as_secs_f64()
     );
-    for &n in &[64usize, 512, 2048, 8192, 16384] {
-        measure(&arena, n, 7);
+    let pool = arena.pool(&slices(&genomes));
+    for &n in &[32usize, 64, 256, 1024, 2048, 4096, 8192, 16384] {
+        measure(&arena, &pool, n, 7);
     }
     let population = population();
-    let arena = Arena::new(&gpu, &population);
+    let pool = arena.pool(&slices(&population));
     for &n in &[8192usize, 16384] {
-        measure(&arena, n, population.len() as u32);
+        measure(&arena, &pool, n, population.len() as u32);
     }
 }
 
-/// `n` tables of `pool` genomes played 60 years on `arena`, timed.
-fn measure(arena: &Arena, n: usize, pool: u32) {
-    let tables: Vec<Table> = (0..n as u32).map(|s| fresh_table_of(s, pool)).collect();
+/// `n` tables of the `genomes` of `pool` played 60 years on `arena`,
+/// timed.
+fn measure(arena: &Arena, pool: &Pool, n: usize, genomes: u32) {
+    let tables: Vec<Table> = (0..n as u32).map(|s| fresh_table_of(s, genomes)).collect();
     let start = std::time::Instant::now();
-    let ends = arena.play(&tables, 60);
+    let ends = arena.play(pool, &tables, 60);
     let took = start.elapsed();
     let years: i32 = ends.iter().map(|t| t.year - 1).sum();
     let crowned = ends
@@ -244,7 +251,7 @@ fn measure(arena: &Arena, n: usize, pool: u32) {
         .filter(|o| o.crowned >= 0)
         .count();
     eprintln!(
-        "{n} tables of {pool} genomes, {years} years in {took:?}: {:.0} tables/s, {crowned} crowns",
+        "{n} tables of {genomes} genomes, {years} years in {took:?}: {:.0} tables/s, {crowned} crowns",
         n as f64 / took.as_secs_f64()
     );
 }
@@ -256,13 +263,14 @@ fn whole_games_are_deterministic() {
         return;
     };
     let genomes = genomes();
-    let arena = Arena::new(&gpu, &genomes);
+    let arena = Arena::new(&gpu);
+    let pool = arena.pool(&slices(&genomes));
     let tables: Vec<Table> = (0..256u32).map(fresh_table).collect();
-    let once = arena.play(&tables, 60);
-    let twice = arena.play(&tables, 60);
+    let once = arena.play(&pool, &tables, 60);
+    let twice = arena.play(&pool, &tables, 60);
     let mut by_year = tables.clone();
     for _ in 0..60 {
-        by_year = arena.play(&by_year, 1);
+        by_year = arena.play(&pool, &by_year, 1);
     }
     let count = |ends: &[Table]| {
         ends.iter()

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+empire-gpu = { path = "../../libs/empire-gpu" }
 empire-lib = { path = "../../libs/empire-lib" }
 rand = "0.8"
 rayon = "1.10"

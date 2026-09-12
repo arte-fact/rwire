@@ -413,6 +413,7 @@ dependencies = [
  "bytemuck",
  "empire-lib",
  "pollster",
+ "rayon",
  "wgpu",
 ]
 
@@ -429,6 +430,7 @@ dependencies = [
 name = "empire-train"
 version = "0.1.0"
 dependencies = [
+ "empire-gpu",
  "empire-lib",
  "rand",
  "rayon",
