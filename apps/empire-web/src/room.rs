@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use empire_lib::arena;
-use empire_lib::brain::{self, Brain, Letters, Memory, Reads, Shape};
+use empire_lib::brain::{self, Brain, Letters, Memory};
 use empire_lib::campaign::{
     apply_battle, expedition_cost, forecast, march, Expedition, Fought, EXPEDITION_GOLD_PER_MAN,
     EXPEDITION_GRAIN_PER_MAN, FIRST_WAR_YEAR,
@@ -2565,6 +2565,7 @@ fn deaf_schooling(biases: &[(usize, f32)]) -> Schooling {
 /// garrison wanted on every target; no agent, whatever the biases).
 #[cfg(test)]
 fn deaf_brain(biases: &[(usize, f32)]) -> Brain {
+    use empire_lib::brain::{Reads, Shape};
     let mut g = vec![0.0; Brain::GENOME];
     for o in 12..17 {
         g[Shape::NOW.exterieur_output(o).end - 1] = -3.0;

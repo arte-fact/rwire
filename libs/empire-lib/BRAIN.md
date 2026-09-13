@@ -81,16 +81,22 @@ prod v1, 45 % de sacres en médiane à 300 générations là où l'**entropie cr
 tirage autour d'une moyenne, `--breed 0`) plafonnait à 17 % et n'y changeait rien en 600.
 La première génération (10 000) reste une loterie.
 
-- Chaque génome joue `--tables` (6) parties de 6 sièges ; sa note est la moyenne. Tables
-  mixtes : 1 à 5 sièges de la population, les autres pris dans `--against` (le pool de
-  référence) et dans le Hall (`--hall`).
+- Chaque génome joue `--tables` (32, un multiple de 32) parties de 6 sièges ; sa note est
+  la moyenne. Tables mixtes : 1 à 5 sièges de la population, les autres pris dans
+  `--against` (le pool de référence) et dans le Hall (`--hall`). Une compagnie tirée joue
+  **32 tables d'un coup** (graines et chaises différentes) : ce sont les 32 voies d'un groupe
+  de travail du GPU, qui lisent ainsi les mêmes six génomes depuis le cache ; chaque génome
+  est noté sur 32 parties au lieu de 6 pour le même prix.
 - **GPU** (`--gpu`, `libs/empire-gpu`) : toute l'année d'une table jouée dans un noyau WGSL,
   une table par voie, règles et dés identiques au CPU (test de parité `tests/year.rs`).
   Rentable à partir de ≈ 6 essais en un processus (`--trials N`, tous les essais dans une
   même passe) : 8 essais à 32 neurones font 2 à 4 s la génération, 20 essais 2,8 s contre
   7,1 s sur 12 threads. Au-delà de 32 neurones le noyau est borné par la lecture des poids
   (chaque table lit six génomes) ; les passes sont découpées (50 000 table-années) pour
-  rester sous le délai du pilote.
+  rester sous le délai du pilote. Avec `--gpu`, les cœurs jouent aussi : chaque génération
+  est partagée entre la carte et le CPU selon le débit que chacun a montré à la
+  précédente (`Pace`). Sur `threadreaper` (3090 + 32 threads) : 8 essais h32 en 1,9 s la
+  génération, 32 essais en 6,7 s.
 - `--hidden H` (couche cachée, les rivaux plus étroits sont élargis par des neurones muets),
   `--told --recall --journal` (les lectures d'une école de zéro), `--keep N` (un instantané
   toutes les N générations, pour les courbes), `--trials N` avec `{n}` dans `--out` et
@@ -231,13 +237,13 @@ python3 apps/empire-train/schools/run-s62.py
 # une campagne d'élevage de 8 essais contre le pool A, sur GPU (≈ 5 min pour 100 gén.)
 P=apps/empire-train/schools/pools/A
 target/release/empire-train --stage war $(for n in 1 2 3 4 5 6 7 8; do echo --against $P/pool-$n-war.json; done) \
-  --hall 0 --longest 100 --rank 40 --tables 6 --trials 8 --breed 0.3 --told --recall --journal \
+  --hall 0 --longest 100 --rank 40 --tables 32 --trials 8 --breed 0.3 --told --recall --journal \
   --generations 300 --keep 25 --gpu --out "s63-{n}-war.json"
 
 # mesurer une école contre le pool (la seule note qui fasse foi), ou dérouler une partie
 target/release/empire-train --stage war $(for n in 1 2 3 4 5; do echo --against $P/pool-$n-war.json; done) \
   --longest 100 --rank 40 --from s63-1-war.json --measure 500 --gpu
-target/release/empire-train --stage war --against ... --from s63-1-war.json --show --tables 6 --rank 40
+target/release/empire-train --stage war --against ... --from s63-1-war.json --show --rank 40
 
 # faire entrer un champion dans le pool (un seul par tour)
 python3 apps/empire-train/schools/promote.py $P apps/empire-train/schools/pools/B s63-*-war.json

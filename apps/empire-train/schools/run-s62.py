@@ -36,7 +36,7 @@ HERE = Path(__file__).resolve().parent / "s62"
 TRIALS = 8
 GENERATIONS = 100
 KEEP = 10
-BASE = ["--stage", "war", "--hall", "0", "--longest", "100", "--rank", "40", "--tables", "6",
+BASE = ["--stage", "war", "--hall", "0", "--longest", "100", "--rank", "40", "--tables", "32",
         "--hidden", "32", "--breed", "0.3", "--trials", str(TRIALS), "--gpu"]
 FLAGS = ["--told", "--recall", "--journal"]
 CROWNED = re.compile(r"^try +(\d+) · gen +99 .*crowned +([\d.]+)%")

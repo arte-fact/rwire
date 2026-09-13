@@ -29,7 +29,7 @@ TRIALS = 8
 GENERATIONS = 300
 KEEP = 25
 MEASURE = 500
-RECIPE = ["--stage", "war", *AGAINST, "--hall", "0", "--longest", "100", "--rank", "40", "--tables", "6"]
+RECIPE = ["--stage", "war", *AGAINST, "--hall", "0", "--longest", "100", "--rank", "40", "--tables", "32"]
 BILAN = re.compile(
     r"one of --from .* prince ([\d.]+)% · king ([\d.]+)% · crowned ([\d.]+)%"
     r"(?: \(years: p10 (\d+) · median (\d+) · p90 (\d+)\))?.* fell ([\d.]+)% \(mother ([\d.]+)%\)"

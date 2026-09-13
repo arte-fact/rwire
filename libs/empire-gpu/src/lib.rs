@@ -20,10 +20,11 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    /// The GPU to play on: a discrete card when there is one, else an
-    /// integrated one, never a software rasterizer; `None` when there is
-    /// nothing. (A machine with several Vulkan drivers installed may
-    /// answer with llvmpipe first.)
+    /// The GPU to play on: `EMPIRE_GPU` names it (a substring of its name,
+    /// or its index in the list printed when it matches nothing); otherwise
+    /// a discrete card when there is one, else an integrated one, never a
+    /// software rasterizer; `None` when there is nothing. (A machine with
+    /// several Vulkan drivers installed may answer with llvmpipe first.)
     pub fn open() -> Option<Gpu> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
@@ -35,12 +36,42 @@ impl Gpu {
             wgpu::DeviceType::VirtualGpu => 2,
             wgpu::DeviceType::Cpu | wgpu::DeviceType::Other => 3,
         };
-        let adapter = instance
+        let adapters: Vec<wgpu::Adapter> = instance
             .enumerate_adapters(wgpu::Backends::VULKAN)
             .into_iter()
             .filter(|a| a.features().contains(wgpu::Features::SUBGROUP))
             .filter(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
-            .min_by_key(|a| rank(a.get_info().device_type))?;
+            .collect();
+        let adapter = match std::env::var("EMPIRE_GPU") {
+            Ok(want) => {
+                let found = match want.parse::<usize>() {
+                    Ok(i) => adapters.get(i),
+                    Err(_) => adapters.iter().find(|a| {
+                        a.get_info()
+                            .name
+                            .to_lowercase()
+                            .contains(&want.to_lowercase())
+                    }),
+                };
+                match found {
+                    Some(a) => a,
+                    None => {
+                        eprintln!("EMPIRE_GPU={want:?} matches no GPU; the GPUs are:");
+                        for (i, a) in adapters.iter().enumerate() {
+                            let info = a.get_info();
+                            eprintln!(
+                                "  {i}: {} ({:?}, {})",
+                                info.name, info.device_type, info.driver_info
+                            );
+                        }
+                        return None;
+                    }
+                }
+            }
+            Err(_) => adapters
+                .iter()
+                .min_by_key(|a| rank(a.get_info().device_type))?,
+        };
         let name = adapter.get_info().name;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("empire"),
@@ -206,6 +237,10 @@ pub struct Arena<'a> {
     gpu: &'a Gpu,
     hidden: usize,
     pipeline: wgpu::ComputePipeline,
+    /// The host-side buffer the genomes are laid into before the copy
+    /// to the card, kept from one pool to the next: a fresh mapping of a
+    /// gigabyte costs more than the layout itself.
+    staging: std::sync::Mutex<Option<wgpu::Buffer>>,
 }
 
 /// A batch of genomes on the device, each at the arena's width in the
@@ -221,6 +256,7 @@ impl<'a> Arena<'a> {
             gpu,
             hidden,
             pipeline: gpu.pipeline("year", &shaders::year(hidden)),
+            staging: std::sync::Mutex::new(None),
         }
     }
 
@@ -245,20 +281,45 @@ impl<'a> Arena<'a> {
     /// uploaded — at most [`Arena::capacity`] of them.
     pub fn pool(&self, genomes: &[&[f32]]) -> Pool {
         let laid = layout::genome(self.hidden);
-        let buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("genomes"),
-            size: (genomes.len() * laid * 4) as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: true,
-        });
+        let size = (genomes.len() * laid * 4) as u64;
+        let mut staging = self.staging.lock().unwrap();
+        let staging = match staging.as_ref().filter(|b| b.size() >= size) {
+            Some(b) => b,
+            None => staging.insert(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("genomes staging"),
+                size,
+                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            })),
+        };
+        let slice = staging.slice(..size);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Write, move |r| tx.send(r).unwrap());
+        self.gpu
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("the device answers");
+        rx.recv().unwrap().expect("the staging buffer maps");
         {
-            let mut mapped = buffer.slice(..).get_mapped_range_mut();
+            let mut mapped = slice.get_mapped_range_mut();
             bytemuck::cast_slice_mut::<u8, f32>(&mut mapped)
                 .par_chunks_exact_mut(laid)
                 .zip(genomes)
                 .for_each(|(out, genome)| layout::lay(genome, self.hidden, out));
         }
-        buffer.unmap();
+        staging.unmap();
+        let buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("genomes"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(staging, 0, &buffer, 0, size);
+        self.gpu.queue.submit([encoder.finish()]);
         Pool { buffer }
     }
 

@@ -50,7 +50,7 @@ def main():
             against = [x for d in LETTERS if d != c for x in ("--against", f"s47{d}-war.json" if os.path.exists(f"s47{d}-war.json") else f"s46{d}-war.json")]
             cmd = [
                 TRAINER, "--stage", "war", "--from", source, *against, "--hall", "0",
-                "--generations", str(GENERATIONS), "--tables", "6", "--rank", "40", "--out", own,
+                "--generations", str(GENERATIONS), "--tables", "32", "--rank", "40", "--out", own,
             ]
             procs.append(subprocess.Popen(
                 cmd,

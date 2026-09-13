@@ -42,7 +42,7 @@ def start(n):
     proc = subprocess.Popen(
         [
             TRAINER, "--stage", "war", "--against", "s35-war.json", "--hall", "0",
-            "--generations", str(GENERATIONS), "--tables", "6", "--rank", "40", "--out", out,
+            "--generations", str(GENERATIONS), "--tables", "32", "--rank", "40", "--out", out,
         ],
         stdout=open(log, "w"),
         stderr=subprocess.STDOUT,

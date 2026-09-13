@@ -34,6 +34,11 @@ fn forward(base: u32, inputs: u32, outputs: u32) {
         var a7 = vec4(0.0);
         for (var i = 0u; i < inputs; i++) {
             let xi = x[i];
+            // A zero entry (a block the brain does not read, a dead
+            // rival) adds nothing: its weights are not fetched.
+            if (xi == 0.0) {
+                continue;
+            }
             let w = base + i * stride + c;
             a0 += xi * genomes[w];
             a1 += xi * genomes[w + 1u];

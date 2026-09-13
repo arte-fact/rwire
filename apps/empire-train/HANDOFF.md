@@ -30,6 +30,43 @@ l'instance précédente ; `libs/empire-lib/BRAIN.md` est la référence de fond.
   réinitialisée se voit à `the GPU came back with zeroed tables`.
 - Clippy propre, `cargo fmt --all`, `cargo test --workspace` verts au dernier commit.
 
+### 1 bis. La machine `threadreaper` (13 septembre, soir — mise en place)
+
+- **Trois cartes** : la RTX 3090 (24 Go, `42:00.0`) et **deux AMD MI50 32 Go** (Vega 20,
+  `0a:00.0` et `0d:00.0`). La seconde MI50 est **en panne depuis le démarrage** (SMC muet,
+  500 erreurs `amdgpu` dans le journal noyau, température fantaisiste) : tout ce qui
+  énumère les cartes AMD — `rocminfo`, `clinfo`, le pilote Vulkan `radeon_icd.json`, donc
+  wgpu sans filtre — **se bloque** dans le pilote. Deux `rocm-smi` du moniteur llama sont
+  restés pendus dessus. La première MI50 semble saine mais injoignable tant que la seconde
+  n'est pas détachée (`echo 0000:0d:00.0 | sudo tee /sys/bus/pci/drivers/amdgpu/unbind`,
+  non fait : à décider avec l'utilisateur).
+- **Toujours** lancer le trainer et les tests GPU avec
+  `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json` (sinon wgpu tombe sur la MI50
+  morte et pend). `EMPIRE_GPU=<bout du nom ou index>` choisit la carte ; un nom inconnu
+  imprime la liste.
+- **Le trainer partage chaque génération entre la carte et les 32 cœurs** (`Pace`, part du
+  CPU réglée sur le débit mesuré, ≈ 40–50 %) ; les écoles s'écrivent en parallèle ; le
+  noyau ne lit plus les poids des entrées à zéro (blocs non lus, voisins morts) ; le tampon
+  d'envoi des génomes est conservé d'une passe à l'autre. Mesuré (8 écoles h32 contre le
+  pool A, par génération) : **4,6 s → 1,9 s** ; 32 écoles : **≈ 6,7 s** (0,21 s par école,
+  contre 0,55 réel avant — le `2,9s` imprimé ne comptait pas l'écriture des écoles).
+  Gén. 0 (10 000 génomes par école) : ≈ 18 s par groupe de 8 écoles.
+- Débit brut du noyau sur la 3090 (`whole_games_throughput`) : 18 700 tables/s à 7
+  génomes, 12 400 sur un pool de 1 024 (8 300 avant le saut des zéros) ; CPU 32 threads
+  6 300.
+- **Compagnie partagée par groupe de 32** (fait le 13 au soir) : une compagnie tirée joue
+  32 tables d'un coup — les 32 voies d'un groupe de travail, graines et ordre des chaises
+  différents — et `--tables` (32 par défaut) est un multiple de 32 : chaque génome est
+  noté sur 32 parties au lieu de 6. Le noyau n'a pas changé, c'est `evaluate` qui compose
+  les tables (les coupes GPU/CPU et les passes tombent sur des multiples de 32). Mesuré
+  sur le pool de 1 024 à 65 000 tables : 12 800 → **19 300 tables/s** (×1,5) ; des tables
+  strictement identiques par 32 (aucune divergence) plafonnent à 26 600 : **le noyau est
+  borné par sa mémoire privée par voie** (13 Ko d'état par table en mémoire locale, accès
+  divergents entre voies), pas par les poids. Dans le trainer : 8 écoles à 32 tables par
+  génome, 5,5 s la génération (64 000 tables, la carte à ≈ 10 000 tables/s, les cœurs
+  ≈ 4 300) ; à 64 tables, 10 s. L'ancien réglage (6 tables) faisait 1,9 s : la table
+  revient 1,8 fois moins cher, la génération en compte 5 fois plus.
+
 ## 2. Ce qu'on sait (le résumé qui compte)
 
 1. **Le plafond à 15 % contre les rivaux était la méthode** : l'entropie croisée (tirage
@@ -101,8 +138,14 @@ l'instance précédente ; `libs/empire-lib/BRAIN.md` est la référence de fond.
    distincts, `--deliver`), mettre `Brain::schools()` et `BRAIN.md` § 4 à jour.
 4. Élevage × largeur (128–256), l'échelle de mutation (0,3 s'aplatit vers 300 gén., 0,1
    monte encore), le recall sur course longue.
-5. Pour la 3090 : le noyau « compagnie partagée par groupe de 32 » (les poids lus une
-   fois par groupe) ou moins de mémoire privée par voie ; le tirage de la population sur
-   la carte (moyenne et sigma envoyés) au-delà de 100 000 poids.
+5. Pour la 3090, le prochain gain est **la mémoire privée par voie** : l'état d'une table
+   (13 Ko) vit en mémoire locale et les index divergents (`K[s]`, `order[i]`, cibles des
+   expéditions) coûtent un secteur par voie. Pistes : ordre des Intendances tiré par
+   groupe (uniforme entre les 32 voies, donc accès coalescés — change les dés, `RULES` à
+   incrémenter, parité CPU à refaire avec un rng d'ordre), sortir le journal et les
+   dossiers de l'état privé (lus une fois l'an, en mémoire globale), `x` reconstruit à la
+   volée. Le tirage de la population sur la carte (moyenne et sigma envoyés) au-delà de
+   100 000 poids. Et la MI50 saine, dès que la morte est détachée : sa bande passante
+   (1 To/s) vaut celle de la 3090 pour ce noyau.
 6. Décider du siège sacré (il joue hors score jusqu'à la fin de table ; sous v2 la table
    s'arrête, la question est close sauf pour les tables de clones).

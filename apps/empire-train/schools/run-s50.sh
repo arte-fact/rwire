@@ -12,4 +12,4 @@ T=../../../target/release/empire-train
 AGAINST=()
 for s in s48a s48b s48c s48d; do AGAINST+=(--against "$s-war.json"); done
 exec "$T" --stage war --from s49a-war.json "${AGAINST[@]}" --hall 0 --longest 100 \
-  --walls 30 --generations 300 --tables 6 --rank 40 --out s50-war.json
+  --walls 30 --generations 300 --tables 32 --rank 40 --out s50-war.json

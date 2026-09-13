@@ -55,7 +55,7 @@ def main():
             against = [x for path in (*sisters, "s35-war.json") for x in ("--against", path)]
             cmd = [
                 TRAINER, "--stage", "war", "--from", source, *against, "--hall", "0", "--longest", "100",
-                "--generations", str(GENERATIONS), "--tables", "6", "--rank", "40", "--out", own,
+                "--generations", str(GENERATIONS), "--tables", "32", "--rank", "40", "--out", own,
             ]
             procs.append(subprocess.Popen(
                 cmd,

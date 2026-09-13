@@ -12,10 +12,10 @@
 
 use std::borrow::Cow;
 use std::fs;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use empire_gpu::state::{self, Seating};
-use empire_gpu::{Arena, Gpu};
+use empire_gpu::{Arena, Gpu, Pool};
 use empire_lib::arena::{play, watch, Outcome, Table, YearEnd};
 use empire_lib::brain::{Brain, Letters, Reads, Shape, Stage, HIDDEN, MAX_HIDDEN, ORDERS};
 use empire_lib::game::EmpireGame;
@@ -192,6 +192,8 @@ struct Args {
     /// The first generation is drawn wider: a lottery for a start that lives.
     first: usize,
     elite: usize,
+    /// How many tables each genome sits a generation, a multiple of
+    /// [`GROUP`]: they come by groups of a company at as many seeds.
     tables: usize,
     longest: i32,
     from: Option<String>,
@@ -293,7 +295,7 @@ fn args() -> Args {
         population: 1000,
         first: 10_000,
         elite: 100,
-        tables: 3,
+        tables: 32,
         longest: 150,
         from: None,
         out: "school.json".to_string(),
@@ -375,6 +377,10 @@ fn args() -> Args {
         "--out needs a {{n}} to name the trials"
     );
     assert!(
+        a.tables > 0 && a.tables.is_multiple_of(GROUP),
+        "--tables is a multiple of {GROUP}: a company sits that many tables"
+    );
+    assert!(
         a.hidden > 0 && a.hidden <= MAX_HIDDEN,
         "--hidden must be between 1 and {MAX_HIDDEN}"
     );
@@ -432,22 +438,28 @@ struct Round {
 
 /// How many bytes of drawn genomes a generation holds at once: past it,
 /// the trials are played in turns.
-const MEMORY_BUDGET: usize = 6 << 30;
+const MEMORY_BUDGET: usize = 12 << 30;
 
 /// A table's company: the pool's genome on each chair.
 type Company = [usize; 6];
+
+/// How many tables a company sits, at as many seeds and chair orders: the
+/// tables of one GPU workgroup, so that its lanes read the same six
+/// genomes — from the cache, not the memory — and every genome is scored
+/// on that many games of each company it is drawn into.
+const GROUP: usize = empire_gpu::TABLES_PER_WORKGROUP;
 
 /// The companies of a round among others: one to five of the trial's
 /// genomes at random chairs and the `others` on the rest, so a genome
 /// can never count on a given number of kindred stalls. The company
 /// varies from table to table — all of the trial's, a single other at
 /// every free chair, or a different other on each — so no fixed set of
-/// rivals can be farmed.
-fn companies_among(round: &Round, tables: usize) -> Vec<Company> {
+/// rivals can be farmed. `groups` companies per genome.
+fn companies_among(round: &Round, groups: usize) -> Vec<Company> {
     let mut rng = rand::thread_rng();
     let others = &round.others;
     let mut companies = Vec::new();
-    for _ in 0..tables {
+    for _ in 0..groups {
         let mut order: Vec<usize> = round.ours.clone().collect();
         order.shuffle(&mut rng);
         let mut rest = order.as_slice();
@@ -535,13 +547,13 @@ fn kernel_width(a: &Args, rivals: &[Other]) -> usize {
 
 /// The companies of `rounds` on the GPU: the seats they sit, and only
 /// them, pooled and every table played to its end in one go.
-fn play_on(
+/// The pool and the fresh tables of `companies`, ready for `arena`.
+fn lay_out(
     arena: &Arena,
     seats: &[Seat],
     companies: &[Company],
-    a: &Args,
     table_of: impl Fn(&Company) -> Table,
-) -> Vec<[Outcome; 6]> {
+) -> (Pool, Vec<state::Table>) {
     let mut local = vec![u32::MAX; seats.len()];
     let mut pooled: Vec<&[f32]> = Vec::new();
     for &g in companies.iter().flatten() {
@@ -569,69 +581,162 @@ fn play_on(
             state::Table::fresh(&seating, &game, random::Rng::seeded(rng.gen()))
         })
         .collect();
-    arena
-        .play(&pool, &tables, a.longest as u32)
-        .iter()
-        .map(state::Table::outcomes)
+    (pool, tables)
+}
+
+/// `companies` played on `arena`, in runs whose genomes fit its pool —
+/// every run laid out and on the card before the first is played, and
+/// `staged` told then: the cores are free from that point on.
+fn play_on(
+    arena: &Arena,
+    seats: &[Seat],
+    companies: &[Company],
+    a: &Args,
+    table_of: impl Fn(&Company) -> Table,
+    staged: impl FnOnce(),
+) -> Vec<[Outcome; 6]> {
+    let runs: Vec<(Pool, Vec<state::Table>)> = batches(companies, arena.capacity())
+        .into_iter()
+        .map(|batch| lay_out(arena, seats, &companies[batch], &table_of))
+        .collect();
+    staged();
+    runs.iter()
+        .flat_map(|(pool, tables)| {
+            let out: Vec<[Outcome; 6]> = arena
+                .play(pool, tables, a.longest as u32)
+                .iter()
+                .map(state::Table::outcomes)
+                .collect();
+            out
+        })
         .collect()
+}
+
+/// `companies` played on the CPU, every core on its own tables.
+fn play_all(
+    seats: &[Seat],
+    companies: &[Company],
+    table_of: impl Fn(&Company) -> Table + Sync,
+) -> Vec<[Outcome; 6]> {
+    let mut used = vec![false; seats.len()];
+    for &g in companies.iter().flatten() {
+        used[g] = true;
+    }
+    let brains: Vec<Option<Brain>> = seats
+        .par_iter()
+        .zip(&used)
+        .map(|(s, &used)| used.then(|| Brain::from_genome(s.genome, s.reads)))
+        .collect();
+    companies
+        .par_iter()
+        .map(|company| {
+            play(
+                std::array::from_fn(|chair| brains[company[chair]].as_ref().unwrap()),
+                &table_of(company),
+            )
+        })
+        .collect()
+}
+
+/// How the tables are shared when the GPU plays: the CPU's part, moved
+/// after every round onto the pace each showed — both are done at once.
+struct Pace {
+    cpu: f32,
+}
+
+impl Pace {
+    fn new() -> Pace {
+        Pace { cpu: 0.3 }
+    }
+
+    /// Where the card's tables end: whole groups.
+    fn cut(&self, tables: usize) -> usize {
+        (tables - (tables as f32 * self.cpu) as usize).div_ceil(GROUP) * GROUP
+    }
+
+    fn learn(&mut self, cpu: (usize, Duration), gpu: (usize, Duration)) {
+        if cpu.0 == 0 || gpu.0 == 0 {
+            return;
+        }
+        let rate = |(n, took): (usize, Duration)| n as f32 / took.as_secs_f32().max(1e-3);
+        let (c, g) = (rate(cpu), rate(gpu));
+        self.cpu = (c / (c + g)).clamp(0.0, 0.9);
+    }
 }
 
 /// Play the generation, every trial's tables at once: alone at a table
 /// of its own clones before the market is taught, among others after
-/// (see [`companies_among`]). Each genome sits `tables` tables; its
-/// fitness is the mean of its scores. One fitness and outcomes per trial.
+/// (see [`companies_among`]). Each genome sits `tables` tables, [`GROUP`]
+/// per company it is drawn into; its fitness is the mean of its scores.
+/// One fitness and outcomes per trial.
 fn evaluate(
     seats: &[Seat],
     rounds: &[Round],
     a: &Args,
     arena: Option<&Arena>,
+    pace: &mut Pace,
 ) -> Vec<(Vec<f32>, Vec<Outcome>)> {
-    let companies: Vec<Vec<Company>> = rounds
+    let groups = a.tables / GROUP;
+    let companies: Vec<Company> = rounds
         .iter()
-        .map(|round| {
+        .flat_map(|round| {
             if a.stage.market() {
-                companies_among(round, a.tables)
+                companies_among(round, groups)
             } else {
                 round
                     .ours
                     .clone()
-                    .flat_map(|g| std::iter::repeat_n([g; 6], a.tables))
+                    .flat_map(|g| std::iter::repeat_n([g; 6], groups))
                     .collect()
             }
         })
         .collect();
     let table_of = |company: &Company| a.table_of(|chair| Some(seats[company[chair]].stage));
+    // Every company at GROUP tables in a row (one workgroup), the chairs
+    // dealt anew at each.
+    let mut rng = rand::thread_rng();
+    let mut all: Vec<Company> = Vec::with_capacity(companies.len() * GROUP);
+    for company in &companies {
+        for _ in 0..GROUP {
+            let mut c = *company;
+            c.shuffle(&mut rng);
+            all.push(c);
+        }
+    }
     let outcomes: Vec<[Outcome; 6]> = match arena {
+        // The card takes the first tables, the cores the rest, at once —
+        // the cores waiting until the card's first run is staged, so its
+        // pool is laid out at full speed.
         Some(arena) => {
-            let all: Vec<Company> = companies.iter().flatten().copied().collect();
-            batches(&all, arena.capacity())
-                .into_iter()
-                .flat_map(|batch| play_on(arena, seats, &all[batch], a, table_of))
-                .collect()
+            let (on_gpu, on_cpu) = all.split_at(pace.cut(all.len()));
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (mut from_gpu, from_cpu) = std::thread::scope(|scope| {
+                let gpu = scope.spawn(|| {
+                    let clock = Instant::now();
+                    let out = play_on(arena, seats, on_gpu, a, table_of, || {
+                        let _ = tx.send(());
+                    });
+                    (out, clock.elapsed())
+                });
+                let _ = rx.recv();
+                let clock = Instant::now();
+                let out = play_all(seats, on_cpu, table_of);
+                let cpu_took = clock.elapsed();
+                let (from_gpu, gpu_took) = gpu.join().unwrap();
+                pace.learn((on_cpu.len(), cpu_took), (on_gpu.len(), gpu_took));
+                (from_gpu, out)
+            });
+            from_gpu.extend(from_cpu);
+            from_gpu
         }
-        None => {
-            let brains: Vec<Brain> = seats
-                .par_iter()
-                .map(|s| Brain::from_genome(s.genome, s.reads))
-                .collect();
-            companies
-                .par_iter()
-                .flatten()
-                .map(|company| {
-                    play(
-                        std::array::from_fn(|chair| &brains[company[chair]]),
-                        &table_of(company),
-                    )
-                })
-                .collect()
-        }
+        None => play_all(seats, &all, table_of),
     };
     // Every seat a genome sat: its score at that table, and the outcome.
     let mut per: Vec<Vec<Vec<(f32, Outcome)>>> = rounds
         .iter()
         .map(|round| vec![Vec::new(); round.ours.len()])
         .collect();
-    for (company, outcomes) in companies.iter().flatten().zip(&outcomes) {
+    for (company, outcomes) in all.iter().zip(&outcomes) {
         let scores = table_of(company).scores(outcomes);
         for chair in 0..6 {
             if let Some((trial, i)) = seats[company[chair]].scored {
@@ -1173,7 +1278,7 @@ impl Trial {
         fitness: &[f32],
         outcomes: &[Outcome],
         a: &Args,
-        elapsed: f32,
+        clock: Instant,
     ) -> String {
         let size = genomes.len();
         let mut order: Vec<usize> = (0..size).collect();
@@ -1230,7 +1335,7 @@ impl Trial {
             serde_json::to_string(&school).unwrap()
         };
         fs::write(&self.out, &json).unwrap();
-        reading(generation, fitness, outcomes, elapsed)
+        reading(generation, fitness, outcomes, clock.elapsed().as_secs_f32())
     }
 }
 
@@ -1306,6 +1411,7 @@ fn main() {
         a.trials,
         gpu.as_ref().map_or("CPU", |g| g.name.as_str()),
     );
+    let mut pace = Pace::new();
     for generation in start..start + a.generations {
         let clock = Instant::now();
         let size = if generation == 0 {
@@ -1354,12 +1460,17 @@ fn main() {
                     scored: None,
                 }));
             }
-            let played = evaluate(&seats, &rounds, &a, arena.as_ref());
-            let elapsed = clock.elapsed().as_secs_f32();
-            for (n, ((trial, genomes), (fitness, outcomes))) in
-                group.iter_mut().zip(&populations).zip(&played).enumerate()
-            {
-                let reading = trial.learn(generation, genomes, fitness, outcomes, &a, elapsed);
+            let played = evaluate(&seats, &rounds, &a, arena.as_ref(), &mut pace);
+            // Every trial learns at once: the school files are big.
+            let readings: Vec<String> = group
+                .par_iter_mut()
+                .zip(&populations)
+                .zip(&played)
+                .map(|((trial, genomes), (fitness, outcomes))| {
+                    trial.learn(generation, genomes, fitness, outcomes, &a, clock)
+                })
+                .collect();
+            for (n, reading) in readings.into_iter().enumerate() {
                 if a.trials > 1 {
                     println!("try {:2} · {reading}", first + n + 1);
                 } else {

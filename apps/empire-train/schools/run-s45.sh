@@ -12,5 +12,5 @@ export RAYON_NUM_THREADS=10
 cargo build --release -p empire-train
 ../../../target/release/empire-train --stage war \
   --against s35-war.json --against s43-war.json --hall 0 \
-  --generations 1200 --tables 6 --rank 40 --out s45-war.json > s45.log 2>&1
+  --generations 1200 --tables 32 --rank 40 --out s45-war.json > s45.log 2>&1
 echo "SCHOOL 45 DONE" >> s45.log
