@@ -20,17 +20,27 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    /// The first GPU found; `None` when there is none.
+    /// The GPU to play on: a discrete card when there is one, else an
+    /// integrated one, never a software rasterizer; `None` when there is
+    /// nothing. (A machine with several Vulkan drivers installed may
+    /// answer with llvmpipe first.)
     pub fn open() -> Option<Gpu> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .ok()?;
+        let rank = |t: wgpu::DeviceType| match t {
+            wgpu::DeviceType::DiscreteGpu => 0,
+            wgpu::DeviceType::IntegratedGpu => 1,
+            wgpu::DeviceType::VirtualGpu => 2,
+            wgpu::DeviceType::Cpu | wgpu::DeviceType::Other => 3,
+        };
+        let adapter = instance
+            .enumerate_adapters(wgpu::Backends::VULKAN)
+            .into_iter()
+            .filter(|a| a.features().contains(wgpu::Features::SUBGROUP))
+            .filter(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
+            .min_by_key(|a| rank(a.get_info().device_type))?;
         let name = adapter.get_info().name;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("empire"),
@@ -219,10 +229,16 @@ impl<'a> Arena<'a> {
         self.hidden
     }
 
-    /// How many genomes a [`Pool`] holds at most: one buffer's worth.
+    /// How many genomes a [`Pool`] holds at most: one binding's worth
+    /// (the buffer may be allowed larger than what a kernel can be bound
+    /// to, as on NVIDIA).
     pub fn capacity(&self) -> usize {
         let genome = (layout::genome(self.hidden) * 4) as u64;
-        (self.gpu.device.limits().max_buffer_size / genome) as usize
+        let limits = self.gpu.device.limits();
+        let bytes = limits
+            .max_buffer_size
+            .min(u64::from(limits.max_storage_buffer_binding_size));
+        (bytes / genome) as usize
     }
 
     /// `genomes`, each of the arena's width, laid out for the kernel and
