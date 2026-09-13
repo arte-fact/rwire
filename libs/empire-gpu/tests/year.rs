@@ -5,7 +5,7 @@
 use empire_gpu::state::{Seating, Table};
 use empire_gpu::{Arena, Gpu, Pool};
 use empire_lib::arena;
-use empire_lib::brain::{Brain, Letters, Shape, Stage};
+use empire_lib::brain::{Brain, Letters, Reads, Shape, Stage, HIDDEN};
 use empire_lib::game::EmpireGame;
 use empire_lib::random;
 
@@ -27,7 +27,7 @@ fn genomes() -> Vec<Vec<f32>> {
                 .chunks_exact(4)
                 .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
                 .collect();
-            Brain::grown(&g, Shape::SCHOOLED)
+            Brain::grown(&g, Shape::SCHOOLED, Shape::NOW)
         })
         .collect()
 }
@@ -41,7 +41,7 @@ fn slices(genomes: &[Vec<f32>]) -> Vec<&[f32]> {
 fn fresh_table_of(seed: u32, pool: u32) -> Table {
     let seating = Seating {
         genomes: std::array::from_fn(|i| (i as u32 * 131 + seed * 7) % pool),
-        told: [true; 6],
+        reads: [Reads::ALL; 6],
         seats: [Stage::War; 6],
         stage: Stage::War,
         longest: 60,
@@ -76,7 +76,7 @@ fn population() -> Vec<Vec<f32>> {
 /// then after each year played.
 fn cpu_years(seed: u32, seating: &Seating, genomes: &[Vec<f32>]) -> Vec<Table> {
     let brains: Vec<Brain> = (0..6)
-        .map(|i| Brain::from_genome(&genomes[seating.genomes[i] as usize], seating.told[i]))
+        .map(|i| Brain::from_genome(&genomes[seating.genomes[i] as usize], seating.reads[i]))
         .collect();
     let table = arena::Table {
         stage: seating.stage,
@@ -119,6 +119,9 @@ fn rounding_only(got: &Table, want: &Table) -> bool {
         if d.abs() <= slack && want.memories[i].net - g.memories[i].net == d {
             g.kingdoms[i].treasury = want.kingdoms[i].treasury;
             g.memories[i].net = want.memories[i].net;
+            if want.journal[0].realms[i].treasury - g.journal[0].realms[i].treasury == d {
+                g.journal[0].realms[i].treasury = want.journal[0].realms[i].treasury;
+            }
         }
     }
     g.differences(want, 1e-4).is_empty()
@@ -131,7 +134,7 @@ fn the_gpu_plays_the_cpu_years() {
         return;
     };
     let genomes = genomes();
-    let arena = Arena::new(&gpu);
+    let arena = Arena::new(&gpu, HIDDEN);
     let pool = arena.pool(&slices(&genomes));
     let stages = [
         Stage::Survive,
@@ -149,7 +152,7 @@ fn the_gpu_plays_the_cpu_years() {
         let stage = stages[seed as usize % 8];
         let seating = Seating {
             genomes: std::array::from_fn(|i| ((i + seed as usize) % 7) as u32),
-            told: std::array::from_fn(|i| !(i + seed as usize).is_multiple_of(3)),
+            reads: std::array::from_fn(|i| Reads::from_bits((i as u32 + seed) % 8)),
             seats: std::array::from_fn(|i| {
                 if i.is_multiple_of(2) {
                     stage
@@ -200,10 +203,10 @@ fn whole_games_throughput() {
         return;
     };
     let genomes = genomes();
-    let arena = Arena::new(&gpu);
+    let arena = Arena::new(&gpu, HIDDEN);
     let brains: Vec<Brain> = genomes
         .iter()
-        .map(|g| Brain::from_genome(g, true))
+        .map(|g| Brain::from_genome(g, Reads::ALL))
         .collect();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let start = std::time::Instant::now();
@@ -263,7 +266,7 @@ fn whole_games_are_deterministic() {
         return;
     };
     let genomes = genomes();
-    let arena = Arena::new(&gpu);
+    let arena = Arena::new(&gpu, HIDDEN);
     let pool = arena.pool(&slices(&genomes));
     let tables: Vec<Table> = (0..256u32).map(fresh_table).collect();
     let once = arena.play(&pool, &tables, 60);

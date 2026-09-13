@@ -31,7 +31,7 @@ pub struct Rumour {
 
 /// The rumours about one realm, as a table sums them up: who it marched on,
 /// who marched on it, who beat it, what ground it lost to whom.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Heard {
     pub marched_on: [bool; 6],
     pub marched_by: [bool; 6],

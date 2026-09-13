@@ -1,7 +1,7 @@
 //! The GPU's forward against `Net::forward`, on random genomes and sights.
 
 use empire_gpu::{layout, shaders, Gpu, Question};
-use empire_lib::brain::{Brain, A_IN, A_OUT, B_IN, B_OUT};
+use empire_lib::brain::{Brain, Reads, Shape, A_IN, A_OUT, B_IN, B_OUT};
 use empire_lib::random::{random, seed};
 
 fn noise(n: usize, scale: f32) -> Vec<f32> {
@@ -16,11 +16,20 @@ fn the_gpu_answers_as_the_cpu() {
         eprintln!("no GPU: skipped");
         return;
     };
+    for hidden in [32, 64, 256] {
+        answers_as_the_cpu(&gpu, hidden);
+    }
+}
+
+/// Four random brains of `hidden` neurons asked forty questions on both
+/// engines.
+fn answers_as_the_cpu(gpu: &Gpu, hidden: usize) {
     seed(3);
-    let scales = Brain::scales();
+    let shape = Shape::wide(hidden);
+    let scales = shape.scales();
     let genomes: Vec<Vec<f32>> = (0..4)
         .map(|_| {
-            noise(Brain::GENOME, 1.0)
+            noise(shape.genome(), 1.0)
                 .iter()
                 .zip(&scales)
                 .map(|(x, s)| x * s * 2.0)
@@ -29,7 +38,7 @@ fn the_gpu_answers_as_the_cpu() {
         .collect();
     let brains: Vec<Brain> = genomes
         .iter()
-        .map(|g| Brain::from_genome(g, true))
+        .map(|g| Brain::from_genome(g, Reads::ALL))
         .collect();
     let questions: Vec<Question> = (0..40)
         .map(|i| Question {
@@ -46,8 +55,11 @@ fn the_gpu_answers_as_the_cpu() {
         })
         .collect();
 
-    let flat: Vec<f32> = genomes.iter().flat_map(|g| layout::laid(g)).collect();
-    let pipeline = gpu.pipeline("forward test", &shaders::forward_test());
+    let flat: Vec<f32> = genomes
+        .iter()
+        .flat_map(|g| layout::laid(g, hidden))
+        .collect();
+    let pipeline = gpu.pipeline("forward test", &shaders::forward_test(hidden));
     let genomes_buf = gpu.upload("genomes", &flat);
     let questions_buf = gpu.upload("questions", &questions);
     let sights_buf = gpu.upload("sights", &sights.concat());
@@ -74,5 +86,5 @@ fn the_gpu_answers_as_the_cpu() {
             assert!(err < 1e-4, "question {i} answer {o}: cpu {e} gpu {g}");
         }
     }
-    eprintln!("{}: worst error {worst:e}", gpu.name);
+    eprintln!("{}, hidden {hidden}: worst error {worst:e}", gpu.name);
 }

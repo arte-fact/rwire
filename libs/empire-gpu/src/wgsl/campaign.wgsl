@@ -265,7 +265,8 @@ fn fight(d: u32, n: u32) {
                 let escort = stands[i].men / stands[i].rams;
                 let missing = max(RAM_ESCORT - escort, 0);
                 var broken = 0;
-                for (var r = 0; r < stands[i].rams; r++) {
+                let engaged = min(stands[i].rams, walls);
+                for (var r = 0; r < engaged; r++) {
                     walls = max(0, walls - 1);
                     if (random(1, RAM_ESCORT) <= missing) {
                         broken += 1;

@@ -1,6 +1,7 @@
 // What a seat sees (brain.rs `sight`), written into the lane's `x` for
 // the networks to read: the realm's own figures, the Chronique, the
-// rivals, then last year's orders and the recall.
+// rivals, last year's orders and the recall, then the journal — each
+// block zero when the seat's brain does not read it (brain.rs `Reads`).
 
 fn share(n: i32, whole: i32) -> f32 {
     if (whole <= 0) {
@@ -54,7 +55,9 @@ fn others_on(flags: array<i32, 6>, me: u32) -> f32 {
 }
 
 fn sight(s: u32) {
-    let told = seat_told[s] != 0u;
+    let told = (seat_reads[s] & 1u) != 0u;
+    let recall = (seat_reads[s] & 2u) != 0u;
+    let journal = (seat_reads[s] & 4u) != 0u;
     let needs = mouths(s) * 5 + K[s].soldiers * 8;
     let next = title(s) + 1;
     var i = 0u;
@@ -177,8 +180,36 @@ fn sight(s: u32) {
     }
     i += 19u;
     for (var j = 19u; j < B_OUT; j++) {
-        x[i] = M[s].orders[j];
+        x[i] = select(0.0, M[s].orders[j], recall);
         i += 1u;
+    }
+    // The journal, the last year first.
+    for (var y = 0u; y < JOURNAL_YEARS; y++) {
+        let mine = J[y].realms[s];
+        x[i] = select(0.0, f32(mine.title) / 3.0, journal);
+        x[i + 1u] = select(0.0, count(mine.soldiers, 400.0), journal);
+        x[i + 2u] = select(0.0, signed_count(mine.treasury, 10000.0), journal);
+        x[i + 3u] = select(0.0, count(mine.starved, 1000.0), journal);
+        i += 4u;
+        for (var j = 0u; j < 5u; j++) {
+            let o = (s + 1u + j) % 6u;
+            let r = J[y].realms[o];
+            x[i] = select(0.0, flag(mine.marched_by[o] != 0), journal);
+            x[i + 1u] = select(0.0, flag(r.marched_by[s] != 0), journal);
+            x[i + 2u] = select(0.0, flag(mine.beaten_by[o] != 0), journal);
+            x[i + 3u] = select(0.0, flag(r.beaten_by[s] != 0), journal);
+            x[i + 4u] = select(0.0, count(r.lost_to[s], 1000.0), journal);
+            x[i + 5u] = select(0.0, f32(r.title) / 3.0, journal);
+            x[i + 6u] = select(0.0, flag(r.alive != 0), journal);
+            x[i + 7u] = select(0.0, others_on(r.marched_by, s), journal);
+            let seen = M[s].sighted[y][o];
+            x[i + 8u] = select(0.0, flag(seen.read != 0), journal);
+            x[i + 9u] = select(0.0, count(seen.surface, 10000.0), journal);
+            x[i + 10u] = select(0.0, count(seen.garrison, 400.0), journal);
+            x[i + 11u] = select(0.0, f32(seen.forts) / 10.0, journal);
+            x[i + 12u] = select(0.0, f32(seen.efficiency) / 150.0, journal);
+            i += 13u;
+        }
     }
 }
 

@@ -6,6 +6,11 @@
 //! such as the terminal `empire` app. The rule modules are pure functions over
 //! `&EmpireGame` / `&mut EmpireGame` (or a single `&mut Kingdom`).
 
+/// The rules' version: what a schooled brain was schooled under — the
+/// game's rules, its sight and the reading of its answers. A school of
+/// another version is not read, it is raised again.
+pub const RULES: u32 = 2;
+
 pub mod arena;
 pub mod brain;
 pub mod campaign;

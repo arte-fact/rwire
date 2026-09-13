@@ -68,6 +68,15 @@ struct Dossier {
     all: i32,
 }
 
+// What a seat's éclaireur read of one realm in one year.
+struct Sighted {
+    read: i32,
+    surface: i32,
+    garrison: i32,
+    forts: i32,
+    efficiency: i32,
+}
+
 struct Memory {
     demo: Demo,
     eco: i32,
@@ -77,6 +86,23 @@ struct Memory {
     answer: array<f32, A_OUT>,
     orders: array<f32, B_OUT>,
     dossiers: array<Dossier, 6>,
+    sighted: array<array<Sighted, 6>, JOURNAL_YEARS>,
+}
+
+// A realm as the record kept it for one year (brain.rs `Recorded`).
+struct Recorded {
+    title: i32,
+    alive: i32,
+    soldiers: i32,
+    treasury: i32,
+    starved: i32,
+    marched_by: array<i32, 6>,
+    beaten_by: array<i32, 6>,
+    lost_to: array<i32, 6>,
+}
+
+struct RecordedYear {
+    realms: array<Recorded, 6>,
 }
 
 struct Heard {
@@ -109,7 +135,7 @@ struct Table {
     done: i32,
     rng: array<u32, 4>,
     genome: array<u32, 6>,
-    told: array<u32, 6>,
+    reads: array<u32, 6>,
     seat: array<u32, 6>,
     stage: u32,
     longest: i32,
@@ -118,6 +144,7 @@ struct Table {
     memories: array<Memory, 6>,
     heard: array<Heard, 6>,
     outcomes: array<Outcome, 6>,
+    journal: array<RecordedYear, JOURNAL_YEARS>,
 }
 
 struct Params {
@@ -132,11 +159,12 @@ var<private> K: array<Kingdom, 6>;
 var<private> M: array<Memory, 6>;
 var<private> H: array<Heard, 6>;
 var<private> O: array<Outcome, 6>;
+var<private> J: array<RecordedYear, JOURNAL_YEARS>;
 var<private> year: i32;
 var<private> barbarians: i32;
 var<private> done: i32;
 var<private> seat_genome: array<u32, 6>;
-var<private> seat_told: array<u32, 6>;
+var<private> seat_reads: array<u32, 6>;
 var<private> seat_stage: array<u32, 6>;
 var<private> table_stage: u32;
 var<private> longest: i32;
@@ -171,8 +199,11 @@ fn load(t: u32) {
         H[i] = tables[t].heard[i];
         O[i] = tables[t].outcomes[i];
         seat_genome[i] = tables[t].genome[i];
-        seat_told[i] = tables[t].told[i];
+        seat_reads[i] = tables[t].reads[i];
         seat_stage[i] = tables[t].seat[i];
+    }
+    for (var y = 0u; y < JOURNAL_YEARS; y++) {
+        J[y] = tables[t].journal[y];
     }
     year = tables[t].year;
     barbarians = tables[t].barbarians;
@@ -191,6 +222,9 @@ fn store(t: u32) {
         tables[t].memories[i] = M[i];
         tables[t].heard[i] = H[i];
         tables[t].outcomes[i] = O[i];
+    }
+    for (var y = 0u; y < JOURNAL_YEARS; y++) {
+        tables[t].journal[y] = J[y];
     }
     tables[t].year = year;
     tables[t].barbarians = barbarians;

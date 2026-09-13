@@ -402,7 +402,8 @@ fn intendance(s: u32) {
                 cap = min(cap, TENTHS - built);
             }
         }
-        let n = to_i32(round_away(want_of[i] * f32(cap)));
+        let w2 = want_of[i] * want_of[i];
+        let n = to_i32(round_away(w2 * w2 * f32(cap)));
         if (n > 0) {
             treasury -= n * COSTS[kind];
             buy_kind[buys] = kind;

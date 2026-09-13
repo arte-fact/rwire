@@ -10,16 +10,18 @@
 //! keeps the elite and moves the mean and spread onto it. The file written
 //! holds the distribution (to go on from) and the best genome seen.
 
+use std::borrow::Cow;
 use std::fs;
 use std::time::Instant;
 
 use empire_gpu::state::{self, Seating};
 use empire_gpu::{Arena, Gpu};
 use empire_lib::arena::{play, watch, Outcome, Table, YearEnd};
-use empire_lib::brain::{Brain, Letters, Shape, Stage, ORDERS};
+use empire_lib::brain::{Brain, Letters, Reads, Shape, Stage, HIDDEN, MAX_HIDDEN, ORDERS};
 use empire_lib::game::EmpireGame;
 use empire_lib::kingdom::{Kingdoms, KINGDOMS};
 use empire_lib::random;
+use empire_lib::RULES;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rayon::prelude::*;
@@ -34,6 +36,12 @@ struct Widths {
     rival: usize,
     a_out: usize,
     b_out: usize,
+    /// The years of journal; the schools from before it have none.
+    #[serde(default)]
+    journal: usize,
+    /// The hidden layer; the schools from before it was a choice have 32.
+    #[serde(default = "Widths::narrow")]
+    hidden: usize,
 }
 
 impl Widths {
@@ -42,10 +50,16 @@ impl Widths {
         rival: 19,
         a_out: 15,
         b_out: 18,
+        journal: 0,
+        hidden: HIDDEN,
     };
 
     fn now() -> Widths {
         Widths::from(Shape::NOW)
+    }
+
+    fn narrow() -> usize {
+        HIDDEN
     }
 }
 
@@ -56,6 +70,8 @@ impl From<Shape> for Widths {
             rival: s.rival,
             a_out: s.a_out,
             b_out: s.b_out,
+            journal: s.journal,
+            hidden: s.hidden,
         }
     }
 }
@@ -67,6 +83,8 @@ impl From<Widths> for Shape {
             rival: w.rival,
             a_out: w.a_out,
             b_out: w.b_out,
+            journal: w.journal,
+            hidden: w.hidden,
         }
     }
 }
@@ -74,15 +92,22 @@ impl From<Widths> for Shape {
 /// What is carried from one run to the next.
 #[derive(Serialize, Deserialize)]
 struct School {
+    /// The rules it was schooled under ([`RULES`]).
+    #[serde(default = "School::first_rules")]
+    rules: u32,
     stage: String,
     generation: usize,
     #[serde(default = "Widths::now")]
     widths: Widths,
-    /// Whether its brains are told the Chronique, last year's orders and
-    /// their old reports ([`Brain::told`]): the schools grown from before
-    /// the recall are, one schooled with a recall is not.
+    /// What its brains read of their sight ([`Reads`]): the Chronique
+    /// and last year's orders, the recall, the journal. The schools from
+    /// before the journal had a recall and were not told.
     #[serde(default)]
     told: bool,
+    #[serde(default = "School::had_recall")]
+    recall: bool,
+    #[serde(default)]
+    journal: bool,
     mean: Vec<f32>,
     sigma: Vec<f32>,
     /// The best genome seen, with its fitness.
@@ -93,6 +118,29 @@ struct School {
     /// drift away from what once beat it.
     #[serde(default)]
     hall: Vec<Laureate>,
+    /// The parents of the next generation when the school breeds
+    /// (`--breed`): the last elite, best first. Only in the school's own
+    /// file, not in the copies kept along the run.
+    #[serde(default)]
+    parents: Vec<Vec<f32>>,
+}
+
+impl School {
+    fn first_rules() -> u32 {
+        1
+    }
+
+    fn had_recall() -> bool {
+        true
+    }
+
+    fn reads(&self) -> Reads {
+        Reads {
+            told: self.told,
+            recall: self.recall,
+            journal: self.journal,
+        }
+    }
 }
 
 /// A generation's best, kept in the Hall of Fame.
@@ -125,6 +173,15 @@ fn best_out(out: &str) -> String {
     match out.strip_suffix(".json") {
         Some(stem) => format!("{stem}.best.json"),
         None => format!("{out}.best"),
+    }
+}
+
+/// Where a generation kept along the run goes (`--keep`):
+/// `<out>.g<generation>.json` beside `<out>.json`.
+fn kept_out(out: &str, generation: usize) -> String {
+    match out.strip_suffix(".json") {
+        Some(stem) => format!("{stem}.g{generation}.json"),
+        None => format!("{out}.g{generation}"),
     }
 }
 
@@ -162,9 +219,40 @@ struct Args {
     /// Write the best genome of `--from` as the game reads it (floats,
     /// little-endian) to this path, and stop.
     deliver: Option<String>,
-    /// Play the generations' tables on the GPU (`--show` and `--measure`
-    /// stay on the CPU, whose years they watch).
+    /// Play the generations' and `--measure`'s tables on the GPU
+    /// (`--show` stays on the CPU, whose years it watches).
     gpu: bool,
+    /// How many schools to raise at once, each on its own draw, all their
+    /// tables played together; `--out` then names them with `{n}`, and
+    /// `--from` may too, each going on from its own.
+    trials: usize,
+    /// The hidden layer of the population's brains; a narrower school
+    /// taken up is widened, silent neurons added. The rivals keep their
+    /// own width (the GPU reads every brain at the widest, rounded up to
+    /// 32, the narrower ones widened on their way to it).
+    hidden: usize,
+    /// Every `keep` generations, the school is also written beside
+    /// `--out` as `<out>.g<generation>.json`, for the curve of a run.
+    keep: usize,
+    /// Breed instead of redrawing: the elite are parents, each of which
+    /// begets its share of the population by mutation, and the next elite
+    /// is chosen among parents and children — as many lineages as parents,
+    /// where the redraw fuses them into one. The mutation is drawn at
+    /// `breed` times the starting scale of each weight; 0 keeps the
+    /// redraw.
+    breed: f32,
+    /// What a school raised from nothing reads of its sight ([`Reads`]):
+    /// `--told` the Chronique, last year's orders and its old reports;
+    /// `--recall` what its Extérieur wrote down; `--journal` the past
+    /// years' record. None by default: the year's figures only.
+    reads: Reads,
+}
+
+impl Args {
+    /// The shape of the population's genomes.
+    fn shape(&self) -> Shape {
+        Shape::wide(self.hidden)
+    }
 }
 
 impl Args {
@@ -218,6 +306,15 @@ fn args() -> Args {
         letters: Letters::None,
         deliver: None,
         gpu: false,
+        trials: 1,
+        hidden: HIDDEN,
+        keep: 0,
+        breed: 0.0,
+        reads: Reads {
+            told: false,
+            recall: false,
+            journal: false,
+        },
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -227,6 +324,18 @@ fn args() -> Args {
         }
         if flag == "--gpu" {
             a.gpu = true;
+            continue;
+        }
+        if flag == "--told" {
+            a.reads.told = true;
+            continue;
+        }
+        if flag == "--recall" {
+            a.reads.recall = true;
+            continue;
+        }
+        if flag == "--journal" {
+            a.reads.journal = true;
             continue;
         }
         let value = it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -254,72 +363,115 @@ fn args() -> Args {
             }
             "--out" => a.out = value,
             "--deliver" => a.deliver = Some(value),
+            "--trials" => a.trials = value.parse().unwrap(),
+            "--hidden" => a.hidden = value.parse().unwrap(),
+            "--keep" => a.keep = value.parse().unwrap(),
+            "--breed" => a.breed = value.parse().unwrap(),
             other => panic!("unknown flag {other}"),
         }
     }
+    assert!(
+        a.trials == 1 || a.out.contains("{n}"),
+        "--out needs a {{n}} to name the trials"
+    );
+    assert!(
+        a.hidden > 0 && a.hidden <= MAX_HIDDEN,
+        "--hidden must be between 1 and {MAX_HIDDEN}"
+    );
     a
 }
 
-/// A standard normal draw (Box–Muller).
-fn gaussian(rng: &mut impl Rng) -> f32 {
-    let u: f32 = rng.gen_range(f32::EPSILON..1.0);
-    let v: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
-    (-2.0 * u.ln()).sqrt() * v.cos()
-}
-
+/// A genome drawn around `mean`, `sigma` wide, on the game's own dice
+/// (a Box–Muller pair per two weights).
 fn draw(mean: &[f32], sigma: &[f32]) -> Vec<f32> {
-    let mut rng = rand::thread_rng();
-    mean.iter()
-        .zip(sigma)
-        .map(|(m, s)| m + s * gaussian(&mut rng))
-        .collect()
+    let mut rng = random::Rng::seeded(rand::thread_rng().gen());
+    let mut out = Vec::with_capacity(mean.len());
+    for (m, s) in mean.chunks(2).zip(sigma.chunks(2)) {
+        let u = (rng.word() as f32 + 1.0) * (1.0 / 4_294_967_296.0);
+        let v = rng.word() as f32 * (std::f32::consts::TAU / 4_294_967_296.0);
+        let r = (-2.0 * u.ln()).sqrt();
+        let (sin, cos) = v.sin_cos();
+        out.push(m[0] + s[0] * r * cos);
+        if let (Some(m), Some(s)) = (m.get(1), s.get(1)) {
+            out.push(m + s * r * sin);
+        }
+    }
+    out
 }
 
 /// A brain the population sits with — a rival school's best, a laureate
 /// of the Hall: its genome, what it was told, the rung it is read at.
 struct Other {
     genome: Vec<f32>,
-    told: bool,
+    reads: Reads,
     stage: Stage,
 }
 
 impl Other {
     fn brain(&self) -> Brain {
-        Brain::from_genome(&self.genome, self.told)
+        Brain::from_genome(&self.genome, self.reads)
     }
 }
 
-/// A table's company: on each chair a genome of the pool — the
-/// population's first, the others' after them. The population's chairs
-/// are the ones scored.
+/// A genome of the generation's pool, what it is told, the rung it is
+/// read at, and whose score its seats are — a trial's genome, by trial
+/// and rank — or nobody's (a rival, a laureate).
+struct Seat<'a> {
+    genome: &'a [f32],
+    reads: Reads,
+    stage: Stage,
+    scored: Option<(usize, usize)>,
+}
+
+/// A trial's tables of the generation: its own genomes in the pool, and
+/// the others it sits with.
+struct Round {
+    ours: std::ops::Range<usize>,
+    others: Vec<usize>,
+}
+
+/// How many bytes of drawn genomes a generation holds at once: past it,
+/// the trials are played in turns.
+const MEMORY_BUDGET: usize = 6 << 30;
+
+/// A table's company: the pool's genome on each chair.
 type Company = [usize; 6];
 
-/// The companies of a generation among others: one to five of the
-/// population at random chairs and the `others` on the rest, so a genome
+/// The companies of a round among others: one to five of the trial's
+/// genomes at random chairs and the `others` on the rest, so a genome
 /// can never count on a given number of kindred stalls. The company
-/// varies from table to table — all of the population, a single other at
+/// varies from table to table — all of the trial's, a single other at
 /// every free chair, or a different other on each — so no fixed set of
 /// rivals can be farmed.
-fn companies_among(n: usize, others: usize, tables: usize) -> Vec<Company> {
+fn companies_among(round: &Round, tables: usize) -> Vec<Company> {
     let mut rng = rand::thread_rng();
+    let others = &round.others;
     let mut companies = Vec::new();
     for _ in 0..tables {
-        let mut order: Vec<usize> = (0..n).collect();
+        let mut order: Vec<usize> = round.ours.clone().collect();
         order.shuffle(&mut rng);
         let mut rest = order.as_slice();
         while !rest.is_empty() {
-            let company = if others == 0 { 0 } else { rng.gen_range(0..3) };
+            let company = if others.is_empty() {
+                0
+            } else {
+                rng.gen_range(0..3)
+            };
             let m = match company {
                 0 if rest.len() >= 6 => 6,
-                0 if others == 0 => break,
+                0 if others.is_empty() => break,
                 _ => rng.gen_range(1..=5).min(rest.len()),
             };
-            let one = rng.gen_range(0..others.max(1));
+            let one = others.get(rng.gen_range(0..others.len().max(1)));
             let mut chairs: Vec<usize> = (0..6).collect();
             chairs.shuffle(&mut rng);
-            let mut seats: Company = std::array::from_fn(|_| match company {
-                1 => n + one,
-                _ => n + rng.gen_range(0..others.max(1)),
+            let mut seats: Company = std::array::from_fn(|_| {
+                match company {
+                    1 => one,
+                    _ => others.get(rng.gen_range(0..others.len().max(1))),
+                }
+                .copied()
+                .unwrap_or(round.ours.start)
             });
             for (g, chair) in rest[..m].iter().zip(chairs) {
                 seats[chair] = *g;
@@ -331,70 +483,140 @@ fn companies_among(n: usize, others: usize, tables: usize) -> Vec<Company> {
     companies
 }
 
-/// Play the population: alone at a table of its own clones before the
-/// market is taught, among others of the population after (see
-/// [`companies_among`]). Each genome sits `tables` tables; its fitness is
-/// the mean of its scores.
+/// `companies` cut into runs whose distinct genomes fit a pool of
+/// `capacity`: each run is one pool, one dispatch.
+fn batches(companies: &[Company], capacity: usize) -> Vec<std::ops::Range<usize>> {
+    let mut batches = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut from = 0;
+    for (i, company) in companies.iter().enumerate() {
+        let fresh: Vec<usize> = company
+            .iter()
+            .copied()
+            .filter(|g| !seen.contains(g))
+            .collect();
+        if seen.len() + fresh.len() > capacity && i > from {
+            batches.push(from..i);
+            from = i;
+            seen.clear();
+        }
+        seen.extend(company.iter().copied());
+    }
+    batches.push(from..companies.len());
+    batches
+}
+
+/// `genomes` as the arena reads them: those narrower than its hidden
+/// layer widened to it, silent neurons added, the others as they are.
+fn widened<'a>(genomes: &[&'a [f32]], arena: &Arena) -> Vec<Cow<'a, [f32]>> {
+    let now = Shape::wide(arena.hidden());
+    genomes
+        .par_iter()
+        .map(|&g| {
+            let was = Shape::of(g.len());
+            if was == now {
+                Cow::Borrowed(g)
+            } else {
+                Cow::Owned(Brain::grown(g, was, now))
+            }
+        })
+        .collect()
+}
+
+/// The widest hidden layer the GPU kernel must read, rounded up to the
+/// 32 neurons it takes at a time: the population's, or a rival's.
+fn kernel_width(a: &Args, rivals: &[Other]) -> usize {
+    rivals
+        .iter()
+        .map(|o| Shape::of(o.genome.len()).hidden)
+        .fold(a.hidden, usize::max)
+        .next_multiple_of(32)
+}
+
+/// The companies of `rounds` on the GPU: the seats they sit, and only
+/// them, pooled and every table played to its end in one go.
+fn play_on(
+    arena: &Arena,
+    seats: &[Seat],
+    companies: &[Company],
+    a: &Args,
+    table_of: impl Fn(&Company) -> Table,
+) -> Vec<[Outcome; 6]> {
+    let mut local = vec![u32::MAX; seats.len()];
+    let mut pooled: Vec<&[f32]> = Vec::new();
+    for &g in companies.iter().flatten() {
+        if local[g] == u32::MAX {
+            local[g] = pooled.len() as u32;
+            pooled.push(seats[g].genome);
+        }
+    }
+    let widened = widened(&pooled, arena);
+    let pool = arena.pool(&widened.iter().map(Cow::as_ref).collect::<Vec<_>>());
+    let game = EmpireGame::default();
+    let mut rng = rand::thread_rng();
+    let tables: Vec<state::Table> = companies
+        .iter()
+        .map(|company| {
+            let table = table_of(company);
+            let seating = Seating {
+                genomes: company.map(|g| local[g]),
+                reads: company.map(|g| seats[g].reads),
+                seats: table.seats,
+                stage: table.stage,
+                longest: table.longest,
+                letters: table.letters,
+            };
+            state::Table::fresh(&seating, &game, random::Rng::seeded(rng.gen()))
+        })
+        .collect();
+    arena
+        .play(&pool, &tables, a.longest as u32)
+        .iter()
+        .map(state::Table::outcomes)
+        .collect()
+}
+
+/// Play the generation, every trial's tables at once: alone at a table
+/// of its own clones before the market is taught, among others after
+/// (see [`companies_among`]). Each genome sits `tables` tables; its
+/// fitness is the mean of its scores. One fitness and outcomes per trial.
 fn evaluate(
-    genomes: &[Vec<f32>],
-    told: bool,
-    others: &[Other],
+    seats: &[Seat],
+    rounds: &[Round],
     a: &Args,
     arena: Option<&Arena>,
-) -> (Vec<f32>, Vec<Outcome>) {
-    let n = genomes.len();
-    let companies: Vec<Company> = if a.stage.market() {
-        companies_among(n, others.len(), a.tables)
-    } else {
-        (0..n)
-            .flat_map(|g| std::iter::repeat_n([g; 6], a.tables))
-            .collect()
-    };
-    let table_of = |company: &Company| {
-        a.table_of(|chair| {
-            let g = company[chair];
-            (g >= n).then(|| others[g - n].stage)
+) -> Vec<(Vec<f32>, Vec<Outcome>)> {
+    let companies: Vec<Vec<Company>> = rounds
+        .iter()
+        .map(|round| {
+            if a.stage.market() {
+                companies_among(round, a.tables)
+            } else {
+                round
+                    .ours
+                    .clone()
+                    .flat_map(|g| std::iter::repeat_n([g; 6], a.tables))
+                    .collect()
+            }
         })
-    };
+        .collect();
+    let table_of = |company: &Company| a.table_of(|chair| Some(seats[company[chair]].stage));
     let outcomes: Vec<[Outcome; 6]> = match arena {
         Some(arena) => {
-            let all: Vec<&[f32]> = genomes
-                .iter()
-                .map(Vec::as_slice)
-                .chain(others.iter().map(|o| o.genome.as_slice()))
-                .collect();
-            let pool = arena.pool(&all);
-            let game = EmpireGame::default();
-            let mut rng = rand::thread_rng();
-            let tables: Vec<state::Table> = companies
-                .iter()
-                .map(|company| {
-                    let table = table_of(company);
-                    let seating = Seating {
-                        genomes: company.map(|g| g as u32),
-                        told: company.map(|g| if g < n { told } else { others[g - n].told }),
-                        seats: table.seats,
-                        stage: table.stage,
-                        longest: table.longest,
-                        letters: table.letters,
-                    };
-                    state::Table::fresh(&seating, &game, random::Rng::seeded(rng.gen()))
-                })
-                .collect();
-            arena
-                .play(&pool, &tables, a.longest as u32)
-                .iter()
-                .map(state::Table::outcomes)
+            let all: Vec<Company> = companies.iter().flatten().copied().collect();
+            batches(&all, arena.capacity())
+                .into_iter()
+                .flat_map(|batch| play_on(arena, seats, &all[batch], a, table_of))
                 .collect()
         }
         None => {
-            let brains: Vec<Brain> = genomes
+            let brains: Vec<Brain> = seats
                 .par_iter()
-                .map(|g| Brain::from_genome(g, told))
-                .chain(others.par_iter().map(Other::brain))
+                .map(|s| Brain::from_genome(s.genome, s.reads))
                 .collect();
             companies
                 .par_iter()
+                .flatten()
                 .map(|company| {
                     play(
                         std::array::from_fn(|chair| &brains[company[chair]]),
@@ -405,26 +627,33 @@ fn evaluate(
         }
     };
     // Every seat a genome sat: its score at that table, and the outcome.
-    let mut per: Vec<Vec<(f32, Outcome)>> = vec![Vec::new(); n];
-    for (company, outcomes) in companies.iter().zip(&outcomes) {
+    let mut per: Vec<Vec<Vec<(f32, Outcome)>>> = rounds
+        .iter()
+        .map(|round| vec![Vec::new(); round.ours.len()])
+        .collect();
+    for (company, outcomes) in companies.iter().flatten().zip(&outcomes) {
         let scores = table_of(company).scores(outcomes);
         for chair in 0..6 {
-            if let Some(seats) = per.get_mut(company[chair]) {
-                seats.push((scores[chair], outcomes[chair]));
+            if let Some((trial, i)) = seats[company[chair]].scored {
+                per[trial][i].push((scores[chair], outcomes[chair]));
             }
         }
     }
-    let fitness = per
-        .iter()
-        .map(|seats| {
-            if seats.is_empty() {
-                f32::MIN
-            } else {
-                seats.iter().map(|(s, _)| s).sum::<f32>() / seats.len() as f32
-            }
+    per.into_iter()
+        .map(|per| {
+            let fitness = per
+                .iter()
+                .map(|seats| {
+                    if seats.is_empty() {
+                        f32::MIN
+                    } else {
+                        seats.iter().map(|(s, _)| s).sum::<f32>() / seats.len() as f32
+                    }
+                })
+                .collect();
+            (fitness, per.into_iter().flatten().map(|(_, o)| o).collect())
         })
-        .collect();
-    (fitness, per.into_iter().flatten().map(|(_, o)| o).collect())
+        .collect()
 }
 
 fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f32) -> String {
@@ -476,8 +705,8 @@ fn reading(generation: usize, fitness: &[f32], outcomes: &[Outcome], elapsed: f3
 /// unless `--against` seats other schools: with exactly five it is a
 /// match — one of each, in order, and every seat is told — otherwise
 /// they are drawn at random and only France is.
-fn show(best: &[f32], told: bool, a: &Args) {
-    let b = Brain::from_genome(best, told);
+fn show(best: &[f32], reads: Reads, a: &Args) {
+    let b = Brain::from_genome(best, reads);
     let rivals = rivals(a);
     let brains: Vec<Brain> = rivals.iter().map(Other::brain).collect();
     let a_match = rivals.len() == 5;
@@ -667,16 +896,31 @@ fn tally(label: &str, outcomes: &[Outcome], a: &Args) {
     );
 }
 
-/// The bests of the `--against` schools, each at its stage.
+/// The `--against` brains: a school's best at its rung, or a delivered
+/// `.f32` (the game's computers: told, read at `--stage`).
 fn rivals(a: &Args) -> Vec<Other> {
     a.against
         .iter()
-        .map(|path| {
-            let school = load(path);
-            Other {
-                genome: school.best,
-                told: school.told,
-                stage: stage(&school.stage),
+        .map(|path| match path.strip_suffix(".f32") {
+            Some(_) => {
+                let bytes = fs::read(path).unwrap();
+                let genome: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .collect();
+                Other {
+                    genome: Brain::grown(&genome, Shape::SCHOOLED, Shape::NOW),
+                    reads: Reads::SCHOOLED,
+                    stage: a.stage,
+                }
+            }
+            None => {
+                let school = load(path, None);
+                Other {
+                    reads: school.reads(),
+                    stage: stage(&school.stage),
+                    genome: school.best,
+                }
             }
         })
         .collect()
@@ -691,10 +935,9 @@ fn seat_rivals(rivals: &[Other]) -> [usize; 6] {
 
 /// Many tables of one genome — clones, or one seat against five of
 /// the `--against` schools — at `--stage`.
-fn measure(best: &[f32], told: bool, a: &Args) {
-    let b = Brain::from_genome(best, told);
+fn measure(best: &[f32], reads: Reads, a: &Args, arena: Option<&Arena>) {
+    let b = Brain::from_genome(best, reads);
     let rivals = rivals(a);
-    let brains: Vec<Brain> = rivals.iter().map(Other::brain).collect();
     if rivals.is_empty() {
         let outcomes: Vec<Outcome> = (0..a.measure)
             .into_par_iter()
@@ -703,17 +946,58 @@ fn measure(best: &[f32], told: bool, a: &Args) {
         tally(&format!("{:?}", a.stage), &outcomes, a);
         return;
     }
-    let tables: Vec<[Outcome; 6]> = (0..a.measure)
-        .into_par_iter()
-        .map(|_| {
-            let seats = seat_rivals(&rivals);
-            let table = a.table_of(|i| (i > 0).then(|| rivals[seats[i]].stage));
-            play(
-                std::array::from_fn(|i| if i == 0 { &b } else { &brains[seats[i]] }),
-                &table,
-            )
-        })
-        .collect();
+    let seatings: Vec<[usize; 6]> = (0..a.measure).map(|_| seat_rivals(&rivals)).collect();
+    let table_of = |seats: &[usize; 6]| a.table_of(|i| (i > 0).then(|| rivals[seats[i]].stage));
+    let tables: Vec<[Outcome; 6]> = match arena {
+        Some(arena) => {
+            let mut genomes: Vec<&[f32]> = vec![best];
+            genomes.extend(rivals.iter().map(|o| o.genome.as_slice()));
+            let widened = widened(&genomes, arena);
+            let pool = arena.pool(&widened.iter().map(Cow::as_ref).collect::<Vec<_>>());
+            let game = EmpireGame::default();
+            let mut rng = rand::thread_rng();
+            let tables: Vec<state::Table> = seatings
+                .iter()
+                .map(|seats| {
+                    let table = table_of(seats);
+                    let seating = Seating {
+                        genomes: std::array::from_fn(
+                            |i| if i == 0 { 0 } else { seats[i] as u32 + 1 },
+                        ),
+                        reads: std::array::from_fn(|i| {
+                            if i == 0 {
+                                reads
+                            } else {
+                                rivals[seats[i]].reads
+                            }
+                        }),
+                        seats: table.seats,
+                        stage: table.stage,
+                        longest: table.longest,
+                        letters: table.letters,
+                    };
+                    state::Table::fresh(&seating, &game, random::Rng::seeded(rng.gen()))
+                })
+                .collect();
+            arena
+                .play(&pool, &tables, a.longest as u32)
+                .iter()
+                .map(state::Table::outcomes)
+                .collect()
+        }
+        None => {
+            let brains: Vec<Brain> = rivals.iter().map(Other::brain).collect();
+            seatings
+                .par_iter()
+                .map(|seats| {
+                    play(
+                        std::array::from_fn(|i| if i == 0 { &b } else { &brains[seats[i]] }),
+                        &table_of(seats),
+                    )
+                })
+                .collect()
+        }
+    };
     let first: Vec<Outcome> = tables.iter().map(|t| t[0]).collect();
     let rest: Vec<Outcome> = tables.iter().flat_map(|t| t[1..].to_vec()).collect();
     tally(&format!("{:?} · one of --from", a.stage), &first, a);
@@ -725,11 +1009,11 @@ fn measure(best: &[f32], told: bool, a: &Args) {
 /// a school that read nothing has closed them — and the biases are seeded
 /// so the reports come from the first day: "no one" pushed down for the
 /// éclaireur, the agents pushed up when they are free too.
-fn wake(mean: &mut [f32], sigma: &mut [f32], best: &mut [f32], letters: Letters) {
-    let scales = Brain::scales();
+fn wake(mean: &mut [f32], sigma: &mut [f32], best: &mut [f32], letters: Letters, shape: Shape) {
+    let scales = shape.scales();
     let rows = if letters.agents() { 6..17 } else { 6..12 };
     for o in rows {
-        for k in Brain::exterieur_output(o) {
+        for k in shape.exterieur_output(o) {
             sigma[k] = scales[k];
         }
     }
@@ -738,47 +1022,61 @@ fn wake(mean: &mut [f32], sigma: &mut [f32], best: &mut [f32], letters: Letters)
         seeds.extend((12..17).map(|o| (o, 3.0)));
     }
     for (o, bias) in seeds {
-        let k = Brain::exterieur_output(o).end - 1;
+        let k = shape.exterieur_output(o).end - 1;
         mean[k] = bias;
         best[k] = bias;
     }
 }
 
-/// A school saved by an earlier run — grown to today's widths if it was
-/// schooled on narrower ones (the new entries start blind, at their
-/// starting spread; the new answers blank). A school from before the
-/// recall was told everything, and stays so.
-fn load(path: &str) -> School {
+/// A school saved by an earlier run — grown to today's widths at the
+/// `hidden` layer asked (its own when none is) if it was schooled
+/// narrower: the new entries and neurons start blind, at their starting
+/// spread, the new answers blank. A school from before the recall was
+/// told everything, and stays so.
+fn load(path: &str, hidden: Option<usize>) -> School {
     let mut s: School = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        s.rules, RULES,
+        "{path} was schooled under rules {}, these are {RULES}: raise it again",
+        s.rules
+    );
     if s.mean.len() != Shape::from(s.widths).genome() {
         // Written before the widths were: one shape for all of them.
         s.widths = Widths::BEFORE_THE_WALLS;
     }
     let was = Shape::from(s.widths);
+    let now = Shape::wide(hidden.unwrap_or(was.hidden));
     assert_eq!(
         s.mean.len(),
         was.genome(),
         "{path} is not a genome of the shape it claims"
     );
-    if was == Shape::NOW {
+    if was == now {
         return s;
     }
-    s.told = was.b_out == ORDERS;
-    let seen = Brain::grown(&vec![1.0; s.mean.len()], was);
-    let scales = Brain::scales();
-    s.mean = Brain::grown(&s.mean, was);
-    s.best = Brain::grown(&s.best, was);
-    s.sigma = Brain::grown(&s.sigma, was)
+    if was.b_out == ORDERS {
+        // From before the recall: told, nothing to remember with.
+        s.told = true;
+        s.recall = false;
+    }
+    let seen = Brain::grown(&vec![1.0; s.mean.len()], was, now);
+    let scales = now.scales();
+    s.mean = Brain::grown(&s.mean, was, now);
+    s.best = Brain::grown(&s.best, was, now);
+    s.sigma = Brain::grown(&s.sigma, was, now)
         .into_iter()
         .zip(seen)
         .zip(scales)
         .map(|((sigma, seen), scale)| if seen > 0.0 { sigma } else { scale })
         .collect();
     for l in &mut s.hall {
-        l.genome = Brain::grown(&l.genome, was);
+        l.genome = Brain::grown(&l.genome, was, now);
     }
-    s.widths = Widths::now();
-    eprintln!("{path}: grown from {was:?} to {:?}", Shape::NOW);
+    for p in &mut s.parents {
+        *p = Brain::grown(p, was, now);
+    }
+    s.widths = Widths::from(now);
+    eprintln!("{path}: grown from {was:?} to {now:?}");
     s
 }
 
@@ -789,68 +1087,225 @@ fn deliver(best: &[f32], path: &str) {
     eprintln!("{path}: {} weights delivered", best.len());
 }
 
+/// A school in the making: its distribution, its best, its Hall, what
+/// its brains are told, the file it is written to.
+#[derive(Clone)]
+struct Trial {
+    reads: Reads,
+    out: String,
+    mean: Vec<f32>,
+    sigma: Vec<f32>,
+    best: Vec<f32>,
+    best_fitness: f32,
+    hall: Vec<Laureate>,
+    /// The elite's mean score of the best generation so far, kept apart
+    /// in case the population drifts away from it later.
+    best_elite: f32,
+    /// The last elite, best first, when the school breeds.
+    parents: Vec<Vec<f32>>,
+}
+
+impl Trial {
+    /// A trial from nothing: blind, at the starting spread.
+    fn fresh(shape: Shape, reads: Reads) -> Trial {
+        Trial {
+            reads,
+            out: String::new(),
+            mean: vec![0.0; shape.genome()],
+            sigma: shape.scales(),
+            best: vec![0.0; shape.genome()],
+            best_fitness: f32::MIN,
+            hall: Vec::new(),
+            best_elite: f32::MIN,
+            parents: Vec::new(),
+        }
+    }
+
+    /// The trial going on from a school.
+    fn from_school(s: &School) -> Trial {
+        Trial {
+            reads: s.reads(),
+            out: String::new(),
+            mean: s.mean.clone(),
+            sigma: s.sigma.clone(),
+            best: s.best.clone(),
+            best_fitness: f32::MIN,
+            hall: s.hall.clone(),
+            best_elite: f32::MIN,
+            parents: s.parents.clone(),
+        }
+    }
+
+    /// The generation's population: drawn around the mean, the best so
+    /// far sitting again — a lucky draw must prove itself. A breeding
+    /// school with parents sits them again and fills the rest with their
+    /// children, each parent begetting its share in turn.
+    fn draw(&self, size: usize, a: &Args) -> Vec<Vec<f32>> {
+        if a.breed > 0.0 && !self.parents.is_empty() {
+            let spread: Vec<f32> = a.shape().scales().iter().map(|s| s * a.breed).collect();
+            let parents = &self.parents;
+            let mut genomes = parents.clone();
+            genomes.extend(
+                (0..size.saturating_sub(parents.len()))
+                    .into_par_iter()
+                    .map(|i| draw(&parents[i % parents.len()], &spread))
+                    .collect::<Vec<_>>(),
+            );
+            return genomes;
+        }
+        let mut genomes: Vec<Vec<f32>> = (0..size)
+            .into_par_iter()
+            .map(|_| draw(&self.mean, &self.sigma))
+            .collect();
+        if self.best_fitness > f32::MIN {
+            genomes[0].clone_from(&self.best);
+        }
+        genomes
+    }
+
+    /// The mean and spread moved onto the elite of `genomes`, the best
+    /// kept, the Hall told; the school written out (and beside it when
+    /// its elite is the best seen). The generation's reading.
+    fn learn(
+        &mut self,
+        generation: usize,
+        genomes: &[Vec<f32>],
+        fitness: &[f32],
+        outcomes: &[Outcome],
+        a: &Args,
+        elapsed: f32,
+    ) -> String {
+        let size = genomes.len();
+        let mut order: Vec<usize> = (0..size).collect();
+        order.sort_by(|&i, &j| fitness[j].total_cmp(&fitness[i]));
+        let elite = &order[..a.elite.min(size)];
+        self.best_fitness = fitness[order[0]];
+        self.best.clone_from(&genomes[order[0]]);
+        if a.hall > 0 {
+            induct(&mut self.hall, generation, &self.best, a.hall);
+        }
+        let n = elite.len() as f32;
+        let elite_mean = elite.iter().map(|&i| fitness[i]).sum::<f32>() / n;
+        let floor = a.shape().scales();
+        for w in 0..genomes[0].len() {
+            let m = elite.iter().map(|&i| genomes[i][w]).sum::<f32>() / n;
+            let v = elite
+                .iter()
+                .map(|&i| (genomes[i][w] - m).powi(2))
+                .sum::<f32>()
+                / n;
+            self.mean[w] = 0.3 * self.mean[w] + 0.7 * m;
+            self.sigma[w] = (0.3 * self.sigma[w] + 0.7 * v.sqrt()).max(floor[w] * 0.05);
+        }
+        if a.breed > 0.0 {
+            self.parents = elite.iter().map(|&i| genomes[i].clone()).collect();
+        }
+        let mut school = School {
+            rules: RULES,
+            stage: format!("{:?}", a.stage).to_lowercase(),
+            generation,
+            widths: Widths::from(a.shape()),
+            told: self.reads.told,
+            recall: self.reads.recall,
+            journal: self.reads.journal,
+            mean: self.mean.clone(),
+            sigma: self.sigma.clone(),
+            best: self.best.clone(),
+            best_fitness: self.best_fitness,
+            hall: self.hall.clone(),
+            parents: Vec::new(),
+        };
+        let light = serde_json::to_string(&school).unwrap();
+        if elite_mean > self.best_elite {
+            self.best_elite = elite_mean;
+            fs::write(best_out(&self.out), &light).unwrap();
+        }
+        if a.keep > 0 && generation.is_multiple_of(a.keep) {
+            fs::write(kept_out(&self.out, generation), &light).unwrap();
+        }
+        school.parents.clone_from(&self.parents);
+        let json = if school.parents.is_empty() {
+            light
+        } else {
+            serde_json::to_string(&school).unwrap()
+        };
+        fs::write(&self.out, &json).unwrap();
+        reading(generation, fitness, outcomes, elapsed)
+    }
+}
+
+/// A trial going on from the school at `path` (its `{n}` filled in, so
+/// that every trial may go on from its own) — the school's next
+/// generation, or a fresh one from nothing; its letters woken, its Hall
+/// cut to size.
+fn trial_from(path: Option<&str>, n: usize, a: &Args) -> (Trial, usize) {
+    let (mut trial, start) = match path {
+        Some(path) => {
+            let s = load(&path.replace("{n}", &n.to_string()), Some(a.hidden));
+            (Trial::from_school(&s), s.generation + 1)
+        }
+        None => (Trial::fresh(a.shape(), a.reads), 0),
+    };
+    if a.letters.scouts() {
+        wake(
+            &mut trial.mean,
+            &mut trial.sigma,
+            &mut trial.best,
+            a.letters,
+            a.shape(),
+        );
+    }
+    trial.hall.truncate(a.hall);
+    trial.out = a.out.replace("{n}", &n.to_string());
+    (trial, start)
+}
+
 fn main() {
     let a = args();
-    let (mut mean, mut sigma, mut best, mut best_fitness, mut hall, start, told) = match &a.from {
-        Some(path) => {
-            let s = load(path);
-            (
-                s.mean,
-                s.sigma,
-                s.best,
-                f32::MIN,
-                s.hall,
-                s.generation + 1,
-                s.told,
-            )
-        }
-        None => (
-            vec![0.0; Brain::GENOME],
-            Brain::scales(),
-            vec![0.0; Brain::GENOME],
-            f32::MIN,
-            Vec::new(),
-            0,
-            false,
-        ),
-    };
+    let (first, start) = trial_from(a.from.as_deref(), 1, &a);
+    let reads = first.reads;
     if let Some(path) = &a.deliver {
-        deliver(&best, path);
+        deliver(&first.best, path);
         return;
     }
     if a.show {
-        show(&best, told, &a);
+        show(&first.best, reads, &a);
         return;
-    }
-    if a.measure > 0 {
-        measure(&best, told, &a);
-        return;
-    }
-    if a.letters.scouts() {
-        wake(&mut mean, &mut sigma, &mut best, a.letters);
     }
     let rivals = rivals(&a);
     let gpu = a.gpu.then(|| Gpu::open().expect("a GPU to play on"));
-    let arena = gpu.as_ref().map(Arena::new);
-    let floor: Vec<f32> = Brain::scales().iter().map(|s| s * 0.05).collect();
+    let arena = gpu
+        .as_ref()
+        .map(|gpu| Arena::new(gpu, kernel_width(&a, &rivals)));
+    if a.measure > 0 {
+        measure(&first.best, reads, &a, arena.as_ref());
+        return;
+    }
+    let mut trials: Vec<Trial> = std::iter::once(first)
+        .chain((2..=a.trials).map(|n| trial_from(a.from.as_deref(), n, &a).0))
+        .collect();
     eprintln!(
-        "{:?} · genome {} · population {} (first {}) · elite {} · tables {} · hall {} · rank {} · letters {:?} · longest {} years · {}",
+        "{:?} · reads {:?} · hidden {} · genome {} · population {} (first {}) · elite {}{} · tables {} · hall {} · rank {} · letters {:?} · longest {} years · {} trials · {}",
         a.stage,
-        Brain::GENOME,
+        reads,
+        a.hidden,
+        a.shape().genome(),
         a.population,
         a.first,
         a.elite,
+        if a.breed > 0.0 {
+            format!(" breeding at {}", a.breed)
+        } else {
+            String::new()
+        },
         a.tables,
         a.hall,
         a.rank,
         a.letters,
         a.longest,
+        a.trials,
         gpu.as_ref().map_or("CPU", |g| g.name.as_str()),
     );
-    hall.truncate(a.hall);
-    // The elite's mean score of the best generation so far, kept apart in
-    // case the population drifts away from it later.
-    let mut best_elite = f32::MIN;
     for generation in start..start + a.generations {
         let clock = Instant::now();
         let size = if generation == 0 {
@@ -858,73 +1313,59 @@ fn main() {
         } else {
             a.population
         };
-        let mut genomes: Vec<Vec<f32>> = (0..size)
-            .into_par_iter()
-            .map(|_| draw(&mean, &sigma))
-            .collect();
-        // The best so far sits again: a lucky draw must prove itself.
-        if best_fitness > f32::MIN {
-            genomes[0].clone_from(&best);
-        }
-        let others: Vec<Other> = rivals
-            .iter()
-            .map(|o| Other {
-                genome: o.genome.clone(),
-                told: o.told,
+        // As many trials at once as their populations fit in memory.
+        let group = (MEMORY_BUDGET / (size * a.shape().genome() * 4)).clamp(1, a.trials);
+        for first in (0..a.trials).step_by(group) {
+            let group = &mut trials[first..(first + group).min(a.trials)];
+            let populations: Vec<Vec<Vec<f32>>> = group.iter().map(|t| t.draw(size, &a)).collect();
+            // The pool: every trial's population, then the rivals, then
+            // every trial's Hall.
+            let mut seats: Vec<Seat> = Vec::new();
+            let mut rounds: Vec<Round> = Vec::new();
+            for (t, genomes) in populations.iter().enumerate() {
+                let from = seats.len();
+                seats.extend(genomes.iter().enumerate().map(|(i, g)| Seat {
+                    genome: g,
+                    reads,
+                    stage: a.stage,
+                    scored: Some((t, i)),
+                }));
+                rounds.push(Round {
+                    ours: from..seats.len(),
+                    others: Vec::new(),
+                });
+            }
+            let shared: Vec<usize> = (seats.len()..seats.len() + rivals.len()).collect();
+            seats.extend(rivals.iter().map(|o| Seat {
+                genome: &o.genome,
+                reads: o.reads,
                 stage: o.stage,
-            })
-            .chain(hall.iter().map(|l| Other {
-                genome: l.genome.clone(),
-                told,
-                stage: a.stage,
-            }))
-            .collect();
-        let (fitness, outcomes) = evaluate(&genomes, told, &others, &a, arena.as_ref());
-        let mut order: Vec<usize> = (0..size).collect();
-        order.sort_by(|&i, &j| fitness[j].total_cmp(&fitness[i]));
-        let elite = &order[..a.elite.min(size)];
-        best_fitness = fitness[order[0]];
-        best.clone_from(&genomes[order[0]]);
-        if a.hall > 0 {
-            induct(&mut hall, generation, &best, a.hall);
-        }
-        let n = elite.len() as f32;
-        let elite_mean = elite.iter().map(|&i| fitness[i]).sum::<f32>() / n;
-        for w in 0..Brain::GENOME {
-            let m = elite.iter().map(|&i| genomes[i][w]).sum::<f32>() / n;
-            let v = elite
-                .iter()
-                .map(|&i| (genomes[i][w] - m).powi(2))
-                .sum::<f32>()
-                / n;
-            mean[w] = 0.3 * mean[w] + 0.7 * m;
-            sigma[w] = (0.3 * sigma[w] + 0.7 * v.sqrt()).max(floor[w]);
-        }
-        println!(
-            "{}",
-            reading(
-                generation,
-                &fitness,
-                &outcomes,
-                clock.elapsed().as_secs_f32()
-            )
-        );
-        let school = School {
-            stage: format!("{:?}", a.stage).to_lowercase(),
-            generation,
-            widths: Widths::now(),
-            told,
-            mean: mean.clone(),
-            sigma: sigma.clone(),
-            best: best.clone(),
-            best_fitness,
-            hall: hall.clone(),
-        };
-        let json = serde_json::to_string(&school).unwrap();
-        fs::write(&a.out, &json).unwrap();
-        if elite_mean > best_elite {
-            best_elite = elite_mean;
-            fs::write(best_out(&a.out), &json).unwrap();
+                scored: None,
+            }));
+            for (round, trial) in rounds.iter_mut().zip(group.iter()) {
+                round.others.clone_from(&shared);
+                round
+                    .others
+                    .extend(seats.len()..seats.len() + trial.hall.len());
+                seats.extend(trial.hall.iter().map(|l| Seat {
+                    genome: &l.genome,
+                    reads,
+                    stage: a.stage,
+                    scored: None,
+                }));
+            }
+            let played = evaluate(&seats, &rounds, &a, arena.as_ref());
+            let elapsed = clock.elapsed().as_secs_f32();
+            for (n, ((trial, genomes), (fitness, outcomes))) in
+                group.iter_mut().zip(&populations).zip(&played).enumerate()
+            {
+                let reading = trial.learn(generation, genomes, fitness, outcomes, &a, elapsed);
+                if a.trials > 1 {
+                    println!("try {:2} · {reading}", first + n + 1);
+                } else {
+                    println!("{reading}");
+                }
+            }
         }
     }
 }

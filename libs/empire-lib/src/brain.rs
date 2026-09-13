@@ -20,8 +20,11 @@ use crate::trade::{
     calculate_buy_cost, max_land_sale, GRAIN_LOT, MAX_GRAIN_PRICE, MIN_GRAIN_PRICE,
 };
 
-/// Neurons of the hidden layer of each network.
+/// Neurons of the hidden layer of each network, as the delivered brains
+/// have them; a school may raise a wider one ([`Shape::hidden`]).
 pub const HIDDEN: usize = 32;
+/// The widest hidden layer a network may have.
+pub const MAX_HIDDEN: usize = 512;
 /// An answer under this is "nothing": sigmoids never quite reach zero.
 pub const DEADBAND: f32 = 0.05;
 
@@ -49,12 +52,108 @@ pub const ORDERS: usize = 19;
 /// old reports (see [`sight`]): what it wants of them, it must keep itself.
 pub const RECALL: usize = 32;
 pub const B_OUT: usize = ORDERS + RECALL;
-/// What both networks see.
-pub const SIGHT: usize = OWN + CHRONICLE + RIVALS * RIVAL + B_OUT;
+/// How many past years the journal keeps, the last first.
+pub const JOURNAL_YEARS: usize = 4;
+/// A year of the journal as a seat reads it: its own standing (title,
+/// soldiers, treasury, starved), then thirteen entries per rival — it
+/// marched on me, I marched on it, it beat me, I beat it, the arpents it
+/// lost to me, its title, whether it lived, how many others marched on
+/// it, then what my éclaireur read of it that year: read at all, its
+/// surface, garrison, walls and efficiency.
+pub const ENTRY: usize = 4 + RIVALS * 13;
+/// What both networks see: the year's figures, the Chronique, the
+/// rivals, last year's orders and the recall, then the journal.
+pub const SIGHT: usize = OWN + CHRONICLE + RIVALS * RIVAL + B_OUT + JOURNAL_YEARS * ENTRY;
 /// The Intendance sees the sight; the Extérieur sees it and the Intendance's
 /// answer of the same year.
 pub const A_IN: usize = SIGHT;
 pub const B_IN: usize = SIGHT + A_OUT;
+
+/// What the record keeps of one realm for a year: how it stood when the
+/// year closed, and what the rumours said of its wars.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Recorded {
+    /// The title's rank, Duke 0 to Emperor 3.
+    pub title: i32,
+    pub alive: bool,
+    pub soldiers: i32,
+    pub treasury: i32,
+    /// Serfs dead of famine that year.
+    pub starved: i32,
+    pub heard: Heard,
+}
+
+/// The record of a year: every realm as it stood when the year closed.
+pub type Recorded6 = [Recorded; 6];
+
+/// What a seat's éclaireur read of one realm in one year: nothing, or
+/// the report he brought back.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Sighted {
+    pub read: bool,
+    pub surface: i32,
+    pub garrison: i32,
+    pub forts: i32,
+    pub efficiency: i32,
+}
+
+/// The year's record, from the game as the year closes and what was
+/// heard of its campaign.
+pub fn record(game: &EmpireGame, memories: &[Memory; 6], heard: &[Heard; 6]) -> Recorded6 {
+    std::array::from_fn(|i| {
+        let k = &game.kingdoms[i];
+        Recorded {
+            title: k.title() as i32,
+            alive: !k.is_dead,
+            soldiers: k.soldiers,
+            treasury: k.treasury,
+            starved: memories[i]
+                .demo
+                .as_ref()
+                .map_or(0, |d| d.starvation_victims),
+            heard: heard[i],
+        }
+    })
+}
+
+/// Which of what a seat could read its brain does: the Chronique, last
+/// year's orders and its old reports (`told`); what the Extérieur wrote
+/// down to remember (`recall`); the journal of past years (`journal`).
+/// What it does not read is zero on its sight, so one genome shape
+/// serves them all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reads {
+    pub told: bool,
+    pub recall: bool,
+    pub journal: bool,
+}
+
+impl Reads {
+    pub const ALL: Reads = Reads {
+        told: true,
+        recall: true,
+        journal: true,
+    };
+    /// What the delivered brains read: told, nothing else.
+    pub const SCHOOLED: Reads = Reads {
+        told: true,
+        recall: false,
+        journal: false,
+    };
+
+    /// Packed for the GPU: told 1, recall 2, journal 4.
+    pub fn bits(self) -> u32 {
+        u32::from(self.told) | u32::from(self.recall) << 1 | u32::from(self.journal) << 2
+    }
+
+    pub fn from_bits(bits: u32) -> Reads {
+        Reads {
+            told: bits & 1 != 0,
+            recall: bits & 2 != 0,
+            journal: bits & 4 != 0,
+        }
+    }
+}
 
 /// What the seat remembers from one year to the next, as a seigneur would
 /// from the Chronique and the last campaign.
@@ -74,6 +173,12 @@ pub struct Memory {
     pub last_orders: [f32; B_OUT],
     /// What the seat knows of each realm.
     pub dossiers: [Dossier; 6],
+    /// The journal: the last years' records, the last first (the same
+    /// for every seat, as the rumours are).
+    pub journal: [Recorded6; JOURNAL_YEARS],
+    /// The seat's own side of the journal: what its éclaireurs read of
+    /// each realm, year by year, the last first.
+    pub sighted: [[Sighted; 6]; JOURNAL_YEARS],
 }
 
 impl Default for Memory {
@@ -88,7 +193,32 @@ impl Default for Memory {
             answer: [0.0; A_OUT],
             last_orders: [0.0; B_OUT],
             dossiers: [Dossier::default(); 6],
+            journal: [[Recorded::default(); 6]; JOURNAL_YEARS],
+            sighted: [[Sighted::default(); 6]; JOURNAL_YEARS],
         }
+    }
+}
+
+impl Memory {
+    /// The year's record written down with what the seat's éclaireurs
+    /// read this `year`, the oldest year forgotten.
+    pub fn note(&mut self, recorded: Recorded6, year: i32) {
+        self.journal.rotate_right(1);
+        self.journal[0] = recorded;
+        self.sighted.rotate_right(1);
+        self.sighted[0] =
+            std::array::from_fn(
+                |i| match self.dossiers[i].report.filter(|r| r.year == year) {
+                    Some(r) => Sighted {
+                        read: true,
+                        surface: r.surface,
+                        garrison: r.garrison,
+                        forts: r.fortifications,
+                        efficiency: r.efficiency,
+                    },
+                    None => Sighted::default(),
+                },
+            );
     }
 }
 
@@ -144,11 +274,12 @@ fn criteria(k: &Kingdom) -> [f32; 9] {
 
 /// What a seigneur sees as the year's Intendance opens, as the networks
 /// read it: shares as they are, counts on a log scale (see [`count`]).
-/// A seigneur `told` reads the Chronique, last year's orders and the
-/// reports of past years as well — the delivered brains were schooled
-/// so; one not told reads zeros there and this year's reports only, and
-/// has its recall to remember with.
-pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory, told: bool) -> Vec<f32> {
+/// What a seat sees this year, as far as its brain `reads` (see
+/// [`Reads`]): a seigneur told reads the Chronique, last year's orders
+/// and the reports of past years, one not told reads zeros there and
+/// this year's reports only.
+pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory, reads: Reads) -> Vec<f32> {
+    let told = reads.told;
     let kingdoms = &game.kingdoms;
     let year = game.year;
     let k = &kingdoms[id.index()];
@@ -278,7 +409,55 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory, told: bool) -> Vec<f32
     } else {
         v.extend([0.0; ORDERS]);
     }
-    v.extend(recall);
+    if reads.recall {
+        v.extend(recall);
+    } else {
+        v.extend([0.0; RECALL]);
+    }
+    // The journal, the last year first.
+    if reads.journal {
+        let me = id.index();
+        for (recorded, sighted) in m.journal.iter().zip(&m.sighted) {
+            let mine = &recorded[me];
+            v.extend([
+                mine.title as f32 / 3.0,
+                count(mine.soldiers, 400.0),
+                signed_count(mine.treasury, 10_000.0),
+                count(mine.starved, 1_000.0),
+            ]);
+            for o in rivals(id) {
+                let r = &recorded[o.index()];
+                let others = r
+                    .heard
+                    .marched_by
+                    .iter()
+                    .enumerate()
+                    .filter(|&(j, &f)| f && j != me)
+                    .count() as f32
+                    / 2.0;
+                v.extend([
+                    f32::from(u8::from(mine.heard.marched_by[o.index()])),
+                    f32::from(u8::from(r.heard.marched_by[me])),
+                    f32::from(u8::from(mine.heard.beaten_by[o.index()])),
+                    f32::from(u8::from(r.heard.beaten_by[me])),
+                    count(r.heard.lost_to[me], 1_000.0),
+                    r.title as f32 / 3.0,
+                    f32::from(u8::from(r.alive)),
+                    others,
+                ]);
+                let s = &sighted[o.index()];
+                v.extend([
+                    f32::from(u8::from(s.read)),
+                    count(s.surface, 10_000.0),
+                    count(s.garrison, 400.0),
+                    s.forts as f32 / 10.0,
+                    s.efficiency as f32 / 150.0,
+                ]);
+            }
+        }
+    } else {
+        v.extend(vec![0.0; JOURNAL_YEARS * ENTRY]);
+    }
     debug_assert_eq!(v.len(), SIGHT);
     v
 }
@@ -300,47 +479,53 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     lanes.iter().sum::<f32>() + a_tail.iter().zip(b_tail).map(|(a, b)| a * b).sum::<f32>()
 }
 
+/// A dense network of one hidden layer: `hidden` rows of `inputs + 1`
+/// weights (the bias last), then `outputs` rows of `hidden + 1`.
 #[derive(Debug, Clone)]
 pub struct Net {
     inputs: usize,
     outputs: usize,
+    hidden: usize,
     w: Vec<f32>,
 }
 
 impl Net {
     /// Weights a network of this shape holds.
-    pub const fn len(inputs: usize, outputs: usize) -> usize {
-        (inputs + 1) * HIDDEN + (HIDDEN + 1) * outputs
+    pub const fn len(inputs: usize, outputs: usize, hidden: usize) -> usize {
+        (inputs + 1) * hidden + (hidden + 1) * outputs
     }
 
-    pub fn new(inputs: usize, outputs: usize, w: &[f32]) -> Net {
-        assert_eq!(w.len(), Self::len(inputs, outputs));
+    pub fn new(inputs: usize, outputs: usize, hidden: usize, w: &[f32]) -> Net {
+        assert_eq!(w.len(), Self::len(inputs, outputs, hidden));
+        assert!(hidden <= MAX_HIDDEN);
         Net {
             inputs,
             outputs,
+            hidden,
             w: w.to_vec(),
         }
     }
 
     /// The scale each weight is best drawn at to start with: `1/√fan_in`,
     /// so the hidden layer opens neither saturated nor dead.
-    pub fn scales(inputs: usize, outputs: usize) -> Vec<f32> {
-        let mut s = vec![1.0 / (inputs as f32).sqrt(); (inputs + 1) * HIDDEN];
-        s.extend(vec![1.0 / (HIDDEN as f32).sqrt(); (HIDDEN + 1) * outputs]);
+    pub fn scales(inputs: usize, outputs: usize, hidden: usize) -> Vec<f32> {
+        let mut s = vec![1.0 / (inputs as f32).sqrt(); (inputs + 1) * hidden];
+        s.extend(vec![1.0 / (hidden as f32).sqrt(); (hidden + 1) * outputs]);
         s
     }
 
     pub fn forward(&self, x: &[f32]) -> Vec<f32> {
         debug_assert_eq!(x.len(), self.inputs);
-        let (w1, w2) = self.w.split_at((self.inputs + 1) * HIDDEN);
-        let mut h = [0.0f32; HIDDEN];
+        let (w1, w2) = self.w.split_at((self.inputs + 1) * self.hidden);
+        let mut h = [0.0f32; MAX_HIDDEN];
+        let h = &mut h[..self.hidden];
         for (hj, row) in h.iter_mut().zip(w1.chunks_exact(self.inputs + 1)) {
             *hj = (dot(&row[..self.inputs], x) + row[self.inputs]).tanh();
         }
         (0..self.outputs)
             .map(|o| {
-                let row = &w2[o * (HIDDEN + 1)..(o + 1) * (HIDDEN + 1)];
-                let s = dot(&row[..HIDDEN], &h) + row[HIDDEN];
+                let row = &w2[o * (self.hidden + 1)..(o + 1) * (self.hidden + 1)];
+                let s = dot(&row[..self.hidden], h) + row[self.hidden];
                 1.0 / (1.0 + (-s).exp())
             })
             .collect()
@@ -353,45 +538,94 @@ impl Net {
 pub struct Brain {
     pub intendance: Net,
     pub exterieur: Net,
-    /// Whether the seat is told the Chronique, last year's orders and its
-    /// old reports (see [`sight`]): the delivered brains were schooled so,
-    /// a brain schooled with a recall is not.
-    pub told: bool,
+    /// What of its sight the brain reads (see [`sight`]).
+    pub reads: Reads,
 }
 
 /// The widths a genome is laid out for: the seigneur's own entries of the
 /// sight, the entries per rival, the Intendance's and the Extérieur's
-/// answers.
+/// answers, the years of journal, and the hidden layer of both networks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shape {
     pub own: usize,
     pub rival: usize,
     pub a_out: usize,
     pub b_out: usize,
+    pub journal: usize,
+    pub hidden: usize,
 }
 
 impl Shape {
-    /// Today's widths.
+    /// Today's widths, at the delivered brains' hidden layer.
     pub const NOW: Shape = Shape {
         own: OWN,
         rival: RIVAL,
         a_out: A_OUT,
         b_out: B_OUT,
+        journal: JOURNAL_YEARS,
+        hidden: HIDDEN,
     };
 
-    /// The widths the delivered brains were schooled at: before the recall.
+    /// Today's widths with a hidden layer of `hidden` neurons.
+    pub const fn wide(hidden: usize) -> Shape {
+        Shape {
+            hidden,
+            ..Shape::NOW
+        }
+    }
+
+    /// The shape of a genome `len` weights long at today's widths: only
+    /// its hidden layer is unknown, and the length says it.
+    pub fn of(len: usize) -> Shape {
+        let per_hidden = A_IN + 1 + A_OUT + B_IN + 1 + B_OUT;
+        let rest = len
+            .checked_sub(A_OUT + B_OUT)
+            .expect("a genome of today's widths");
+        assert!(
+            rest.is_multiple_of(per_hidden),
+            "{len} weights are no genome of today's widths"
+        );
+        Shape::wide(rest / per_hidden)
+    }
+
+    /// The widths the delivered brains were schooled at: before the
+    /// recall and the journal.
     pub const SCHOOLED: Shape = Shape {
         b_out: ORDERS,
+        journal: 0,
         ..Shape::NOW
     };
 
     const fn sight(self) -> usize {
-        self.own + CHRONICLE + RIVALS * self.rival + self.b_out
+        self.own + CHRONICLE + RIVALS * self.rival + self.b_out + self.journal * ENTRY
     }
 
     /// The length of a genome laid out this way.
     pub const fn genome(self) -> usize {
-        Net::len(self.sight(), self.a_out) + Net::len(self.sight() + self.a_out, self.b_out)
+        Net::len(self.sight(), self.a_out, self.hidden)
+            + Net::len(self.sight() + self.a_out, self.b_out, self.hidden)
+    }
+
+    /// The starting scale of every weight of a genome of this shape.
+    pub fn scales(self) -> Vec<f32> {
+        let mut s = Net::scales(self.sight(), self.a_out, self.hidden);
+        s.extend(Net::scales(
+            self.sight() + self.a_out,
+            self.b_out,
+            self.hidden,
+        ));
+        s
+    }
+
+    /// Where in a genome of this shape the Extérieur's output `o` lives:
+    /// its `hidden` weights, then its bias. So a school may open an answer
+    /// the brain never gave, or seed one it should.
+    pub fn exterieur_output(self, o: usize) -> std::ops::Range<usize> {
+        assert!(o < self.b_out);
+        let start = Net::len(self.sight(), self.a_out, self.hidden)
+            + (self.sight() + self.a_out + 1) * self.hidden
+            + o * (self.hidden + 1);
+        start..start + self.hidden + 1
     }
 
     fn fits(self, now: Shape) -> bool {
@@ -399,6 +633,8 @@ impl Shape {
             && self.rival <= now.rival
             && self.a_out <= now.a_out
             && self.b_out <= now.b_out
+            && self.journal <= now.journal
+            && self.hidden <= now.hidden
     }
 }
 
@@ -406,25 +642,31 @@ impl Brain {
     /// Weights of both networks laid end to end: the genome evolution works on.
     pub const GENOME: usize = Shape::NOW.genome();
 
-    /// The brain of a genome; `told` as [`Brain::told`].
-    pub fn from_genome(g: &[f32], told: bool) -> Brain {
-        assert_eq!(g.len(), Self::GENOME);
-        let (a, b) = g.split_at(Net::len(A_IN, A_OUT));
+    /// The brain of a genome at today's widths, its hidden layer as wide
+    /// as its length says, reading what `reads` says.
+    pub fn from_genome(g: &[f32], reads: Reads) -> Brain {
+        let shape = Shape::of(g.len());
+        let (a, b) = g.split_at(Net::len(A_IN, A_OUT, shape.hidden));
         Brain {
-            intendance: Net::new(A_IN, A_OUT, a),
-            exterieur: Net::new(B_IN, B_OUT, b),
-            told,
+            intendance: Net::new(A_IN, A_OUT, shape.hidden, a),
+            exterieur: Net::new(B_IN, B_OUT, shape.hidden, b),
+            reads,
         }
     }
 
-    /// A genome schooled at the widths `was`, laid out for today's
-    /// [`Shape::NOW`]: the weights it had where they were, nothing on the
-    /// entries it never saw and nothing into the answers it never gave — so
-    /// it plays on exactly as it did until evolution finds a use for them.
-    /// New entries and answers are appended to their block.
-    pub fn grown(g: &[f32], was: Shape) -> Vec<f32> {
-        let now = Shape::NOW;
+    /// A genome schooled at the widths `was`, laid out for `now` (today's
+    /// widths, at some hidden layer): the weights it had where they were,
+    /// nothing on the entries it never saw, nothing into the answers it
+    /// never gave, and the new hidden neurons silent — so it plays on
+    /// exactly as it did until evolution finds a use for them. New
+    /// entries and answers are appended to their block.
+    pub fn grown(g: &[f32], was: Shape, now: Shape) -> Vec<f32> {
         assert!(was.fits(now), "{was:?} does not fit {now:?}");
+        assert_eq!(now.own, OWN);
+        assert_eq!(now.rival, RIVAL);
+        assert_eq!(now.a_out, A_OUT);
+        assert_eq!(now.b_out, B_OUT);
+        assert_eq!(now.journal, JOURNAL_YEARS);
         assert_eq!(g.len(), was.genome());
         // Where an input of the old sight (and, for the Extérieur, of the
         // Intendance's answer after it) sits in the new one: its block
@@ -435,6 +677,7 @@ impl Brain {
                 (CHRONICLE, CHRONICLE),
                 (RIVALS * was.rival, RIVALS * now.rival),
                 (was.b_out, now.b_out),
+                (was.journal * ENTRY, now.journal * ENTRY),
                 (was.a_out, now.a_out),
             ];
             let (mut from, mut to) = (0, 0);
@@ -452,11 +695,12 @@ impl Brain {
             }
             unreachable!("input {i} beyond the old sight")
         };
+        let (hidden_was, hidden) = (was.hidden, now.hidden);
         let net =
             |w: &[f32], inputs_was: usize, inputs: usize, outputs_was: usize, outputs: usize| {
-                let (w1, w2) = w.split_at((inputs_was + 1) * HIDDEN);
-                let mut out = vec![0.0; (inputs + 1) * HIDDEN];
-                for j in 0..HIDDEN {
+                let (w1, w2) = w.split_at((inputs_was + 1) * hidden_was);
+                let mut out = vec![0.0; (inputs + 1) * hidden];
+                for j in 0..hidden_was {
                     let row = &w1[j * (inputs_was + 1)..(j + 1) * (inputs_was + 1)];
                     let to = &mut out[j * (inputs + 1)..(j + 1) * (inputs + 1)];
                     for (i, &x) in row[..inputs_was].iter().enumerate() {
@@ -464,21 +708,25 @@ impl Brain {
                     }
                     to[inputs] = row[inputs_was];
                 }
-                debug_assert_eq!(w2.len(), (HIDDEN + 1) * outputs_was);
-                out.extend_from_slice(w2);
-                out.extend(vec![0.0; (HIDDEN + 1) * (outputs - outputs_was)]);
+                debug_assert_eq!(w2.len(), (hidden_was + 1) * outputs_was);
+                for row in w2.chunks_exact(hidden_was + 1) {
+                    out.extend_from_slice(&row[..hidden_was]);
+                    out.extend(vec![0.0; hidden - hidden_was]);
+                    out.push(row[hidden_was]);
+                }
+                out.extend(vec![0.0; (hidden + 1) * (outputs - outputs_was)]);
                 out
             };
-        let (a, b) = g.split_at(Net::len(was.sight(), was.a_out));
+        let (a, b) = g.split_at(Net::len(was.sight(), was.a_out, hidden_was));
         let mut grown = net(a, was.sight(), A_IN, was.a_out, A_OUT);
         grown.extend(net(b, was.sight() + was.a_out, B_IN, was.b_out, B_OUT));
-        assert_eq!(grown.len(), Self::GENOME);
+        assert_eq!(grown.len(), now.genome());
         grown
     }
 
     /// The brains the computers sit down with, one per temperament,
     /// their genomes in little-endian floats under `brains/`, at the
-    /// widths of [`Shape::SCHOOLED`] (none has a recall: all are told). All were
+    /// widths of [`Shape::SCHOOLED`] (told, no recall, no journal). All were
     /// schooled at the arena (`apps/empire-train`) from scratch, six
     /// tables of six, no hall, a rank cost of forty, no letters. The
     /// first four came out of s46 (against s35); three then played forty
@@ -500,7 +748,10 @@ impl Brain {
                     .chunks_exact(4)
                     .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
                     .collect();
-                Brain::from_genome(&Brain::grown(&genome, Shape::SCHOOLED), true)
+                Brain::from_genome(
+                    &Brain::grown(&genome, Shape::SCHOOLED, Shape::NOW),
+                    Reads::SCHOOLED,
+                )
             };
             [
                 school(include_bytes!("../brains/soldat.f32")),
@@ -518,7 +769,7 @@ impl Brain {
     /// The Intendance's answer as the year opens, kept in `m` for the
     /// Extérieur to read again.
     pub fn answer(&self, game: &EmpireGame, id: Kingdoms, m: &mut Memory) -> [f32; A_OUT] {
-        let a = self.intendance.forward(&sight(game, id, m, self.told));
+        let a = self.intendance.forward(&sight(game, id, m, self.reads));
         m.answer.copy_from_slice(&a);
         m.answer
     }
@@ -553,25 +804,9 @@ impl Brain {
     }
 
     fn exterieur_sight(&self, game: &EmpireGame, id: Kingdoms, m: &Memory) -> Vec<f32> {
-        let mut x = sight(game, id, m, self.told);
+        let mut x = sight(game, id, m, self.reads);
         x.extend(m.answer);
         x
-    }
-
-    /// The starting scale of every weight of the genome.
-    pub fn scales() -> Vec<f32> {
-        let mut s = Net::scales(A_IN, A_OUT);
-        s.extend(Net::scales(B_IN, B_OUT));
-        s
-    }
-
-    /// Where in the genome the Extérieur's output `o` lives: its `HIDDEN`
-    /// weights, then its bias. So a school may open an answer the brain
-    /// never gave, or seed one it should.
-    pub fn exterieur_output(o: usize) -> std::ops::Range<usize> {
-        assert!(o < B_OUT);
-        let start = Net::len(A_IN, A_OUT) + (B_IN + 1) * HIDDEN + o * (HIDDEN + 1);
-        start..start + HIDDEN + 1
     }
 }
 
@@ -699,7 +934,9 @@ pub fn decode_intendance(
 
     // The strongest wants are served first, each on what the treasury still
     // holds; the palace, the walls and the hospice stop at their roof, the
-    // army at what the nobles can command.
+    // army at what the nobles can command. A want buys its fourth power of
+    // what the treasury allows: a small want buys a few whatever the
+    // treasury, a want of one empties it.
     let mut wants: Vec<(usize, f32)> = (0..PURCHASES.len())
         .map(|i| (i, on(9 + i)))
         .filter(|w| w.1 > 0.0)
@@ -714,7 +951,8 @@ pub fn decode_intendance(
             (_, Some(built)) => cap.min(TENTHS - built),
             (_, None) => cap,
         };
-        let n = (want * cap as f32).round() as i32;
+        let w2 = want * want;
+        let n = (w2 * w2 * cap as f32).round() as i32;
         if n > 0 {
             treasury -= n * kind.cost();
             purchases.push((kind, n));
@@ -892,7 +1130,7 @@ mod tests {
     use crate::intel::Report;
 
     fn brain(fill: f32) -> Brain {
-        Brain::from_genome(&vec![fill; Brain::GENOME], true)
+        Brain::from_genome(&vec![fill; Brain::GENOME], Reads::ALL)
     }
 
     #[test]
@@ -911,12 +1149,25 @@ mod tests {
         let fresh = Report::read(game.kingdom(first), 5);
         m.dossiers[first.index()].report = Some(fresh);
         m.dossiers[second.index()].report = Some(Report::read(game.kingdom(second), 3));
-        let told = sight(&game, Kingdoms::France, &m, true);
-        let kept = sight(&game, Kingdoms::France, &m, false);
+        let recall = Reads {
+            told: false,
+            recall: true,
+            journal: false,
+        };
+        let told = sight(
+            &game,
+            Kingdoms::France,
+            &m,
+            Reads {
+                told: true,
+                ..recall
+            },
+        );
+        let kept = sight(&game, Kingdoms::France, &m, recall);
         // The Chronique is blank, the recall stays, the orders go.
         assert!(told[OWN..OWN + CHRONICLE].iter().any(|&x| x != 0.0));
         assert!(kept[OWN..OWN + CHRONICLE].iter().all(|&x| x == 0.0));
-        let orders = SIGHT - B_OUT;
+        let orders = OWN + CHRONICLE + RIVALS * RIVAL;
         assert!(kept[orders..orders + ORDERS].iter().all(|&x| x == 0.0));
         assert_eq!(&kept[orders + ORDERS..], &told[orders + ORDERS..]);
         // This year's report is read, last years' is not.
@@ -931,7 +1182,7 @@ mod tests {
     fn the_sight_has_its_length_and_stays_bounded() {
         let game = EmpireGame::default();
         for id in KINGDOMS {
-            let v = sight(&game, id, &Memory::default(), true);
+            let v = sight(&game, id, &Memory::default(), Reads::ALL);
             assert_eq!(v.len(), SIGHT);
             assert!(v.iter().all(|x| x.is_finite() && (-1.0..=2.0).contains(x)));
         }
@@ -943,7 +1194,7 @@ mod tests {
         k.grain_stocks = 2_000_000;
         k.treasury = -50_000;
         k.grain_to_sell = 500_000;
-        let v = sight(&game, Kingdoms::France, &Memory::default(), true);
+        let v = sight(&game, Kingdoms::France, &Memory::default(), Reads::ALL);
         assert!(
             v.iter().all(|x| x.is_finite() && (-3.0..=5.0).contains(x)),
             "{v:?}"
@@ -954,7 +1205,7 @@ mod tests {
     fn the_networks_answer_in_zero_one() {
         let game = EmpireGame::default();
         let b = brain(0.3);
-        let s = sight(&game, Kingdoms::France, &Memory::default(), true);
+        let s = sight(&game, Kingdoms::France, &Memory::default(), Reads::ALL);
         let a = b.intendance.forward(&s);
         assert_eq!(a.len(), A_OUT);
         let mut x = s.clone();
@@ -1063,15 +1314,17 @@ mod tests {
             rival: RIVAL - 2,
             a_out: A_OUT - 3,
             b_out: B_OUT - 1,
+            journal: 0,
+            hidden: HIDDEN,
         };
         let old: Vec<f32> = (0..was.genome())
             .map(|i| ((i * 7919) % 101) as f32 / 101.0 - 0.5)
             .collect();
-        let grown = Brain::grown(&old, was);
-        let brain = Brain::from_genome(&grown, true);
-        let (a, b) = old.split_at(Net::len(was.sight(), was.a_out));
-        let old_a = Net::new(was.sight(), was.a_out, a);
-        let old_b = Net::new(was.sight() + was.a_out, was.b_out, b);
+        let grown = Brain::grown(&old, was, Shape::NOW);
+        let brain = Brain::from_genome(&grown, Reads::ALL);
+        let (a, b) = old.split_at(Net::len(was.sight(), was.a_out, HIDDEN));
+        let old_a = Net::new(was.sight(), was.a_out, HIDDEN, a);
+        let old_b = Net::new(was.sight() + was.a_out, was.b_out, HIDDEN, b);
         let game = EmpireGame {
             year: 5,
             ..Default::default()
@@ -1082,17 +1335,18 @@ mod tests {
             last_orders,
             ..Default::default()
         };
-        let full = sight(&game, Kingdoms::France, &m, true);
+        let full = sight(&game, Kingdoms::France, &m, Reads::ALL);
         // The narrower sight: the own block without its last entry, each
         // rival block without its last two, the last orders without the
-        // last.
+        // last, no journal.
         let base = OWN + CHRONICLE;
+        let orders = base + RIVALS * RIVAL;
         let mut narrow: Vec<f32> = full[..was.own].to_vec();
         narrow.extend(&full[OWN..base]);
         for r in 0..RIVALS {
             narrow.extend(&full[base + r * RIVAL..base + r * RIVAL + was.rival]);
         }
-        narrow.extend(&full[base + RIVALS * RIVAL..SIGHT - 1]);
+        narrow.extend(&full[orders..orders + was.b_out]);
         let full_zeroed: Vec<f32> = full
             .iter()
             .enumerate()
@@ -1122,7 +1376,39 @@ mod tests {
         let b_new = brain.exterieur.forward(&x_new);
         assert!(close(&b_new[..was.b_out], &old_b.forward(&x_old)[..]));
         assert_eq!(b_new[was.b_out], 0.5);
-        assert_eq!(Brain::grown(&grown, Shape::NOW), grown);
+        assert_eq!(Brain::grown(&grown, Shape::NOW, Shape::NOW), grown);
+    }
+
+    #[test]
+    fn a_genome_grown_wider_answers_the_same() {
+        // A wider hidden layer, its new neurons silent: the same answers
+        // to float noise, and the wider shape read back from the length.
+        let old: Vec<f32> = (0..Brain::GENOME)
+            .map(|i| ((i * 7919) % 101) as f32 / 101.0 - 0.5)
+            .collect();
+        let wide = Shape::wide(128);
+        let grown = Brain::grown(&old, Shape::NOW, wide);
+        assert_eq!(grown.len(), wide.genome());
+        assert_eq!(Shape::of(grown.len()), wide);
+        let narrow = Brain::from_genome(&old, Reads::ALL);
+        let brain = Brain::from_genome(&grown, Reads::ALL);
+        let x: Vec<f32> = (0..B_IN)
+            .map(|i| ((i * 31) % 17) as f32 / 17.0 - 0.5)
+            .collect();
+        let close = |a: &[f32], b: &[f32]| {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5)
+        };
+        assert!(close(
+            &brain.intendance.forward(&x[..A_IN]),
+            &narrow.intendance.forward(&x[..A_IN])
+        ));
+        assert!(close(
+            &brain.exterieur.forward(&x),
+            &narrow.exterieur.forward(&x)
+        ));
+        assert_eq!(wide.scales().len(), wide.genome());
+        let o = wide.exterieur_output(B_OUT - 1);
+        assert_eq!(o.end, wide.genome());
     }
 
     #[test]

@@ -596,15 +596,16 @@ pub(crate) fn fight(
             }
         }
         exchange += 1;
-        // The rams: every RAM_PACE exchanges each one still standing knocks
-        // a tenth off the walls, then takes its risk — a chance in ten per
-        // man missing from its escort.
+        // The rams: every RAM_PACE exchanges, as many as the walls still
+        // stand tenths are brought up — the rest wait in the camp — and
+        // each one knocks a tenth off, then takes its risk: a chance in
+        // ten per man missing from its escort.
         if garrison > 0 && exchange % RAM_PACE == 0 && stands.iter().any(|s| s.rams > 0) {
             for s in stands.iter_mut().filter(|s| s.rams > 0) {
                 let escort = s.men / s.rams;
                 let missing = (RAM_ESCORT - escort).max(0);
                 let mut broken = 0;
-                for _ in 0..s.rams {
+                for _ in 0..s.rams.min(walls) {
                     walls = max(0, walls - 1);
                     if random(1, RAM_ESCORT) <= missing {
                         broken += 1;
@@ -1095,6 +1096,18 @@ mod tests {
         let s = game.kingdom_mut(Kingdoms::Spain);
         s.soldiers = 5000;
         s.fortifications = 0;
+        // No walls to break: no ram is brought up, none takes a risk;
+        // wiped out, the army leaves every ram behind all the same.
+        let r = simulate_front(
+            &game,
+            Kingdoms::Spain,
+            &[Host::new(Kingdoms::France, 3).with_rams(3)],
+        );
+        assert_eq!(r.walls_fallen(), 0);
+        assert_eq!(r.armies[0].rams_broken, 0);
+        assert_eq!(r.armies[0].rams_home(), 0);
+        assert_eq!(r.armies[0].rams_lost(), 3);
+        game.kingdom_mut(Kingdoms::Spain).fortifications = 10;
         let mut broken = 0;
         let mut blows = 0;
         for _ in 0..50 {
@@ -1103,9 +1116,6 @@ mod tests {
                 Kingdoms::Spain,
                 &[Host::new(Kingdoms::France, 3).with_rams(3)],
             );
-            // No walls to break, the risk is taken all the same; wiped out,
-            // the army leaves every ram behind.
-            assert_eq!(r.walls_fallen(), 0);
             assert_eq!(r.armies[0].rams_home(), 0);
             assert_eq!(r.armies[0].rams_lost(), 3);
             if r.rounds.iter().any(|x| x.exchange >= RAM_PACE) {

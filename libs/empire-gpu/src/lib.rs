@@ -46,10 +46,9 @@ impl Gpu {
         })
     }
 
-    /// A compute pipeline over the shader `source` (the brain's widths
-    /// prepended), its bindings laid out from the source.
+    /// A compute pipeline over the shader `source`, its bindings laid out
+    /// from the source.
     pub fn pipeline(&self, label: &str, source: &str) -> wgpu::ComputePipeline {
-        let source = format!("{}\n{source}", layout::header());
         let module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -160,27 +159,29 @@ pub mod shaders {
     pub const CAMPAIGN: &str = include_str!("wgsl/campaign.wgsl");
     pub const YEAR: &str = include_str!("wgsl/year.wgsl");
 
-    /// The forward test kernel, whole.
-    pub fn forward_test() -> String {
-        format!("{FORWARD_TEST}\n{NET}")
+    /// The forward test kernel, whole, for brains of `hidden` neurons.
+    pub fn forward_test(hidden: usize) -> String {
+        format!("{}\n{FORWARD_TEST}\n{NET}", super::layout::header(hidden))
     }
 
-    /// The year kernel, whole.
-    pub fn year() -> String {
-        [
+    /// The year kernel, whole, for brains of `hidden` neurons.
+    pub fn year(hidden: usize) -> String {
+        let body = [
             STATE, RNG, NET, SIGHT, INTENDANCE, EXTERIEUR, CAMPAIGN, YEAR,
         ]
-        .join("\n")
+        .join("\n");
+        format!("{}\n{body}", super::layout::header(hidden))
     }
 }
 
 /// The tables a workgroup plays, one per lane.
 pub const TABLES_PER_WORKGROUP: usize = 32;
 
-/// How many table-years one dispatch plays at most: a job the driver
-/// lets run to its end (amdgpu resets the ring after about two seconds,
-/// and a fresh table plays a million table-years a second or so).
-const TABLE_YEARS_PER_DISPATCH: usize = 200_000;
+/// How many table-years one dispatch plays at most for brains of 32
+/// neurons: a job the driver lets run to its end (amdgpu resets the ring
+/// after about two seconds, and a fresh table plays a million table-years
+/// a second or so). Wider brains get proportionally fewer.
+const TABLE_YEARS_PER_DISPATCH: usize = 50_000;
 
 /// How many years one dispatch plays before the tables come back.
 #[repr(C)]
@@ -189,45 +190,77 @@ pub struct Params {
     pub years: u32,
 }
 
-/// The year kernel: tables are played in place, as many years at a time
-/// as asked, on the genomes of a [`Pool`].
+/// The year kernel for brains of one hidden width: tables are played in
+/// place, as many years at a time as asked, on the genomes of a [`Pool`].
 pub struct Arena<'a> {
     gpu: &'a Gpu,
+    hidden: usize,
     pipeline: wgpu::ComputePipeline,
 }
 
-/// A batch of genomes on the device, each of `Brain::GENOME` weights in
-/// the CPU's layout when given; a table's seats index into it.
+/// A batch of genomes on the device, each at the arena's width in the
+/// CPU's layout when given; a table's seats index into it.
 pub struct Pool {
     buffer: wgpu::Buffer,
 }
 
 impl<'a> Arena<'a> {
-    /// The kernel, compiled.
-    pub fn new(gpu: &'a Gpu) -> Arena<'a> {
+    /// The kernel, compiled for brains of `hidden` neurons.
+    pub fn new(gpu: &'a Gpu, hidden: usize) -> Arena<'a> {
         Arena {
             gpu,
-            pipeline: gpu.pipeline("year", &shaders::year()),
+            hidden,
+            pipeline: gpu.pipeline("year", &shaders::year(hidden)),
         }
     }
 
-    /// `genomes` laid out for the kernel and uploaded.
+    /// The hidden layer the kernel reads.
+    pub fn hidden(&self) -> usize {
+        self.hidden
+    }
+
+    /// How many genomes a [`Pool`] holds at most: one buffer's worth.
+    pub fn capacity(&self) -> usize {
+        let genome = (layout::genome(self.hidden) * 4) as u64;
+        (self.gpu.device.limits().max_buffer_size / genome) as usize
+    }
+
+    /// `genomes`, each of the arena's width, laid out for the kernel and
+    /// uploaded — at most [`Arena::capacity`] of them.
     pub fn pool(&self, genomes: &[&[f32]]) -> Pool {
-        let laid: Vec<Vec<f32>> = genomes.par_iter().map(|g| layout::laid(g)).collect();
-        Pool {
-            buffer: self.gpu.upload("genomes", &laid.concat()),
+        let laid = layout::genome(self.hidden);
+        let buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("genomes"),
+            size: (genomes.len() * laid * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
+        {
+            let mut mapped = buffer.slice(..).get_mapped_range_mut();
+            bytemuck::cast_slice_mut::<u8, f32>(&mut mapped)
+                .par_chunks_exact_mut(laid)
+                .zip(genomes)
+                .for_each(|(out, genome)| layout::lay(genome, self.hidden, out));
         }
+        buffer.unmap();
+        Pool { buffer }
     }
 
     /// `tables` after `years` more years each (fewer once a table is
     /// done), the years played a slice at a time so that no dispatch
     /// outlasts the driver's patience.
+    ///
+    /// # Panics
+    ///
+    /// When the device was reset under the job (the tables come back
+    /// zeroed, no year on them): the outcome would be a lie.
     pub fn play(&self, pool: &Pool, tables: &[state::Table], years: u32) -> Vec<state::Table> {
         let buffer = self.gpu.output("tables", std::mem::size_of_val(tables) / 4);
         self.gpu
             .queue
             .write_buffer(&buffer, 0, bytemuck::cast_slice(tables));
-        let slice = (TABLE_YEARS_PER_DISPATCH / tables.len().max(1)).max(1) as u32;
+        let budget = TABLE_YEARS_PER_DISPATCH * 32 / self.hidden;
+        let slice = (budget / tables.len().max(1)).max(1) as u32;
         let mut left = years;
         while left > 0 {
             let step = slice.min(left);
@@ -239,7 +272,12 @@ impl<'a> Arena<'a> {
             );
             left -= step;
         }
-        self.gpu.download(&buffer)
+        let played: Vec<state::Table> = self.gpu.download(&buffer);
+        assert!(
+            played.iter().all(|t| t.year >= 1),
+            "the GPU came back with zeroed tables: the device was reset under the job"
+        );
+        played
     }
 }
 

@@ -1,177 +1,134 @@
-# Le Brain — point d'arrêt (septembre 2026)
+# Le Brain — point d'arrêt (13 septembre 2026, règles v2)
 
-État : **livré** (`brains/soldat.f32`, `batisseuse.f32`, `garnison.f32`, `boutiquiere.f32` —
-s46a et s48b–d, quatre sœurs de zéro contre s35, sous les murs, l'hospice, les béliers et le
-renseignement immédiat de `BATIMENTS.md` / `RENSEIGNEMENT.md` ; `Brain::schools()`, une par
-tempérament). Ce document
-fige ce que les ordinateurs d'Empire savent faire, comment ils l'ont appris, ce qui a été
-essayé et ce qui reste ouvert — pour pouvoir reprendre l'entraînement plus tard sans rien
-redécouvrir.
-Code : `src/brain.rs` (le joueur), `src/arena.rs` (la table et la note),
-`apps/empire-train` (l'école).
+État : **en régénération**. Les brains livrés (`brains/*.f32`, s46a et s48b–d, s53) ont été
+formés sous la version 1 des règles ; le jeu tourne maintenant sous la **version 2**
+(`empire_lib::RULES = 2`), où ils jouent encore mais mal (ils achètent moins qu'ils ne
+veulent). Décision du 13 septembre : on ne porte pas de rétrocompatibilité, on jette les
+modèles et on les régénère ; les règles sont versionnées, un fichier d'école d'une autre
+version est refusé, et le script de régénération fait foi. Ce document fige ce que les
+ordinateurs savent faire, comment ils l'apprennent, ce qui a été essayé et ce qui reste
+ouvert. Code : `src/brain.rs` (le joueur), `src/arena.rs` (la table et la note),
+`libs/empire-gpu` (la même arène en WGSL), `apps/empire-train` (l'école).
 
 ## 1. Ce qu'est un ordinateur
 
 Chaque siège tenu par l'ordinateur est un `Brain` : **deux réseaux denses** à une couche
-cachée de 32 neurones (`tanh` dedans, sigmoïdes en sortie), lus une fois par an chacun.
+cachée (32 neurones par défaut, `--hidden` pour plus ; `tanh` dedans, sigmoïdes en sortie),
+lus une fois par an chacun.
 
 | Réseau | Entrées | Sorties | Rôle |
 |---|---|---|---|
-| `intendance` | `SIGHT` = 169 | `A_OUT` = 18 | rations, taxes, marché du grain, vente de terre, achats |
-| `exterieur` | `SIGHT` + 18 | `B_OUT` = 19 | éclaireur, agents, puis expéditions (5 voisins + barbares) et béliers |
+| `intendance` | `SIGHT` = 477 | `A_OUT` = 18 | rations, taxes, marché du grain, vente de terre, achats |
+| `exterieur` | `SIGHT` + 18 | `B_OUT` = 51 (19 ordres + 32 de recall) | éclaireur, agents, puis expéditions (5 voisins + barbares) et béliers ; les 32 dernières sorties sont relues l'an d'après |
 
-Génome : `Brain::GENOME` = 12 677 poids (les deux réseaux bout à bout, floats
-little-endian dans `brains/<tempérament>.f32`). Il n'y a **aucune règle codée à la main** dans le jeu
-de l'ordinateur en dehors du décodage ci-dessous : tout ce qu'il fait sort des réseaux.
+Génome à 32 neurones : 33 445 poids (les deux réseaux bout à bout). Il n'y a **aucune règle
+codée à la main** dans le jeu de l'ordinateur en dehors du décodage ci-dessous.
 
-### La vue (`sight`, 169 entrées)
+### La vue (`sight`, 477 entrées) et ce qu'un brain en lit (`Reads`)
 
-Les parts sont lues telles quelles, les comptes en **échelle log** (`count(n, scale)` :
-`scale` lit 0,7, dix fois plus 2,4, cent fois 4,6 — un royaume dix fois plus grand qu'à
-l'école reste dans la plage).
+Les parts sont lues telles quelles, les comptes en **échelle log** (`count(n, scale)`).
 
 - **Son royaume (43)** : année, météo, arpents, serfs, nobles, marchands, soldats,
-  efficacité, ration des soldats, trésor, stocks, récolte, rats, marchés, moulins,
-  fonderies, chantiers, palais, les trois taxes, titre, arpents par serf, stocks sur
-  besoins, part cultivée, soldats sur nobles×20, grain à vendre, prix, l'étal en cours,
-  les 7 premiers critères du titre suivant (part atteinte), terres barbares restantes,
-  puis ce qui est venu avec les murs : les critères fortifications et hospice, ses
-  fortifications et son hospice (dixièmes), ses béliers en stock.
-- **La Chronique (12)** : naissances, immigrés, nobles et marchands partis, morts de
-  maladie / malnutrition / famine, soldats perdus, delta de population, bilan du trésor,
-  solde des soldats, peste.
-- **Cinq voisins × 19** (`rivals(id)` = les cinq suivants à la table) : vivant, titre,
-  surface **d'après le rapport d'éclaireur** (rien sans rapport — la surface « entendue »
-  a disparu, ce serait tricher), grain à l'étal et prix, m'a attaqué / je l'ai attaqué /
-  je l'ai battu, ses guerres avec les autres, arpents qu'il m'a pris, puis le rapport
-  d'éclaireur (âge, garnison, efficacité, fortifications) et la lecture d'agent (âge,
-  trésor, stocks, avancée vers son titre).
-- **Sa dernière réponse d'Extérieur (19)** : ce qu'il a ordonné l'an passé.
+  efficacité, ration, trésor, stocks, récolte, rats, bâtiments, taxes, titre, ratios, étal,
+  critères du titre suivant, terres barbares, fortifications, hospice, béliers.
+- **La Chronique (12)** : naissances, immigrés, départs, morts, pertes de soldats, bilan.
+- **Cinq voisins × 19** : vivant, titre, surface lue par l'éclaireur, étal, rumeurs de la
+  campagne (m'a attaqué, je l'ai attaqué, battu, arpents pris), rapport d'éclaireur et
+  lecture d'agent, chacun avec son âge.
+- **Sa dernière réponse d'Extérieur (19 ordres + 32 de recall)**.
+- **Le journal (4 années × 69)**, la dernière année d'abord : son propre état de l'année
+  (titre, soldats, trésor, affamés), puis par voisin ce que tout le monde a vu (m'a attaqué,
+  je l'ai attaqué, m'a battu, je l'ai battu, arpents perdus contre moi, titre, vivant,
+  combien d'autres l'ont attaqué) et ce que **mon** éclaireur en a lu cette année-là (lu,
+  surface, garnison, murs, efficacité). Le journal public est tenu une fois par table
+  (`Memory::note`, `record`), les rapports par siège (`Sighted`).
 
-Tout ce que la vue contient est **ce qu'un seigneur voit ou entend** — pas de triche.
+Trois **drapeaux de lecture** par brain (`Reads`, portés par le fichier d'école et par le
+siège dans le noyau GPU) : `told` (la Chronique, les ordres de l'an passé, les vieux
+rapports), `recall` (les 32 sorties relues), `journal`. Ce qu'un brain ne lit pas est à
+zéro sur sa vue : **une seule forme de génome sert toutes les lectures**, ce qui permet de
+les comparer à recette égale (s61, s62). Les `.f32` livrés lisent la Chronique seule.
 
 ### Le décodage (`decode_intendance`, `decode_missions`, `decode_expeditions`)
 
 - Deadband 0,05 : une sortie sous ce seuil est « rien ».
-- Intendance : rations (0–2× la ration pleine des serfs, 0–1,5× celle des soldats), les
-  trois taxes, étal (part des stocks, prix), achat (part du trésor, sur l'étal le moins
-  cher), vente de terre (part du maximum), puis les **neuf achats** (marchés, moulins,
-  fonderies, chantiers, palais, soldats, fortifications, hospice, béliers) servis du plus
-  voulu au moins voulu sur un trésor courant, le palais, les murs et l'hospice plafonnés
-  à 10 dixièmes, l'armée à 20 par noble. Les rations sont
-  ensuite bornées par les stocks (`bound_council`, règle des curseurs du web).
-- Extérieur, **en deux lectures** du même réseau, parce que l'éclaireur répond sur-le-champ :
-  `missions` d'abord (éclaireur = argmax sur 6, le sixième est « personne » ; agents =
-  sorties ≥ 0,5), le rapport entre au dossier, puis `expeditions` sur la vue rafraîchie :
-  une envie par cible (5 voisins + barbares), triées ; au plus `nobles/4 + 1`
-  expéditions ; hommes = envie × soldats ; la première expédition contre un royaume
-  emmène envie × béliers en stock (arrondi). Pas de guerre avant `FIRST_WAR_YEAR` (an 3).
-- `Stage` (`Survive < Emperor < Market < Guard < War`) ferme les sorties non encore
-  enseignées ; en jeu tout est ouvert (`Stage::War`).
+- Intendance : rations, taxes, étal, achat de grain, vente de terre, puis les **neuf achats**
+  servis du plus voulu au moins voulu sur un trésor courant ; **une envie achète sa puissance
+  quatrième de ce que le trésor permet** (`n = envie⁴ × plafond`, v2) — une petite envie
+  achète quelques unités quel que soit le trésor, une envie de 1 vide la caisse. En v1
+  l'achat était linéaire et un trésor de 60 M faisait acheter 30 000 moulins par an.
+- Extérieur, en deux lectures : missions (éclaireur = argmax sur 6, agents ≥ 0,5), le rapport
+  entre au dossier et au journal, puis expéditions sur la vue rafraîchie. Pas de guerre
+  avant l'an 3.
 
-### La mémoire (`Memory`)
+### Le recall, ce qu'il fait vraiment
 
-Ce qu'un seigneur retient d'un an sur l'autre : la Chronique (`demo`, `eco`, `plague`),
-les rumeurs entendues (`heard` : qui a marché sur qui, qui a battu qui, arpents perdus),
-les dossiers d'éclaireur et d'agent, la réponse d'Intendance de l'année et les derniers
-ordres. Le web la reconstruit chaque an (`Room::remember`), le terminal la garde.
+Lu le long de six parties (s59, élevage 0,3) : 4 à 9 cases sur 32 restent constantes, une
+douzaine bougent **une fois**, en marche d'escalier, quand le trésor et l'armée passent un
+seuil (vers l'an 15–18) — un **bit de phase** « assaut final », l'école sacre l'an d'après.
+Les mêmes cases dans une école, d'autres dans une autre ; aucune ne suit un événement
+ponctuel. Coupé à la mesure, s59 tombe de 55 % à 3 % de sacres. Ce n'est pas une mémoire
+d'événements, c'est un automate à deux ou trois états ; d'où le journal, qui donne
+l'histoire d'office.
 
 ## 2. L'école (`apps/empire-train`)
 
-**Neuro-évolution par la méthode d'entropie croisée** (CEM) : pas de gradient.
+**Élevage** (`--breed 0.3`, s59, la recette de référence depuis le 13 septembre) : la
+population de 1 000 est faite des 100 parents (l'élite) et de 900 enfants, neuf par
+parent, chaque poids muté d'une gaussienne d'écart-type `0,3 × échelle de départ` ; l'élite
+suivante est prise parmi parents et enfants. Cent lignées au lieu d'une : contre le pool de
+prod v1, 45 % de sacres en médiane à 300 générations là où l'**entropie croisée** (le
+tirage autour d'une moyenne, `--breed 0`) plafonnait à 17 % et n'y changeait rien en 600.
+La première génération (10 000) reste une loterie.
 
-- Population 1 000 génomes tirés autour d'une moyenne ± sigma (première génération à
-  10 000, une loterie pour un départ qui vive) ; élite 100 ; la moyenne et le sigma
-  glissent sur l'élite (`sigma ← 0,3·sigma + 0,7·écart-type`, plancher 5 % de l'échelle
-  initiale — **c'est ce plancher qui rend les biais semés collants**).
-- Chaque génome joue `--tables` (6) parties de 6 sièges ; sa note est la moyenne.
-- **Tables mixtes** : 1 à 5 sièges de la population, les autres pris dans le
-  **Hall of Fame** (`--hall 8` : les meilleurs de générations passées, étalés sur la
-  course, pour ne pas dériver loin de ce qui a déjà gagné) et dans les écoles
-  `--against` (leurs `.best.json`, chacune lue à son propre palier).
-- **Cursus** par paliers (`--stage`) : `survive` (rations, taxes, achats, terre) →
-  `emperor` (raids barbares) → `market` (grain) → `guard` (garnison, renseignement) →
-  `war`. Les écoles s8+ ont été faites **d'un trait au palier war** (1 100 générations),
-  le cursus n'apportait rien.
-- `--from` reprend une distribution ; un génome d'une forme plus étroite est **grandi**
-  (`Brain::grown`, d'une `Shape` — `own`, `rival`, `a_out`, `b_out` — à `Shape::NOW`) :
-  ses poids restent où ils étaient, les entrées nouvelles naissent aveugles à leur sigma
-  initial, les sorties nouvelles à zéro (une sigmoïde à 0,5 : « moitié », que l'école
-  déplace). Le fichier d'école porte ses `widths` ; sans le champ, c'est la forme d'avant
-  les murs (s26 : 38 / 19 / 15 / 18).
-- Sortie : `<out>.json` (moyenne, sigma, Hall, meilleur, `widths`) pour reprendre,
-  `<out>.best.json` le meilleur génome ; `--deliver <chemin>` écrit le meilleur en
-  floats LE, ce sont les `brains/<tempérament>.f32`.
-- ≈ 1,1 s la génération sur 10 threads (`RAYON_NUM_THREADS=10`) ; 1 200 générations ≈ 22 min.
-- `--measure N --show` : joue N tables de clones (ou contre `--against`) et imprime le
-  bilan ; `--show` déroule les années du siège 0.
+- Chaque génome joue `--tables` (6) parties de 6 sièges ; sa note est la moyenne. Tables
+  mixtes : 1 à 5 sièges de la population, les autres pris dans `--against` (le pool de
+  référence) et dans le Hall (`--hall`).
+- **GPU** (`--gpu`, `libs/empire-gpu`) : toute l'année d'une table jouée dans un noyau WGSL,
+  une table par voie, règles et dés identiques au CPU (test de parité `tests/year.rs`).
+  Rentable à partir de ≈ 6 essais en un processus (`--trials N`, tous les essais dans une
+  même passe) : 8 essais à 32 neurones font 2 à 4 s la génération, 20 essais 2,8 s contre
+  7,1 s sur 12 threads. Au-delà de 32 neurones le noyau est borné par la lecture des poids
+  (chaque table lit six génomes) ; les passes sont découpées (50 000 table-années) pour
+  rester sous le délai du pilote.
+- `--hidden H` (couche cachée, les rivaux plus étroits sont élargis par des neurones muets),
+  `--told --recall --journal` (les lectures d'une école de zéro), `--keep N` (un instantané
+  toutes les N générations, pour les courbes), `--trials N` avec `{n}` dans `--out` et
+  `--from`.
+- Sortie : `<out>.json` (moyenne, sigma, Hall, meilleur, parents, `widths`, `rules`, les
+  lectures), `<out>.best.json`, `<out>.g<n>.json` ; `--deliver` écrit le meilleur en floats.
+- **Mesure** : `--measure N --gpu` joue N tables d'un siège contre cinq du pool et imprime
+  le bilan (sacres, année médiane, chutes, lectures, fitness) ; c'est la seule note qui fasse
+  foi, la lecture d'école (tables mixtes) est indicative. `--show` déroule une partie.
+- **Pool de référence** (`schools/pools/A`, figé, 8 écoles de zéro élevées entre elles sous
+  v2) : chaque campagne s'entraîne contre lui et s'y mesure ; `promote.py` fait entrer **un
+  champion à la fois** (le meilleur candidat contre le pool et contre ses pairs remplace le
+  membre le plus faible en tournoi) dans un nouveau dossier, jamais en place.
+- Les campagnes sont des scripts (`run-s58.py` … `run-s62.py`) lancés **détachés** (`nohup
+  setsid`) : l'outil de session tue les tâches d'arrière-plan longues.
 
 ## 3. La note (`arena.rs`)
 
-`Outcome::fitness(longest)` :
+`Outcome::fitness(longest)` : sacre `1200 − 6·an` ; sinon `100 · années / longest + 200 ·
+progress` ; Prince `150 − an`, Roi `300 − 2·an` ; le peuple chaque an (naissance +0,002,
+colon +0,01, mort de faim −0,05, noble ±0,3). Rien sur la bataille perdue ni la chute.
+`Table::scores` retranche `rank_cost × sièges finis devant` (`--rank 40`).
 
-| Terme | Valeur |
-|---|---|
-| Sacre | `1200 − 6·an` depuis s47 (900 à l'an 50, 300 à l'an 150 : un sacre tardif reste au-dessus de toute route, cinquante ans plus tôt valent 300) ; s35–s46 : `1000 − 4·an` |
-| Sinon : survie + route | `100 · années / longest + 200 · progress` |
-| Prince, Roi (une fois, au premier an) | `150 − an`, `300 − 2·an` |
-| Peuple (chaque an) | naissance +0,002, colon +0,01, mort de faim −0,05, noble ±0,3 (s42 les a payés ×5 sans rien déplacer) |
-| Rien d'autre | ni la bataille perdue ni la chute (s37, s38 : plateau pacifique), ni l'usage des outils (s39, s40 : fermes à points) |
-| Guerre | rien : ni la bataille perdue ni la chute ne coûtent au-delà des années perdues (s37 et s38 les faisaient payer, et personne ne cherchait plus le sacre) |
-
-`progress` = moyenne des parts atteintes des 9 exigences impériales (trésor non compté :
-un palais épargné n'est pas un palais). Le siège sacré **continue à jouer en paix**, la
-partie s'arrête quand chaque siège est sacré ou tombé (150 ans au plus).
-
-`Table::scores` retranche au palier war **`rank_cost × sièges finis devant`** (`--rank 40`).
-C'est ce coût de rang, avec le `1200 − 6·an` du sacre, qui fait l'agressivité du brain
-livré : couper un voisin paie deux fois (il finit derrière, et il ne me devance plus).
-L'agressivité **n'est pas une personnalité**, c'est la fitness.
+**v2 : la table s'arrête au premier Empereur** (ou quand tout le monde est tombé), comme
+la partie d'un seigneur ; plus d'après-sacre hors score, des tables trois fois plus courtes,
+et un seul sacre par table — le « sacres par siège » plafonne donc vers 25–30 %, il ne se
+compare pas aux chiffres v1. Au siège, **au plus un bélier par dixième de mur** monte à
+l'assaut par cadence, les autres attendent au camp (une boucle de 400 000 béliers faisait
+sauter le GPU).
 
 ## 4. Les brains livrés — ce qu'ils valent
 
-### Les quatre sœurs (livrées le 12 septembre 2026)
-
-`Brain::schools()` : **le soldat** (s46a), **la bâtisseuse** (s48b), **la garnison** (s48c),
-**la boutiquière** (s48d) — quatre génomes de la même recette (§5, s46) aux tempéraments
-stables ; trois d'entre eux repris par s48 (quarante manches entre sœurs et s35 aux tables
-de 100 ans), qui sacrent plus souvent et plus tôt que leurs versions s46 ; le soldat s48
-ayant reculé (15 → 10,5 % contre s35), c'est le s46 qui est livré. En ligne (`apps/empire-web`), chaque table tire une école par siège d'ordinateur :
-les quatre une fois, deux autres au hasard, le tout mélangé (`Schooling`) ; rien ne dit
-aux joueurs qui est qui, c'est à deviner sur le style. Au terminal
-(`apps/empire`), le siège n° i joue l'école i mod 4. Ce qu'elles valent : § 5, lignes s46
-(match à six) et 8e enseignement. s28, le brain livré avant elles, reste en
-`schools/s28-war.json`.
-
-### s28 (livré du 10 au 12 septembre 2026)
-
-Deux écoles du même âge (3 500 générations) sous les nouvelles règles : **s27** = s26 grandi
-(`Brain::grown`) + 1 200 générations ; **s28** = de zéro, 3 500 générations d'un trait.
-
-| `--measure 200` | s27 | **s28** |
-|---|---|---|
-| Clones : sacrés | 12 % (an 50 en médiane) | **24 %** (an 67, p90 98) |
-| Clones : tombés | 88 % | **76 %** |
-| Affamés par siège | 630 | **239** |
-| Fitness clones | 217 | **355** |
-| Seul contre cinq de l'autre | 98 contre 343 | 104 contre 213 |
-| Lectures d'éclaireur par siège | 0,2 | 0,0 |
-
-- **Aucune ne domine l'autre** : le siège minoritaire perd dans les deux sens (96,5 % de
-  chutes) — le coût de rang punit celui qui joue autrement que sa table. En jeu les cinq
-  ordinateurs sont le même brain, donc ça ne compte pas.
-- **s28 joue long** : palais à 10 vers l'an 30, murs et hospice à 9–10, un bélier acheté
-  de loin en loin ; mais très peu de serfs pour sa surface et des **stocks de grain énormes**
-  jamais vendus (300 000 à 800 000 boisseaux) — la fitness ne compte pas le grain, rien ne
-  l'en dissuade. C'est le défaut visible en jeu (étal vide).
-- **s27** garde le style de s26 : tables de 25 ans, tout le monde tombe, murs et hospice
-  10/10 sur les longues parties, jamais de bélier.
-- Ni l'une ni l'autre n'envoie d'éclaireur : le renseignement ne paie toujours pas
-  (§5, enseignement 1). Un s26 grandi sans rescolarisation ne valait rien sous les
-  nouvelles règles (1 % de sacres, 99 % de chutes).
-
-Pour mémoire, s26 sous ses règles : 13 % de sacres (an 43), Prince 18 %, Roi 15 %, 87 % de
-chutes, tables de 24 ans. Contre un humain le brain reste très fort et très agressif.
+Les sept `.f32` sont de la **version 1** : s46a, s48b–d (les quatre sœurs) et s53 (deux
+rusheurs, une prudente). Sous v2 ils jouent encore mais achètent `envie⁴` au lieu de
+`envie` : ils sont à régénérer à partir du pool v2 (`run-s62.py`, étape A) dès qu'une
+campagne v2 donne des tempéraments stables. Ce qu'ils valaient sous v1 (13 septembre,
+`--measure 500` contre eux-mêmes) : s54a, la meilleure école v1, sacrait 68 % contre eux
+en médiane à l'an 23 ; un essai ordinaire de la même recette, 12 à 18 %.
 
 ## 5. Inventaire des écoles
 
@@ -214,6 +171,14 @@ chacun, avec leurs `run-s*.sh`).
 | s46 | **la recette de s43 rejouée jusqu'à quatre écoles valides** (`run-s46.py`) : de zéro, note de s35, `--against s35-war.json --hall 0`, 300 gén., cinq essais à la fois ; un essai est jeté si la gén. 80 passe sans sacre, gardé s'il finit à ≥ 5 % | **3 gagnantes sur 35 essais** (+ s46a d'avant) : sacres finaux à leurs tables d'école 20,7 % (a), 21,7 % (b), 24,2 % (c), 17,4 % (d), médiane an 110–125. **Quatre tempéraments stables** (mêmes chiffres en match à six et entre clones) : **a le soldat** (le plus de soldats achetés, quatre fois moins de moulins, murs négligés — la seule annexée dans les deux parties), **b la bâtisseuse** (moulins, marchés, murs et grain en tête, le moins de soldats, mais 33 victoires aux béliers ; sacrée an 123 du match), **c la garnison** (172 soldats entretenus contre 66–101, paysans sacrifiés), **d la boutiquière** (marché dès l'an 8, le plus de marches, sacrée an 128 entre clones). Match à six (`--show` avec cinq `--against` = une école par chaise, tous les sièges racontés) contre s35 et s43 : les deux conquérants vendent leur terre et meurent de faim l'an 9 et l'an 11 ; les quatre sœurs jettent 50 000 hommes contre des murs à 10 pendant 85 ans, puis la famine de la Germanie (an 106) ouvre le bal : France annexée an 121, Bretagne (b) Empereur an 123, Castille (d) et Germanie (c) mortes de faim ans 130 et 134 |
 | s47 | **les quatre sœurs l'une contre l'autre** (`run-s47.py`) : chacune reprise de s46, `--against` les trois autres figées, `--hall 0`, par manches de 25 gén. (chaque manche relit les sœurs), quatre entraîneurs à 3 threads ; sacre **`1200 − 6·an`** pour presser le sacre | **arrêtée à la manche 5 (gén. 424)** : entre sœurs murées, les sacres reculent à l'an 138–146 et deux sœurs sur quatre glissent vers le plateau pacifique (a : chutes 63 → 24 %, Princes 37 → 5 %, sacres 0,2 % ; d : 3,3 %) ; b et c tiennent à 18–20 % sans avancer. La survie (~210 points sûrs sur 150 ans) bat un sacre à 4 % après l'an 138 ; la note pressée ne raccourcit pas un sacre qui n'existe plus |
 | s48 | **s47 aux tables courtes avec s35 sur une chaise** (`run-s48.py`) : mêmes manches, reprises de s46, `--against` les trois sœurs **et s35** (un conquérant sans murs à chaque table), **`--longest 100`** : survivre ne rapporte plus rien après l'an 100, il faut sacrer avant | **finie (40 manches, gén. 1299)** : aux tables d'école les sacres montent de 3–5 % à **a 8,0 · b 6,7 · c 9,6 · d 9,4 %** (la moitié du gain dans les dix premières manches, palier dès la 25e), médianes figées à l'an 80–93. Mesure à 150 ans, chaque sœur seule contre cinq s35 (200 tables), s46 → s48 : **a 15 → 10,5 %** (médiane 78 → 74), **b 5,5 → 11 %** (96 → 73), **c 19 → 26 %** (80 → 72), **d 4 → 7,5 %** (93 → 76) — trois sœurs sur quatre sacrent plus souvent, toutes sacrent plus tôt, le soldat recule. Match à six contre s35 et s43 : s35 annexe le soldat (France) l'an 16, s43 meurt de faim l'an 16, s35 l'an 40 ; **deux sacres l'an 89** (b et d, contre un seul l'an 123 chez s46), puis la garnison (c) annexe la boutiquière l'an 123 avant de mourir de faim l'an 127 |
+| s49–s55 | schools de la reprise GPU (recette s54 : de zéro, contre s46a/s48b–d/s53 figés, `--hall 0 --longest 100`, 300 gén., tirage) | s54a = 68 % contre prod (an 23), l'exception d'une campagne de 38 ; les autres finalistes 12–18 % |
+| s56 | auto-jeu pur, 30 000 génomes, élite 1 000, tirage, GPU | 9 % contre prod à 100 gén., 19,5 % à 379 : transfère mal et lentement |
+| s57 | de zéro contre prod + son propre Hall (`--hall 8`), 8 essais, 500 gén. | 6–20 % contre prod : pas mieux que s54 à âge égal |
+| s58 | **largeur de la couche cachée** 4 à 256, 8 essais chacune, 300 gén., tirage | lignée trouvée 0/8 (4), 1/8 (8), 2/8 (16), 6/8 (32), 5/8 (64), 8/8 (128, 256) ; médianes 13–17 % partout ; à 256, deux essais à 40–43 % (plateau franchi par la queue haute) ; h32 prolongé à 600 gén. ne bouge pas |
+| **s59** | **élevage** (`--breed 0.1` et `0.3`) contre tirage, h32, 8 essais, 300 gén. | 0,3 : 8/8, 29–61 %, **médiane 45 %** (33 % dès la gén. 100), sacre an 19–27 ; le plafond de 15 % était la méthode |
+| s60 | recall (sans Chronique) contre told (Chronique, sans recall), élevage 0,3, 100 gén. | told 40 % de médiane, recall 26 % : la Chronique donnée d'office bat l'automate à construire, à 100 gén. |
+| s61 | plan factoriel told × recall × journal sous v1 | interrompu deux fois par la boucle des béliers (400 000 béliers), abandonné pour v2 |
+| **s62** | **règles v2** : pool A régénéré de zéro (8/8 lignée entre clones), puis les huit lectures contre le pool, 100 gén. | rien 16 % de médiane (max 48), recall 13, les trois 11, journal 9, Chronique seule 3 : à 100 gén. toute entrée en plus ralentit ; s62b prolonge « les trois » et le témoin à 300 |
 
 Enseignements (détail dans la mémoire `empire-intel-findings`) :
 
@@ -244,55 +209,56 @@ Enseignements (détail dans la mémoire `empire-intel-findings`) :
    siège qui a de la terre. D'où s37 : quand un royaume tombe sous le couteau d'une
    mère affamée, **ses terres reviennent aux barbares** (`EmpireGame::break_up`) au lieu
    de disparaître de la carte, et la note punit cette chute de 300 points.
+9. **Le plafond à 15 % était la méthode, pas la capacité ni le temps** (13 septembre) :
+   l'entropie croisée fond l'élite en une gaussienne et jette la diversité ; l'élevage la
+   garde (s59 : 45 % de médiane contre 17 %). La largeur ne bouge pas la médiane (s58) mais
+   rend la lignée sûre dès 128 neurones et ouvre la queue haute à 256.
+10. **Comparer dans la même campagne, avec un témoin** ; les pools de référence sont figés
+    et numérotés, on y fait entrer un champion à la fois. Les chiffres v1 et v2 ne se
+    comparent pas (un sacre par table en v2).
+11. **L'élevage envoie des éclaireurs** (4 à 30 lectures par siège et par partie) là où le
+    tirage n'en envoyait jamais : le geste à deux temps (payer, puis conditionner) est ce
+    qu'une lignée découvre et qu'une moyenne perd.
+12. **Plus d'entrées, départ plus lent** (s62 à 100 gén.) : une école qui ne lit pas un bloc
+    cherche dans un espace plus petit ; la mémoire se juge sur 300 générations.
 
 ## 6. Reprendre
 
 ```bash
-# reprendre s35 (1 200 générations de plus, mêmes réglages) — ou `run-s41.sh` de zéro
-RAYON_NUM_THREADS=10 cargo run --release -p empire-train -- \
-  --stage war --from apps/empire-train/schools/s35-war.json \
-  --generations 1200 --tables 6 --hall 8 --rank 40 --out s43-war.json
+# régénérer le pool sous les règles courantes, puis le plan des lectures (s62)
+python3 apps/empire-train/schools/run-s62.py
 
-# une école de zéro contre un rival fixe (s43 : `run-s43.sh`) — 1 à 5 sièges de la
-# population par table, les autres tenues par le meilleur de --against
-RAYON_NUM_THREADS=10 cargo run --release -p empire-train -- \
-  --stage war --against s35-war.json --hall 0 \
-  --generations 1200 --tables 6 --rank 40 --out s43-war.json
+# une campagne d'élevage de 8 essais contre le pool A, sur GPU (≈ 5 min pour 100 gén.)
+P=apps/empire-train/schools/pools/A
+target/release/empire-train --stage war $(for n in 1 2 3 4 5 6 7 8; do echo --against $P/pool-$n-war.json; done) \
+  --hall 0 --longest 100 --rank 40 --tables 6 --trials 8 --breed 0.3 --told --recall --journal \
+  --generations 300 --keep 25 --gpu --out "s63-{n}-war.json"
 
-# un match : cinq --against = une école par chaise (France = --from, puis dans l'ordre
-# Britanny, Germany, Spain, Moscovy, Persia), tous les sièges racontés année par année
-target/release/empire-train --stage war --from s46a-war.json --against s46b-war.json \
-  --against s46c-war.json --against s46d-war.json --against s35-war.json \
-  --against s43-war.json --show --tables 6 --rank 40
+# mesurer une école contre le pool (la seule note qui fasse foi), ou dérouler une partie
+target/release/empire-train --stage war $(for n in 1 2 3 4 5; do echo --against $P/pool-$n-war.json; done) \
+  --longest 100 --rank 40 --from s63-1-war.json --measure 500 --gpu
+target/release/empire-train --stage war --against ... --from s63-1-war.json --show --tables 6 --rank 40
 
-# les sœurs l'une contre l'autre par manches (s48 : `run-s48.py`, quatre entraîneurs à la fois)
-python3 apps/empire-train/schools/run-s48.py
+# faire entrer un champion dans le pool (un seul par tour)
+python3 apps/empire-train/schools/promote.py $P apps/empire-train/schools/pools/B s63-*-war.json
 
-# une sœur seule contre cinq s35, 200 tables de 150 ans (le bilan de s48)
-target/release/empire-train --stage war --from s48c-war.json --against s35-war.json \
-  --measure 200 --rank 40
-
-# mesurer une école contre une autre
-cargo run --release -p empire-train -- --stage war --from s29-war.json \
-  --against apps/empire-train/schools/s28-war.best.json --measure 200 --show
-
-# livrer : le meilleur génome d'une école devient un brains/<tempérament>.f32 (floats LE)
-cargo run --release -p empire-train -- --stage war --from s48c-war.json \
-  --deliver libs/empire-lib/brains/garnison.f32
+# livrer : le meilleur génome d'une école devient un brains/<tempérament>.f32
+target/release/empire-train --stage war --from s63-1-war.json --deliver libs/empire-lib/brains/soldat.f32
 ```
 
-Si la vue ou les sorties s'élargissent (`OWN`, `RIVAL`, `A_OUT`, `B_OUT`), `load` grandit
-les anciens génomes automatiquement d'après les `widths` du fichier d'école ; ajouter la
-forme d'hier comme constante nommée dans `Widths` si un fichier sans `widths` doit encore
-se lire.
+Toute modification des règles, de la vue ou du décodage incrémente `empire_lib::RULES` ; les
+fichiers d'école d'une autre version sont refusés et le pool est régénéré.
 
-## 7. Prochaine étape IA (parquée)
+## 7. Ouvert
 
-Des tempéraments, pas des règles : un `Temper` de poids de fitness sur la `Table`
-(marchand : le grain vendu paie ; bâtisseur : la route et les titres pèsent plus, le rang
-moins ; conquérant : le rang et les arpents pris ; diplomate : demanderait de nouvelles
-entrées — qui m'a attaqué, qui m'a vendu du grain — déjà en partie dans `heard`), chaque
-école partant de s26 et **co-entraînée** contre les autres (`--against`), mesurée sur des
-tables mixtes avec pour cible des parties de 60–100 ans et moins de la moitié des sièges
-tombés. En jeu, un tempérament par siège d'ordinateur. Mais d'abord : les nouveaux
-bâtiments (`BATIMENTS.md`), puis une rescolarisation avec la vue et les sorties élargies.
+- Le recall sur une course longue (300–600 gén.) : en dessous à 100 gén., mais il monte
+  encore là où la Chronique s'aplatit (s60).
+- Élevage × largeur (128–256 neurones, où le tirage trouvait déjà des conquérants rapides).
+- L'échelle de mutation (0,3 converge plus vite mais s'aplatit vers 300 gén. ; 0,1 monte
+  encore), à faire décroître le long de la course.
+- Le tirage sur la carte (moyenne et sigma envoyés, la population tirée dans le noyau) :
+  supprime l'envoi du pool et la mémoire CPU de la première génération, nécessaire au-delà
+  de 100 000 poids.
+- La fenêtre glissante complète (encodeur par année) si le journal ne suffit pas ; le
+  dimensionnement est dans le brouillon « Brain à fenêtre glissante » du 13 septembre.
+- Livrer sept tempéraments v2 dans `brains/` et mettre `Brain::schools()` à jour.

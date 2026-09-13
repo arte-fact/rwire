@@ -3,7 +3,9 @@
 //! Extérieur orders, the armies march together, the year ends. What each
 //! seat made of it comes back as an [`Outcome`], scored for evolution.
 
-use crate::brain::{bound_council, decode_intendance, Brain, Intendance, Letters, Memory, Stage};
+use crate::brain::{
+    bound_council, decode_intendance, record, Brain, Intendance, Letters, Memory, Stage,
+};
 use crate::campaign::{apply_battle, march_quiet, Fought};
 use crate::demography::apply_feed;
 use crate::economy::{apply_economy, apply_taxes, economy_report};
@@ -150,14 +152,10 @@ pub fn progress(k: &Kingdom, stage: Stage) -> f32 {
 }
 
 /// The game's end: every seat crowned or fallen. Each seat is scored on
-/// its own road to the crown, so a crown ends nothing for the others —
-/// the crowned realm plays on at peace, its armies home. (A seigneur's
-/// game ends at the first Emperor; a brain that reaches its own crown
-/// soonest while keeping its realm is the one that gets there first.)
+/// its own road to the crown. The table ends at the first Emperor, as a
+/// seigneur's game does — or when every realm has fallen.
 fn over(outcomes: &[Outcome; 6]) -> bool {
-    outcomes
-        .iter()
-        .all(|o| o.crowned.is_some() || o.fell.is_some())
+    outcomes.iter().any(|o| o.crowned.is_some()) || outcomes.iter().all(|o| o.fell.is_some())
 }
 
 /// What a year left behind, shown to whoever watches a table.
@@ -395,6 +393,10 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
                 outcomes[i].king.get_or_insert(year);
             }
         }
+        let recorded = record(&game, &memories, &heard);
+        for m in &mut memories {
+            m.note(recorded, year);
+        }
         watch(YearEnd {
             fought: &fought,
             sent: &sent,
@@ -483,6 +485,7 @@ pub fn send_scout(k: &mut Kingdom, free: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brain::{Reads, Shape};
 
     #[test]
     fn an_eclaireur_is_bought_when_none_waits() {
@@ -500,7 +503,12 @@ mod tests {
 
     fn brains(fill: f32) -> Vec<Brain> {
         (0..6)
-            .map(|i| Brain::from_genome(&vec![fill * (i as f32 + 1.0) / 6.0; Brain::GENOME], false))
+            .map(|i| {
+                Brain::from_genome(
+                    &vec![fill * (i as f32 + 1.0) / 6.0; Brain::GENOME],
+                    Reads::ALL,
+                )
+            })
             .collect()
     }
 
@@ -529,11 +537,11 @@ mod tests {
         let bs: Vec<Brain> = (0..6)
             .map(|i| {
                 let mut g = vec![0.02 * (i as f32 + 1.0) / 6.0; Brain::GENOME];
-                g[Brain::exterieur_output(11).end - 1] = -3.0;
+                g[Shape::NOW.exterieur_output(11).end - 1] = -3.0;
                 for o in 12..17 {
-                    g[Brain::exterieur_output(o).end - 1] = 3.0;
+                    g[Shape::NOW.exterieur_output(o).end - 1] = 3.0;
                 }
-                Brain::from_genome(&g, false)
+                Brain::from_genome(&g, Reads::ALL)
             })
             .collect();
         let table: [&Brain; 6] = std::array::from_fn(|i| &bs[i]);
@@ -811,7 +819,7 @@ mod tests {
 
     #[test]
     fn the_titles_reached_are_dated_at_the_table() {
-        let brain = Brain::from_genome(&vec![0.0; Brain::GENOME], false);
+        let brain = Brain::from_genome(&vec![0.0; Brain::GENOME], Reads::ALL);
         let outcomes = play([&brain; 6], &Table::at(Stage::War, 30));
         for o in outcomes {
             assert!(o.prince.is_none_or(|y| (1..=30).contains(&y)));
