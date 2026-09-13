@@ -12,7 +12,7 @@
 //!
 //! # Available Components
 //!
-//! - **Button**: Primary, Secondary, Ghost, Destructive buttons
+//! - **Button**: Primary, Secondary, Ghost, Outline, Destructive buttons (Xs–Lg sizes)
 //! - **Input**: Text, password, email, number inputs
 //! - **Textarea**: Multi-line text input
 //! - **Label**: Form labels
@@ -21,7 +21,7 @@
 //! - **Switch**: Toggle switch input
 //! - **Select**: Dropdown select with options
 //! - **FormField**: Form field wrapper with label/help/error
-//! - **Avatar**: User avatar with image or fallback
+//! - **Avatar**: User avatar with image, fallback, or `name(…)` initials
 //! - **Progress**: Progress bar
 //! - **Spinner**: Loading spinner
 //! - **Table**: Div-based table
@@ -31,7 +31,11 @@
 //! - **Pagination**: Page navigation
 //! - **Stack**: Flexbox layout (row/column)
 //! - **Card**: Surface container with padding/shadow
-//! - **Badge**: Status indicators
+//! - **Badge**: Status indicators (pill/square shape, solid/outline fill)
+//! - **Chip**: Selectable chip for filters, view toggles, and inline pickers
+//! - **StatusDot**: Presence dot with intent colors, optional pulse and label
+//! - **Composer**: Chat message bar (Enter submits, Shift+Enter newline)
+//! - **ChatScroll**: Bottom-pinned autoscroll for chat logs and live feeds
 //!
 //! # Example
 //!
@@ -73,16 +77,27 @@ mod breadcrumb;
 mod button;
 mod card;
 pub mod catalog;
+mod chat;
+mod chat_entry;
+mod chat_item;
+mod chat_scroll;
+mod chat_transcript;
 mod checkbox;
+mod chip;
 mod code;
+mod code_editor;
+mod composer;
 mod container;
 mod copy_button;
 mod divider;
+mod document_view;
 mod drawer;
 mod dropdown;
 mod empty_state;
+mod file_tree;
 mod footer;
 mod form_field;
+mod fs_source;
 mod grid;
 mod image;
 mod input;
@@ -100,9 +115,12 @@ mod skeleton;
 mod slider;
 mod spacer;
 mod spinner;
+mod split_pane;
 mod stack;
 mod stat;
+mod status_dot;
 mod stepper;
+mod streamed_content;
 mod switch;
 mod table;
 mod tabs;
@@ -113,6 +131,8 @@ mod theme_toggle;
 mod timeline;
 mod toast;
 mod tooltip;
+mod tree_view;
+mod typing_indicator;
 pub mod utils;
 
 pub use accordion::{Accordion, AccordionItem};
@@ -120,21 +140,32 @@ pub use alert::{Alert, AlertIntent};
 pub use app_shell::AppShell;
 pub use avatar::{Avatar, AvatarSize};
 pub use avatar_group::AvatarGroup;
-pub use badge::{Badge, BadgeIntent};
+pub use badge::{Badge, BadgeFill, BadgeIntent, BadgeShape};
 pub use blockquote::Blockquote;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonIntent, ButtonSize};
 pub use card::{Card, CardPadding, CardShadow};
+pub use chat::Chat;
+pub use chat_entry::ChatEntry;
+pub use chat_item::{ChatAuthor, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatTag};
+pub use chat_scroll::ChatScroll;
+pub use chat_transcript::ChatTranscript;
 pub use checkbox::Checkbox;
+pub use chip::Chip;
 pub use code::{Code, CodeMode};
+pub use code_editor::CodeEditor;
+pub use composer::Composer;
 pub use container::{Container, ContainerSize};
 pub use copy_button::CopyButton;
 pub use divider::{Divider, SpacingSize};
+pub use document_view::DocumentView;
 pub use drawer::{Drawer, DrawerPosition};
 pub use dropdown::{DropdownItem, DropdownMenu};
 pub use empty_state::EmptyState;
+pub use file_tree::FileTree;
 pub use footer::{Footer, FooterColumn};
 pub use form_field::FormField;
+pub use fs_source::{FsEntry, FsSnapshot};
 pub use grid::{Grid, GridColumns};
 pub use image::{Image, ImageAspect, ImageFit};
 pub use input::{Input, InputSize, InputType};
@@ -145,16 +176,19 @@ pub use list::{List, ListItem};
 pub use modal::{Modal, ModalSize};
 pub use nav_menu::{NavItem, NavMenu};
 pub use pagination::Pagination;
-pub use progress::{Progress, ProgressIntent};
+pub use progress::{Progress, ProgressIntent, ProgressSize};
 pub use radio::Radio;
 pub use select::{Select, SelectOption};
 pub use skeleton::{Skeleton, SkeletonShape};
 pub use slider::Slider;
 pub use spacer::Spacer;
 pub use spinner::{Spinner, SpinnerSize};
+pub use split_pane::SplitPane;
 pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify};
 pub use stat::{Stat, StatSize, StatTone, StatTrend};
+pub use status_dot::{StatusDot, StatusDotIntent};
 pub use stepper::Stepper;
+pub use streamed_content::StreamedContent;
 pub use switch::Switch;
 pub use table::{Table, TableRow};
 pub use tabs::{Tab, Tabs};
@@ -165,6 +199,8 @@ pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize};
 pub use timeline::{Timeline, TimelineItem};
 pub use toast::{Toast, ToastContainer, ToastIntent};
 pub use tooltip::{Tooltip, TooltipPosition};
+pub use tree_view::{TreeNode, TreeView};
+pub use typing_indicator::TypingIndicator;
 pub use utils::{
     backdrop, class_if, combine_classes, focus_trap, portal_container, sr_only, transition_class,
     unique_id, AriaAttrs, TransitionState, Z_DROPDOWN, Z_FIXED, Z_MODAL, Z_MODAL_BACKDROP,

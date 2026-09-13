@@ -162,3 +162,62 @@ Text::new()
 Constructors: `Text::heading1/2/3()`, `Text::body()`, `Text::body_small()`, `Text::caption()`.
 Variants: `Body`, `BodySmall`, `Label`, `Caption`. Colors: `Default`, `High`, `Muted`, `Accent`,
 `Success`, `Warning`, `Error` (or the `.muted()` shorthand).
+
+## StreamedContent
+
+Progressive delivery for large content: renders the chunks delivered so far,
+then a spinner sentinel row that fires `on_load_more` as it nears the viewport
+(one request in flight, structurally). Chunks get stable ids so morphs reuse
+everything already rendered.
+
+```rust
+use rwire_components::StreamedContent;
+
+#[renderer]
+fn render_doc(state: &DocState) -> ElementBuilder {
+    StreamedContent::new("doc")
+        .chunks(state.chunks[..state.delivered].iter().map(render_chunk))
+        .load_more(load_more(), state.delivered as u32, state.delivered < state.total)
+        .build()
+}
+
+#[handler]
+fn load_more(state: &mut DocState, ctx: &EventContext) {
+    // ignore stale sentinel fires
+    if ctx.item_index() == Some(state.delivered) {
+        state.delivered = (state.delivered + PAGE).min(state.total);
+    }
+}
+```
+
+## Chat family
+
+A full chat surface built from composable parts: implement the `ChatItem`
+trait for your transcript type (three required methods; `row()` is the
+chrome-free escape hatch for system lines), then render through
+`ChatTranscript` (seamless history via a top scroll-sentinel, same-author
+grouping, writing row) inside `Chat` (bottom-pinned scroller over a composer
+that reserves its height). `ChatEntry` and `TypingIndicator` also work à la
+carte. See `examples/chat` for a working multi-tab chatroom on shared state.
+
+```rust
+use rwire_components::{Chat, ChatAuthor, ChatItem, ChatItemCtx, ChatTranscript, Composer};
+
+impl ChatItem for Msg {
+    fn key(&self) -> Cow<'_, str> { Cow::Owned(format!("m{}", self.id)) }
+    fn author(&self) -> ChatAuthor { ChatAuthor::user(self.name.clone()) }
+    fn body(&self, _ctx: &ChatItemCtx<Self>) -> ElementBuilder {
+        el(El::P).text(&self.text)
+    }
+}
+
+Chat::new(
+    ChatTranscript::new()
+        .items(state.messages.iter_with_ref())
+        .on_load_older(load_older(), state.window_start as u32, state.window_start > 0)
+        .writing(state.busy.then(|| "claw is typing…".into()))
+        .build(),
+)
+.composer(Composer::new().on_submit(send()).on_draft(drafting()).build())
+.build()
+```

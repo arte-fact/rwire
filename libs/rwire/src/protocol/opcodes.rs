@@ -70,6 +70,16 @@ pub const BIND_DEBOUNCED: u8 = 0x33;
 /// The param_bytes are sent back with the event, enabling item-specific handlers.
 pub const BIND_REMOTE_PARAM: u8 = 0x34;
 
+/// Reserved for WASM builds: inline-local handler. Never emitted by this
+/// server; the JS runtime skips it (stubbed `xi`). Registered here so the
+/// generated runtime opcode table (`runtime/src/opcodes.ts`) has a single
+/// source of truth.
+pub const INLINE_LOCAL: u8 = 0x40;
+
+/// Reserved for WASM builds: handler definition. Never emitted; see
+/// [`INLINE_LOCAL`].
+pub const DEF_HANDLER: u8 = 0x42;
+
 // ============================================================================
 // Client Actions (Targets & Selectors)
 // ============================================================================
@@ -100,9 +110,24 @@ pub const BIND_TIMED_TOGGLE: u8 = 0x4D;
 /// Format: [AUTO_TOGGLE, target_idx, ms_hi, ms_lo]
 pub const AUTO_TOGGLE: u8 = 0x4E;
 
+/// Bind a one-shot visibility sentinel: an IntersectionObserver fires a remote
+/// `Ev::Visible` event (with the param bytes, like BIND_REMOTE_PARAM) when the
+/// element nears the viewport, then disconnects. The server's response renders
+/// a fresh sentinel with new params — its binding key changes, so the morph
+/// swaps in the new node with a live observer. One-request-in-flight falls out
+/// structurally. Format: [BIND_SENTINEL, ref_varint, handler_varint, param_len, ...params]
+pub const BIND_SENTINEL: u8 = 0x4F;
+
+/// Bind a horizontal resize handle: pointer-dragging the element resizes its
+/// **previous element sibling** (width in px, min 8rem) — entirely
+/// client-side, the SplitPane primitive. Pairing by adjacency avoids
+/// cross-element ref plumbing at emit time.
+/// Format: [BIND_RESIZE, ref_varint]
+pub const BIND_RESIZE: u8 = 0x50;
+
 /// Live value source: `[ref, channel]` — on `input`, the element's value is
 /// pushed to every element bound to `channel` (client-side only, no round-trip).
-pub const LIVE_SOURCE: u8 = 0x4F;
+pub const LIVE_SOURCE: u8 = 0x51;
 
 /// Live value binding: `[ref, channel, kind, args…]`.
 ///
@@ -132,7 +157,7 @@ pub const LIVE_SOURCE: u8 = 0x4F;
 ///   digit-grouped per the page's `<html lang>` (a slider in tenths)
 ///
 /// Varint args except the `n`/`m` counts and `p` (one byte).
-pub const LIVE_BIND: u8 = 0x50;
+pub const LIVE_BIND: u8 = 0x52;
 
 /// `LIVE_BIND` kind bit: the value is `base − Σ channels` rather than one channel.
 pub const LIVE_REMAINDER: u8 = 0x10;
@@ -237,6 +262,12 @@ pub const STYLE_PSEUDO: u8 = 0x89;
 /// CSS: `@media(min-width:{px}px){.b{bp}u{st}{declaration}}`
 pub const STYLE_BREAKPOINT: u8 = 0x8A;
 
+/// Lazy runtime-extension hint: names of JS modules the DOM in this message
+/// needs. The runtime dynamic-imports each from `/_rw/ext/{name}.js` once per
+/// page; the server dedupes per connection (`sent_mods`), mirroring MAP_DEF.
+/// Format: `[MOD_DEF, count_varint, (name_len_varint, name_utf8){count}]`.
+pub const MOD_DEF: u8 = 0x8B;
+
 // ============================================================================
 // Control
 // ============================================================================
@@ -261,6 +292,13 @@ pub const SET_TEXT_WORDS: u8 = 0x13;
 /// Set text content to a number. Format: [SET_TEXT_INT, ref, varint]
 /// More compact than symbol table for dynamic numeric values.
 pub const SET_TEXT_INT: u8 = 0x15;
+
+/// Set a morph key on an element. Format: [SET_KEY, ref_varint, key_varint]
+/// The client stores it as a `__k` expando (never a DOM attribute): sibling-
+/// local identity for keyed morphing, so id-less list items reorder by
+/// identity instead of positionally. Keys come from `ElementBuilder::key`
+/// (strings FNV-1a hashed, integers used directly).
+pub const SET_KEY: u8 = 0x16;
 
 /// End of batch marker
 pub const BATCH_END: u8 = 0xFF;
@@ -323,6 +361,8 @@ define_token_enum! {
         Rect = 0x2F => "rect",
         G = 0x30 => "g",
         Style = 0x31 => "style",
+        Details = 0x32 => "details",
+        Summary = 0x33 => "summary",
     }
 }
 
@@ -349,6 +389,9 @@ define_token_enum! {
         Focus = 0x0B => "focus",
         Blur = 0x0C => "blur",
         Scroll = 0x0D => "scroll",
+        /// Synthetic: fired by the scroll-sentinel primitive (BIND_SENTINEL)
+        /// when the element nears the viewport; never bound as a DOM listener.
+        Visible = 0x0E => "visible",
     }
 }
 

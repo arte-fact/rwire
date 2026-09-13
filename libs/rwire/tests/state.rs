@@ -368,3 +368,12 @@ fn test_deps_changeset_interaction() {
     let update_name_changes = ChangeSet::from_fields(&[FIELD_NAME]);
     assert!(!render_count_deps.needs_update(update_name_changes));
 }
+
+#[test]
+fn event_context_carries_session_identity() {
+    use rwire::EventContext;
+    let ctx = EventContext::empty();
+    assert_eq!(ctx.session_id(), None);
+    let ctx = EventContext::empty().with_session("abc123".into());
+    assert_eq!(ctx.session_id(), Some("abc123"));
+}

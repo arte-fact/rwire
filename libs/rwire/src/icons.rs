@@ -39,6 +39,12 @@ pub enum Icon {
     // Actions
     Check,
     Plus,
+    FilePlus,
+    FolderPlus,
+    Eye,
+    Save,
+    RotateCcw,
+    RotateCw,
     Minus,
     Edit,
     Trash,
@@ -130,8 +136,6 @@ pub enum Icon {
     Hospice,
     /// A battering ram under its frame.
     Ram,
-    /// An eye (éclaireur).
-    Eye,
 }
 
 impl Icon {
@@ -154,6 +158,12 @@ impl Icon {
             // Actions
             Icon::Check => "M20 6L9 17l-5-5",
             Icon::Plus => "M12 5v14M5 12h14",
+            Icon::FilePlus => "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6 M9 15h6",
+            Icon::FolderPlus => "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z M12 10v6 M9 13h6",
+            Icon::Eye => "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+            Icon::Save => "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8",
+            Icon::RotateCcw => "M1 4v6h6 M3.51 15a9 9 0 1 0 2.13-9.36L1 10",
+            Icon::RotateCw => "M23 4v6h-6 M20.49 15a9 9 0 1 1-2.12-9.36L23 10",
             Icon::Minus => "M5 12h14",
             Icon::Edit => "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z",
             Icon::Trash => "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6",
@@ -244,7 +254,6 @@ impl Icon {
             Icon::Wall => "M3 21V8h3V5h3v3h6V5h3v3h3v13z M3 14h18 M8 14v7 M16 14v7 M12 8v6",
             Icon::Hospice => "M4 21V10l8-6 8 6v11z M12 12v6 M9 15h6",
             Icon::Ram => "M4 20h16 M6 20V9l6-5 6 5v11 M4 13h13 M17 11l3 2-3 2 M9 9v11 M15 9v11",
-            Icon::Eye => "M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
         }
     }
 
@@ -394,6 +403,12 @@ mod tests {
             Icon::Close,
             Icon::Check,
             Icon::Plus,
+            Icon::FilePlus,
+            Icon::FolderPlus,
+            Icon::Eye,
+            Icon::Save,
+            Icon::RotateCcw,
+            Icon::RotateCw,
             Icon::Minus,
             Icon::Edit,
             Icon::Trash,
@@ -460,7 +475,6 @@ mod tests {
             Icon::Wall,
             Icon::Hospice,
             Icon::Ram,
-            Icon::Eye,
         ];
 
         for icon in &icons {

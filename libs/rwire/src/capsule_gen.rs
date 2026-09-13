@@ -8,195 +8,37 @@
 
 use crate::theme::Theme;
 
-/// The runtime JavaScript code (constant part, not affected by tree shaking).
-///
-/// The gp() function collects payload data from events:
-/// - Form submit: collects all field values as JSON {t:'form',v:{...}}
-/// - Input/change on input/textarea: collects value as JSON {t:'text',v:'...'}
-/// - Click: collects data-* attributes as JSON {t:'data',v:{...}}
-///
-/// The sep() function sends events with param bytes (for ItemRef handlers):
-/// - Format: [handler_idx | 0x80, event_type, ref, param_len, ...param_bytes, payload_len, ...payload]
-///
-/// The sh() function scrolls to a hash target (#id) using MutationObserver:
-/// - Tries immediate getElementById; if not found, observes DOM mutations
-/// - Auto-disconnects after 2s safety timeout
-///
-/// New opcodes for bandwidth optimization:
-/// - CREATE_SYNCED (0x03): Create span with id="__synced_N" using varint ID
-/// - GET_SYNCED (0x05): Get synced element by numeric ID using varint
-/// - SYMBOLS_EXTEND (0xF1): Add new symbols to existing table
-/// - WORD_TABLE (0xF2): Define word table for text compression
-/// - SET_TEXT_WORDS (0x13): Set text from word indices
-/// - SET_TEXT_INT (0x15): Set text from zigzag-encoded integer
-/// - STYLE_UTIL (0x82): Set style from utility token (varint encoded)
-/// - STYLE_PROP (0x83): Set style from property+value (4 bytes)
-/// - STYLE_MULTI (0x84): Set multiple style utilities (varint encoded)
-///
-/// Reconnect: `rc` (backoff exponent) is reset only when a batch is applied
-/// end-to-end (BATCH_END), never on `onopen`. A connection that opens, receives
-/// the initial DOM and dies on a parse error therefore escalates to
-/// `location.reload()` after two failed attempts instead of looping forever.
-const RUNTIME_JS: &str = r#"const O={S:0xF0,SE:0xF1,WT:0xF2,G:0x01,C:0x02,CS:0x03,GS:0x05,L:0x10,T:0x11,TW:0x13,D:0x14,TI:0x15,A:0x12,P:0x20,CC:0x25,AE:0x26,AB:0x27,AK:0x28,B:0x30,R:0x31,DB:0x33,RP:0x34,IL:0x40,DH:0x42,IT:0x47,BT:0x48,TG:0x49,IS:0x4A,BS:0x4B,SS2:0x4C,TT:0x4D,AT2:0x4E,LS:0x4F,LB:0x50,RU:0x70,RR:0x71,RUI:0x72,RRI:0x73,SS:0x81,SU:0x82,SP:0x83,SM:0x84,SC:0x85,CT:0x86,SD:0x87,MD:0x88,PD:0x89,BP:0x8A,E:0xFF};
-let lv={},lb={};function ls(e,c){e.__lc=c;lv[c]=e;if(!e.__ls){e.__ls=1;e.addEventListener('input',()=>{if(e.__lc!==undefined){lv[e.__lc]=e;ul(e.__lc)}})}}
-function ul(c){let s=lv[c];if(!s)return;for(let b of lb[c]||[]){let e=b.e,k=b.k&15,v,p;if(!e)continue;if(b.k&16){v=b.b-b.c.reduce((a,h)=>a+(lv[h]?+lv[h].value||0:0),0);p=b.b>0?(b.b-v)/b.b:0}else{v=+s.value;let mn=+s.min||0,mx=+s.max;p=mx>mn?(v-mn)/(mx-mn):0}
-let f=b.k&32?n=>n.toLocaleString(document.documentElement.lang||undefined):String,sg=y=>b.k&64?(y>0?'+':y<0?'\u2212':'')+f(Math.abs(y)):f(y);if(k===1)e.style.width=Math.min(100,Math.max(0,p*100))+'%';else if(k===2)e.textContent=f(b.d?Math.round(v*b.n/b.d):0);else if(k===3){let i=0;while(i<b.t.length&&v>=b.t[i])i++;for(let j=0;j<e.children.length;j++)e.children[j].hidden=j!==i}else if(k===4)e.textContent=sg(Math.round(b.o+ip(b.t,p)));else if(k===7)e.textContent=(v/10**b.p).toLocaleString(document.documentElement.lang||undefined,{minimumFractionDigits:b.p,maximumFractionDigits:b.p});else if(k===5||k===6){let g=a=>Math.round(a.b+a.s.reduce((z,t)=>{let x=lv[t.c];if(!x)return z;let mn=+x.min||0,mx=+x.max;return z+t.o+ip(t.t,mx>mn?(+x.value-mn)/(mx-mn):0)},0)),y=g(b.l),z=b.h?g(b.h):y;if(k===6){let cl=n=>Math.min(b.w1,Math.max(b.w0,n)),w=b.a1-b.a0||1;y=cl(y);z=cl(z);e.style.left=(y-b.a0)/w*100+'%';e.style.width=Math.max(0,z-y)/w*100+'%'}else e.textContent=y===z?sg(y):sg(y)+' \u2026 '+sg(z)}else e.textContent=f(v)}}
-function ip(t,p){let q=Math.min(1,Math.max(0,p))*(t.length-1),j=Math.floor(q);return t[j]+(t[Math.min(j+1,t.length-1)]-t[j])*(q-j)}
-const A={4:'id'};
-let s={},wt=[],w,sc=0,K={},DS,pm=null;
-function rv(d,i){let b=d[i];if(b<0x80)return[b,1];if(b<0xC0)return[0x80+((b&0x3F)<<8)+d[i+1],2];return[0x4080+((b&0x3F)<<16)+(d[i+1]<<8)+d[i+2],3]}
-function wv(a,v){if(v<128)a.push(v);else if(v<16512){v-=128;a.push(128|(v>>8),v&255)}else{v-=16512;a.push(192|(v>>16),(v>>8)&255,v&255)}}
-function sa(e,n,v){let l=(''+n).toLowerCase();if(l.slice(0,2)==='on')return;if(/^(href|src|xlink:href|formaction|action)$/.test(l)&&/^javascript:/.test((''+v).replace(/[\u0000-\u0020]+/g,'').toLowerCase()))return;e.setAttribute(n,v)}
-function gp(e,el){
-let t=el.tagName.toLowerCase();
-if(e.type==='submit'&&t==='form'){e.preventDefault();let fd=new FormData(el),obj={};fd.forEach((v,k)=>obj[k]=v);return JSON.stringify({t:'form',v:obj})}
-if(e.type==='input'||e.type==='change'){let c=(e.target&&/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))?e.target:el;if(/^(INPUT|TEXTAREA|SELECT)$/.test(c.tagName))return JSON.stringify({t:'text',v:c.value})}
-if(e.type==='click'){let tg=e.target.closest('[data-id]')||el,dt={};for(let k in tg.dataset)dt[k]=tg.dataset[k];if(Object.keys(dt).length)return JSON.stringify({t:'data',v:dt})}
-return ''}
-function se(h,t,f,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0];wv(a,h);a.push(t,f&255);wv(a,pb.length);let msg=new Uint8Array(a.length+pb.length);for(let j=0;j<a.length;j++)msg[j]=a[j];msg.set(pb,a.length);w.send(msg)}
-function sep(h,t,f,prm,e,el){let p=gp(e,el),pb=new TextEncoder().encode(p),a=[0x80];wv(a,h);a.push(t,f&255,prm.length);let pl=[];wv(pl,pb.length);let msg=new Uint8Array(a.length+prm.length+pl.length+pb.length);let j=0;for(let b of a)msg[j++]=b;msg.set(prm,j);j+=prm.length;for(let b of pl)msg[j++]=b;msg.set(pb,j);w.send(msg)}
-function snd(fn,e,el){if(e.type==='input'){if(el.__t)clearTimeout(el.__t);el.__t=setTimeout(fn,250)}else fn()}
-// --- DOM morphing (node reuse on update) ---
-// me/mk reconcile a live subtree toward a freshly-built shadow subtree, reusing
-// nodes by id (and id-less nodes positionally) so focus/caret/scroll/uncontrolled
-// input state survive updates. A bound node is reused only when its binding key
-// (__hk) is unchanged — its existing listener stays valid via stable handler ids;
-// when the binding changed, the freshly-built node (with its new listener) is
-// swapped in instead, so listeners are never stale and never leak.
-// A `value`/`checked` attribute the server changed is pushed onto the live
-// property too: once the user has touched a control, setAttribute alone no
-// longer moves it (the dirty flag), and a re-rendered slider would keep its old
-// position. The focused control still gets its typed value back at BATCH_END.
-function me(a,b){
-if(a.nodeType===3){if(a.nodeValue!==b.nodeValue)a.nodeValue=b.nodeValue;return}
-if(a.nodeType!==1)return;
-let ba=b.attributes;for(let k=0;k<ba.length;k++){let n=ba[k].name,v=ba[k].value;if(a.getAttribute(n)!==v){a.setAttribute(n,v);if(n==='value'&&'value' in a)a.value=v;else if(n==='checked'&&'checked' in a)a.checked=true}}
-let aa=a.attributes;for(let k=aa.length-1;k>=0;k--){let n=aa[k].name;if(!b.hasAttribute(n)){a.removeAttribute(n);if(n==='checked'&&'checked' in a)a.checked=false}}
-a.__hk=b.__hk;
-if(a.__lb)for(let x of a.__lb)x.e=null;if(a.__lb=b.__lb)for(let x of a.__lb)x.e=a;if(a.__lc!==undefined&&a.__lc!==b.__lc&&lv[a.__lc]===a)delete lv[a.__lc];if(b.__lc!==undefined)ls(a,b.__lc);else a.__lc=undefined;
-if(typeof a.id==='string'&&a.id.indexOf('__synced_')===0)return; // nested region: its own update owns it (guard non-string id so the morph never throws and freezes the stream)
-mk(a,b)}
-function mk(a,b){
-let byId={};for(let c=a.firstChild;c;c=c.nextSibling)if(c.nodeType===1&&c.id)byId[c.id]=c;
-let cur=a.firstChild;
-for(let bc=b.firstChild;bc;){
-let nb=bc.nextSibling,m=null;
-if(bc.nodeType===1&&bc.id){if(byId[bc.id])m=byId[bc.id]}
-else if(cur&&!(cur.nodeType===1&&cur.id)&&cur.nodeType===bc.nodeType&&(cur.nodeType!==1||cur.tagName===bc.tagName))m=cur;
-if(m&&m.nodeType===1&&(m.tagName!==bc.tagName||(m.__hk||'')!==(bc.__hk||'')))m=null;
-if(m){if(m!==cur)a.insertBefore(m,cur);else cur=cur.nextSibling;me(m,bc)}
-else a.insertBefore(bc,cur);
-bc=nb}
-while(cur){let n=cur.nextSibling;a.removeChild(cur);cur=n}}
-function fm(){if(pm){mk(pm.live,pm.shadow);pm=null}}
-function x(d){
-let r=[],i=0,_oc=0;
-let ae=document.activeElement,ai=ae&&ae.id,ap=ae?ae.selectionStart:0,aq=ae?ae.selectionEnd:0,ax=ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'),av=ax?ae.value:null;
-try{
-while(i<d.length){
-let _p=i,o=d[i++];_oc++;
-if(o===O.S){let[n,l]=rv(d,i);i+=l;sc=0x80;while(n--){let[sl,ll]=rv(d,i);i+=ll;s[sc++]=new TextDecoder().decode(d.slice(i,i+sl));i+=sl}}
-else if(o===O.SE){let[n,l]=rv(d,i);i+=l;let[si,sl]=rv(d,i);i+=sl;sc=si;while(n--){let[sl2,ll]=rv(d,i);i+=ll;s[sc++]=new TextDecoder().decode(d.slice(i,i+sl2));i+=sl2}}
-else if(o===O.WT){let n=d[i++];wt=[];while(n--){let[l,ll]=rv(d,i);i+=ll;wt.push(new TextDecoder().decode(d.slice(i,i+l)));i+=l}}
-else if(o===O.G){let[k,l]=rv(d,i);i+=l;let el=document.getElementById(s[k]);r.push(el)}
-else if(o===O.C){let t=d[i++];r.push(SE[t]?document.createElementNS('http://www.w3.org/2000/svg',E[t]||'svg'):document.createElement(E[t]||'div'))}
-else if(o===O.CS){let[id,l]=rv(d,i);i+=l;let e=document.createElement('span');e.id='__synced_'+id;r.push(e)}
-else if(o===O.GS){let[id,l]=rv(d,i);i+=l;r.push(document.getElementById('__synced_'+id))}
-else if(o===O.T){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].textContent=s[k]||''}
-else if(o===O.TW){let[f,fl]=rv(d,i);i+=fl;let n=d[i++],ws=[];while(n--)ws.push(wt[d[i++]]||'');r[f].textContent=ws.join(' ')}
-else if(o===O.TI){let[f,fl]=rv(d,i);i+=fl;let[v,l]=rv(d,i);i+=l;let n=(v>>>1)^-(v&1);r[f].textContent=n.toString()}
-else if(o===O.L){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].className=s[k]||''}
-else if(o===O.A){let[f,fl]=rv(d,i);i+=fl;let[ak,al]=rv(d,i);i+=al;let[vk,vl]=rv(d,i);i+=vl;let an=A[ak]||s[ak]||'data';sa(r[f],an,s[vk]||'')}
-else if(o===O.AE){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],v=d[i++];r[f].setAttribute(AT[k]||'data',AV[v]||'')}
-else if(o===O.AB){let[f,fl]=rv(d,i);i+=fl;let k=d[i++];r[f].setAttribute(AT[k]||'data','')}
-else if(o===O.AK){let[f,fl]=rv(d,i);i+=fl;let k=d[i++],[v,l]=rv(d,i);i+=l;sa(r[f],AT[k]||'data',s[v]||'')}
-else if(o===O.D){let[f,fl]=rv(d,i);i+=fl;let[kk,kl]=rv(d,i);i+=kl;let[vk,vl]=rv(d,i);i+=vl;r[f].dataset[s[kk]||'']=s[vk]||''}
-else if(o===O.P){let[p,pl]=rv(d,i);i+=pl;let[c,cl]=rv(d,i);i+=cl;(p<0xFFFF?r[p]:document.body).appendChild(r[c])}
-else if(o===O.CC){let[f,fl]=rv(d,i);i+=fl;fm();let lv=r[f];let sh=document.createElement(lv.tagName||'DIV');pm={live:lv,shadow:sh};r[f]=sh}
-else if(o===O.B){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;BL(f,t,h,r)}
-else if(o===O.R){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;r[f].__hk='r'+t+'_'+h;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>se(h,t,f,e,r[f]),e,r[f])})}
-else if(o===O.DB){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let ms=(d[i++]<<8)|d[i++];let tm;r[f].__hk='d'+t+'_'+h;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);tm=setTimeout(()=>se(h,t,f,e,r[f]),ms)})}
-else if(o===O.RP){let[f,fl]=rv(d,i);i+=fl;let t=d[i++];let[h,hl]=rv(d,i);i+=hl;let pl=d[i++],prm=d.slice(i,i+pl);i+=pl;r[f].__hk='p'+t+'_'+h+'_'+prm.join(',');r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>sep(h,t,f,prm,e,r[f]),e,r[f])})}
-else if(o===O.IL||o===O.DH){i=xi(d,i-1)}
-else if(o===O.RU){let[k,l]=rv(d,i);i+=l;history.pushState(null,'',s[k])}
-else if(o===O.RR){let[k,l]=rv(d,i);i+=l;history.replaceState(null,'',s[k])}
-else if(o===O.RUI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.pushState(null,'',u)}
-else if(o===O.RRI){let[sl,ll]=rv(d,i);i+=ll;let u=new TextDecoder().decode(d.slice(i,i+sl));i+=sl;history.replaceState(null,'',u)}
-else if(o===O.SS){let[f,fl]=rv(d,i);i+=fl;let[k,l]=rv(d,i);i+=l;r[f].style.cssText=s[k]||''}
-else if(o===O.SU){let[f,fl]=rv(d,i);i+=fl;let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}
-else if(o===O.SP){let[f,fl]=rv(d,i);i+=fl;let p=d[i++],v=d[i++];r[f].style[P[p]]=Y[v]}
-else if(o===O.SM){let[f,fl]=rv(d,i);i+=fl;let n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('u'+u)}}
-else if(o===O.CT){let[n,l]=rv(d,i);i+=l;while(n--){let[id,il]=rv(d,i);i+=il;let c=d[i++];while(c--){let[u,ul]=rv(d,i);i+=ul}K[id]='c'+id}}
-else if(o===O.SD){let[n,l]=rv(d,i);i+=l;if(!DS){DS=document.createElement('style');document.head.appendChild(DS)}while(n--){let[rl,ll]=rv(d,i);i+=ll;let rule=new TextDecoder().decode(d.slice(i,i+rl));i+=rl;try{DS.sheet.insertRule(rule,DS.sheet.cssRules.length)}catch(_e){DS.textContent+=rule}}}
-else if(o===O.MD){let[n,nl]=rv(d,i);i+=nl;while(n--){let k=d[i++],c=d[i++],[l,ll]=rv(d,i);i+=ll;let nm=new TextDecoder().decode(d.slice(i,i+l));i+=l;if(k===6){E[c]=nm;SE[c]=1}else(k===0?E:k===1?V:k===2?AT:k===3?AV:k===4?P:Y)[c]=nm}}
-else if(o===O.SC){let[f,fl]=rv(d,i);i+=fl;let[id,l]=rv(d,i);i+=l;r[f].classList.add(K[id]||'c'+id)}
-else if(o===O.PD){let[f,fl]=rv(d,i);i+=fl;let pc=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('h'+pc+'u'+u)}}
-else if(o===O.BP){let[f,fl]=rv(d,i);i+=fl;let bp=d[i++],n=d[i++];while(n--){let[u,l]=rv(d,i);i+=l;r[f].classList.add('b'+bp+'u'+u)}}
-else if(o===O.IT){if(typeof fl2!=='undefined'){fl2[d[i]]=!!d[i+1]}i+=2}
-else if(o===O.BT){let[f,l]=rv(d,i);i+=l;let ti=d[i++];let[st,sl]=rv(d,i);i+=sl;let inv=d[i++];if(typeof fb2!=='undefined'){(fb2[ti]||(fb2[ti]=[])).push({e:r[f],s:st,n:!!inv});uf2(ti)}}
-else if(o===O.TG){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++];if(typeof fl2!=='undefined'){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();fl2[ti]=!fl2[ti];uf2(ti)})}}
-else if(o===O.IS){if(typeof sl2!=='undefined'){sl2[d[i]]=d[i+1]}i+=2}
-else if(o===O.BS){let[f,l]=rv(d,i);i+=l;let si=d[i++],mv=d[i++];let[st,sl]=rv(d,i);i+=sl;if(typeof sb2!=='undefined'){(sb2[si]||(sb2[si]=[])).push({e:r[f],v:mv,s:st});us2(si)}}
-else if(o===O.SS2){let[f,l]=rv(d,i);i+=l;let t=d[i++],si=d[i++],sv=d[i++];if(typeof sl2!=='undefined'){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();sl2[si]=sv;us2(si)})}}
-else if(o===O.TT){let[f,l]=rv(d,i);i+=l;let t=d[i++],ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){let tm;r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();clearTimeout(tm);fl2[ti]=true;uf2(ti);tm=setTimeout(()=>{fl2[ti]=false;uf2(ti)},ms)})}}
-else if(o===O.AT2){let ti=d[i++],ms=(d[i++]<<8)|d[i++];if(typeof fl2!=='undefined'){setTimeout(()=>{fl2[ti]=!fl2[ti];uf2(ti)},ms)}}
-else if(o===O.LS){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;ls(r[f],c)}
-else if(o===O.LB){let[f,l]=rv(d,i);i+=l;let[c,cl]=rv(d,i);i+=cl;let k=d[i++],b={e:r[f],k:k},n,nl;if(k&16){[b.b,nl]=rv(d,i);i+=nl;n=d[i++];b.c=[c];while(n--){let[h,hl]=rv(d,i);i+=hl;b.c.push(h)}}if((k&15)===2){[b.n,nl]=rv(d,i);i+=nl;[b.d,nl]=rv(d,i);i+=nl}else if((k&15)===7)b.p=d[i++];else if((k&15)===3){n=d[i++];b.t=[];while(n--){let[h,hl]=rv(d,i);i+=hl;b.t.push(h)}}else if((k&15)===4){n=d[i++];[b.o,nl]=rv(d,i);i+=nl;b.o=(b.o>>>1)^-(b.o&1);b.t=[];while(n--){let[h,hl]=rv(d,i);i+=hl;b.t.push(h)}}else if((k&15)===5||(k&15)===6){let rt=()=>{let[q,ql]=rv(d,i);i+=ql;let a={b:(q>>>1)^-(q&1),s:[]},m=d[i++];while(m--){let[h,hl]=rv(d,i);i+=hl;let z=d[i++],[o,ol]=rv(d,i);i+=ol;let t=[];while(z--){let[x,xl]=rv(d,i);i+=xl;t.push(x)}a.s.push({c:h,o:(o>>>1)^-(o&1),t:t})}return a};b.l=rt();if(k&128)b.h=rt();if((k&15)===6)for(let q of['a0','a1','w0','w1']){let[x,xl]=rv(d,i);i+=xl;b[q]=(x>>>1)^-(x&1)}b.c=[...new Set(b.l.s.concat(b.h?b.h.s:[]).map(x=>x.c))]}(r[f].__lb||(r[f].__lb=[])).push(b);for(let h of b.c||[c])(lb[h]||(lb[h]=[])).push(b)}
-else if(o===O.E){rc=0;fm();document.querySelectorAll('[data-autoscroll]').forEach(e=>{e.scrollTop=e.scrollHeight});if(ai){let ne=document.getElementById(ai);if(ne){if(av!==null&&(ne.tagName==='INPUT'||ne.tagName==='TEXTAREA')&&ne.value!==av)ne.value=av;if(ne!==document.activeElement)ne.focus();try{ne.setSelectionRange(ap,aq)}catch(_){}}}
-for(let c in lb){lb[c]=lb[c].filter(x=>x.e&&x.e.isConnected);if(!lb[c].length)delete lb[c]}for(let c in lv){if(lv[c].isConnected)ul(c);else delete lv[c]}return}
-else{console.error('Unknown opcode 0x'+o.toString(16)+' at pos '+_p+' after '+_oc+' ops, r.len='+r.length)}
-}}catch(e){console.error('PARSE ERROR at pos='+i+' op#'+_oc+' opcode=0x'+(d[i-1]||0).toString(16)+' r.len='+r.length+': '+e.message);console.error('Context:',Array.from(d.slice(Math.max(0,i-10),i+10)).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(' '));try{w.close()}catch(_){}}}
-function sh(h){if(!h)return;let id=h.slice(1);if(!id)return;let ts=()=>{let el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth'});return true}return false};if(!ts()){let ob=new MutationObserver(()=>{if(ts())ob.disconnect()});ob.observe(document.body,{childList:true,subtree:true});setTimeout(()=>ob.disconnect(),2000)}}
-if('scrollRestoration' in history)history.scrollRestoration='manual';
-let rc=0,rn=false,op=false,ot;
-function ov(show,off){let o=document.getElementById('__rwov');if(!o){o=document.createElement('div');o.id='__rwov';o.style.cssText='position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);font-family:inherit';o.innerHTML='<div style="background:var(--a,#fff);color:var(--k,#111);border:1px solid var(--c,rgba(128,128,128,.3));border-radius:.5rem;padding:1.1rem 1.4rem;text-align:center;max-width:18rem"><div id="__rwovm" style="font-weight:600;margin-bottom:.7rem"></div><button id="__rwovr" style="font:inherit;cursor:pointer;border:1px solid var(--c,rgba(128,128,128,.4));background:var(--r,rgba(128,128,128,.12));color:inherit;border-radius:.375rem;padding:.35rem .85rem">Retry</button></div>';document.body.appendChild(o);o.querySelector('#__rwovr').onclick=()=>{rc=0;connect()}}o.querySelector('#__rwovm').textContent=off?'You’re offline':'Reconnecting…';o.style.display=show?'flex':'none'}
-function connect(){
-w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
-w.binaryType='arraybuffer';
-w.onopen=()=>{
-clearTimeout(ot);ov(false);
-if(rn){document.body.querySelectorAll(':scope>:not(script):not(style)').forEach(c=>c.remove());s={};wt=[];K={};sc=0;lv={};lb={};if(typeof fl2!=='undefined'){fl2={};fb2={};sl2={};sb2={}}}
-rn=false;op=true;
-w.send('R'+location.pathname);
-if(location.hash)sh(location.hash)};
-w.onmessage=e=>x(new Uint8Array(e.data));
-w.onclose=()=>{rn=true;clearTimeout(ot);ot=setTimeout(()=>ov(true,!navigator.onLine),600);if(op&&rc>=2)fetch('/ready',{cache:'no-store'}).then(()=>location.reload()).catch(()=>{});setTimeout(connect,Math.min(1000*Math.pow(2,rc++),30000))};
-w.onerror=()=>{}}
-connect();
-addEventListener('online',()=>{if(w.readyState>1){rc=0;connect()}});
-addEventListener('offline',()=>{if(rn)ov(true,true)});
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&w.readyState>1){rc=0;connect()}});
-document.addEventListener('click',e=>{let a=e.target.closest('a[data-route]');if(a){e.preventDefault();let h=a.getAttribute('href');history.pushState(null,'',h);w.send('R'+h);let hs=h.indexOf('#');if(hs>=0)sh(h.slice(hs));else scrollTo(0,0)}let b=e.target.closest('[data-copy]');if(b){navigator.clipboard.writeText(b.dataset.copy);b.classList.add('copied');setTimeout(()=>b.classList.remove('copied'),2000)}});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.target.matches&&e.target.matches('[data-enter-submit]')){e.preventDefault();let f=e.target.closest('form');if(f)f.requestSubmit()}});
-window.addEventListener('popstate',()=>{w.send('R'+location.pathname);if(location.hash)sh(location.hash);else scrollTo(0,0)});"#;
+/// The runtime JavaScript — the built artifact from `runtime/` (TypeScript
+/// source; `npm run sync` there is the only write path; CI rebuilds and fails
+/// on drift). Fully static: the only capsule-injected config is
+/// `const BASE='…'` — name maps, opcode table, client actions, and state live
+/// inside the bundle, which exposes the opcode executor as `globalThis.__rwx`
+/// for the wire harness. See `runtime/README.md` for the module map and rules.
+const RUNTIME_JS: &str = include_str!("../assets/runtime.min.js");
+const EXT_VIM_JS_FOR_VERSION: &str = include_str!("../assets/ext/vim.min.js");
 
-/// Client actions JS (~250 bytes): targets (bool toggle) and selectors (exclusive enum).
-///
-/// - `fl2[idx]` = bool state, `fb2[idx]` = [{e: element, s: st_code, n: invert}]
-/// - `sl2[idx]` = u8 state, `sb2[idx]` = [{e: element, v: match_value, s: st_code}]
-/// - `uf2(idx)` = update all target bindings for index
-/// - `us2(idx)` = update all selector bindings for index
-///
-/// Conditionally included when `has_client_actions` is true.
-const CLIENT_ACTIONS_JS: &str = r#"let fl2={},fb2={},sl2={},sb2={};
-function uf2(i){let v=fl2[i];for(let b of fb2[i]||[]){if(v!==b.n)b.e.classList.add('u'+b.s);else b.e.classList.remove('u'+b.s)}}
-function us2(i){let v=sl2[i];for(let b of sb2[i]||[]){if(v===b.v)b.e.classList.add('u'+b.s);else b.e.classList.remove('u'+b.s)}}"#;
-
-/// Bind handler (sends to server via WebSocket).
-/// Also includes a stub xi() since the main runtime references it.
-const BIND_JS: &str = r#"function BL(f,t,h,r){r[f].addEventListener(V[t]||'click',e=>{e.preventDefault();snd(()=>se(h,t,f,e,r[f]),e,r[f])})}
-function xi(d,i){return i}"#;
+/// Build stamp for lazy-extension URLs (`?v=`): changes whenever either
+/// artifact changes, so a rebuilt server can never be served a cached stale
+/// module. FNV-1a over both vendored artifacts.
+pub(crate) fn ext_version() -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in RUNTIME_JS.bytes().chain(EXT_VIM_JS_FOR_VERSION.bytes()) {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    format!("{h:x}")
+}
 
 /// Generate a minimal (unstyled) capsule HTML.
 ///
-/// Name maps ship empty; entries arrive lazily via `MAP_DEF` (see `generate_styled_capsule`).
+/// The bundle carries its own (empty) name maps; entries arrive lazily via
+/// `MAP_DEF` (see `generate_styled_capsule`).
 pub fn generate_capsule() -> String {
-    // Name maps ship empty; entries arrive lazily via `MAP_DEF` (see `generate_styled_capsule`).
+    let rwv = ext_version();
     format!(
         r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
 <script>
-const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
-{BIND_JS}
+const BASE='',RWV='{rwv}';
 {RUNTIME_JS}
 </script>
 </body></html>"#
@@ -353,16 +195,25 @@ impl FontFace {
 pub struct CapsuleConfig {
     /// Theme configuration for CSS variables
     pub theme: Theme,
-    /// Whether any client actions (targets/selectors) are used
-    pub(crate) has_client_actions: bool,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
     pub(crate) composite_css: String,
+    /// Render the root tree (default state) into the capsule for a static
+    /// first paint — crawlers and no-JS clients see real HTML; the live render
+    /// replaces it when the WebSocket delivers the first frame.
+    pub(crate) ssr: bool,
+    /// The pre-rendered HTML (filled by the server at startup when `ssr`).
+    pub(crate) ssr_html: String,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
     /// Optional PWA configuration (manifest, service worker, icons, head tags).
     pub(crate) pwa: Option<crate::pwa::Pwa>,
     /// `<html lang>`: the page language (also the locale of grouped live values).
     pub(crate) lang: Option<String>,
+    /// URL prefix this app is mounted under (e.g. `/preview/<id>`), or empty for the root. When
+    /// set, the client runtime prefixes its WebSocket URL and history entries with it while still
+    /// speaking root-relative routes to the server — so a reverse proxy can strip the prefix and
+    /// the app needs no server-side path changes. PWA install is suppressed under a prefix.
+    pub(crate) base_path: String,
 }
 
 impl CapsuleConfig {
@@ -387,9 +238,29 @@ impl CapsuleConfig {
         self
     }
 
-    /// Set whether client actions (targets/selectors) are used.
-    pub(crate) fn has_client_actions(mut self, has: bool) -> Self {
-        self.has_client_actions = has;
+    /// Mount this app under a URL prefix (e.g. `/preview/<id>`). Empty means the root (default).
+    /// The client runtime prefixes its WebSocket URL and browser-history entries with it, while
+    /// still sending root-relative routes to the server — so a same-origin reverse proxy strips the
+    /// prefix and the server needs no path awareness. A leading `/` is ensured; a trailing `/` is
+    /// trimmed.
+    pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
+        let raw = prefix.into();
+        let trimmed = raw.trim().trim_end_matches('/');
+        self.base_path = if trimmed.is_empty() {
+            String::new()
+        } else if trimmed.starts_with('/') {
+            trimmed.to_owned()
+        } else {
+            format!("/{trimmed}")
+        };
+        self
+    }
+
+    /// Enable a static first paint: the capsule ships the root tree rendered
+    /// at its default state (plus the CSS its classes need). The live render
+    /// replaces it on the first WebSocket frame.
+    pub fn ssr(mut self, ssr: bool) -> Self {
+        self.ssr = ssr;
         self
     }
 
@@ -548,42 +419,55 @@ pub fn render_static_page(
 /// This ensures styles are available immediately when the page loads,
 /// without waiting for the WebSocket connection.
 pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
-    // The element/event/attribute/style-token name maps ship empty: each
-    // `(kind, code)→name` entry is delivered lazily over the wire via `MAP_DEF` the first
-    // time a connection references the code (the name-map analogue of lazy CSS / `STYLE_DEF`).
-    // `A={4:'id'}` (the one universal attribute) is seeded in `RUNTIME_JS`.
+    // The bundle's name maps start empty: each `(kind, code)→name` entry is
+    // delivered lazily over the wire via `MAP_DEF` the first time a connection
+    // references the code (the name-map analogue of lazy CSS / `STYLE_DEF`).
+    // Client actions ride inside the bundle unconditionally (~250B).
 
-    // Include client actions JS (targets & selectors) when used
-    let client_actions_js = if config.has_client_actions {
-        CLIENT_ACTIONS_JS
+    // PWA head tags (title, theme-color, manifest link, icons, SW registration) — suppressed under
+    // a base path: those URLs are root-absolute (`/sw.js`, `/manifest.webmanifest`, `/pwa/*`) and a
+    // mounted preview needn't be installable, so we simply don't advertise them.
+    let pwa_head = if config.base_path.is_empty() {
+        config
+            .pwa
+            .as_ref()
+            .map(|p| p.head(&config.theme))
+            .unwrap_or_default()
     } else {
-        ""
+        String::new()
     };
 
-    // PWA head tags (title, theme-color, manifest link, icons, SW registration).
-    let pwa_head = config
-        .pwa
-        .as_ref()
-        .map(|p| p.head(&config.theme))
-        .unwrap_or_default();
     let lang = config
         .lang
         .as_deref()
         .map(|l| format!(" lang=\"{}\"", l.replace('"', "")))
         .unwrap_or_default();
+    let base_js = base_path_js(&config.base_path);
+    let ssr_html = &config.ssr_html;
+    let rwv = ext_version();
 
     format!(
         r#"<!DOCTYPE html><html{lang}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{pwa_head}
 <style>{css}</style></head><body>
-<div id="rw"></div>
+<div id="rw">{ssr_html}</div>
 <script>
-const E={{}},V={{}},P={{}},Y={{}},AT={{}},AV={{}},SE={{}};
-{client_actions_js}
-{BIND_JS}
+const RWV='{rwv}';
+{base_js}
 {RUNTIME_JS}
 </script>
 </body></html>"#
     )
+}
+
+/// The `const BASE=…` line the client runtime reads to prefix its WebSocket URL and history while
+/// speaking root-relative routes to the server. Only `[A-Za-z0-9._/-]` survive, so the injected
+/// literal can't break out of its quotes; anything else yields the safe empty base.
+fn base_path_js(base_path: &str) -> String {
+    let safe = base_path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '-'));
+    let value = if safe { base_path } else { "" };
+    format!("const BASE='{value}';")
 }
 
 #[cfg(test)]
@@ -596,6 +480,44 @@ mod tests {
         let config = CapsuleConfig::new();
         assert_eq!(config.theme.mode, ThemeMode::Light);
         assert!(config.theme.palette_ref().is_none());
+    }
+
+    #[test]
+    fn base_path_is_normalized_and_injected() {
+        // Leading slash ensured, trailing trimmed.
+        assert_eq!(
+            CapsuleConfig::new().base_path("preview/x/").base_path,
+            "/preview/x"
+        );
+        assert_eq!(
+            CapsuleConfig::new().base_path("/preview/x").base_path,
+            "/preview/x"
+        );
+        assert_eq!(CapsuleConfig::new().base_path("").base_path, "");
+
+        // The default (no base) injects an empty BASE; a mount injects the prefix and drops PWA.
+        let plain = generate_styled_capsule(&CapsuleConfig::dark(), ".c1{}");
+        assert!(plain.contains("const BASE='';"));
+        let mounted = generate_styled_capsule(
+            &CapsuleConfig::dark()
+                .pwa(crate::pwa::Pwa::new("x"))
+                .base_path("/preview/ws-abc"),
+            ".c1{}",
+        );
+        assert!(mounted.contains("const BASE='/preview/ws-abc';"));
+        assert!(
+            !mounted.contains("manifest.webmanifest"),
+            "PWA head must be suppressed under a base path"
+        );
+        // The client runtime prefixes its socket URL and reads BASE back out.
+        assert!(mounted.contains("location.host+BASE"));
+    }
+
+    #[test]
+    fn base_path_js_rejects_unsafe_characters() {
+        assert_eq!(base_path_js("/preview/ws-1"), "const BASE='/preview/ws-1';");
+        // A quote/injection attempt collapses to the empty base.
+        assert_eq!(base_path_js("/x';evil//"), "const BASE='';");
     }
 
     #[test]
@@ -667,8 +589,10 @@ mod tests {
         assert!(capsule.contains("<div id=\"rw\""));
 
         // Name maps ship empty (entries delivered lazily via MAP_DEF).
-        assert!(capsule.contains("const E={},V={}"));
-        assert!(capsule.contains("O.MD"), "MAP_DEF handler must be present");
+        assert!(
+            capsule.contains("__rwx"),
+            "runtime artifact must be embedded"
+        );
     }
 
     #[test]
@@ -705,20 +629,20 @@ mod tests {
         // empty rather than inlining every entry. A token reached only through a plain helper
         // can never be missing: its name arrives the first time its code is referenced.
         let capsule = generate_capsule();
-        assert!(capsule.contains("const E={},V={}"), "maps ship empty");
+        assert!(
+            capsule.contains("__rwx"),
+            "runtime artifact must be embedded"
+        );
         assert!(!capsule.contains("0:'div'"), "names must not be inlined");
-        assert!(capsule.contains("O.MD"), "MAP_DEF handler must be present");
     }
 
     #[test]
     fn test_generate_capsule() {
         let capsule = generate_capsule();
         // Maps ship empty; element/event names arrive lazily via MAP_DEF.
-        assert!(capsule.contains("const E={},V={}"));
+        assert!(capsule.contains("__rwx"));
         assert!(!capsule.contains("0:'div'"));
         assert!(capsule.contains("<!DOCTYPE html>"));
-        // `ls` is the live-source registrar; the reconnect reset must not clobber it.
-        assert!(!capsule.contains("ls={}"));
     }
 
     #[test]
@@ -822,97 +746,33 @@ mod tests {
     }
 
     #[test]
-    fn test_client_actions_js_included_when_enabled() {
-        let config = CapsuleConfig::new().has_client_actions(true);
+    fn test_ssr_html_embedded_in_mount_div() {
+        let mut config = CapsuleConfig::new().ssr(true);
+        config.ssr_html = "<h1>Static paint</h1>".to_string();
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
-
-        // Client actions JS should be included
-        assert!(
-            capsule.contains("fl2"),
-            "Client actions JS vars should be present"
-        );
-        assert!(
-            capsule.contains("uf2"),
-            "Target update function should be present"
-        );
-        assert!(
-            capsule.contains("us2"),
-            "Selector update function should be present"
-        );
+        assert!(capsule.contains(r#"<div id="rw"><h1>Static paint</h1></div>"#));
     }
 
     #[test]
-    fn test_client_actions_js_excluded_when_disabled() {
-        let config = CapsuleConfig::new().has_client_actions(false);
-        let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&config, &css);
-
-        // Client actions update functions should NOT be included
-        assert!(
-            !capsule.contains("function uf2"),
-            "Target update function should not be present when disabled"
-        );
-        assert!(
-            !capsule.contains("function us2"),
-            "Selector update function should not be present when disabled"
-        );
-    }
-
-    #[test]
-    fn test_client_action_opcodes_in_runtime() {
+    fn test_runtime_artifact_embedded() {
+        // The runtime is the built artifact from runtime/ (see runtime/README.md).
+        // Assert on minification-stable markers: string literals and the __rwx
+        // debug hook survive; identifiers and hex literals do not.
+        assert!(RUNTIME_JS.len() > 10_000, "artifact suspiciously small");
+        assert!(!RUNTIME_JS.contains('\n'), "artifact must be a single line");
         let config = CapsuleConfig::new();
         let css = generate_capsule_css(&config);
         let capsule = generate_styled_capsule(&config, &css);
-
-        // Opcode constants should always be in the runtime
+        assert!(capsule.contains("__rwx"), "executor hook missing");
+        assert!(capsule.contains("__rwov"), "reconnect overlay missing");
         assert!(
-            capsule.contains("IT:0x47"),
-            "INIT_TARGET opcode should be in O object"
+            capsule.contains("PARSE ERROR at pos="),
+            "executor error path missing"
         );
         assert!(
-            capsule.contains("BT:0x48"),
-            "BIND_TARGET opcode should be in O object"
-        );
-        assert!(
-            capsule.contains("TG:0x49"),
-            "BIND_TOGGLE opcode should be in O object"
-        );
-        assert!(
-            capsule.contains("IS:0x4A"),
-            "INIT_SELECTOR opcode should be in O object"
-        );
-        assert!(
-            capsule.contains("BS:0x4B"),
-            "BIND_SELECTOR opcode should be in O object"
-        );
-        assert!(
-            capsule.contains("SS2:0x4C"),
-            "BIND_SELECT opcode should be in O object"
-        );
-    }
-
-    #[test]
-    fn test_timed_toggle_opcode_in_runtime() {
-        let config = CapsuleConfig::new();
-        let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&config, &css);
-
-        assert!(
-            capsule.contains("TT:0x4D"),
-            "BIND_TIMED_TOGGLE opcode should be in O object"
-        );
-    }
-
-    #[test]
-    fn test_auto_toggle_opcode_in_runtime() {
-        let config = CapsuleConfig::new();
-        let css = generate_capsule_css(&config);
-        let capsule = generate_styled_capsule(&config, &css);
-
-        assert!(
-            capsule.contains("AT2:0x4E"),
-            "AUTO_TOGGLE opcode should be in O object"
+            capsule.contains("__synced_"),
+            "synced-region addressing missing"
         );
     }
 }

@@ -1,6 +1,40 @@
 //! Server configuration for connection limits and timeouts.
 
+use std::sync::Arc;
 use std::time::Duration;
+
+/// Resolves a request path to a reverse-proxy upstream. Returns `(port, prefix)` when the path is a
+/// proxied route — `port` is the local upstream to forward to on `127.0.0.1`, and `prefix` is the
+/// leading path segment to strip so the upstream sees a root-relative path — or `None` for a normal
+/// request the server should handle itself.
+///
+/// The mechanism lives here; the *policy* (which paths map to which ports) is the host app's
+/// closure. It's how one origin can front several sibling servers behind a single auth gate — e.g.
+/// a preview supervisor mapping `/preview/<id>/…` to a pooled port (claw's P2 CD flow).
+/// The boxed closure a [`ProxyResolver`] holds: a request path → `(upstream port, prefix to strip)`.
+type ProxyFn = dyn Fn(&str) -> Option<(u16, String)> + Send + Sync;
+
+#[derive(Clone)]
+pub struct ProxyResolver(Arc<ProxyFn>);
+
+impl ProxyResolver {
+    /// Wrap a path→`(port, prefix)` resolver.
+    pub fn new(resolve: impl Fn(&str) -> Option<(u16, String)> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(resolve))
+    }
+
+    /// Resolve `path` to an upstream, or `None` to handle it normally.
+    #[must_use]
+    pub fn resolve(&self, path: &str) -> Option<(u16, String)> {
+        (self.0)(path)
+    }
+}
+
+impl std::fmt::Debug for ProxyResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProxyResolver(..)")
+    }
+}
 
 /// Configuration for the rwire server.
 ///
@@ -19,6 +53,14 @@ pub struct ServerConfig {
     /// Maximum memory per connection state in bytes. Default: 1MB
     pub state_memory_limit: usize,
 
+    /// Extra origins allowed to open WebSocket connections, as full origin
+    /// strings (e.g. `https://app.example.com`). Same-origin requests (the
+    /// `Origin` header's host matching the request `Host`) are always allowed,
+    /// and non-browser clients without an `Origin` header are not blocked —
+    /// this list is for legitimate cross-origin setups (a page on another
+    /// domain embedding this app). Default: empty.
+    pub allowed_origins: Vec<String>,
+
     /// Force the `Secure` attribute on the session cookie regardless of the
     /// request scheme. Default: false.
     ///
@@ -28,6 +70,10 @@ pub struct ServerConfig {
     /// dropped by the browser). Set this only to force `Secure` on in a setup
     /// that doesn't send that header.
     pub secure_cookies: bool,
+
+    /// Reverse-proxy resolver, consulted for every authenticated request (after the auth gate, so
+    /// proxied upstreams inherit it). `None` (default) disables proxying.
+    pub proxy: Option<ProxyResolver>,
 }
 
 impl Default for ServerConfig {
@@ -37,7 +83,9 @@ impl Default for ServerConfig {
             max_connections_per_ip: 100,
             idle_timeout: Duration::from_secs(300),
             state_memory_limit: 1024 * 1024, // 1MB
+            allowed_origins: Vec::new(),
             secure_cookies: false,
+            proxy: None,
         }
     }
 }
@@ -61,6 +109,14 @@ impl ServerConfig {
     }
 
     /// Set the idle timeout duration.
+    /// Allow an extra cross-origin `Origin` to open WebSocket connections
+    /// (full origin string, e.g. `https://app.example.com`). Same-origin
+    /// connections are always allowed; call repeatedly for several origins.
+    pub fn allow_origin(mut self, origin: impl Into<String>) -> Self {
+        self.allowed_origins.push(origin.into());
+        self
+    }
+
     pub fn idle_timeout(mut self, timeout: Duration) -> Self {
         self.idle_timeout = timeout;
         self
@@ -76,6 +132,13 @@ impl ServerConfig {
     /// `X-Forwarded-Proto: https` header (which is otherwise auto-detected).
     pub fn secure_cookies(mut self, secure: bool) -> Self {
         self.secure_cookies = secure;
+        self
+    }
+
+    /// Install a reverse-proxy resolver (see [`ProxyResolver`]). Matched paths are forwarded to a
+    /// local port after the auth gate, so proxied upstreams inherit authentication.
+    pub fn proxy(mut self, resolver: ProxyResolver) -> Self {
+        self.proxy = Some(resolver);
         self
     }
 }

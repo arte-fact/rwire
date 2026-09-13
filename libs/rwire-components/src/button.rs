@@ -39,6 +39,8 @@ pub enum ButtonIntent {
     Secondary,
     /// Ghost button (transparent, text only)
     Ghost,
+    /// Bordered, muted text that lifts on hover — between Secondary and Ghost.
+    Outline,
     /// Destructive action (red)
     Destructive,
 }
@@ -46,6 +48,8 @@ pub enum ButtonIntent {
 /// Button size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonSize {
+    /// Extra small: 24px height — dense chrome (toolbars, inline forms, list rows)
+    Xs,
     /// Small: 28px height
     Sm,
     /// Medium: 36px height (default)
@@ -93,6 +97,11 @@ impl Button {
     /// Ghost button with text.
     pub fn ghost(text: impl Into<Cow<'static, str>>) -> Self {
         Self::new().intent(ButtonIntent::Ghost).text(text)
+    }
+
+    /// Outline button with text.
+    pub fn outline(text: impl Into<Cow<'static, str>>) -> Self {
+        Self::new().intent(ButtonIntent::Outline).text(text)
     }
 
     /// Destructive button with text.
@@ -172,6 +181,7 @@ impl Button {
     /// Icon edge length (px), scaled to the button size.
     fn icon_px(&self) -> u32 {
         match self.size {
+            ButtonSize::Xs => 12,
             ButtonSize::Sm => 12,
             ButtonSize::Md => 14,
             ButtonSize::Lg => 16,
@@ -201,11 +211,14 @@ impl Button {
                 tokens.extend([St::BgSecondary, St::TextOnSecondary, St::BorderDefault])
             }
             ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
+            ButtonIntent::Outline => {
+                tokens.extend([St::BgTransparent, St::TextMuted, St::BorderDefault])
+            }
             ButtonIntent::Destructive => tokens.extend([St::BgDestructive, St::TextOnDestructive]),
         }
 
         match self.size {
-            ButtonSize::Sm => {
+            ButtonSize::Xs | ButtonSize::Sm => {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextXs, St::GapXs]);
             }
@@ -234,6 +247,7 @@ impl Button {
             ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
             ButtonIntent::Secondary => builder.hover([St::BgSecondaryHover, St::BorderEmphasis]),
             ButtonIntent::Ghost => builder.hover([St::BgHover]),
+            ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
             ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
         };
 
@@ -263,6 +277,7 @@ impl Button {
     /// Compute size-specific style tokens.
     fn size_tokens(&self) -> Vec<St> {
         match self.size {
+            ButtonSize::Xs => vec![St::H1_5rem, St::Py0, St::PxSm],
             ButtonSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSp3],
             ButtonSize::Md => vec![St::H2_25rem, St::Py0, St::PxMd],
             ButtonSize::Lg => vec![St::H2_75rem, St::Py0, St::PxLg],

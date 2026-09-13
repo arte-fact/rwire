@@ -79,7 +79,7 @@ pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 // Builder API exports
-pub use builder::{el, ElementBuilder, LiveBind, LiveOutput, LiveSource, LiveSum};
+pub use builder::{el, ElementBuilder, ElementKey, LiveBind, LiveOutput, LiveSource, LiveSum};
 
 // Item reference exports
 pub use item_ref::{ItemRef, IterWithRef};
@@ -106,7 +106,7 @@ pub use persist::{PersistError, PersistRegistry, PersistableType, SqliteStore};
 pub use rusqlite;
 
 // Config exports
-pub use config::ServerConfig;
+pub use config::{ProxyResolver, ServerConfig};
 
 // Registry exports
 pub use pwa::{Pwa, PwaDisplay};

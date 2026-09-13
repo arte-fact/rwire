@@ -19,7 +19,8 @@ use rwire::builder::LiveSum;
 use rwire::{el, icon_sized, El, ElementBuilder, Ev, HandlerSpec, Icon, St, Style};
 use rwire_components::{
     Alert, Badge, Button, ButtonIntent, ButtonSize, CopyButton, Drawer, DrawerPosition, Gap, Input,
-    Link, Progress, ProgressIntent, Slider, Stack, StackJustify, Stepper, Text, TextVariant,
+    Link, Progress, ProgressIntent, ProgressSize, Slider, Stack, StackJustify, Stepper, Text,
+    TextVariant,
 };
 
 use crate::room::{
@@ -1153,7 +1154,7 @@ fn over(room: &Room) -> ElementBuilder {
                 Progress::new()
                     .value(surface)
                     .max(most as u32)
-                    .thin(true)
+                    .size(ProgressSize::Sm)
                     .build()
                     .st([St::MtXs]),
             );
@@ -1745,7 +1746,7 @@ fn ledger_bar(n: i32, largest: i32, slot: usize) -> ElementBuilder {
         .value(n.unsigned_abs())
         .max(largest.max(1) as u32)
         .intent(intent)
-        .thin(true)
+        .size(ProgressSize::Sm)
         .bar_st([St::AnimateGrow, delay(slot)])
         .build()
 }
@@ -2796,7 +2797,7 @@ fn criterion_row(c: &Criterion) -> ElementBuilder {
                 } else {
                     ProgressIntent::Primary
                 })
-                .thin(true)
+                .size(ProgressSize::Sm)
                 .build(),
         ])
 }
@@ -4182,7 +4183,7 @@ fn report_step(seat: &Seat) -> ElementBuilder {
                 .value(n.unsigned_abs())
                 .max(largest as u32)
                 .intent(intent)
-                .thin(true)
+                .size(ProgressSize::Sm)
                 .bar_st([St::AnimateGrow, delay(slot)])
                 .build();
             let row = ledger_row(slot, el(El::Span).text(label), signed(*n), Some(bar));
@@ -4208,7 +4209,7 @@ fn report_step(seat: &Seat) -> ElementBuilder {
                 .value(efficiency.max(0) as u32)
                 .max(200)
                 .intent(ProgressIntent::Warning)
-                .thin(true)
+                .size(ProgressSize::Sm)
                 .bar_st([St::AnimateGrow, delay(slot)])
                 .build(),
         ),
@@ -4328,7 +4329,7 @@ fn treasury_step(k: &Kingdom, seat: &Seat) -> ElementBuilder {
                 .value(n.unsigned_abs())
                 .max(largest as u32)
                 .intent(intent)
-                .thin(true)
+                .size(ProgressSize::Sm)
                 .bar_st([St::AnimateGrow, delay(slot)])
                 .build();
             let row = ledger_row(

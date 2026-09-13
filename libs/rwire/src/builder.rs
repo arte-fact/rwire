@@ -188,6 +188,23 @@ fn name_for(category: u8, code: u8) -> Option<&'static str> {
 /// style-token names: the capsule ships empty maps and each name arrives the first time
 /// its code is referenced. SVG element codes are emitted with wire `kind` 6, so the client
 /// sets both `E[code]` and `SE[code]=1`. Returns empty bytes when there is nothing new.
+/// `MOD_DEF` bytes for the lazy runtime-extension names this message references.
+/// No per-connection tracking: the runtime's page-level import set makes
+/// re-hints idempotent, and a hint is ~7 bytes. Empty when nothing referenced.
+pub fn mod_def_prefix(referenced: &BTreeSet<&'static str>) -> BytesMut {
+    if referenced.is_empty() {
+        return BytesMut::new();
+    }
+    let mut out = BytesMut::new();
+    out.put_u8(crate::protocol::opcodes::MOD_DEF);
+    crate::protocol::varint::write_varint(&mut out, referenced.len() as u32);
+    for name in referenced {
+        crate::protocol::varint::write_varint(&mut out, name.len() as u32);
+        out.extend_from_slice(name.as_bytes());
+    }
+    out
+}
+
 pub fn map_def_prefix(referenced: &BTreeSet<(u8, u8)>, sent: &mut HashSet<(u8, u8)>) -> BytesMut {
     let mut new_entries: Vec<(u8, u8, &'static str)> = Vec::new();
     for &(category, code) in referenced {
@@ -282,6 +299,48 @@ pub fn el(el_type: El) -> ElementBuilder {
 ///
 /// This trait allows renderers to be stored and invoked without knowing
 /// the concrete state type at compile time.
+/// A stable per-sibling identity for keyed morphing (see [`ElementBuilder::key`]).
+/// Strings hash with FNV-1a (32-bit); integers use their value (folded to 32
+/// bits) — distinct ids stay distinct.
+pub trait ElementKey {
+    fn key_code(&self) -> u32;
+}
+
+fn fnv1a32(bytes: &[u8]) -> u32 {
+    let mut h: u32 = 0x811C_9DC5;
+    for &b in bytes {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+impl ElementKey for &str {
+    fn key_code(&self) -> u32 {
+        fnv1a32(self.as_bytes())
+    }
+}
+impl ElementKey for String {
+    fn key_code(&self) -> u32 {
+        fnv1a32(self.as_bytes())
+    }
+}
+impl ElementKey for u32 {
+    fn key_code(&self) -> u32 {
+        *self
+    }
+}
+impl ElementKey for u64 {
+    fn key_code(&self) -> u32 {
+        (*self ^ (*self >> 32)) as u32
+    }
+}
+impl ElementKey for usize {
+    fn key_code(&self) -> u32 {
+        (*self as u64).key_code()
+    }
+}
+
 pub trait SyncedRenderer: Send + Sync {
     /// Render with the given state, returning a new ElementBuilder.
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder>;
@@ -414,8 +473,13 @@ pub struct ElementBuilder {
     /// Binary-encoded typed attributes (At/Av enums)
     typed_attrs: Vec<TypedAttr>,
     events: Vec<(Ev, HandlerSpec)>,
+    /// Morph key (`__k`): sibling-local identity for keyed reordering.
+    key: Option<u32>,
+    /// This element is a drag handle resizing its previous sibling (BIND_RESIZE).
+    resize_handle: bool,
     children: Vec<ElementBuilder>,
     synced: Option<Box<dyn SyncedRenderer>>,
+    exts: Vec<&'static str>,
     /// Binary-encoded style utility tokens (compact 1-byte each)
     style_utils: Vec<u16>,
     /// Binary-encoded style property+value pairs (2 bytes each)
@@ -525,8 +589,11 @@ impl ElementBuilder {
             attrs: Vec::new(),
             typed_attrs: Vec::new(),
             events: Vec::new(),
+            key: None,
+            resize_handle: false,
             children: Vec::new(),
             synced: None,
+            exts: Vec::new(),
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
@@ -618,8 +685,11 @@ impl ElementBuilder {
             attrs: Vec::new(),
             typed_attrs: Vec::new(),
             events: Vec::new(),
+            key: None,
+            resize_handle: false,
             children: Vec::new(),
             synced: Some(synced),
+            exts: Vec::new(),
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
@@ -669,6 +739,15 @@ impl ElementBuilder {
     }
 
     /// Set an attribute on this element.
+    /// Declare that this element needs the named lazy runtime extension
+    /// (e.g. `"vim"`). The server hints it via MOD_DEF; the runtime imports
+    /// `/_rw/ext/{name}.js` once per page. Idempotent client-side, so the
+    /// server re-hints per batch instead of tracking per connection.
+    pub fn ext(mut self, name: &'static str) -> Self {
+        self.exts.push(name);
+        self
+    }
+
     pub fn attr(mut self, key: &str, value: &str) -> Self {
         self.attrs.push((key.to_string(), value.to_string()));
         self
@@ -803,6 +882,40 @@ impl ElementBuilder {
         out
     }
 
+    /// Collect every utility/pseudo/breakpoint style key this tree references
+    /// (descending into synced regions at their default state), so a statically
+    /// rendered page (SSR) can inline exactly the CSS its classes need.
+    pub fn static_style_rules(&self) -> std::collections::BTreeSet<StyleKey> {
+        let mut keys = std::collections::BTreeSet::new();
+        self.collect_static_style_rules(&mut keys);
+        keys
+    }
+
+    fn collect_static_style_rules(&self, keys: &mut std::collections::BTreeSet<StyleKey>) {
+        for &u in &self.style_utils {
+            keys.insert(StyleKey::Util(u));
+        }
+        for (pc, codes) in &self.pseudo_groups {
+            for &u in codes {
+                keys.insert(StyleKey::Pseudo(*pc, u));
+            }
+        }
+        for (bp, codes) in &self.breakpoint_groups {
+            for &u in codes {
+                keys.insert(StyleKey::Breakpoint(*bp, u));
+            }
+        }
+        if let Some(renderer) = &self.synced {
+            let state = renderer.create_default_state();
+            if let Some(tree) = renderer.render_with_state(state.as_ref()) {
+                tree.collect_static_style_rules(keys);
+            }
+        }
+        for child in &self.children {
+            child.collect_static_style_rules(keys);
+        }
+    }
+
     fn write_static_html(&self, out: &mut String) {
         let tag = self.el_type.name();
         out.push('<');
@@ -870,6 +983,14 @@ impl ElementBuilder {
 
         if let Some(text) = &self.text {
             push_text_escaped(out, text);
+        }
+        // Synced region: render its default-state content so crawlers and the
+        // pre-WebSocket paint see real markup (the live render replaces it).
+        if let Some(renderer) = &self.synced {
+            let state = renderer.create_default_state();
+            if let Some(tree) = renderer.render_with_state(state.as_ref()) {
+                tree.write_static_html(out);
+            }
         }
         for child in &self.children {
             child.write_static_html(out);
@@ -1502,6 +1623,48 @@ impl ElementBuilder {
         // Clone the handler and attach the param bytes
         let handler_with_params = handler.with_param_bytes(param_bytes);
         self.events.push((ev, handler_with_params));
+        self
+    }
+
+    /// Bind a one-shot visibility sentinel to this element (infinite scroll /
+    /// content streaming). When the element nears the viewport, `handler`
+    /// fires once with `next` as its param — read it via `ctx.item_index()`
+    /// and ignore stale values. Each render must pass the new `next`, which
+    /// re-keys the binding so the morph installs a fresh observer; one
+    /// request in flight is therefore structural, not a convention.
+    ///
+    /// ```ignore
+    /// el(El::Div).on_visible(load_more(), state.delivered as u32)
+    /// ```
+    pub fn on_visible(mut self, handler: HandlerSpec, next: u32) -> Self {
+        let mut param_bytes = Vec::new();
+        crate::item_ref::ItemRef::<()>::new(next as usize).encode(&mut param_bytes);
+        let handler_with_params = handler.with_param_bytes(param_bytes);
+        self.events.push((Ev::Visible, handler_with_params));
+        self
+    }
+
+    /// Give this element a stable identity among its siblings, so list
+    /// reorders morph by identity instead of positionally — the moved DOM
+    /// nodes (with their input values, scroll, and focus) travel with their
+    /// items. Strings hash (FNV-1a, 32-bit); integers are used directly. Use
+    /// your domain id (`todo.id`, message id), NOT the list index — an index
+    /// is exactly the positional identity keying exists to replace.
+    ///
+    /// ```ignore
+    /// state.items.iter_with_ref().map(|(item_ref, item)| {
+    ///     el(El::Li).key(item.id).text(&item.text)
+    /// })
+    /// ```
+    pub fn key<K: ElementKey>(mut self, key: K) -> Self {
+        self.key = Some(key.key_code());
+        self
+    }
+
+    /// Make this element a pointer-drag resize handle for its **previous
+    /// sibling** (horizontal, client-side only). The SplitPane primitive.
+    pub fn resize_handle(mut self) -> Self {
+        self.resize_handle = true;
         self
     }
 
@@ -2145,6 +2308,11 @@ impl BuildContext {
             if let Some(rendered) = renderer.render_with_state(state) {
                 // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
                 let ref_idx = self.buf.create_synced(synced_id);
+                // The synced element's own style tokens land on the wrapper —
+                // regions can be flex items (`render_x().st([St::Flex1, ...])`).
+                if !el.style_utils.is_empty() {
+                    self.buf.style_multi(ref_idx, &el.style_utils);
+                }
 
                 // Emit the rendered content as a child, tagging nested regions with this
                 // region as their parent.
@@ -2164,6 +2332,9 @@ impl BuildContext {
             }
         }
 
+        for e in &el.exts {
+            self.buf.ref_ext(e);
+        }
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
         if let Some(ref class) = el.class {
@@ -2230,12 +2401,23 @@ impl BuildContext {
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
+        // Morph key for keyed reordering
+        if let Some(k) = el.key {
+            self.buf.set_key(ref_idx, k);
+        }
+        if el.resize_handle {
+            self.buf.bind_resize(ref_idx);
+        }
         // Bind events
         for (ev, handler_spec) in &el.events {
             if let Some(handler) = &handler_spec.remote_handler {
                 let handler_idx = self.register_remote_handler(handler_spec, handler);
 
-                if let Some(param_bytes) = &handler_spec.param_bytes {
+                if *ev == Ev::Visible {
+                    let empty = Vec::new();
+                    let params = handler_spec.param_bytes.as_ref().unwrap_or(&empty);
+                    self.buf.bind_sentinel(ref_idx, handler_idx, params);
+                } else if let Some(param_bytes) = &handler_spec.param_bytes {
                     self.buf
                         .bind_remote_param(ref_idx, ev.as_u8(), handler_idx, param_bytes);
                 } else if handler_spec.debounce_ms > 0 {
@@ -2285,6 +2467,9 @@ impl BuildContext {
             // Use cached render from collect_symbols_multi (single-render path)
             if let Some(rendered) = self.synced_render_cache.remove(&synced_id) {
                 let ref_idx = self.buf.create_synced(synced_id);
+                if !el.style_utils.is_empty() {
+                    self.buf.style_multi(ref_idx, &el.style_utils);
+                }
                 let saved_parent = self.current_synced_parent;
                 self.current_synced_parent = Some(synced_id);
                 self.emit_element_multi(&rendered, Some(ref_idx));
@@ -2301,6 +2486,9 @@ impl BuildContext {
             return 0;
         }
 
+        for e in &el.exts {
+            self.buf.ref_ext(e);
+        }
         let ref_idx = self.buf.create(el.el_type.as_u8());
 
         if let Some(ref class) = el.class {
@@ -2367,12 +2555,23 @@ impl BuildContext {
 
         // Emit client action bindings (targets & selectors)
         self.emit_client_action_bindings(ref_idx, el);
+        // Morph key for keyed reordering
+        if let Some(k) = el.key {
+            self.buf.set_key(ref_idx, k);
+        }
+        if el.resize_handle {
+            self.buf.bind_resize(ref_idx);
+        }
         // Bind events
         for (ev, handler_spec) in &el.events {
             if let Some(handler) = &handler_spec.remote_handler {
                 let handler_idx = self.register_remote_handler(handler_spec, handler);
 
-                if let Some(param_bytes) = &handler_spec.param_bytes {
+                if *ev == Ev::Visible {
+                    let empty = Vec::new();
+                    let params = handler_spec.param_bytes.as_ref().unwrap_or(&empty);
+                    self.buf.bind_sentinel(ref_idx, handler_idx, params);
+                } else if let Some(param_bytes) = &handler_spec.param_bytes {
                     self.buf
                         .bind_remote_param(ref_idx, ev.as_u8(), handler_idx, param_bytes);
                 } else if handler_spec.debounce_ms > 0 {
@@ -2425,7 +2624,8 @@ impl BuildContext {
     ) -> Bytes {
         self.buf.end();
         // Names (MAP_DEF) before CSS (STYLE_DEF); both land before the body that uses them.
-        let mut prefix = map_def_prefix(self.buf.referenced_names(), sent_maps);
+        let mut prefix = mod_def_prefix(self.buf.referenced_exts());
+        prefix.extend_from_slice(&map_def_prefix(self.buf.referenced_names(), sent_maps));
         prefix.extend_from_slice(&style_def_prefix(self.buf.referenced_styles(), sent));
         let body = self.buf.finish();
         prepend(prefix, body)
@@ -2448,11 +2648,6 @@ impl BuildContext {
     /// symbol updates.
     pub fn take_symbol_map(&self) -> HashMap<String, u32> {
         self.symbol_map.clone()
-    }
-
-    /// Whether any client actions (targets or selectors) are used.
-    pub fn has_client_actions(&self) -> bool {
-        self.has_client_actions
     }
 
     /// Snapshot the target/selector index assignments made during this render.
@@ -2700,6 +2895,7 @@ pub fn build_synced_update_with_known_symbols(
     }
     let no_children: HashMap<TypeId, Vec<u32>> = HashMap::new();
 
+    let trace = std::env::var_os("RWIRE_TRACE").is_some();
     for se in synced {
         // Track the highest synced ID to know where nested ones start
         if se.id >= synced_counter {
@@ -2715,12 +2911,21 @@ pub fn build_synced_update_with_known_symbols(
         // Layer 1: Skip elements bound to a different state type
         if let Some(changed_id) = changed_state_type_id {
             if se.state_type_id != changed_id {
+                if trace {
+                    eprintln!("[rwire-trace] se={} skip: state-type", se.id);
+                }
                 continue;
             }
         }
 
         // Skip elements that don't need updating (bitmask check)
         if !se.deps.needs_update(changes) {
+            if trace {
+                eprintln!(
+                    "[rwire-trace] se={} skip: deps mask={:#x} always={} changes={:?}",
+                    se.id, se.deps.mask, se.deps.always, changes
+                );
+            }
             continue;
         }
 
@@ -2732,6 +2937,9 @@ pub fn build_synced_update_with_known_symbols(
                     Some(ref mut hashes) => {
                         let hash = rendered.content_hash();
                         if hashes.get(&se.id) == Some(&hash) {
+                            if trace {
+                                eprintln!("[rwire-trace] se={} skip: hash unchanged", se.id);
+                            }
                             false
                         } else {
                             hashes.insert(se.id, hash);
@@ -2750,6 +2958,9 @@ pub fn build_synced_update_with_known_symbols(
                         states,
                     );
                     has_updates = true;
+                }
+                if trace {
+                    eprintln!("[rwire-trace] se={} RENDER", se.id);
                 }
 
                 // A nested region's content is a function of its parent's render (a
@@ -2892,10 +3103,11 @@ pub fn build_synced_update_with_known_symbols(
     // Lazy delivery: prepend MAP_DEF (element/event/attr/style-token names) then STYLE_DEF
     // (CSS rules) for anything this batch references that the connection hasn't received yet.
     // Both land before the body opcodes that use them.
-    let mut prefix = match sent_maps {
+    let mut prefix = mod_def_prefix(buf.referenced_exts());
+    prefix.extend_from_slice(&match sent_maps {
         Some(sent) => map_def_prefix(buf.referenced_names(), sent),
         None => BytesMut::new(),
-    };
+    });
     let style_prefix = match sent_css {
         Some(sent) => style_def_prefix(buf.referenced_styles(), sent),
         None => BytesMut::new(),
@@ -3017,6 +3229,9 @@ fn emit_update_element(
         });
 
         let wrapper_ref = buf.create_synced(synced_id);
+        if !el.style_utils.is_empty() {
+            buf.style_multi(wrapper_ref, &el.style_utils);
+        }
 
         if is_existing {
             // The region already exists on the client. Emit ONLY the wrapper as a
@@ -3058,6 +3273,9 @@ fn emit_update_element(
     }
 
     // Create the element
+    for e in &el.exts {
+        buf.ref_ext(e);
+    }
     let ref_idx = buf.create(el.el_type.as_u8());
 
     // Set class
@@ -3098,6 +3316,14 @@ fn emit_update_element(
         }
     }
 
+    // Morph key for keyed reordering
+    if let Some(k) = el.key {
+        buf.set_key(ref_idx, k);
+    }
+    if el.resize_handle {
+        buf.bind_resize(ref_idx);
+    }
+
     // Emit style tokens (binary-encoded styles)
     if !el.style_utils.is_empty() {
         if el.style_utils.len() >= 3 {
@@ -3136,7 +3362,11 @@ fn emit_update_element(
 
             // Use BIND_REMOTE_PARAM if we have param bytes,
             // BIND_DEBOUNCED if debounced, otherwise BIND_REMOTE
-            if let Some(param_bytes) = &spec.param_bytes {
+            if *ev == Ev::Visible {
+                let empty = Vec::new();
+                let params = spec.param_bytes.as_ref().unwrap_or(&empty);
+                buf.bind_sentinel(ref_idx, handler_id, params);
+            } else if let Some(param_bytes) = &spec.param_bytes {
                 buf.bind_remote_param(ref_idx, ev.as_u8(), handler_id, param_bytes);
             } else if spec.debounce_ms > 0 {
                 buf.bind_debounced(ref_idx, ev.as_u8(), handler_id, spec.debounce_ms);
@@ -3292,6 +3522,34 @@ fn collect_symbols_recursive_with_known(
 mod map_def_tests {
     use super::*;
     use std::collections::{BTreeSet, HashSet};
+
+    #[test]
+    fn mod_def_prefix_format_and_emptiness() {
+        let mut refs: BTreeSet<&'static str> = BTreeSet::new();
+        assert!(mod_def_prefix(&refs).is_empty());
+        refs.insert("vim");
+        let bytes = mod_def_prefix(&refs);
+        assert_eq!(
+            &bytes[..],
+            &[crate::protocol::opcodes::MOD_DEF, 1, 3, b'v', b'i', b'm']
+        );
+    }
+
+    #[test]
+    fn ext_rides_the_message_as_a_mod_def_prefix() {
+        let element = el(El::Div).ext("vim").text("x");
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&element, &());
+        ctx.emit(&element, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+        let needle = [crate::protocol::opcodes::MOD_DEF, 1, 3, b'v', b'i', b'm'];
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MOD_DEF hint missing from emission"
+        );
+    }
 
     #[test]
     fn map_def_prefix_encodes_names_and_dedups_per_connection() {

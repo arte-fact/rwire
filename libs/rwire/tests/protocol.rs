@@ -608,3 +608,30 @@ mod opcodes {
         assert_eq!(codes.len(), sorted.len(), "Event codes must be unique");
     }
 }
+
+#[test]
+fn set_key_encodes_ref_and_key_varints() {
+    use rwire::protocol::encoder::OpcodeBuffer;
+    let mut buf = OpcodeBuffer::new();
+    buf.set_key(3, 300);
+    let bytes = buf.finish();
+    // [SET_KEY, ref=3, key=300 (2-byte varint)]
+    assert_eq!(bytes[0], 0x16);
+    assert_eq!(bytes[1], 3);
+    assert_eq!(
+        &bytes[2..4],
+        &[0x80 | ((300 - 128) >> 8) as u8, ((300 - 128) & 0xFF) as u8]
+    );
+}
+
+#[test]
+fn element_keys_hash_stably() {
+    use rwire::ElementKey;
+    // FNV-1a 32-bit known vectors.
+    assert_eq!("".key_code(), 0x811C_9DC5);
+    assert_eq!("a".key_code(), 0xE40C_292C);
+    // Integers pass through (folded); distinct ids stay distinct.
+    assert_eq!(42u32.key_code(), 42);
+    assert_eq!(7u64.key_code(), 7);
+    assert_ne!(7u64.key_code(), 8u64.key_code());
+}

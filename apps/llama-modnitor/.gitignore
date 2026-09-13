@@ -1,0 +1,5 @@
+/target
+
+# Local environment overrides (may hold secrets) — keep .env.example only.
+.env
+.env.local

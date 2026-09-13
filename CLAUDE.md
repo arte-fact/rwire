@@ -32,7 +32,7 @@ rwire/
 │   ├── rwire/               # Core framework library
 │   │   ├── builder.rs       # Fluent el() API, BuildContext, lazy CSS/name-map prefixes
 │   │   ├── capsule.rs       # HTTP serving for capsule HTML
-│   │   ├── capsule_gen.rs   # JS runtime generation; lazy CSS + name-map delivery
+│   │   ├── capsule_gen.rs   # Capsule HTML; embeds the built runtime artifact (assets/runtime.min.js)
 │   │   ├── config.rs        # Server configuration (bind address, max connections)
 │   │   ├── form.rs          # Form builder and validation rules
 │   │   ├── health.rs        # Health check endpoints (/health, /ready)
@@ -57,12 +57,15 @@ rwire/
 │   │       ├── css.rs       # CSS custom property generation
 │   │       ├── palette.rs   # Color palettes, ColorScale, hex→oklch conversion
 │   │       └── primitives.rs # Raw values (spacing, radius, typography, shadows)
+│   ├── rwire-editor/        # FileEditor kit: stateful explorer+editor (autosave, managed ops, guarded saves)
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
-│   ├── rwire-components/    # UI component library (50 components)
+│   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
 │   ├── rwire-themes/        # Predefined styles and palettes
 │   └── empire-lib/          # Empire game rules; `EmpireGame` derives rwire::State
+├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
+│   ├── llama-modnitor/      # LLM launcher + hardware monitor (real-world app; runtime data gitignored)
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
 │   ├── rwire-design-system/ # Component showcase
@@ -70,6 +73,8 @@ rwire/
 │   ├── empire/              # Empire — terminal (ANSI) front-end
 │   └── empire-web/          # Empire — multiplayer web app (shared state + identity pattern)
 └── examples/
+    ├── chat/                # Multi-tab chatroom: shared state + Chat family (E2E: runtime/e2e/chat.mjs)
+    ├── editor/              # File explorer + editor: FsSnapshot sandbox, dirty diff, gated save (E2E: runtime/e2e/editor.mjs)
     ├── counter/             # Simple counter app
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef dynamic binding
@@ -90,13 +95,19 @@ Single-byte opcodes followed by arguments. Strings are interned in a symbol tabl
 | SET_TEXT | 0x11 | `[ref, sym]` | Set textContent |
 | SET_ATTR | 0x12 | `[ref, attr, val]` | setAttribute |
 | SET_DATA | 0x14 | `[ref, key, val]` | dataset[key]=val |
+| SET_KEY | 0x16 | `[ref, key]` | Morph key (`__k`) for keyed list reordering |
 | APPEND | 0x20 | `[parent, child]` | appendChild |
 | BIND_LOCAL | 0x30 | `[ref, ev, handler]` | addEventListener (local) |
 | BIND_REMOTE | 0x31 | `[ref, ev, handler]` | Server round-trip event |
 | BIND_DEBOUNCED | 0x33 | `[ref, ev, handler, ms_hi, ms_lo]` | Debounced event |
 | BIND_REMOTE_PARAM | 0x34 | `[ref, ev, handler, len, params...]` | Event with item params |
+| BIND_SENTINEL | 0x4F | `[ref, handler, len, params...]` | One-shot visibility sentinel (infinite scroll) |
+| BIND_RESIZE | 0x50 | `[ref]` | Pointer-drag handle resizing the previous sibling |
+| LIVE_SOURCE | 0x51 | `[ref, channel]` | Input pushes its value to a live channel (client-side) |
+| LIVE_BIND | 0x52 | `[ref, channel, kind, args...]` | Element follows a live channel (text, fill, lookup, sum…) |
 | STYLE_DEF | 0x87 | `[count, (rule_len, rule)...]` | Lazy CSS rule delivery |
 | MAP_DEF | 0x88 | `[count, (kind, code, len, name)...]` | Lazy name-map delivery |
+| MOD_DEF | 0x8B | `[count, (len, name)...]` | Lazy runtime-extension hint (`/_rw/ext/{name}.js`) |
 | BATCH_END | 0xFF | | End of message |
 
 Symbol indices: 0x00-0x7F reserved (e.g., 0x04="id"), 0x80-0xFF session-specific.
@@ -107,29 +118,31 @@ connection references each, deduped per connection (`ConnectionState.sent_maps` 
 
 ## Key Patterns
 
-### Adding a New Element Type
+### Adding a New Element or Event Type
 
-1. Add constant in `protocol/opcodes.rs`:
-   ```rust
-   pub const EL_TEXTAREA: u8 = 0x08;
-   ```
-2. Add variant to `El` enum and `as_u8()` match
-3. Add to `ELEMENT_MAPPINGS` in `capsule_gen.rs`:
-   ```rust
-   (8, "textarea"),
-   ```
+One edit: add the variant to the `El` (or `Ev`) enum in `protocol/opcodes.rs`:
 
-### Adding a New Event Type
+```rust
+Details = 0x32 => "details",
+```
 
-1. Add constant in `protocol/opcodes.rs`:
-   ```rust
-   pub const EV_SCROLL: u8 = 0x0D;
-   ```
-2. Add variant to `Ev` enum and `as_u8()` match
-3. Add to `EVENT_MAPPINGS` in `capsule_gen.rs`:
-   ```rust
-   (13, "scroll"),
-   ```
+`define_token_enum!` generates the mappings; the browser learns the name lazily
+over the wire (`MAP_DEF`). No JS or capsule changes needed.
+
+### Changing the JS Runtime
+
+The runtime is TypeScript at `runtime/` (see `runtime/README.md`); the capsule
+embeds the built artifact `libs/rwire/assets/runtime.min.js` via `include_str!`.
+
+```bash
+cd runtime
+npm test        # build + unit tests (every opcode branch) + size budget
+npm run sync    # the ONLY write path for libs/rwire/assets/runtime.min.js
+```
+
+Commit source and artifact together. `cargo test --test wire_roundtrip` drives
+the vendored artifact through Rust-encoded fixtures (needs node; skips without).
+Manual full-stack check: `cargo run -p counter` + `node runtime/e2e/counter.mjs`.
 
 ### Creating Components
 
@@ -354,7 +367,7 @@ el(El::Div).st([St::BgApp, St::Px4, St::Py2])
 
 ### Adding a New Style Token
 
-1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x343`+)
+1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x390`+)
 2. Add CSS mapping to `St::css()` method
 3. Add `(u16_code, "css")` to `UTIL_MAPPINGS` const
 
@@ -379,6 +392,9 @@ cargo test --workspace
 
 # Format code (if rustfmt is configured)
 cargo fmt --all
+
+# After breaking framework changes: the out-of-tree consumer must still build
+[ -d ../claw-rwire ] && cargo check --manifest-path ../claw-rwire/Cargo.toml
 ```
 
 **Goal: Zero warnings.** All clippy warnings should be fixed, not suppressed.
@@ -422,8 +438,14 @@ Don't refactor:
 ### Deprecation Process
 
 - We are in an experimental phase; breaking changes are allowed.
-- The only consumers are internal examples. Do breaking changes, then update examples using compiler errors as guidance.
-- No need for formal deprecation warnings or versioning.
+- Consumers: the in-workspace apps/examples (covered by `cargo test --workspace`,
+  including `apps/llama-modnitor`) and the out-of-tree **`../claw-rwire`** (personal
+  assistant app; other agents commit rwire changes from there). Do breaking changes,
+  then fix consumers using compiler errors as guidance — and run the claw-rwire
+  smoke-check from "Before Committing" so it doesn't rot silently.
+- Versioning: 0.x semver discipline once published — breaking changes bump the
+  minor and get a CHANGELOG.md entry; the wire protocol is explicitly unstable
+  (no compat matrix: the runtime ships from the same binary).
 
 ### Test Coverage
 

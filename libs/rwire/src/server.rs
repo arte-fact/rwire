@@ -631,6 +631,7 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
 pub struct ServerBuilder {
     addr: SocketAddr,
     persist_interval: Duration,
+    base_path: Option<String>,
 }
 
 /// Server with root element configured, ready to run.
@@ -640,6 +641,7 @@ pub struct ServerWithRoot<F> {
     root: F,
     shared: Option<Arc<SharedServerState>>,
     capsule_config: Option<CapsuleConfig>,
+    base_path: Option<String>,
     route_handler: Option<HandlerFn>,
     router: Option<crate::router::Router>,
     theme_provider: Option<ThemeProvider>,
@@ -653,6 +655,7 @@ impl Server {
         Ok(ServerBuilder {
             addr: addr.parse()?,
             persist_interval: Duration::from_millis(100),
+            base_path: None,
         })
     }
 }
@@ -664,6 +667,15 @@ impl ServerBuilder {
     /// Configure persist interval (default 100ms).
     pub fn persist_interval(mut self, interval: Duration) -> Self {
         self.persist_interval = interval;
+        self
+    }
+
+    /// Mount the whole app under a URL prefix (e.g. `/preview/<id>`), set right alongside the bind
+    /// address so a deployment reads both from its environment in one place. Applied to the capsule
+    /// last (at [`run`](ServerWithRoot::run)), so it survives a later `.capsule_config(...)`; an
+    /// empty prefix is a no-op. See [`CapsuleConfig::base_path`](crate::CapsuleConfig::base_path).
+    pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
+        self.base_path = Some(prefix.into());
         self
     }
 
@@ -682,12 +694,30 @@ impl ServerBuilder {
             root: f,
             shared: None,
             capsule_config: None,
+            base_path: self.base_path,
             route_handler: None,
             router: None,
             theme_provider: None,
             auth: None,
             config: ServerConfig::default(),
         }
+    }
+}
+
+/// Fold a builder-level `base_path` into the capsule config as the final step before capsule
+/// generation. Applied last so it wins regardless of where `.base_path(...)` sat relative to
+/// `.capsule_config(...)`; an empty/`"/"`-only prefix is dropped (a true no-op that leaves the
+/// basic capsule intact), and a base with no prior config forces a default styled capsule so the
+/// `const BASE` line is still emitted.
+fn apply_base_path(
+    config: Option<CapsuleConfig>,
+    base_path: Option<String>,
+) -> Option<CapsuleConfig> {
+    let base_path = base_path.filter(|prefix| !prefix.trim().trim_end_matches('/').is_empty());
+    match (config, base_path) {
+        (Some(config), Some(base)) => Some(config.base_path(base)),
+        (None, Some(base)) => Some(CapsuleConfig::default().base_path(base)),
+        (config, None) => config,
     }
 }
 
@@ -746,6 +776,16 @@ where
     /// The capsule will include tree-shaken CSS for only the components used.
     pub fn capsule_config(mut self, config: CapsuleConfig) -> Self {
         self.capsule_config = Some(config);
+        self
+    }
+
+    /// Mount the whole app under a URL prefix (e.g. `/preview/<id>`) — see
+    /// [`CapsuleConfig::base_path`](crate::CapsuleConfig::base_path). Reachable behind a same-origin
+    /// reverse proxy (which strips the prefix) with no server-side path changes. Applied to the
+    /// capsule **last** at [`run`](Self::run), so chain order doesn't matter — setting it before or
+    /// after `.capsule_config(...)` both work, and it can't be silently clobbered. Empty = no-op.
+    pub fn base_path(mut self, prefix: impl Into<String>) -> Self {
+        self.base_path = Some(prefix.into());
         self
     }
 
@@ -904,9 +944,13 @@ where
         // Resolve initial theme if provider is set
         let initial_theme = self.theme_provider.as_ref().map(|p| p.init());
 
+        // Fold a builder-level base_path into the capsule config as the final step, so it wins
+        // regardless of chain order and works with or without a prior `.capsule_config(...)`.
+        let capsule_config = apply_base_path(self.capsule_config, self.base_path);
+
         // Generate capsule - styled if config provided, basic otherwise.
         // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
-        let (capsule, pwa_assets) = if let Some(config) = self.capsule_config {
+        let (capsule, pwa_assets) = if let Some(config) = capsule_config {
             // If theme provider is set, override config theme with initial theme
             let config = if let Some(ref theme) = initial_theme {
                 config.theme(theme.clone())
@@ -917,14 +961,27 @@ where
             // The capsule's static CSS only needs composite classes + globals;
             // utility/pseudo/breakpoint rules (.u/.h/.b) are delivered lazily over
             // the wire (STYLE_DEF), and the small u8 enum maps are shipped whole.
-            // So only the composite table and client-action flag feed the config.
+            // So only the composite table feeds the config (client actions ride inside the bundle).
             let composite_css = ctx.composite_table().generate_css();
-            let config = config
-                .has_client_actions(ctx.has_client_actions())
-                .with_composite_css(composite_css);
+            let mut config = config.with_composite_css(composite_css);
+
+            // Static first paint (SSR): render the root at default state into
+            // the capsule, and inline exactly the utility CSS its classes
+            // reference (they'd otherwise arrive lazily, after first paint).
+            let mut ssr_css = String::new();
+            if config.ssr {
+                config.ssr_html = root_element.to_static_html();
+                for key in root_element.static_style_rules() {
+                    if let Some(rule) = key.to_css_rule() {
+                        ssr_css.push_str(&rule);
+                        ssr_css.push('\n');
+                    }
+                }
+            }
 
             // Generate CSS and embed in capsule HTML <style> tag.
-            let css = capsule_gen::generate_capsule_css(&config);
+            let mut css = capsule_gen::generate_capsule_css(&config);
+            css.push_str(&ssr_css);
             let capsule = capsule_gen::generate_styled_capsule(&config, &css);
 
             // PWA: version the service-worker cache by the capsule's hash so a new
@@ -1200,12 +1257,112 @@ fn request_line(request: &str) -> (&str, &str) {
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
+/// Proxy a matched request to a local upstream port (P2), streaming both directions until either
+/// side closes. `head` is the client's already-drained request head; its first line is rewritten to
+/// strip `prefix` so the upstream sees a root-relative path. A WebSocket upgrade needs no special
+/// handling — once the head is forwarded, frames are just bytes the pump copies each way.
+async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &str) {
+    let mut upstream = match TcpStream::connect(("127.0.0.1", port)).await {
+        Ok(upstream) => upstream,
+        Err(_) => {
+            let _ = crate::health::serve_unavailable(stream, "preview_unreachable").await;
+            return;
+        }
+    };
+    let rewritten = rewrite_proxy_head(&head, prefix);
+    if upstream.write_all(&rewritten).await.is_err() {
+        return;
+    }
+    let _ = upstream.flush().await;
+
+    // Pump both directions concurrently; the first to reach EOF (upstream closing after an HTTP
+    // response, or either side closing a WebSocket) ends the exchange. The inner scope drops both
+    // copy futures — releasing their borrows on `stream` — before the final flush.
+    {
+        let mut client_read = stream.clone();
+        let mut upstream_write = upstream.clone();
+        let to_upstream = futures::io::copy(&mut client_read, &mut upstream_write);
+        let to_client = futures::io::copy(&mut upstream, &mut stream);
+        futures::pin_mut!(to_upstream, to_client);
+        let _ = futures::future::select(to_upstream, to_client).await;
+    }
+    let _ = stream.flush().await;
+}
+
+/// Rewrite a proxied request's first line to strip the `prefix` path segment, so the upstream app
+/// sees a root-relative path (`/preview/<id>/foo` → `/foo`; the bare prefix → `/`). All other bytes
+/// (headers, any body already read) are preserved verbatim; a malformed head is passed through.
+fn rewrite_proxy_head(head: &[u8], prefix: &str) -> Vec<u8> {
+    let Some(eol) = head.windows(2).position(|w| w == b"\r\n") else {
+        return head.to_vec();
+    };
+    let line = String::from_utf8_lossy(&head[..eol]);
+    let mut parts = line.splitn(3, ' ');
+    let (Some(method), Some(path), Some(version)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return head.to_vec();
+    };
+    let stripped = path.strip_prefix(prefix).unwrap_or(path);
+    let new_path = if stripped.is_empty() { "/" } else { stripped };
+    let mut out = format!("{method} {new_path} {version}").into_bytes();
+    out.extend_from_slice(&head[eol..]);
+    out
+}
+
 /// Return the body that follows the header terminator, if present.
 fn request_body(request: &str) -> &str {
     request.split_once("\r\n\r\n").map_or("", |(_, body)| body)
 }
 
 /// Extract Cookie header value from HTTP request.
+/// Case-insensitive single-header lookup in a raw request head.
+fn header_value(request: &str, name: &str) -> Option<String> {
+    for line in request.lines().skip(1) {
+        if let Some((n, v)) = line.split_once(':') {
+            if n.trim().eq_ignore_ascii_case(name) {
+                return Some(v.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Host[:port] equality with default ports (80/443) stripped, case-insensitive.
+fn host_eq(a: &str, b: &str) -> bool {
+    let norm = |h: &str| {
+        let h = h.trim().to_ascii_lowercase();
+        h.trim_end_matches(":443")
+            .trim_end_matches(":80")
+            .to_string()
+    };
+    !a.trim().is_empty() && norm(a) == norm(b)
+}
+
+/// Whether a WebSocket handshake's `Origin` may connect (T2, CSWSH defense).
+///
+/// Same-origin (the Origin's host[:port] matching the request `Host`) always
+/// passes; anything else must be in `allowed` (full origin strings). Requests
+/// WITHOUT an Origin header are not routed here — non-browser clients don't
+/// send one, and browsers always do.
+fn origin_allowed(origin: &str, host: Option<&str>, allowed: &[String]) -> bool {
+    let origin = origin.trim().trim_end_matches('/');
+    if allowed
+        .iter()
+        .any(|a| a.trim_end_matches('/').eq_ignore_ascii_case(origin))
+    {
+        return true;
+    }
+    let origin_lc = origin.to_ascii_lowercase();
+    let origin_host = origin_lc
+        .strip_prefix("https://")
+        .or_else(|| origin_lc.strip_prefix("http://"))
+        .unwrap_or("");
+    match host {
+        Some(h) => host_eq(origin_host, h),
+        None => false,
+    }
+}
+
 fn extract_cookie_from_request(request: &str) -> Option<String> {
     for line in request.lines() {
         if line.len() >= 7 && line[..7].eq_ignore_ascii_case("cookie:") {
@@ -1248,6 +1405,21 @@ fn login_capsule_config(
     config.with_composite_css(composite_table.generate_css())
 }
 
+/// Vendored lazy runtime extensions, served at `/_rw/ext/{name}.js` and
+/// dynamic-imported by the core loader on a MOD_DEF hint. Same single-binary
+/// vendoring as the core runtime artifact; `npm run sync` is the write path.
+const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
+
+async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_client<F>(
     mut stream: TcpStream,
@@ -1283,6 +1455,14 @@ async fn handle_client<F>(
     // while the server is at capacity.
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
+        if path.split('?').next() == Some("/_rw/ext/vim.js") {
+            let mut drain = vec![0u8; n];
+            let _ = stream.read_exact(&mut drain).await;
+            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
+                eprintln!("[{}] ext module error: {}", peer_addr, e);
+            }
+            return;
+        }
         if path == "/health" || path == "/ready" || path == "/metrics" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
@@ -1385,6 +1565,19 @@ async fn handle_client<F>(
         // Valid session: fall through to normal capsule/WebSocket handling.
     }
 
+    // Reverse-proxy gate (after auth, so previews inherit the gate): a matched path forwards to a
+    // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw bytes.
+    if let Some(resolver) = config.proxy.as_ref() {
+        let (_, path) = request_line(&peek_str);
+        if let Some((port, prefix)) = resolver.resolve(path) {
+            let mut head = vec![0u8; n];
+            if stream.read_exact(&mut head).await.is_ok() {
+                serve_proxy(stream, head, port, &prefix).await;
+            }
+            return;
+        }
+    }
+
     // Extract the session ID from the cookie, but only trust it if it has the
     // exact format we mint (32 hex chars). A missing, malformed, or crafted value
     // (e.g. one containing `:` to confuse the persisted-state cache key, or an
@@ -1406,6 +1599,21 @@ async fn handle_client<F>(
 
     // Check if this is a WebSocket upgrade request
     if capsule::is_websocket_upgrade(&peek_str) {
+        // Origin gate (CSWSH defense): a browser handshake carries an Origin
+        // header; reject it unless same-origin with the request Host or in the
+        // configured allowlist. Origin-less (non-browser) handshakes pass.
+        if let Some(origin) = header_value(&peek_str, "origin") {
+            let host = header_value(&peek_str, "host");
+            if !origin_allowed(&origin, host.as_deref(), &config.allowed_origins) {
+                println!(
+                    "[{}] WebSocket rejected: cross_origin ({})",
+                    peer_addr, origin
+                );
+                metrics.connections_rejected.inc();
+                let _ = crate::health::serve_forbidden(stream, "cross_origin").await;
+                return;
+            }
+        }
         // Admission control: enforce total and per-IP connection caps before
         // spawning the (long-lived, stateful) WebSocket session. Rejected clients
         // get a 503 instead of an upgrade.
@@ -1785,6 +1993,12 @@ impl ConnectionState {
                 .entry(r.state_type_id())
                 .or_insert_with(|| r.create_default_state());
         }
+
+        // Drop the render-hash dedup cache across a view swap: hashes exist only to skip
+        // re-sending unchanged content, and after a swap the client's DOM for any reused
+        // region id is not guaranteed to match what the hash claims was last sent (a lost
+        // or partially-applied update would otherwise be pinned stale forever).
+        self.synced_hashes.clear();
 
         // Prune the previous view's regions (every synced region descended from a
         // CurrentRoute region) so the new view's regions render fresh, not against
@@ -2269,7 +2483,8 @@ where
 
                     if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned() {
                         // Create EventContext from payload and param_bytes
-                        let ctx = EventContext::new_with_params(event.payload, event.param_bytes);
+                        let ctx = EventContext::new_with_params(event.payload, event.param_bytes)
+                            .with_session(conn_state.session_id.clone());
                         let state_type_id = handler.state_type_id();
 
                         // Execute the handler against its state (shared cache or memory)
@@ -2378,13 +2593,35 @@ where
 
 #[cfg(test)]
 mod auth_tests {
-    use super::{request_body, request_line, url_decode, AuthGate};
+    use super::{request_body, request_line, rewrite_proxy_head, url_decode, AuthGate};
 
     #[test]
     fn url_decode_handles_plus_and_percent() {
         assert_eq!(url_decode("hello"), "hello");
         assert_eq!(url_decode("a+b"), "a b");
         assert_eq!(url_decode("p%40ss%2Fword"), "p@ss/word");
+    }
+
+    #[test]
+    fn proxy_head_strips_the_prefix_and_preserves_the_rest() {
+        let head = b"GET /preview/ws-abc/dash?x=1 HTTP/1.1\r\nHost: h\r\n\r\n";
+        let out = rewrite_proxy_head(head, "/preview/ws-abc");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "GET /dash?x=1 HTTP/1.1\r\nHost: h\r\n\r\n"
+        );
+        // The bare mount point becomes root.
+        let bare = b"GET /preview/ws-abc HTTP/1.1\r\n\r\n";
+        assert!(
+            String::from_utf8(rewrite_proxy_head(bare, "/preview/ws-abc"))
+                .unwrap()
+                .starts_with("GET / HTTP/1.1")
+        );
+        // A WebSocket upgrade line is rewritten the same way (headers untouched → still upgrades).
+        let ws = b"GET /preview/ws-abc/ HTTP/1.1\r\nUpgrade: websocket\r\n\r\n";
+        let got = String::from_utf8(rewrite_proxy_head(ws, "/preview/ws-abc")).unwrap();
+        assert!(got.starts_with("GET / HTTP/1.1"));
+        assert!(got.contains("Upgrade: websocket"));
     }
 
     #[test]
@@ -2421,6 +2658,65 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_base_path_folds_a_prefix_and_drops_empty() {
+        // A prefix with no prior config forces a default (styled) capsule carrying the base.
+        assert_eq!(
+            apply_base_path(None, Some("/preview/x".to_owned()))
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+        // A prefix merges into an existing config.
+        assert_eq!(
+            apply_base_path(Some(CapsuleConfig::new()), Some("/preview/x".to_owned()))
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+        // Empty / "/"-only / whitespace prefixes are a no-op — no config is conjured.
+        assert!(apply_base_path(None, Some(String::new())).is_none());
+        assert!(apply_base_path(None, Some("/".to_owned())).is_none());
+        assert!(apply_base_path(None, Some("   ".to_owned())).is_none());
+        // No prefix leaves the config untouched (present or absent).
+        assert!(apply_base_path(None, None).is_none());
+        assert!(apply_base_path(Some(CapsuleConfig::new()), None).is_some());
+    }
+
+    #[test]
+    fn base_path_is_order_independent_on_the_builder() {
+        use crate::builder::el;
+        use crate::protocol::El;
+
+        // Set base_path BEFORE .root()/.capsule_config() — via ServerBuilder::base_path (alongside
+        // bind). The base rides through as its own field, untouched by the later capsule_config.
+        let before = Server::bind("127.0.0.1:0")
+            .unwrap()
+            .base_path("/preview/x")
+            .root(|| el(El::Div))
+            .capsule_config(CapsuleConfig::new());
+        assert_eq!(
+            apply_base_path(before.capsule_config, before.base_path)
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+
+        // Set base_path AFTER .capsule_config() — via ServerWithRoot::base_path. This is the order
+        // the old immediate-merge silently clobbered; now both land the same prefix.
+        let after = Server::bind("127.0.0.1:0")
+            .unwrap()
+            .root(|| el(El::Div))
+            .capsule_config(CapsuleConfig::new())
+            .base_path("/preview/x");
+        assert_eq!(
+            apply_base_path(after.capsule_config, after.base_path)
+                .unwrap()
+                .base_path,
+            "/preview/x"
+        );
+    }
 
     #[test]
     fn session_cache_is_bounded() {
@@ -2781,6 +3077,73 @@ mod tests {
         ));
         assert!(!super::forwarded_https(
             "GET / HTTP/1.1\r\nX-Forwarded-Proto: http\r\n\r\n"
+        ));
+    }
+
+    #[test]
+    fn origin_gate_same_origin_passes() {
+        assert!(origin_allowed(
+            "http://localhost:9000",
+            Some("localhost:9000"),
+            &[]
+        ));
+        assert!(origin_allowed(
+            "https://app.example.com",
+            Some("app.example.com"),
+            &[]
+        ));
+        // default ports normalize
+        assert!(origin_allowed(
+            "https://app.example.com",
+            Some("app.example.com:443"),
+            &[]
+        ));
+        assert!(origin_allowed(
+            "HTTP://LOCALHOST:9000",
+            Some("localhost:9000"),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn origin_gate_cross_origin_rejected() {
+        assert!(!origin_allowed(
+            "http://evil.example",
+            Some("localhost:9000"),
+            &[]
+        ));
+        // same host, different explicit port = different origin
+        assert!(!origin_allowed(
+            "http://localhost:3000",
+            Some("localhost:9000"),
+            &[]
+        ));
+        assert!(!origin_allowed("null", Some("localhost:9000"), &[]));
+        assert!(!origin_allowed(
+            "chrome-extension://abc",
+            Some("localhost:9000"),
+            &[]
+        ));
+        assert!(!origin_allowed("http://localhost:9000", None, &[]));
+    }
+
+    #[test]
+    fn origin_gate_allowlist_passes_cross_origin() {
+        let allowed = vec!["https://embed.example.com".to_string()];
+        assert!(origin_allowed(
+            "https://embed.example.com",
+            Some("api.other.com"),
+            &allowed
+        ));
+        assert!(origin_allowed(
+            "https://embed.example.com/",
+            Some("api.other.com"),
+            &allowed
+        ));
+        assert!(!origin_allowed(
+            "https://evil.example.com",
+            Some("api.other.com"),
+            &allowed
         ));
     }
 

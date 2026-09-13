@@ -1,5 +1,10 @@
 # rwire — Comparative Study
 
+> **Note (2026-07-06):** internal study; some figures predate lazy delivery
+> (the runtime is ~13KB now, not 1.5KB — the capsule no longer inlines
+> tree-shaken names at build time). The public, current version is
+> `apps/rwire-docs/docs/05-advanced/comparison.md`.
+
 A technical comparison of rwire against similar server-driven and Rust-based UI frameworks, analyzing architecture, performance, bandwidth efficiency, developer experience, and environmental impact.
 
 ## Executive Summary

@@ -3,18 +3,22 @@ members = [
     "libs/rwire",
     "libs/rwire-macros",
     "libs/rwire-components",
+    "libs/rwire-editor",
     "libs/rwire-markdown",
     "libs/rwire-themes",
     "libs/empire-lib",
     "libs/empire-gpu",
     "apps/rwire-website",
+    "apps/llama-modnitor",
     "apps/rwire-docs",
     "apps/rwire-design-system",
     "apps/rwire-examples",
     "apps/empire",
     "apps/empire-web",
     "apps/empire-train",
+    "examples/chat",
     "examples/counter",
+    "examples/editor",
     "examples/todolist",
     "examples/todo-combined",
     "examples/fine-grained",
@@ -23,5 +27,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/arte-fact/rwire"
 [profile.release]
 debug = "line-tables-only"

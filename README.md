@@ -24,7 +24,26 @@ Traditional web frameworks ship large JavaScript bundles to the browser. rwire i
 - **No client-side state management**: All state lives on the server
 - **Rust everywhere**: Write UI logic in Rust with full type safety
 - **Binary protocol**: Compact opcodes minimize bandwidth
-- **Reactive updates**: Only changed elements re-render
+- **Reactive updates**: Only changed elements re-render; keyed diffing preserves input state across reorders
+
+## Status & scope
+
+rwire is **experimental (0.x)**: breaking changes are normal (semver-minor,
+changelogged) and the wire protocol is deliberately unstable — the runtime
+ships from the same binary, so there is never a compatibility matrix.
+
+It is built for **self-hosted software, dashboards, internal tools, and
+personal apps** — anywhere the server is close and the audience is bounded.
+Know the trade-offs before the features: every non-cosmetic interaction is a
+WebSocket round-trip, server memory scales with open connections (single
+process, no horizontal-scaling story yet — partition, don't pool), and the
+static first paint (`ssr(true)`) shows default-state content until the
+socket connects. If those hurt your use case, a different
+architecture will serve you better; see
+[How rwire Compares](apps/rwire-docs/docs/05-advanced/comparison.md) for an
+honest look at the design space, and
+[Scaling & Deployment Model](apps/rwire-docs/docs/05-advanced/scaling.md) for
+what one process gives you and how to deploy behind a proxy.
 
 ## Quick Start
 
@@ -200,7 +219,7 @@ fn toggle_mode(theme: &mut Theme) {
 
 ### Component Library
 
-`rwire-components` provides 52 prebuilt components (buttons, cards, modals, navigation, forms, …), all built from `St` tokens.
+`rwire-components` provides 55 prebuilt components (buttons, cards, modals, navigation, forms, chat — `Composer`/`ChatScroll` — status — `Chip`/`Badge`/`StatusDot` — …), all built from `St` tokens.
 
 ## Project Structure
 
@@ -210,7 +229,7 @@ rwire/
 │   ├── rwire/               # Core framework: builder, protocol, state, router,
 │   │                        #   store, theme, style_tokens, attr_tokens, tokens/
 │   ├── rwire-macros/        # Proc macros: #[handler], #[renderer], #[derive(State)], #[theme]
-│   ├── rwire-components/    # UI component library (50 components)
+│   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-themes/        # Predefined palettes + style presets
 │   └── rwire-markdown/      # Markdown rendering for docs
 ├── apps/
@@ -219,6 +238,8 @@ rwire/
 │   ├── rwire-design-system/ # Component catalog / showcase
 │   └── rwire-examples/      # Examples gallery
 └── examples/
+    ├── chat/                # Multi-tab chatroom on shared state (ChatItem + broadcast)
+    ├── editor/              # File explorer + view/edit: dirty marks, gated save, resizable split
     ├── counter/             # Simple counter
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef + JSON file persistence
@@ -272,18 +293,29 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Multi-state support (memory, persisted)
 - [x] ItemRef for dynamic list binding
 - [x] Style token system + reactive theming (palettes, dark/light, style presets)
-- [x] Component library (50 components)
+- [x] Component library (55 components)
+- [x] Keyed children (`.key()` — list reorders move nodes, preserving input/focus state)
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics
+- [x] Static first paint (SSR-lite: default-state HTML + its CSS in the capsule)
 
 ### Planned
-- [ ] Keyed children (virtual DOM-like diffing)
 - [ ] Event delegation for large lists
 - [ ] Database persistence adapters
 - [ ] Authentication middleware
-- [ ] SSR support
 
 ## License
 
-MIT
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.

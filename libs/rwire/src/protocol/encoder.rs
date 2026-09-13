@@ -7,14 +7,14 @@ use bytes::{BufMut, BytesMut};
 
 use super::opcodes::{
     APPEND, AUTO_TOGGLE, BATCH_END, BIND_DEBOUNCED, BIND_LOCAL, BIND_REMOTE, BIND_REMOTE_PARAM,
-    BIND_SELECT, BIND_SELECTOR, BIND_TARGET, BIND_TIMED_TOGGLE, BIND_TOGGLE, CLEAR_CHILDREN,
-    COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR, FORM_SET_REQUIRED,
-    FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR, INIT_TARGET,
-    LIVE_BIND, LIVE_GROUPED, LIVE_RANGE, LIVE_REMAINDER, LIVE_SIGNED, LIVE_SOURCE, ROUTE_PUSH,
-    ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL, SET_ATTR_ENUM,
-    SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_TEXT, SET_TEXT_INT, SET_TEXT_WORDS,
-    STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO, STYLE_SET,
-    STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
+    BIND_RESIZE, BIND_SELECT, BIND_SELECTOR, BIND_SENTINEL, BIND_TARGET, BIND_TIMED_TOGGLE,
+    BIND_TOGGLE, CLEAR_CHILDREN, COMPOSITE_TABLE, CREATE, CREATE_SYNCED, FORM_CLEAR_ERROR,
+    FORM_SET_REQUIRED, FORM_SET_VALIDATION, FORM_SHOW_ERROR, GET_BY_ID, GET_SYNCED, INIT_SELECTOR,
+    INIT_TARGET, LIVE_BIND, LIVE_GROUPED, LIVE_RANGE, LIVE_REMAINDER, LIVE_SIGNED, LIVE_SOURCE,
+    ROUTE_PUSH, ROUTE_PUSH_INLINE, ROUTE_REPLACE, ROUTE_REPLACE_INLINE, SET_ATTR, SET_ATTR_BOOL,
+    SET_ATTR_ENUM, SET_ATTR_KEY_SYM, SET_CLASS, SET_DATA, SET_KEY, SET_TEXT, SET_TEXT_INT,
+    SET_TEXT_WORDS, STYLE_BREAKPOINT, STYLE_COMPOSITE, STYLE_MULTI, STYLE_PROP, STYLE_PSEUDO,
+    STYLE_SET, STYLE_UTIL, SYMBOLS, SYMBOLS_EXTEND, SYMBOL_SESSION_START, WORD_TABLE,
 };
 use super::varint::write_varint;
 use crate::builder::{LiveBind, LiveOutput, LiveSource, LiveSum};
@@ -48,6 +48,7 @@ pub struct OpcodeBuffer {
     /// `(category, code)` name-map entries referenced by this buffer, for lazy
     /// name delivery (`MAP_DEF`) — the element/event/attr/style-token names.
     referenced_names: BTreeSet<(u8, u8)>,
+    referenced_exts: BTreeSet<&'static str>,
 }
 
 impl OpcodeBuffer {
@@ -58,6 +59,7 @@ impl OpcodeBuffer {
             next_symbol: SYMBOL_SESSION_START as u32,
             referenced_styles: BTreeSet::new(),
             referenced_names: BTreeSet::new(),
+            referenced_exts: BTreeSet::new(),
         }
     }
 
@@ -69,6 +71,16 @@ impl OpcodeBuffer {
     /// The set of `(category, code)` name-map entries referenced so far (for `MAP_DEF`).
     pub fn referenced_names(&self) -> &BTreeSet<(u8, u8)> {
         &self.referenced_names
+    }
+
+    /// Lazy runtime-extension modules referenced by this message (MOD_DEF).
+    pub fn referenced_exts(&self) -> &BTreeSet<&'static str> {
+        &self.referenced_exts
+    }
+
+    /// Record that an element in this message needs the named extension.
+    pub fn ref_ext(&mut self, name: &'static str) {
+        self.referenced_exts.insert(name);
     }
 
     /// Get the current ref count.
@@ -329,6 +341,48 @@ impl OpcodeBuffer {
         self.buf.put_u8(param_bytes.len() as u8);
         self.buf.put_slice(param_bytes);
         self.referenced_names.insert((NAME_EVENT, event_type));
+        self
+    }
+
+    /// Bind a one-shot visibility sentinel (see [`BIND_SENTINEL`]).
+    ///
+    /// No event-type byte: the event is always `Ev::Visible`, implied by the
+    /// opcode. The param bytes come back with the fired event (chunk index),
+    /// and changing them re-keys the binding so morphs replace the node.
+    ///
+    /// Format: [BIND_SENTINEL, ref_varint, handler_varint, param_len, ...param_bytes]
+    pub fn bind_sentinel(
+        &mut self,
+        ref_idx: u32,
+        handler_idx: u32,
+        param_bytes: &[u8],
+    ) -> &mut Self {
+        assert!(
+            param_bytes.len() <= 255,
+            "bind_sentinel: param_bytes too large ({} bytes, max 255)",
+            param_bytes.len()
+        );
+        self.buf.put_u8(BIND_SENTINEL);
+        write_varint(&mut self.buf, ref_idx);
+        write_varint(&mut self.buf, handler_idx);
+        self.buf.put_u8(param_bytes.len() as u8);
+        self.buf.put_slice(param_bytes);
+        self
+    }
+
+    /// Bind a horizontal resize handle (resizes the previous element sibling).
+    /// Format: [BIND_RESIZE, ref_varint]
+    pub fn bind_resize(&mut self, ref_idx: u32) -> &mut Self {
+        self.buf.put_u8(BIND_RESIZE);
+        write_varint(&mut self.buf, ref_idx);
+        self
+    }
+
+    /// Set a morph key (`__k`) on an element. Format: [SET_KEY, ref_varint, key_varint]
+    pub fn set_key(&mut self, ref_idx: u32, key: u32) -> &mut Self {
+        self.buf.put_u8(SET_KEY);
+        write_varint(&mut self.buf, ref_idx);
+        write_varint(&mut self.buf, key);
         self
     }
 

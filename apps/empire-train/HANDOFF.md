@@ -29,6 +29,17 @@ l'instance précédente ; `libs/empire-lib/BRAIN.md` est la référence de fond.
   table-années (× 32 / hidden) pour rester sous le délai du pilote ; une carte
   réinitialisée se voit à `the GPU came back with zeroed tables`.
 - Clippy propre, `cargo fmt --all`, `cargo test --workspace` verts au dernier commit.
+- **`empire-v2` a rejoint `main` de GitHub** (fusion du 13 septembre au soir) : le runtime
+  JavaScript est désormais du TypeScript dans `runtime/` (`npm test`, puis `npm run sync`,
+  seul chemin d'écriture de `libs/rwire/assets/runtime.min.js`, que le capsule inclut à la
+  compilation : **recompiler après un sync**). Les liaisons vives d'Empire y sont portées
+  (`runtime/src/live.ts`, opcodes `LIVE_SOURCE` 0x51 / `LIVE_BIND` 0x52 — renumérotés, 0x4F
+  et 0x50 étant pris par `BIND_SENTINEL` / `BIND_RESIZE`), avec la restauration de `value`
+  au morph, la charge des contrôles enveloppés, l'autoscroll, la route à l'ouverture et la
+  casse des attributs SVG. Les jetons `St` d'Empire ont glissé de 0x347→0x34E … 0x388→0x38F
+  (`H025rem` est celui de `main`, 0x34A) ; `Progress::thin` est devenu
+  `.size(ProgressSize::Sm)`. Vérifications de bout en bout : `runtime/e2e/empire.mjs`
+  (crée une table, lance une partie, bouge chaque curseur vif).
 
 ### 1 bis. La machine `threadreaper` (13 septembre, soir — mise en place)
 

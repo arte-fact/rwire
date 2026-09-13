@@ -333,7 +333,7 @@ const BADGE_TEXT: &[TextProp] = &[TextProp {
     default: "Badge",
 }];
 fn badge_rich(p: &DemoParams) -> ElementBuilder {
-    use crate::{Badge, BadgeIntent};
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
     let intent = match v(p.variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -341,8 +341,18 @@ fn badge_rich(p: &DemoParams) -> ElementBuilder {
         4 => BadgeIntent::Error,
         _ => BadgeIntent::Default,
     };
+    let shape = match v(p.variants, 1) {
+        1 => BadgeShape::Square,
+        _ => BadgeShape::Pill,
+    };
+    let fill = match v(p.variants, 2) {
+        1 => BadgeFill::Outline,
+        _ => BadgeFill::Solid,
+    };
     Badge::new()
         .intent(intent)
+        .shape(shape)
+        .fill(fill)
         .text(p.texts.first().copied().unwrap_or("Badge").to_string())
         .build()
 }
@@ -1901,7 +1911,7 @@ fn text_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 }
 
 fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::{Badge, BadgeIntent};
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
     let intent = match v(variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -1909,7 +1919,319 @@ fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         4 => BadgeIntent::Error,
         _ => BadgeIntent::Default,
     };
-    Badge::new().intent(intent).text("Badge").build()
+    let shape = match v(variants, 1) {
+        1 => BadgeShape::Square,
+        _ => BadgeShape::Pill,
+    };
+    let fill = match v(variants, 2) {
+        1 => BadgeFill::Outline,
+        _ => BadgeFill::Solid,
+    };
+    Badge::new()
+        .intent(intent)
+        .shape(shape)
+        .fill(fill)
+        .text("Badge")
+        .build()
+}
+
+const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "intent",
+    display_name: "Intent",
+    rust_type: "StatusDotIntent",
+    default_index: 1,
+    values: &[
+        VariantValue {
+            label: "Muted",
+            rust_expr: "StatusDotIntent::Muted",
+        },
+        VariantValue {
+            label: "Primary",
+            rust_expr: "StatusDotIntent::Primary",
+        },
+        VariantValue {
+            label: "Success",
+            rust_expr: "StatusDotIntent::Success",
+        },
+        VariantValue {
+            label: "Warning",
+            rust_expr: "StatusDotIntent::Warning",
+        },
+        VariantValue {
+            label: "Error",
+            rust_expr: "StatusDotIntent::Error",
+        },
+    ],
+}];
+
+fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{StatusDot, StatusDotIntent};
+    let intent = match v(variants, 0) {
+        1 => StatusDotIntent::Primary,
+        2 => StatusDotIntent::Success,
+        3 => StatusDotIntent::Warning,
+        4 => StatusDotIntent::Error,
+        _ => StatusDotIntent::Muted,
+    };
+    let mut dot = StatusDot::new().intent(intent).pulse(b(bools, 0));
+    if b(bools, 1) {
+        dot = dot.label("running");
+    }
+    dot.build()
+}
+
+fn composer_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::Composer;
+    let mut composer = Composer::new()
+        .placeholder("Message the team…")
+        .compact(b(bools, 0));
+    if !b(bools, 0) {
+        composer = composer.hint("⏎ send · ⇧⏎ newline");
+    }
+    composer.build()
+}
+
+fn typing_indicator_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::TypingIndicator;
+    let mut t = TypingIndicator::new();
+    if b(bools, 0) {
+        t = t.label("claw is typing…");
+    }
+    t.build()
+}
+
+fn chat_entry_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{ChatAuthor, ChatDetail, ChatEntry, ChatTag};
+    use rwire::St;
+    ChatEntry::new(
+        ChatAuthor::agent("claw"),
+        el(El::P)
+            .st([St::TextSm])
+            .text("Ran the checks — everything is green."),
+    )
+    .key("demo-entry")
+    .time("14:32")
+    .tag(ChatTag::muted("bash"))
+    .detail(ChatDetail::closed(
+        "result · 3 lines",
+        el(El::Pre)
+            .st([St::TextXs, St::BgCode, St::PSm, St::RoundedSm])
+            .text("cargo test --workspace\n743 passed, 0 failed"),
+    ))
+    .grouped(b(bools, 0))
+    .build()
+}
+
+fn chat_transcript_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{ChatAuthor, ChatEntry};
+    use rwire::St;
+    let mut rows = vec![
+        el(El::Div)
+            .st([St::TextCenter, St::TextMuted, St::TextXs])
+            .text("· older messages condensed into memory ·"),
+        ChatEntry::new(
+            ChatAuthor::user("you"),
+            el(El::P).st([St::TextSm]).text("Ship it?"),
+        )
+        .key("d1")
+        .time("14:30")
+        .build(),
+        ChatEntry::new(
+            ChatAuthor::agent("claw"),
+            el(El::P)
+                .st([St::TextSm])
+                .text("Checks are green — shipping."),
+        )
+        .key("d2")
+        .time("14:31")
+        .build(),
+    ];
+    if b(bools, 0) {
+        rows.push(
+            crate::TypingIndicator::new()
+                .label("claw is typing…")
+                .build(),
+        );
+    }
+    el(El::Div)
+        .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0])
+        .append(rows)
+}
+
+fn chat_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Chat, Composer};
+    use rwire::St;
+    let transcript = chat_transcript_demo(&[], bools);
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "20rem"))
+        .st([St::DisplayFlex, St::FlexCol])
+        .append([Chat::new(transcript)
+            .composer(Composer::new().placeholder("Message claw…").build())
+            .build()])
+}
+
+fn tree_view_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{TreeNode, TreeView};
+    use rwire::St;
+    let label = |t: &str| el(El::Span).st([St::TextSm]).text(t);
+    TreeView::new()
+        .roots(vec![
+            TreeNode::branch(
+                "src",
+                label("src"),
+                vec![
+                    TreeNode::leaf("main", label("main.rs")).selected(b(bools, 0)),
+                    TreeNode::leaf("lib", label("lib.rs")),
+                ],
+            )
+            .expanded(true),
+            TreeNode::leaf("readme", label("README.md")),
+        ])
+        .build()
+}
+
+fn file_tree_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{FileTree, FsEntry};
+    let entries = vec![
+        FsEntry {
+            rel: "src".into(),
+            name: "src".into(),
+            is_dir: true,
+            depth: 0,
+        },
+        FsEntry {
+            rel: "src/main.rs".into(),
+            name: "main.rs".into(),
+            is_dir: false,
+            depth: 1,
+        },
+        FsEntry {
+            rel: "README.md".into(),
+            name: "README.md".into(),
+            is_dir: false,
+            depth: 0,
+        },
+    ];
+    FileTree::new(&entries)
+        .selected(b(bools, 0).then_some(1))
+        .expand_all()
+        .build()
+}
+
+fn split_pane_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::SplitPane;
+    use rwire::St;
+    let pane = |t: &str| {
+        el(El::Div)
+            .st([
+                St::BgSurface,
+                St::PMd,
+                St::RoundedMd,
+                St::TextSm,
+                St::TextMuted,
+            ])
+            .text(t)
+    };
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "10rem"))
+        .st([St::DisplayFlex])
+        .append([
+            SplitPane::new(pane("left pane"), pane("drag the divider ⇢"))
+                .initial("10rem")
+                .build(),
+        ])
+}
+
+fn code_editor_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::CodeEditor;
+    let dirty = b(bools, 0);
+    let content = "fn main() {\n    println!(\"hello\");\n}";
+    let flags = [false, dirty, false];
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "12rem"))
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol])
+        .append([CodeEditor::new("demo-editor", content)
+            .dirty_lines(&flags)
+            .build()])
+}
+
+fn document_view_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Chip, DocumentView};
+    use rwire::St;
+    DocumentView::new(
+        "src/main.rs",
+        el(El::P)
+            .st([St::TextSm, St::TextMuted])
+            .text("Rendered document body — markdown, highlighted code, or an editor."),
+    )
+    .action(
+        Chip::new(if b(bools, 0) { "View" } else { "Edit" })
+            .active(b(bools, 0))
+            .build(),
+    )
+    .build()
+}
+
+fn streamed_content_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Spinner, SpinnerSize};
+    // Static rendition of the streamed region: delivered chunks, plus the
+    // sentinel spinner row while more content remains. The live component arms
+    // a one-shot visibility sentinel (BIND_SENTINEL) on that row instead.
+    use rwire::St;
+    let loading = b(bools, 0);
+    let mut root = el(El::Div).st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0]);
+    for i in 0..3 {
+        root = root.append([el(El::Div)
+            .st([St::BgSurface, St::PMd, St::RoundedMd])
+            .append([el(El::P).st([St::TextSm, St::TextMuted]).text(
+                format!(
+                    "Chunk {} — delivered when the sentinel neared the viewport.",
+                    i + 1
+                )
+                .as_str(),
+            )])]);
+    }
+    if loading {
+        root = root.append([el(El::Div)
+            .st([St::DisplayFlex, St::JustifyCenter, St::PMd])
+            .append([Spinner::new().size(SpinnerSize::Sm).build()])]);
+    }
+    root
+}
+
+fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::Chip;
+    el(El::Div)
+        .st([
+            rwire::St::DisplayFlex,
+            rwire::St::GapSm,
+            rwire::St::ItemsCenter,
+        ])
+        .append([
+            Chip::new("All").active(b(bools, 0)).build(),
+            Chip::new("Running").build(),
+            Chip::new("Failed").build(),
+        ])
+}
+
+fn chat_scroll_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::ChatScroll;
+    let entries = (1..=12).map(|n| {
+        el(El::Div)
+            .st([rwire::St::TextSm, rwire::St::PySm])
+            .text(&format!(
+                "message {n} — the newest stays pinned at the bottom"
+            ))
+    });
+    el(El::Div)
+        .style(rwire::style::Style::new().set("height", "10rem"))
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol])
+        .append([ChatScroll::new(
+            el(El::Div)
+                .st([rwire::St::DisplayFlex, rwire::St::FlexCol])
+                .append(entries),
+        )
+        .build()])
 }
 
 fn tag_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
@@ -2106,13 +2428,21 @@ fn spinner_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     Spinner::new().size(size).label("Loading...").build()
 }
 
-fn progress_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::Progress;
-    Progress::new()
-        .value(65)
-        .max(100)
-        .label("Upload progress")
-        .build()
+fn progress_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{Progress, ProgressSize};
+    match v(variants, 0) {
+        1 => Progress::new()
+            .value(3)
+            .max(5)
+            .size(ProgressSize::Sm)
+            .label("3 of 5 tasks done")
+            .build(),
+        _ => Progress::new()
+            .value(65)
+            .max(100)
+            .label("Upload progress")
+            .build(),
+    }
 }
 
 fn skeleton_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
@@ -2820,34 +3150,68 @@ const TEXT_VARIANTS: &[VariantAxis] = &[
     },
 ];
 
-const BADGE_VARIANTS: &[VariantAxis] = &[VariantAxis {
-    name: "intent",
-    display_name: "Intent",
-    rust_type: "BadgeIntent",
-    values: &[
-        VariantValue {
-            label: "Default",
-            rust_expr: "BadgeIntent::Default",
-        },
-        VariantValue {
-            label: "Primary",
-            rust_expr: "BadgeIntent::Primary",
-        },
-        VariantValue {
-            label: "Success",
-            rust_expr: "BadgeIntent::Success",
-        },
-        VariantValue {
-            label: "Warning",
-            rust_expr: "BadgeIntent::Warning",
-        },
-        VariantValue {
-            label: "Error",
-            rust_expr: "BadgeIntent::Error",
-        },
-    ],
-    default_index: 0,
-}];
+const BADGE_VARIANTS: &[VariantAxis] = &[
+    VariantAxis {
+        name: "intent",
+        display_name: "Intent",
+        rust_type: "BadgeIntent",
+        values: &[
+            VariantValue {
+                label: "Default",
+                rust_expr: "BadgeIntent::Default",
+            },
+            VariantValue {
+                label: "Primary",
+                rust_expr: "BadgeIntent::Primary",
+            },
+            VariantValue {
+                label: "Success",
+                rust_expr: "BadgeIntent::Success",
+            },
+            VariantValue {
+                label: "Warning",
+                rust_expr: "BadgeIntent::Warning",
+            },
+            VariantValue {
+                label: "Error",
+                rust_expr: "BadgeIntent::Error",
+            },
+        ],
+        default_index: 0,
+    },
+    VariantAxis {
+        name: "shape",
+        display_name: "Shape",
+        rust_type: "BadgeShape",
+        default_index: 0,
+        values: &[
+            VariantValue {
+                label: "Pill",
+                rust_expr: "BadgeShape::Pill",
+            },
+            VariantValue {
+                label: "Square",
+                rust_expr: "BadgeShape::Square",
+            },
+        ],
+    },
+    VariantAxis {
+        name: "fill",
+        display_name: "Fill",
+        rust_type: "BadgeFill",
+        default_index: 0,
+        values: &[
+            VariantValue {
+                label: "Solid",
+                rust_expr: "BadgeFill::Solid",
+            },
+            VariantValue {
+                label: "Outline",
+                rust_expr: "BadgeFill::Outline",
+            },
+        ],
+    },
+];
 
 const TAG_VARIANTS: &[VariantAxis] = &[VariantAxis {
     name: "intent",
@@ -2935,6 +3299,23 @@ const AVATAR_SIZE: &[VariantAxis] = &[VariantAxis {
         },
     ],
     default_index: 1,
+}];
+
+const PROGRESS_SIZE: &[VariantAxis] = &[VariantAxis {
+    name: "size",
+    display_name: "Size",
+    rust_type: "ProgressSize",
+    values: &[
+        VariantValue {
+            label: "Md",
+            rust_expr: "ProgressSize::Md",
+        },
+        VariantValue {
+            label: "Sm (hairline)",
+            rust_expr: "ProgressSize::Sm",
+        },
+    ],
+    default_index: 0,
 }];
 
 const SPINNER_SIZE: &[VariantAxis] = &[VariantAxis {
@@ -3310,6 +3691,16 @@ const BOOL_OPEN: &[BoolProp] = &[BoolProp {
 const ENTRIES: &[ComponentEntry] = &[
     // --- Layout (order 1xx) ---
     ComponentEntry {
+        name: "ChatScroll",
+        slug: "chat-scroll",
+        description: "Bottom-pinned autoscroll for chat logs and live feeds — pure CSS, no JS.",
+        category: Category::Layout,
+        order: 103,
+        variants: &[],
+        bool_props: &[],
+        build_demo: chat_scroll_demo,
+    },
+    ComponentEntry {
         name: "Stack",
         slug: "stack",
         description: "Flexbox layout with configurable direction and spacing.",
@@ -3591,6 +3982,20 @@ const ENTRIES: &[ComponentEntry] = &[
         build_demo: label_demo,
     },
     ComponentEntry {
+        name: "Composer",
+        slug: "composer",
+        description: "Chat message bar: auto-growing field, Enter submits, Shift+Enter newline.",
+        category: Category::Forms,
+        order: 211,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "compact",
+            description: "Single-row form factor (inline composers)",
+            default: false,
+        }],
+        build_demo: composer_demo,
+    },
+    ComponentEntry {
         name: "FormField",
         slug: "form-field",
         description: "Composition wrapper with label, input, help text, and validation.",
@@ -3631,6 +4036,27 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: BADGE_VARIANTS,
         bool_props: &[],
         build_demo: badge_demo,
+    },
+    ComponentEntry {
+        name: "StatusDot",
+        slug: "status-dot",
+        description: "Presence/status dot with optional pulse and inline label.",
+        category: Category::DataDisplay,
+        order: 302,
+        variants: STATUS_DOT_VARIANTS,
+        bool_props: &[
+            BoolProp {
+                name: "pulse",
+                description: "Pulse while live",
+                default: true,
+            },
+            BoolProp {
+                name: "label",
+                description: "Show an inline label",
+                default: false,
+            },
+        ],
+        build_demo: status_dot_demo,
     },
     ComponentEntry {
         name: "Tag",
@@ -3802,7 +4228,7 @@ const ENTRIES: &[ComponentEntry] = &[
         description: "Progress bars showing task completion.",
         category: Category::Feedback,
         order: 403,
-        variants: &[],
+        variants: PROGRESS_SIZE,
         bool_props: &[],
         build_demo: progress_demo,
     },
@@ -3880,6 +4306,161 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: &[],
         bool_props: &[],
         build_demo: tabs_demo,
+    },
+    ComponentEntry {
+        name: "StreamedContent",
+        slug: "streamed-content",
+        description:
+            "Progressive content delivery: chunks stream in as a sentinel nears the viewport.",
+        category: Category::DataDisplay,
+        order: 313,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "loading",
+            description: "More chunks remain; the sentinel spinner row is visible",
+            default: true,
+        }],
+        build_demo: streamed_content_demo,
+    },
+    ComponentEntry {
+        name: "TreeView",
+        slug: "tree-view",
+        description:
+            "Generic collapsible tree: native details/summary branches, selectable leaves.",
+        category: Category::Navigation,
+        order: 505,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "selected",
+            description: "Highlight a leaf as the current selection",
+            default: true,
+        }],
+        build_demo: tree_view_demo,
+    },
+    ComponentEntry {
+        name: "FileTree",
+        slug: "file-tree",
+        description:
+            "TreeView specialized for filesystem snapshots: icons, selection, sandboxed source.",
+        category: Category::Navigation,
+        order: 506,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "selected",
+            description: "Highlight the selected file",
+            default: true,
+        }],
+        build_demo: file_tree_demo,
+    },
+    ComponentEntry {
+        name: "SplitPane",
+        slug: "split-pane",
+        description: "Two panes with a pointer-drag divider (client-side resize primitive).",
+        category: Category::Layout,
+        order: 120,
+        variants: &[],
+        bool_props: &[],
+        build_demo: split_pane_demo,
+    },
+    ComponentEntry {
+        name: "CodeEditor",
+        slug: "code-editor",
+        description: "Textarea editor with line-number gutter, dirty marks, and a gated save bar.",
+        category: Category::Forms,
+        order: 230,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "dirty",
+            description: "Mark a line dirty",
+            default: true,
+        }],
+        build_demo: code_editor_demo,
+    },
+    ComponentEntry {
+        name: "DocumentView",
+        slug: "document-view",
+        description: "View/edit shell: title + actions header over a scrolling document body.",
+        category: Category::DataDisplay,
+        order: 317,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "editing",
+            description: "Show the toggle in its editing state",
+            default: false,
+        }],
+        build_demo: document_view_demo,
+    },
+    ComponentEntry {
+        name: "ChatEntry",
+        slug: "chat-entry",
+        description:
+            "One authored transcript entry: rail, header, body, native details disclosure.",
+        category: Category::DataDisplay,
+        order: 314,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "grouped",
+            description: "Suppress the header (consecutive same-author entries)",
+            default: false,
+        }],
+        build_demo: chat_entry_demo,
+    },
+    ComponentEntry {
+        name: "ChatTranscript",
+        slug: "chat-transcript",
+        description: "Windowed chat entries with seamless history and a writing-state row.",
+        category: Category::DataDisplay,
+        order: 315,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "writing",
+            description: "Show the typing-indicator row",
+            default: true,
+        }],
+        build_demo: chat_transcript_demo,
+    },
+    ComponentEntry {
+        name: "Chat",
+        slug: "chat",
+        description:
+            "The full chat surface: pinned scroller over a composer that reserves its height.",
+        category: Category::DataDisplay,
+        order: 316,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "writing",
+            description: "Show the typing-indicator row",
+            default: true,
+        }],
+        build_demo: chat_demo,
+    },
+    ComponentEntry {
+        name: "TypingIndicator",
+        slug: "typing-indicator",
+        description: "Pulsing writing cue with an optional label.",
+        category: Category::Feedback,
+        order: 415,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "label",
+            description: "Show the author label after the dots",
+            default: true,
+        }],
+        build_demo: typing_indicator_demo,
+    },
+    ComponentEntry {
+        name: "Chip",
+        slug: "chip",
+        description: "Selectable chip for filters, view toggles, and inline pickers.",
+        category: Category::Navigation,
+        order: 504,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "active",
+            description: "The chip is the current selection",
+            default: true,
+        }],
+        build_demo: chip_demo,
     },
     ComponentEntry {
         name: "Pagination",

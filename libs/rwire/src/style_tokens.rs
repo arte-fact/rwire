@@ -641,6 +641,11 @@ define_token_enum! {
         MaxW64rem = 0x276 => "max-width:64rem",
         MaxW80rem = 0x277 => "max-width:80rem",
         MaxH90vh = 0x278 => "max-height:90vh",
+        MaxW60rem = 0x279 => "max-width:60rem",
+        /// Bottom auto margin: anchors a lone flex child to the far edge without breaking the
+        /// container's scrollability (unlike `justify-content`, an auto margin collapses to 0
+        /// once content overflows).
+        MbAuto = 0x27A => "margin-bottom:auto",
 
         // Padding/Margin extended (0x280-0x285)
         PxSp3 = 0x280 => "padding-inline:var(--S3)",
@@ -904,115 +909,124 @@ define_token_enum! {
         // Dynamic viewport heights — mobile-safe alternative to the `vh` Screen tokens,
         // which over/undershoot when the browser chrome shows/hides.
         HDvh = 0x344 => "height:100dvh",
+        CursorColResize = 0x34C => "cursor:col-resize",
+        CaretInk = 0x34D => "caret-color:var(--k)",
         MinHDvh = 0x345 => "min-height:100dvh",
         MaxHDvh = 0x346 => "max-height:100dvh",
-        PbSafe = 0x347 => "padding-bottom:max(var(--S2),env(safe-area-inset-bottom))",
-        TranslateYPosFull = 0x348 => "transform:translateY(100%)",
-        MaxH85Dvh = 0x349 => "max-height:85dvh",
-        RoundedTLg = 0x34A => "border-top-left-radius:var(--R3);border-top-right-radius:var(--R3)",
+        /// Auto-grow a textarea/input to its content (pair with a max-height cap).
+        FieldSizingContent = 0x347 => "field-sizing:content",
+        BgGreen9 = 0x348 => "background:var(--P9)",
+        BgAmber9 = 0x349 => "background:var(--M9)",
+        /// Hairline bar height (Progress `Sm` — dense card/list meters).
+        H025rem = 0x34A => "height:0.25rem",
+        /// A warning-toned hairline border (needs-attention panels).
+        BorderWarning = 0x34B => "border:1px solid var(--p)",
+        PbSafe = 0x34E => "padding-bottom:max(var(--S2),env(safe-area-inset-bottom))",
+        TranslateYPosFull = 0x34F => "transform:translateY(100%)",
+        MaxH85Dvh = 0x350 => "max-height:85dvh",
+        RoundedTLg = 0x351 => "border-top-left-radius:var(--R3);border-top-right-radius:var(--R3)",
         // Reveal choreography: `both` fill keeps the from-state while an `animation-delay`
         // (Delay1..Delay12, .3s steps) holds the element, so a cascade is pure CSS.
-        AnimateFadeUp = 0x34B => "animation:rw-fade-up .5s ease-out both",
-        AnimateGrow = 0x34C => "transform-origin:left;animation:rw-grow .6s ease-out both",
-        Delay1 = 0x34D => "animation-delay:.3s",
-        Delay2 = 0x34E => "animation-delay:.6s",
-        Delay3 = 0x34F => "animation-delay:.9s",
-        Delay4 = 0x350 => "animation-delay:1.2s",
-        Delay5 = 0x351 => "animation-delay:1.5s",
-        Delay6 = 0x352 => "animation-delay:1.8s",
-        Delay7 = 0x353 => "animation-delay:2.1s",
-        Delay8 = 0x354 => "animation-delay:2.4s",
+        AnimateFadeUp = 0x352 => "animation:rw-fade-up .5s ease-out both",
+        AnimateGrow = 0x353 => "transform-origin:left;animation:rw-grow .6s ease-out both",
+        Delay1 = 0x354 => "animation-delay:.3s",
+        Delay2 = 0x355 => "animation-delay:.6s",
+        Delay3 = 0x356 => "animation-delay:.9s",
+        Delay4 = 0x357 => "animation-delay:1.2s",
+        Delay5 = 0x358 => "animation-delay:1.5s",
+        Delay6 = 0x359 => "animation-delay:1.8s",
+        Delay7 = 0x35A => "animation-delay:2.1s",
+        Delay8 = 0x35B => "animation-delay:2.4s",
         // Counts the registered `--n` from its inline start (default 0) to the inline `--to`
         // over 1.2s, rendered through `::after{content:counter(n)}` (see PSEUDO_GLOBAL_CSS),
         // then fades out so a formatted value can take its place (AnimateFadeUp + Delay).
         // The start is the inline `--d` (default 0s), not a Delay token: a single
         // `animation-delay` would apply to the fade-out too and cut the count short.
-        CountUp = 0x355 => "animation:rw-count 1.2s var(--d,0s) cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s calc(var(--d,0s) + 1.2s) ease both;counter-reset:n var(--n)",
-        TabularNums = 0x356 => "font-variant-numeric:tabular-nums",
-        H025rem = 0x357 => "height:0.25rem",
+        CountUp = 0x35C => "animation:rw-count 1.2s var(--d,0s) cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s calc(var(--d,0s) + 1.2s) ease both;counter-reset:n var(--n)",
+        TabularNums = 0x35D => "font-variant-numeric:tabular-nums",
         // Ledger row: label column takes the slack, figure column hugs its content.
-        GridColsFrAuto = 0x358 => "grid-template-columns:minmax(0,1fr) auto",
-        MinH12rem = 0x359 => "min-height:12rem",
+        GridColsFrAuto = 0x35F => "grid-template-columns:minmax(0,1fr) auto",
+        MinH12rem = 0x360 => "min-height:12rem",
         /// Slider tick on the track (`left` set inline, see `Slider::mark`).
-        SliderMark = 0x35A => "position:absolute;top:50%;width:2px;height:1.125rem;transform:translate(-50%,-50%);background:var(--l);opacity:.45;pointer-events:none",
+        SliderMark = 0x361 => "position:absolute;top:50%;width:2px;height:1.125rem;transform:translate(-50%,-50%);background:var(--l);opacity:.45;pointer-events:none",
         /// Slider tick label under the track (`left` set inline).
-        SliderMarkLabel = 0x35B => "position:absolute;top:0;white-space:nowrap",
-        W05rem = 0x35C => "width:0.5rem",
+        SliderMarkLabel = 0x362 => "position:absolute;top:0;white-space:nowrap",
+        W05rem = 0x363 => "width:0.5rem",
         /// A sun/moon rising into place over 2.4s (from below, transparent); the
         /// element's own opacity is the resting state.
-        AnimateSunUp = 0x35D => "animation:rw-sun-up 2.4s ease-out both",
+        AnimateSunUp = 0x364 => "animation:rw-sun-up 2.4s ease-out both",
         /// Soft glowing disk pinned to a scene's top-right (background set inline).
-        GlowDisk = 0x35E => "position:absolute;right:1.5rem;top:2rem;width:3.5rem;height:3.5rem;border-radius:50%;filter:blur(.5px);pointer-events:none",
+        GlowDisk = 0x365 => "position:absolute;right:1.5rem;top:2rem;width:3.5rem;height:3.5rem;border-radius:50%;filter:blur(.5px);pointer-events:none",
         /// A vertical cursor over a chart: its right edge marks the x, so a
         /// `live_fill` width moves it with a slider.
-        ChartCursor = 0x35F => "position:absolute;top:0;bottom:0;left:0;border-right:1px solid var(--k);opacity:.7;pointer-events:none",
+        ChartCursor = 0x366 => "position:absolute;top:0;bottom:0;left:0;border-right:1px solid var(--k);opacity:.7;pointer-events:none",
         /// A tiny axis label pinned to a chart's right edge, sitting on its `top`.
-        ChartLabel = 0x360 => "position:absolute;right:2px;transform:translateY(-100%);font-size:.6rem;line-height:1.2;color:var(--j);pointer-events:none",
+        ChartLabel = 0x367 => "position:absolute;right:2px;transform:translateY(-100%);font-size:.6rem;line-height:1.2;color:var(--j);pointer-events:none",
         /// Selectable line: radio, name, then price pushed to the right edge.
-        GridColsAutoFrAuto = 0x361 => "grid-template-columns:auto minmax(0,1fr) auto",
+        GridColsAutoFrAuto = 0x368 => "grid-template-columns:auto minmax(0,1fr) auto",
         /// The unchosen twin of [`St::BorderL3Accent`], keeping the same width.
-        BorderL3Transparent = 0x362 => "border-left:3px solid transparent",
+        BorderL3Transparent = 0x369 => "border-left:3px solid transparent",
         /// Rain over a scene: two layers of slanted streaks falling forever
         /// (overlay; the scene is `position:relative` + `overflow:hidden`).
-        Rain = 0x363 => "position:absolute;inset:-20% -10% 0;pointer-events:none;opacity:.6;transform:skewX(-12deg);background-image:radial-gradient(.7px 8px at 50% 50%,rgba(255,255,255,.7) 0 90%,transparent 100%),radial-gradient(.6px 6px at 50% 50%,rgba(255,255,255,.45) 0 90%,transparent 100%);background-size:19px 44px,31px 58px;background-position:0 0,9px 20px;animation:rw-rain .5s linear infinite",
+        Rain = 0x36A => "position:absolute;inset:-20% -10% 0;pointer-events:none;opacity:.6;transform:skewX(-12deg);background-image:radial-gradient(.7px 8px at 50% 50%,rgba(255,255,255,.7) 0 90%,transparent 100%),radial-gradient(.6px 6px at 50% 50%,rgba(255,255,255,.45) 0 90%,transparent 100%);background-size:19px 44px,31px 58px;background-position:0 0,9px 20px;animation:rw-rain .5s linear infinite",
         /// Snow over a scene: two layers of flakes drifting down slowly.
-        Snow = 0x364 => "position:absolute;inset:0;pointer-events:none;opacity:.85;background-image:radial-gradient(circle,rgba(255,255,255,.95) 0 1.4px,transparent 2px),radial-gradient(circle,rgba(255,255,255,.7) 0 1px,transparent 1.5px),radial-gradient(circle,rgba(255,255,255,.5) 0 .8px,transparent 1.2px);background-size:37px 41px,53px 59px,29px 67px;background-position:7px 3px,31px 22px,14px 40px;animation:rw-snow 9s linear infinite",
+        Snow = 0x36B => "position:absolute;inset:0;pointer-events:none;opacity:.85;background-image:radial-gradient(circle,rgba(255,255,255,.95) 0 1.4px,transparent 2px),radial-gradient(circle,rgba(255,255,255,.7) 0 1px,transparent 1.5px),radial-gradient(circle,rgba(255,255,255,.5) 0 .8px,transparent 1.2px);background-size:37px 41px,53px 59px,29px 67px;background-position:7px 3px,31px 22px,14px 40px;animation:rw-snow 9s linear infinite",
         /// A ledger's total line, ruled above in the accent.
-        BorderTAccent = 0x365 => "border-top:1px solid var(--n9)",
-        Pr0 = 0x366 => "padding-right:0",
+        BorderTAccent = 0x36C => "border-top:1px solid var(--n9)",
+        Pr0 = 0x36D => "padding-right:0",
         /// A range gauge: a 10px strip holding an axis, a tick and spans.
-        Gauge = 0x367 => "position:relative;height:10px",
+        Gauge = 0x36E => "position:relative;height:10px",
         /// The gauge's axis line, across the strip at mid-height.
-        GaugeAxis = 0x368 => "position:absolute;left:0;right:0;top:4px;height:2px;border-radius:1px;background:var(--c)",
+        GaugeAxis = 0x36F => "position:absolute;left:0;right:0;top:4px;height:2px;border-radius:1px;background:var(--c)",
         /// A vertical tick on the gauge (the zero, a landmark); set `left`.
-        GaugeTick = 0x369 => "position:absolute;top:0;width:1px;height:10px;background:var(--l)",
+        GaugeTick = 0x370 => "position:absolute;top:0;width:1px;height:10px;background:var(--l)",
         /// A segment on the gauge; set `left`/`width` (or bind `live_span`) and a background.
-        GaugeSpan = 0x36A => "position:absolute;top:2px;height:6px;border-radius:3px",
-        Delay9 = 0x36B => "animation-delay:2.7s",
-        Delay10 = 0x36C => "animation-delay:3s",
-        Delay11 = 0x36D => "animation-delay:3.3s",
-        Delay12 = 0x36E => "animation-delay:3.6s",
+        GaugeSpan = 0x371 => "position:absolute;top:2px;height:6px;border-radius:3px",
+        Delay9 = 0x372 => "animation-delay:2.7s",
+        Delay10 = 0x373 => "animation-delay:3s",
+        Delay11 = 0x374 => "animation-delay:3.3s",
+        Delay12 = 0x375 => "animation-delay:3.6s",
         /// A small square medallion centring an icon or two letters.
-        Pill = 0x36F => "display:grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:var(--R2);flex-shrink:0",
+        Pill = 0x376 => "display:grid;place-items:center;width:1.75rem;height:1.75rem;border-radius:var(--R2);flex-shrink:0",
         /// The dot of a dial: a value on a gauge (set `left`).
-        GaugeDot = 0x370 => "position:absolute;top:1px;width:8px;height:8px;border-radius:50%;background:var(--n9);transform:translateX(-50%)",
+        GaugeDot = 0x377 => "position:absolute;top:1px;width:8px;height:8px;border-radius:50%;background:var(--n9);transform:translateX(-50%)",
         /// Party colour hooks: the inline `--kc` paints a text, a fill or a dimmed fill.
-        TextParty = 0x371 => "color:var(--kc)",
-        BgParty = 0x372 => "background:var(--kc)",
-        BgPartyDim = 0x373 => "background:color-mix(in oklab,var(--kc) 38%,var(--c))",
+        TextParty = 0x378 => "color:var(--kc)",
+        BgParty = 0x379 => "background:var(--kc)",
+        BgPartyDim = 0x37A => "background:color-mix(in oklab,var(--kc) 38%,var(--c))",
         /// A name sliding into place from its side (start in the inline `--d`).
-        AnimateInLeft = 0x374 => "animation:rw-in-l .45s var(--d,0s) cubic-bezier(.2,.8,.2,1) both",
-        AnimateInRight = 0x375 => "animation:rw-in-r .45s var(--d,0s) cubic-bezier(.2,.8,.2,1) both",
+        AnimateInLeft = 0x37B => "animation:rw-in-l .45s var(--d,0s) cubic-bezier(.2,.8,.2,1) both",
+        AnimateInRight = 0x37C => "animation:rw-in-r .45s var(--d,0s) cubic-bezier(.2,.8,.2,1) both",
         /// An SVG path drawing itself end to end (paths under 1000 units; start in `--d`).
-        PathDraw = 0x376 => "stroke-dasharray:1000;stroke-dashoffset:1000;animation:rw-draw 1.1s var(--d,0s) ease-out forwards",
+        PathDraw = 0x37D => "stroke-dasharray:1000;stroke-dashoffset:1000;animation:rw-draw 1.1s var(--d,0s) ease-out forwards",
         /// An SVG path of marching dashes, fading in once a drawn base is in place.
-        PathMarch = 0x377 => "stroke-dasharray:3 9;animation:rw-march 1.2s linear infinite,rw-fade-in .3s 1.4s both",
+        PathMarch = 0x37E => "stroke-dasharray:3 9;animation:rw-march 1.2s linear infinite,rw-fade-in .3s 1.4s both",
         /// An SVG path left as a faint dotted trace.
-        PathDead = 0x378 => "stroke-dasharray:2 6;opacity:.25",
-        Blink = 0x379 => "animation:rw-blink .8s ease-in-out infinite",
+        PathDead = 0x37F => "stroke-dasharray:2 6;opacity:.25",
+        Blink = 0x380 => "animation:rw-blink .8s ease-in-out infinite",
         /// A rubber stamp slapped on a card's top-right corner, in `currentColor`.
-        Stamp = 0x37A => "position:absolute;right:.75rem;top:.6rem;transform:rotate(-6deg);text-transform:uppercase;font-weight:800;font-size:.75rem;letter-spacing:.06em;line-height:1.4;border:2px solid currentColor;border-radius:4px;padding:0 .4rem;animation:rw-stamp .35s cubic-bezier(.2,1.4,.4,1) both",
-        TransitionWidth = 0x37B => "transition:width .35s ease-out",
+        Stamp = 0x381 => "position:absolute;right:.75rem;top:.6rem;transform:rotate(-6deg);text-transform:uppercase;font-weight:800;font-size:.75rem;letter-spacing:.06em;line-height:1.4;border:2px solid currentColor;border-radius:4px;padding:0 .4rem;animation:rw-stamp .35s cubic-bezier(.2,1.4,.4,1) both",
+        TransitionWidth = 0x382 => "transition:width .35s ease-out",
         /// A bar's fill anchored to its right/left edge (set `width`).
-        FillRight = 0x37C => "position:absolute;top:0;bottom:0;right:0",
-        FillLeft = 0x37D => "position:absolute;top:0;bottom:0;left:0",
-        FontExtrabold = 0x37E => "font-weight:800",
-        H4_5rem = 0x37F => "height:4.5rem",
+        FillRight = 0x383 => "position:absolute;top:0;bottom:0;right:0",
+        FillLeft = 0x384 => "position:absolute;top:0;bottom:0;left:0",
+        FontExtrabold = 0x385 => "font-weight:800",
+        H4_5rem = 0x386 => "height:4.5rem",
         /// Three columns: the outer two share the width, the middle is a fixed slot.
-        GridColsFrAutoFr = 0x380 => "grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)",
-        W34Pct = 0x381 => "width:34%",
+        GridColsFrAutoFr = 0x387 => "grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)",
+        W34Pct = 0x388 => "width:34%",
         /// Bleed into a `PMd` parent's side padding (pair with `PxMd` to realign).
-        MxNegMd = 0x382 => "margin-inline:calc(-1 * var(--S4))",
+        MxNegMd = 0x389 => "margin-inline:calc(-1 * var(--S4))",
         /// A party's colour as a thick rule on top (the inline `--kc`).
-        BorderT3Party = 0x383 => "border-top:3px solid var(--kc)",
-        BorderL3Party = 0x387 => "border-left:3px solid var(--kc)",
+        BorderT3Party = 0x38A => "border-top:3px solid var(--kc)",
+        BorderL3Party = 0x38E => "border-left:3px solid var(--kc)",
         /// A stacked bar: a flat strip whose segments ([`St::BarSeg`]) set `left`/`width`.
-        Bar = 0x384 => "position:relative;height:8px;border-radius:2px;overflow:hidden;background:var(--c)",
-        BarSeg = 0x385 => "position:absolute;top:0;bottom:0",
+        Bar = 0x38B => "position:relative;height:8px;border-radius:2px;overflow:hidden;background:var(--c)",
+        BarSeg = 0x38C => "position:absolute;top:0;bottom:0",
         /// Hatched fill for what is held back (a garrison, a reserve).
-        BgHatched = 0x386 => "background:repeating-linear-gradient(135deg,var(--l) 0 2px,transparent 2px 5px);opacity:.6",
+        BgHatched = 0x38D => "background:repeating-linear-gradient(135deg,var(--l) 0 2px,transparent 2px 5px);opacity:.6",
         /// Fades to a quarter once the in-animations are done: what stays out of the moment.
-        AnimateDim = 0x388 => "animation:rw-dim .6s 1.2s ease both",
+        AnimateDim = 0x38F => "animation:rw-dim .6s 1.2s ease both",
     }
 }
 
@@ -1292,8 +1306,8 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@keyframes rw-sun-up{from{opacity:0;transform:translateY(40px)}}",
     "@keyframes rw-rain{to{background-position:0 44px,9px 78px}}",
     "@keyframes rw-snow{to{background-position:44px 85px,-22px 140px,43px 174px}}",
-    ".u853::after{content:counter(n)}",
-    "@media(prefers-reduced-motion:reduce){.u843,.u844,.u853,.u861,.u867,.u868,.u884,.u885,.u886,.u887,.u889,.u890,.u904{animation-duration:0s!important;animation-delay:0s!important}}"
+    ".u860::after{content:counter(n)}",
+    "@media(prefers-reduced-motion:reduce){.u850,.u851,.u860,.u868,.u874,.u875,.u891,.u892,.u893,.u894,.u896,.u897,.u911{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
 /// Whether a utility declaration references one of the shared `rw-*` keyframes.
