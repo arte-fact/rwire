@@ -22,18 +22,6 @@
 .security-key
 logs/security/
 
-# Empire schools: genomes and logs stay local (megabytes of floats, rewritten every generation)
-apps/empire-train/schools/*.json
-apps/empire-train/schools/*.log
-apps/empire-train/schools/*-driver.out
-
-# The campaigns' schools (a genome and its parents, tens of MB each): the pools under
-# schools/pools are kept, the campaigns keep their logs and measures only
-apps/empire-train/schools/s*/*.json
-apps/empire-train/schools/s*/*.out
-# Recall traces (`--trace`): tens of MB per school, regenerated at will
-apps/empire-train/schools/s*/recall/
-apps/empire-train/schools/__pycache__/
 # llama-modnitor runtime data (public repo: profiles hold local model paths)
 apps/llama-modnitor/.env
 apps/llama-modnitor/profiles/

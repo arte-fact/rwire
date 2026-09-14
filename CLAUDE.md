@@ -61,17 +61,14 @@ rwire/
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
 │   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
-│   ├── rwire-themes/        # Predefined styles and palettes
-│   └── empire-lib/          # Empire game rules; `EmpireGame` derives rwire::State
+│   └── rwire-themes/        # Predefined styles and palettes
 ├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
 │   ├── llama-modnitor/      # LLM launcher + hardware monitor (real-world app; runtime data gitignored)
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
 │   ├── rwire-design-system/ # Component showcase
-│   ├── rwire-examples/      # Examples gallery
-│   ├── empire/              # Empire — terminal (ANSI) front-end
-│   └── empire-web/          # Empire — multiplayer web app (shared state + identity pattern)
+│   └── rwire-examples/      # Examples gallery
 └── examples/
     ├── chat/                # Multi-tab chatroom: shared state + Chat family (E2E: runtime/e2e/chat.mjs)
     ├── editor/              # File explorer + editor: FsSnapshot sandbox, dirty diff, gated save (E2E: runtime/e2e/editor.mjs)
@@ -239,7 +236,8 @@ struct UserData { name: String }
 ### Multiplayer: shared state + per-connection identity
 
 Handlers and renderers take exactly one state and `EventContext` carries no session id, so a
-multi-user app identifies the caller itself (see `apps/empire-web`):
+multi-user app identifies the caller itself (see `empire-web` in the sibling `../empire`
+workspace, the reference implementation of this pattern):
 
 1. A `#[storage(shared)]` state holds the whole table (one instance for the process; every
    connection that renders it is subscribed and re-rendered on change).
@@ -277,7 +275,7 @@ what the user is typing.
   sampled evenly over the input's `min`..`max` (linear interpolation between samples, signed
   variant prints `+`/`−` and groups digits). Pair with an SVG drawn from the same samples and a
   `St::ChartCursor` div bound with `live_fill` to make an "expected outcome" chart follow a
-  slider (`feed_step` in `apps/empire-web`). `Slider::above_track(el)` slots content between
+  slider (`feed_step` in `../empire`'s `empire-web`). `Slider::above_track(el)` slots content between
   the readout and the track.
 - `el.data("autoscroll", "1")` on a scroll box keeps it scrolled to the bottom after every update
   (journals, logs).
