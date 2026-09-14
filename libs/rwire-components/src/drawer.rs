@@ -51,6 +51,9 @@ pub struct Drawer {
     open: bool,
     on_close: Option<HandlerSpec>,
     content: Option<ElementBuilder>,
+    /// Pinned under the content, outside its scroll: a wide close button,
+    /// the sheet's action.
+    footer: Option<ElementBuilder>,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -86,6 +89,12 @@ impl Drawer {
     }
 
     /// Set the drawer content.
+    /// Set what stays pinned at the bottom while the content scrolls.
+    pub fn footer(mut self, footer: ElementBuilder) -> Self {
+        self.footer = Some(footer);
+        self
+    }
+
     pub fn content(mut self, content: ElementBuilder) -> Self {
         self.content = Some(content);
         self
@@ -107,7 +116,6 @@ impl Drawer {
             St::ShadowXl,
             St::DisplayFlex,
             St::FlexCol,
-            St::OverflowYScroll,
             St::TransitionTransformMd,
             St::Z1400,
         ]
@@ -212,14 +220,27 @@ impl Drawer {
                         St::JustifyBetween,
                         St::PMd,
                         St::BorderBDefault,
+                        St::FlexShrink0,
                     ])
                     .append(header_children),
             );
         }
 
-        // Content
+        // Content: the one part that scrolls — the header above and the
+        // footer below stay where the thumb expects them.
         if let Some(content) = self.content {
-            panel_children.push(el(El::Div).st([St::Flex1, St::PMd]).append([content]));
+            panel_children.push(
+                el(El::Div)
+                    .st([St::Flex1, St::MinH0, St::OverflowYScroll, St::PMd])
+                    .append([content]),
+            );
+        }
+        if let Some(footer) = self.footer {
+            panel_children.push(
+                el(El::Div)
+                    .st([St::FlexShrink0, St::PxMd, St::PySm, St::BorderT])
+                    .append([footer]),
+            );
         }
 
         let mut panel = el(El::Div)
@@ -264,6 +285,26 @@ mod tests {
         assert_eq!(drawer.position, DrawerPosition::Left);
         assert!(!drawer.open);
         assert!(drawer.title.is_none());
+    }
+
+    #[test]
+    fn the_content_scrolls_between_a_pinned_header_and_footer() {
+        // The panel is a fixed-height column: it must not scroll as a whole,
+        // or the title's cross and the footer's button leave with the content.
+        assert!(!Drawer::compute_panel_tokens().contains(&St::OverflowYScroll));
+        let built = Drawer::new()
+            .title("T")
+            .content(el(El::P).text("body"))
+            .footer(el(El::Button).text("Fermer"))
+            .build();
+        let panel = &built.children()[1];
+        let parts = panel.children();
+        assert_eq!(parts.len(), 3);
+        let utils = |i: usize| parts[i].get_style_utils().to_vec();
+        assert!(utils(0).contains(&(St::FlexShrink0 as u16)));
+        assert!(utils(1).contains(&(St::OverflowYScroll as u16)));
+        assert!(utils(1).contains(&(St::MinH0 as u16)));
+        assert!(utils(2).contains(&(St::FlexShrink0 as u16)));
     }
 
     #[test]
