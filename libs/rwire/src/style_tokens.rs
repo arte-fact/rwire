@@ -1027,6 +1027,12 @@ define_token_enum! {
         BgHatched = 0x38D => "background:repeating-linear-gradient(135deg,var(--l) 0 2px,transparent 2px 5px);opacity:.6",
         /// Fades to a quarter once the in-animations are done: what stays out of the moment.
         AnimateDim = 0x38F => "animation:rw-dim .6s 1.2s ease both",
+        // Touch (0x390-0x391): the base CSS sets both on `html`; these are for
+        // an element that opts in on its own (an embedded page, a widget).
+        /// No double-tap zoom: a double tap is the app's gesture; pinch stays.
+        TouchManipulation = 0x390 => "touch-action:manipulation",
+        /// No translucent tap flash over a touched element.
+        TapHighlightNone = 0x391 => "-webkit-tap-highlight-color:transparent",
     }
 }
 

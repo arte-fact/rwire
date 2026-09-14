@@ -365,7 +365,7 @@ el(El::Div).st([St::BgApp, St::Px4, St::Py2])
 
 ### Adding a New Style Token
 
-1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x390`+)
+1. Add variant to `St` enum in `style_tokens.rs` (next code: `0x392`+)
 2. Add CSS mapping to `St::css()` method
 3. Add `(u16_code, "css")` to `UTIL_MAPPINGS` const
 
