@@ -1,0 +1,163 @@
+{
+  "from": "/home/artefact/rwire/apps/empire-train/schools/pools/B",
+  "members": [
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-1-war.json",
+      "against_fellows": 17.2,
+      "year": 26
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-2-war.json",
+      "against_fellows": 4.0,
+      "year": 51
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-3-war.json",
+      "against_fellows": 16.8,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-4-war.json",
+      "against_fellows": 0.0,
+      "year": 0
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-5-war.json",
+      "against_fellows": 20.6,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-6-war.json",
+      "against_fellows": 15.4,
+      "year": 27
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-7-war.json",
+      "against_fellows": 21.6,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-8-war.json",
+      "against_fellows": 16.2,
+      "year": 23
+    }
+  ],
+  "candidates": [
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-1-war.json",
+      "against_pool": 24.4,
+      "against_peers": 17.8,
+      "mark": 17.8,
+      "year": 20
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-2-war.json",
+      "against_pool": 25.8,
+      "against_peers": 22.2,
+      "mark": 22.2,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-3-war.json",
+      "against_pool": 0.0,
+      "against_peers": 0.0,
+      "mark": 0.0,
+      "year": 0
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-4-war.json",
+      "against_pool": 38.8,
+      "against_peers": 26.6,
+      "mark": 26.6,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-5-war.json",
+      "against_pool": 37.2,
+      "against_peers": 24.4,
+      "mark": 24.4,
+      "year": 21
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-6-war.json",
+      "against_pool": 1.8,
+      "against_peers": 1.2,
+      "mark": 1.2,
+      "year": 63
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-7-war.json",
+      "against_pool": 0.0,
+      "against_peers": 0.0,
+      "mark": 0.0,
+      "year": 0
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-8-war.json",
+      "against_pool": 22.6,
+      "against_peers": 15.8,
+      "mark": 15.8,
+      "year": 20
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-9-war.json",
+      "against_pool": 0.0,
+      "against_peers": 0.0,
+      "mark": 0.0,
+      "year": 0
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-10-war.json",
+      "against_pool": 13.0,
+      "against_peers": 12.0,
+      "mark": 12.0,
+      "year": 23
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-11-war.json",
+      "against_pool": 25.4,
+      "against_peers": 15.2,
+      "mark": 15.2,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-12-war.json",
+      "against_pool": 36.0,
+      "against_peers": 22.0,
+      "mark": 22.0,
+      "year": 22
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-13-war.json",
+      "against_pool": 16.2,
+      "against_peers": 17.4,
+      "mark": 16.2,
+      "year": 19
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-14-war.json",
+      "against_pool": 23.8,
+      "against_peers": 23.0,
+      "mark": 23.0,
+      "year": 21
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-15-war.json",
+      "against_pool": 31.0,
+      "against_peers": 21.4,
+      "mark": 21.4,
+      "year": 23
+    },
+    {
+      "school": "/home/artefact/rwire/apps/empire-train/schools/s63/t-16-war.json",
+      "against_pool": 34.2,
+      "against_peers": 25.2,
+      "mark": 25.2,
+      "year": 19
+    }
+  ],
+  "promoted": "/home/artefact/rwire/apps/empire-train/schools/s63/t-4-war.json",
+  "replaced": "/home/artefact/rwire/apps/empire-train/schools/pools/B/pool-4-war.json",
+  "weakest_rate": 0.0,
+  "best_mark": 26.6
+}

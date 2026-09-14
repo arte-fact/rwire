@@ -5,7 +5,7 @@
 use empire_gpu::state::{Seating, Table};
 use empire_gpu::{Arena, Gpu, Pool};
 use empire_lib::arena;
-use empire_lib::brain::{Brain, Letters, Reads, Shape, Stage, HIDDEN};
+use empire_lib::brain::{Brain, Letters, Reads, Stage, HIDDEN};
 use empire_lib::game::EmpireGame;
 use empire_lib::random;
 
@@ -23,11 +23,10 @@ fn genomes() -> Vec<Vec<f32>> {
     SCHOOLS
         .iter()
         .map(|bytes| {
-            let g: Vec<f32> = bytes
+            bytes
                 .chunks_exact(4)
                 .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
-                .collect();
-            Brain::grown(&g, Shape::SCHOOLED, Shape::NOW)
+                .collect()
         })
         .collect()
 }
@@ -119,8 +118,15 @@ fn rounding_only(got: &Table, want: &Table) -> bool {
         if d.abs() <= slack && want.memories[i].net - g.memories[i].net == d {
             g.kingdoms[i].treasury = want.kingdoms[i].treasury;
             g.memories[i].net = want.memories[i].net;
-            if want.journal[0].realms[i].treasury - g.journal[0].realms[i].treasury == d {
-                g.journal[0].realms[i].treasury = want.journal[0].realms[i].treasury;
+            // An agent's ledger copies the treasury it read, coin included.
+            for s in 0..6 {
+                let (ledger, want_ledger) = (
+                    &mut g.memories[s].dossiers[i],
+                    &want.memories[s].dossiers[i],
+                );
+                if want_ledger.treasury - ledger.treasury == d {
+                    ledger.treasury = want_ledger.treasury;
+                }
             }
         }
     }

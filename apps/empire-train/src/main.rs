@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use empire_gpu::state::{self, Seating};
 use empire_gpu::{Arena, Gpu, Pool};
 use empire_lib::arena::{play, watch, Outcome, Table, YearEnd};
-use empire_lib::brain::{Brain, Letters, Reads, Shape, Stage, HIDDEN, MAX_HIDDEN, ORDERS};
+use empire_lib::brain::{Brain, Letters, Reads, Shape, Stage, HIDDEN, MAX_HIDDEN, ORDERS, RECALL};
+use empire_lib::campaign::Fought;
 use empire_lib::game::EmpireGame;
 use empire_lib::kingdom::{Kingdoms, KINGDOMS};
 use empire_lib::random;
@@ -36,9 +37,6 @@ struct Widths {
     rival: usize,
     a_out: usize,
     b_out: usize,
-    /// The years of journal; the schools from before it have none.
-    #[serde(default)]
-    journal: usize,
     /// The hidden layer; the schools from before it was a choice have 32.
     #[serde(default = "Widths::narrow")]
     hidden: usize,
@@ -50,7 +48,6 @@ impl Widths {
         rival: 19,
         a_out: 15,
         b_out: 18,
-        journal: 0,
         hidden: HIDDEN,
     };
 
@@ -70,7 +67,6 @@ impl From<Shape> for Widths {
             rival: s.rival,
             a_out: s.a_out,
             b_out: s.b_out,
-            journal: s.journal,
             hidden: s.hidden,
         }
     }
@@ -83,7 +79,6 @@ impl From<Widths> for Shape {
             rival: w.rival,
             a_out: w.a_out,
             b_out: w.b_out,
-            journal: w.journal,
             hidden: w.hidden,
         }
     }
@@ -100,14 +95,12 @@ struct School {
     #[serde(default = "Widths::now")]
     widths: Widths,
     /// What its brains read of their sight ([`Reads`]): the Chronique
-    /// and last year's orders, the recall, the journal. The schools from
-    /// before the journal had a recall and were not told.
+    /// and last year's orders, the recall. The schools from before the
+    /// choice had a recall and were not told.
     #[serde(default)]
     told: bool,
     #[serde(default = "School::had_recall")]
     recall: bool,
-    #[serde(default)]
-    journal: bool,
     mean: Vec<f32>,
     sigma: Vec<f32>,
     /// The best genome seen, with its fitness.
@@ -138,7 +131,6 @@ impl School {
         Reads {
             told: self.told,
             recall: self.recall,
-            journal: self.journal,
         }
     }
 }
@@ -221,6 +213,14 @@ struct Args {
     /// Write the best genome of `--from` as the game reads it (floats,
     /// little-endian) to this path, and stop.
     deliver: Option<String>,
+    /// Play `--measure` tables of the best genome of `--from` against
+    /// five of `--against` on the CPU and write, one row a year, what its
+    /// seat saw and the 32 recall entries its Extérieur wrote down, to
+    /// this CSV; then stop.
+    trace: Option<String>,
+    /// Read the best genome of `--from` with its recall cut (zero on its
+    /// sight) for `--measure`, `--show` and `--trace`: the ablation.
+    no_recall: bool,
     /// Play the generations' and `--measure`'s tables on the GPU
     /// (`--show` stays on the CPU, whose years it watches).
     gpu: bool,
@@ -245,8 +245,8 @@ struct Args {
     breed: f32,
     /// What a school raised from nothing reads of its sight ([`Reads`]):
     /// `--told` the Chronique, last year's orders and its old reports;
-    /// `--recall` what its Extérieur wrote down; `--journal` the past
-    /// years' record. None by default: the year's figures only.
+    /// `--recall` what its Extérieur wrote down. None by default: the
+    /// year's figures only.
     reads: Reads,
 }
 
@@ -307,6 +307,8 @@ fn args() -> Args {
         walls: 0.0,
         letters: Letters::None,
         deliver: None,
+        trace: None,
+        no_recall: false,
         gpu: false,
         trials: 1,
         hidden: HIDDEN,
@@ -315,7 +317,6 @@ fn args() -> Args {
         reads: Reads {
             told: false,
             recall: false,
-            journal: false,
         },
     };
     let mut it = std::env::args().skip(1);
@@ -336,8 +337,8 @@ fn args() -> Args {
             a.reads.recall = true;
             continue;
         }
-        if flag == "--journal" {
-            a.reads.journal = true;
+        if flag == "--no-recall" {
+            a.no_recall = true;
             continue;
         }
         let value = it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -365,6 +366,7 @@ fn args() -> Args {
             }
             "--out" => a.out = value,
             "--deliver" => a.deliver = Some(value),
+            "--trace" => a.trace = Some(value),
             "--trials" => a.trials = value.parse().unwrap(),
             "--hidden" => a.hidden = value.parse().unwrap(),
             "--keep" => a.keep = value.parse().unwrap(),
@@ -855,6 +857,110 @@ fn show(best: &[f32], reads: Reads, a: &Args) {
     }
 }
 
+/// `--measure` tables of `best` on seat 0 against five of `--against`,
+/// every year of seat 0 written to `path`: the game, the year, how the
+/// realm stood, its wars of the year, its intelligence, then the 32
+/// recall entries the Extérieur wrote down that year (read again the
+/// next). For reading what a brain keeps in its memory.
+fn trace(best: &[f32], reads: Reads, a: &Args, path: &str) {
+    let b = Brain::from_genome(best, reads);
+    let rivals = rivals(a);
+    assert!(!rivals.is_empty(), "--trace needs --against");
+    let brains: Vec<Brain> = rivals.iter().map(Other::brain).collect();
+    let mut csv = String::from(
+        "game,year,title,dead,crowned,treasury,soldiers,efficiency,surface,peasants,nobles,merchants,stocks,forts,rams,marched,attacked,scouted,scout_target,expeditions,mills,markets,foundries,shipyards,palaces,hospices,price,to_sell,land_ratio",
+    );
+    for i in 0..RECALL {
+        csv.push_str(&format!(",r{i}"));
+    }
+    csv.push('\n');
+    let rows: Vec<String> = (0..a.measure.max(1))
+        .into_par_iter()
+        .flat_map(|game| {
+            let seats = seat_rivals(&rivals);
+            let table = a.table_of(|i| (i > 0).then(|| rivals[seats[i]].stage));
+            let mut rows = Vec::new();
+            let me = KINGDOMS[0];
+            watch(
+                [
+                    &b,
+                    &brains[seats[1]],
+                    &brains[seats[2]],
+                    &brains[seats[3]],
+                    &brains[seats[4]],
+                    &brains[seats[5]],
+                ],
+                &table,
+                |y: YearEnd| {
+                    let k = &y.game.kingdoms[0];
+                    let m = &y.memories[0];
+                    let marched: i32 = y
+                        .fought
+                        .iter()
+                        .flat_map(Fought::expeditions)
+                        .filter(|e| e.attacker == me)
+                        .map(|e| e.soldiers)
+                        .sum();
+                    let attacked: i32 = y
+                        .fought
+                        .iter()
+                        .filter(|f| f.target == Some(me))
+                        .flat_map(Fought::expeditions)
+                        .map(|e| e.soldiers)
+                        .sum();
+                    let expeditions = y
+                        .fought
+                        .iter()
+                        .flat_map(Fought::expeditions)
+                        .filter(|e| e.attacker == me)
+                        .count();
+                    let mut row = format!(
+                        "{game},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{marched},{attacked},{},{},{expeditions},{},{},{},{},{},{},{},{},{}",
+                        y.game.year,
+                        k.title() as i32,
+                        u8::from(k.is_dead),
+                        u8::from(y.outcomes[0].crowned.is_some()),
+                        k.treasury,
+                        k.soldiers,
+                        k.soldiers_efficiency,
+                        k.surface,
+                        k.peasants,
+                        k.nobles,
+                        k.merchants,
+                        k.grain_stocks,
+                        k.fortifications,
+                        k.rams,
+                        u8::from(y.sent[0].scout.is_some()),
+                        y.sent[0].scout.map_or(-1, |t| t.index() as i32),
+                        k.grain_mills,
+                        k.marketplaces,
+                        k.foundries,
+                        k.shipyards,
+                        k.palaces,
+                        k.hospices,
+                        k.grain_price,
+                        k.grain_to_sell,
+                        k.land_ratio(),
+                    );
+                    for r in &m.last_orders[ORDERS..] {
+                        row.push_str(&format!(",{r:.4}"));
+                    }
+                    row.push('\n');
+                    rows.push(row);
+                },
+            );
+            rows
+        })
+        .collect();
+    csv.extend(rows);
+    eprintln!(
+        "{path}: {} rows of {} games",
+        csv.lines().count() - 1,
+        a.measure.max(1)
+    );
+    fs::write(path, csv).unwrap();
+}
+
 /// A seat's state at the end of the year, on one row.
 fn row(y: &YearEnd, seat: usize) {
     let k = &y.game.kingdoms[seat];
@@ -1002,7 +1108,7 @@ fn tally(label: &str, outcomes: &[Outcome], a: &Args) {
 }
 
 /// The `--against` brains: a school's best at its rung, or a delivered
-/// `.f32` (the game's computers: told, read at `--stage`).
+/// `.f32` (the game's computers: told + recall, read at `--stage`).
 fn rivals(a: &Args) -> Vec<Other> {
     a.against
         .iter()
@@ -1014,8 +1120,8 @@ fn rivals(a: &Args) -> Vec<Other> {
                     .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
                     .collect();
                 Other {
-                    genome: Brain::grown(&genome, Shape::SCHOOLED, Shape::NOW),
-                    reads: Reads::SCHOOLED,
+                    genome,
+                    reads: Reads::ALL,
                     stage: a.stage,
                 }
             }
@@ -1312,7 +1418,6 @@ impl Trial {
             widths: Widths::from(a.shape()),
             told: self.reads.told,
             recall: self.reads.recall,
-            journal: self.reads.journal,
             mean: self.mean.clone(),
             sigma: self.sigma.clone(),
             best: self.best.clone(),
@@ -1368,13 +1473,20 @@ fn trial_from(path: Option<&str>, n: usize, a: &Args) -> (Trial, usize) {
 fn main() {
     let a = args();
     let (first, start) = trial_from(a.from.as_deref(), 1, &a);
-    let reads = first.reads;
+    let mut reads = first.reads;
+    if a.no_recall {
+        reads.recall = false;
+    }
     if let Some(path) = &a.deliver {
         deliver(&first.best, path);
         return;
     }
     if a.show {
         show(&first.best, reads, &a);
+        return;
+    }
+    if let Some(path) = &a.trace {
+        trace(&first.best, reads, &a, path);
         return;
     }
     let rivals = rivals(&a);

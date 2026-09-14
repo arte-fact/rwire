@@ -6,9 +6,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use empire_lib::arena;
-use empire_lib::brain::{
-    Letters, Memory, Reads, Recorded, Sighted, Stage, A_OUT, B_OUT, JOURNAL_YEARS,
-};
+use empire_lib::brain::{Letters, Memory, Reads, Stage, A_OUT, B_OUT};
 use empire_lib::game::EmpireGame;
 use empire_lib::intel::{Dossier, Heard};
 use empire_lib::kingdom;
@@ -158,34 +156,9 @@ impl GpuDossier {
     }
 }
 
-/// What a seat's éclaireur read of one realm in one year (brain.rs
-/// `Sighted`).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuSighted {
-    pub read: i32,
-    pub surface: i32,
-    pub garrison: i32,
-    pub forts: i32,
-    pub efficiency: i32,
-}
-
-impl GpuSighted {
-    fn from_sighted(s: &Sighted) -> GpuSighted {
-        GpuSighted {
-            read: i32::from(s.read),
-            surface: s.surface,
-            garrison: s.garrison,
-            forts: s.forts,
-            efficiency: s.efficiency,
-        }
-    }
-}
-
 /// A seat's memory: what the Intendance left, the last answers, the
-/// dossiers, its side of the journal. (What was heard of the campaign
-/// and the record are the same for every seat, so they are kept once
-/// per table.)
+/// dossiers. (What was heard of the campaign is the same for every seat,
+/// so it is kept once per table.)
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct GpuMemory {
@@ -197,7 +170,6 @@ pub struct GpuMemory {
     pub answer: [f32; A_OUT],
     pub orders: [f32; B_OUT],
     pub dossiers: [GpuDossier; 6],
-    pub sighted: [[GpuSighted; 6]; JOURNAL_YEARS],
 }
 
 impl Default for GpuMemory {
@@ -237,47 +209,8 @@ impl GpuMemory {
             answer: m.answer,
             orders: m.last_orders,
             dossiers: std::array::from_fn(|i| GpuDossier::from_memory(&m.dossiers[i])),
-            sighted: std::array::from_fn(|y| {
-                std::array::from_fn(|i| GpuSighted::from_sighted(&m.sighted[y][i]))
-            }),
         }
     }
-}
-
-/// A realm as the record kept it for one year (brain.rs `Recorded`).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuRecorded {
-    pub title: i32,
-    pub alive: i32,
-    pub soldiers: i32,
-    pub treasury: i32,
-    pub starved: i32,
-    pub marched_by: [i32; 6],
-    pub beaten_by: [i32; 6],
-    pub lost_to: [i32; 6],
-}
-
-impl GpuRecorded {
-    pub fn from_recorded(r: &Recorded) -> GpuRecorded {
-        GpuRecorded {
-            title: r.title,
-            alive: i32::from(r.alive),
-            soldiers: r.soldiers,
-            treasury: r.treasury,
-            starved: r.starved,
-            marched_by: r.heard.marched_by.map(i32::from),
-            beaten_by: r.heard.beaten_by.map(i32::from),
-            lost_to: r.heard.lost_to,
-        }
-    }
-}
-
-/// A year of the journal: every realm's record.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-pub struct GpuRecordedYear {
-    pub realms: [GpuRecorded; 6],
 }
 
 /// What everyone heard of the last campaign about one realm.
@@ -409,8 +342,6 @@ pub struct Table {
     pub memories: [GpuMemory; 6],
     pub heard: [GpuHeard; 6],
     pub outcomes: [GpuOutcome; 6],
-    /// The journal, the last year first (the same for every seat).
-    pub journal: [GpuRecordedYear; JOURNAL_YEARS],
 }
 
 impl Table {
@@ -442,11 +373,6 @@ impl Table {
             memories: std::array::from_fn(|i| GpuMemory::from_memory(&memories[i])),
             heard: std::array::from_fn(|i| GpuHeard::from_heard(&memories[0].heard[i])),
             outcomes: std::array::from_fn(|i| GpuOutcome::from_outcome(&outcomes[i])),
-            journal: std::array::from_fn(|y| GpuRecordedYear {
-                realms: std::array::from_fn(|i| {
-                    GpuRecorded::from_recorded(&memories[0].journal[y][i])
-                }),
-            }),
         }
     }
 
@@ -505,12 +431,6 @@ impl Table {
                     out.push(format!("dossier {i} on {j}: {x:?}\n              vs {y:?}"));
                 }
             }
-            if a.sighted != b.sighted {
-                out.push(format!(
-                    "sighted {i}: {:?}\n         vs {:?}",
-                    a.sighted[0], b.sighted[0]
-                ));
-            }
             let far = |p: &[f32], q: &[f32]| {
                 p.iter()
                     .zip(q)
@@ -524,10 +444,6 @@ impl Table {
             let d = far(&a.orders, &b.orders);
             if d > tolerance {
                 out.push(format!("orders {i}: off by {d}"));
-            }
-            let (a, b) = (&self.journal[0].realms[i], &other.journal[0].realms[i]);
-            if a != b {
-                out.push(format!("journal {i}: {a:?}\n         vs {b:?}"));
             }
             let (a, b) = (&self.heard[i], &other.heard[i]);
             if a != b {

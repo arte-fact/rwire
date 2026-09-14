@@ -31,6 +31,8 @@ apps/empire-train/schools/*-driver.out
 # schools/pools are kept, the campaigns keep their logs and measures only
 apps/empire-train/schools/s*/*.json
 apps/empire-train/schools/s*/*.out
+# Recall traces (`--trace`): tens of MB per school, regenerated at will
+apps/empire-train/schools/s*/recall/
 apps/empire-train/schools/__pycache__/
 # llama-modnitor runtime data (public repo: profiles hold local model paths)
 apps/llama-modnitor/.env

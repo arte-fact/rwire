@@ -3,9 +3,7 @@
 //! Extérieur orders, the armies march together, the year ends. What each
 //! seat made of it comes back as an [`Outcome`], scored for evolution.
 
-use crate::brain::{
-    bound_council, decode_intendance, record, Brain, Intendance, Letters, Memory, Stage,
-};
+use crate::brain::{bound_council, decode_intendance, Brain, Intendance, Letters, Memory, Stage};
 use crate::campaign::{apply_battle, march_quiet, Fought};
 use crate::demography::apply_feed;
 use crate::economy::{apply_economy, apply_taxes, economy_report};
@@ -392,10 +390,6 @@ pub fn watch(brains: [&Brain; 6], table: &Table, mut watch: impl FnMut(YearEnd))
             if title >= PlayerTitle::King {
                 outcomes[i].king.get_or_insert(year);
             }
-        }
-        let recorded = record(&game, &memories, &heard);
-        for m in &mut memories {
-            m.note(recorded, year);
         }
         watch(YearEnd {
             fought: &fought,

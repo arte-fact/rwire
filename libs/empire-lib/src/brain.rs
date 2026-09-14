@@ -52,105 +52,41 @@ pub const ORDERS: usize = 19;
 /// old reports (see [`sight`]): what it wants of them, it must keep itself.
 pub const RECALL: usize = 32;
 pub const B_OUT: usize = ORDERS + RECALL;
-/// How many past years the journal keeps, the last first.
-pub const JOURNAL_YEARS: usize = 4;
-/// A year of the journal as a seat reads it: its own standing (title,
-/// soldiers, treasury, starved), then thirteen entries per rival — it
-/// marched on me, I marched on it, it beat me, I beat it, the arpents it
-/// lost to me, its title, whether it lived, how many others marched on
-/// it, then what my éclaireur read of it that year: read at all, its
-/// surface, garrison, walls and efficiency.
-pub const ENTRY: usize = 4 + RIVALS * 13;
 /// What both networks see: the year's figures, the Chronique, the
-/// rivals, last year's orders and the recall, then the journal.
-pub const SIGHT: usize = OWN + CHRONICLE + RIVALS * RIVAL + B_OUT + JOURNAL_YEARS * ENTRY;
+/// rivals, last year's orders and the recall. (A four-year journal of
+/// every realm's standing and wars once followed, 276 entries: s62c
+/// showed it cost every reading three to six points of crowns, so the
+/// rules' version 3 dropped it.)
+pub const SIGHT: usize = OWN + CHRONICLE + RIVALS * RIVAL + B_OUT;
 /// The Intendance sees the sight; the Extérieur sees it and the Intendance's
 /// answer of the same year.
 pub const A_IN: usize = SIGHT;
 pub const B_IN: usize = SIGHT + A_OUT;
 
-/// What the record keeps of one realm for a year: how it stood when the
-/// year closed, and what the rumours said of its wars.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct Recorded {
-    /// The title's rank, Duke 0 to Emperor 3.
-    pub title: i32,
-    pub alive: bool,
-    pub soldiers: i32,
-    pub treasury: i32,
-    /// Serfs dead of famine that year.
-    pub starved: i32,
-    pub heard: Heard,
-}
-
-/// The record of a year: every realm as it stood when the year closed.
-pub type Recorded6 = [Recorded; 6];
-
-/// What a seat's éclaireur read of one realm in one year: nothing, or
-/// the report he brought back.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct Sighted {
-    pub read: bool,
-    pub surface: i32,
-    pub garrison: i32,
-    pub forts: i32,
-    pub efficiency: i32,
-}
-
-/// The year's record, from the game as the year closes and what was
-/// heard of its campaign.
-pub fn record(game: &EmpireGame, memories: &[Memory; 6], heard: &[Heard; 6]) -> Recorded6 {
-    std::array::from_fn(|i| {
-        let k = &game.kingdoms[i];
-        Recorded {
-            title: k.title() as i32,
-            alive: !k.is_dead,
-            soldiers: k.soldiers,
-            treasury: k.treasury,
-            starved: memories[i]
-                .demo
-                .as_ref()
-                .map_or(0, |d| d.starvation_victims),
-            heard: heard[i],
-        }
-    })
-}
-
 /// Which of what a seat could read its brain does: the Chronique, last
 /// year's orders and its old reports (`told`); what the Extérieur wrote
-/// down to remember (`recall`); the journal of past years (`journal`).
-/// What it does not read is zero on its sight, so one genome shape
-/// serves them all.
+/// down to remember (`recall`). What it does not read is zero on its
+/// sight, so one genome shape serves them all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reads {
     pub told: bool,
     pub recall: bool,
-    pub journal: bool,
 }
 
 impl Reads {
     pub const ALL: Reads = Reads {
         told: true,
         recall: true,
-        journal: true,
     };
-    /// What the delivered brains read: told, nothing else.
-    pub const SCHOOLED: Reads = Reads {
-        told: true,
-        recall: false,
-        journal: false,
-    };
-
-    /// Packed for the GPU: told 1, recall 2, journal 4.
+    /// Packed for the GPU: told 1, recall 2.
     pub fn bits(self) -> u32 {
-        u32::from(self.told) | u32::from(self.recall) << 1 | u32::from(self.journal) << 2
+        u32::from(self.told) | u32::from(self.recall) << 1
     }
 
     pub fn from_bits(bits: u32) -> Reads {
         Reads {
             told: bits & 1 != 0,
             recall: bits & 2 != 0,
-            journal: bits & 4 != 0,
         }
     }
 }
@@ -173,12 +109,6 @@ pub struct Memory {
     pub last_orders: [f32; B_OUT],
     /// What the seat knows of each realm.
     pub dossiers: [Dossier; 6],
-    /// The journal: the last years' records, the last first (the same
-    /// for every seat, as the rumours are).
-    pub journal: [Recorded6; JOURNAL_YEARS],
-    /// The seat's own side of the journal: what its éclaireurs read of
-    /// each realm, year by year, the last first.
-    pub sighted: [[Sighted; 6]; JOURNAL_YEARS],
 }
 
 impl Default for Memory {
@@ -193,32 +123,7 @@ impl Default for Memory {
             answer: [0.0; A_OUT],
             last_orders: [0.0; B_OUT],
             dossiers: [Dossier::default(); 6],
-            journal: [[Recorded::default(); 6]; JOURNAL_YEARS],
-            sighted: [[Sighted::default(); 6]; JOURNAL_YEARS],
         }
-    }
-}
-
-impl Memory {
-    /// The year's record written down with what the seat's éclaireurs
-    /// read this `year`, the oldest year forgotten.
-    pub fn note(&mut self, recorded: Recorded6, year: i32) {
-        self.journal.rotate_right(1);
-        self.journal[0] = recorded;
-        self.sighted.rotate_right(1);
-        self.sighted[0] =
-            std::array::from_fn(
-                |i| match self.dossiers[i].report.filter(|r| r.year == year) {
-                    Some(r) => Sighted {
-                        read: true,
-                        surface: r.surface,
-                        garrison: r.garrison,
-                        forts: r.fortifications,
-                        efficiency: r.efficiency,
-                    },
-                    None => Sighted::default(),
-                },
-            );
     }
 }
 
@@ -414,50 +319,6 @@ pub fn sight(game: &EmpireGame, id: Kingdoms, m: &Memory, reads: Reads) -> Vec<f
     } else {
         v.extend([0.0; RECALL]);
     }
-    // The journal, the last year first.
-    if reads.journal {
-        let me = id.index();
-        for (recorded, sighted) in m.journal.iter().zip(&m.sighted) {
-            let mine = &recorded[me];
-            v.extend([
-                mine.title as f32 / 3.0,
-                count(mine.soldiers, 400.0),
-                signed_count(mine.treasury, 10_000.0),
-                count(mine.starved, 1_000.0),
-            ]);
-            for o in rivals(id) {
-                let r = &recorded[o.index()];
-                let others = r
-                    .heard
-                    .marched_by
-                    .iter()
-                    .enumerate()
-                    .filter(|&(j, &f)| f && j != me)
-                    .count() as f32
-                    / 2.0;
-                v.extend([
-                    f32::from(u8::from(mine.heard.marched_by[o.index()])),
-                    f32::from(u8::from(r.heard.marched_by[me])),
-                    f32::from(u8::from(mine.heard.beaten_by[o.index()])),
-                    f32::from(u8::from(r.heard.beaten_by[me])),
-                    count(r.heard.lost_to[me], 1_000.0),
-                    r.title as f32 / 3.0,
-                    f32::from(u8::from(r.alive)),
-                    others,
-                ]);
-                let s = &sighted[o.index()];
-                v.extend([
-                    f32::from(u8::from(s.read)),
-                    count(s.surface, 10_000.0),
-                    count(s.garrison, 400.0),
-                    s.forts as f32 / 10.0,
-                    s.efficiency as f32 / 150.0,
-                ]);
-            }
-        }
-    } else {
-        v.extend(vec![0.0; JOURNAL_YEARS * ENTRY]);
-    }
     debug_assert_eq!(v.len(), SIGHT);
     v
 }
@@ -544,14 +405,13 @@ pub struct Brain {
 
 /// The widths a genome is laid out for: the seigneur's own entries of the
 /// sight, the entries per rival, the Intendance's and the Extérieur's
-/// answers, the years of journal, and the hidden layer of both networks.
+/// answers, and the hidden layer of both networks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shape {
     pub own: usize,
     pub rival: usize,
     pub a_out: usize,
     pub b_out: usize,
-    pub journal: usize,
     pub hidden: usize,
 }
 
@@ -562,7 +422,6 @@ impl Shape {
         rival: RIVAL,
         a_out: A_OUT,
         b_out: B_OUT,
-        journal: JOURNAL_YEARS,
         hidden: HIDDEN,
     };
 
@@ -588,16 +447,8 @@ impl Shape {
         Shape::wide(rest / per_hidden)
     }
 
-    /// The widths the delivered brains were schooled at: before the
-    /// recall and the journal.
-    pub const SCHOOLED: Shape = Shape {
-        b_out: ORDERS,
-        journal: 0,
-        ..Shape::NOW
-    };
-
     const fn sight(self) -> usize {
-        self.own + CHRONICLE + RIVALS * self.rival + self.b_out + self.journal * ENTRY
+        self.own + CHRONICLE + RIVALS * self.rival + self.b_out
     }
 
     /// The length of a genome laid out this way.
@@ -633,7 +484,6 @@ impl Shape {
             && self.rival <= now.rival
             && self.a_out <= now.a_out
             && self.b_out <= now.b_out
-            && self.journal <= now.journal
             && self.hidden <= now.hidden
     }
 }
@@ -666,7 +516,6 @@ impl Brain {
         assert_eq!(now.rival, RIVAL);
         assert_eq!(now.a_out, A_OUT);
         assert_eq!(now.b_out, B_OUT);
-        assert_eq!(now.journal, JOURNAL_YEARS);
         assert_eq!(g.len(), was.genome());
         // Where an input of the old sight (and, for the Extérieur, of the
         // Intendance's answer after it) sits in the new one: its block
@@ -677,7 +526,6 @@ impl Brain {
                 (CHRONICLE, CHRONICLE),
                 (RIVALS * was.rival, RIVALS * now.rival),
                 (was.b_out, now.b_out),
-                (was.journal * ENTRY, now.journal * ENTRY),
                 (was.a_out, now.a_out),
             ];
             let (mut from, mut to) = (0, 0);
@@ -725,22 +573,21 @@ impl Brain {
     }
 
     /// The brains the computers sit down with, one per temperament,
-    /// their genomes in little-endian floats under `brains/`, at the
-    /// widths of [`Shape::SCHOOLED`] (told, no recall, no journal). All were
-    /// schooled at the arena (`apps/empire-train`) from scratch, six
-    /// tables of six, no hall, a rank cost of forty, no letters. The
-    /// first four came out of s46 (against s35); three then played forty
-    /// rounds against their sisters and s35 at hundred-year tables (s48).
-    /// The last three came out of s53 (against those four, hundred-year
-    /// tables): two rushers and a careful one. The players are left to
-    /// guess who is who: the soldier (s46a) buys men and neglects the
-    /// walls; the builder (s48b) hoards grain, mills and rams; the
-    /// garrison (s48c) keeps the largest standing army; the shopkeeper
-    /// (s48d) opens her market first and marches the most; the charger
-    /// (s53, trial 18) and the conqueror (s53, trial 9) sell land for
-    /// seven years, then raise hundreds of men a year and take two walled
-    /// neighbours at a time — crowned by the year 20 against the first
-    /// four; the careful one (s53a) outlives everyone and crowns late.
+    /// their genomes in little-endian floats under `brains/`, at today's
+    /// widths, reading the Chronique and their recall. All seven came out
+    /// of s63 (14 September 2026, rules 3): sixteen schools raised from
+    /// nothing against pool B, bred at 0.3, 400 generations, each genome
+    /// scored on 32 tables; the seven were read in 200 traced games each
+    /// and named for what they do. The players are left to guess who is
+    /// who: the soldier (t-2) marches the most men every year and keeps
+    /// rams; the builder (t-4, the best of the sixteen) raises a thousand
+    /// mills and the widest lands; the garrison (t-5) keeps the largest
+    /// standing army and the fullest granary, never a ram; the shopkeeper
+    /// (t-16) hoards gold and lists grain nearly every year; the charger
+    /// (t-8) crowns by the year 13, walls and palaces neglected; the
+    /// conqueror (t-14) takes walled neighbours with fifty rams and a
+    /// fleet; the careful one (t-12) walls up, builds hospices and palaces
+    /// and sends an éclaireur every year.
     pub fn schools() -> &'static [Brain; 7] {
         static SCHOOLS: LazyLock<[Brain; 7]> = LazyLock::new(|| {
             let school = |bytes: &[u8]| {
@@ -748,10 +595,7 @@ impl Brain {
                     .chunks_exact(4)
                     .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
                     .collect();
-                Brain::from_genome(
-                    &Brain::grown(&genome, Shape::SCHOOLED, Shape::NOW),
-                    Reads::SCHOOLED,
-                )
+                Brain::from_genome(&genome, Reads::ALL)
             };
             [
                 school(include_bytes!("../brains/soldat.f32")),
@@ -1152,7 +996,6 @@ mod tests {
         let recall = Reads {
             told: false,
             recall: true,
-            journal: false,
         };
         let told = sight(
             &game,
@@ -1314,7 +1157,6 @@ mod tests {
             rival: RIVAL - 2,
             a_out: A_OUT - 3,
             b_out: B_OUT - 1,
-            journal: 0,
             hidden: HIDDEN,
         };
         let old: Vec<f32> = (0..was.genome())
@@ -1338,7 +1180,7 @@ mod tests {
         let full = sight(&game, Kingdoms::France, &m, Reads::ALL);
         // The narrower sight: the own block without its last entry, each
         // rival block without its last two, the last orders without the
-        // last, no journal.
+        // last.
         let base = OWN + CHRONICLE;
         let orders = base + RIVALS * RIVAL;
         let mut narrow: Vec<f32> = full[..was.own].to_vec();

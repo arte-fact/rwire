@@ -10,6 +10,9 @@ l'instance précédente ; `libs/empire-lib/BRAIN.md` est la référence de fond.
   (`gitlab.raptors.pizza/raptor-1/rwire`) et dans le dépôt local `~/rwire` (origin =
   GitHub, sans cette branche : on pousse par SSH ou on tire depuis GitLab). `main` n'a rien
   de tout ça.
+- **Règles v3** (`empire_lib::RULES = 3`, 14 septembre) : v2 sans le journal dans la vue
+  (201 entrées, génome de 15 781 poids à 32 neurones) ; le pool de référence est `pools/B`
+  (s63, told + recall), le pool A (v2) ne se charge plus.
 - **Règles v2** (`empire_lib::RULES = 2`) : achats = envie⁴ × ce que le trésor permet ;
   table finie au premier Empereur ; au plus un bélier par dixième de mur monte à l'assaut
   par cadence ; la vue porte le journal de 4 ans (public + rapports d'éclaireur du siège).
@@ -18,7 +21,7 @@ l'instance précédente ; `libs/empire-lib/BRAIN.md` est la référence de fond.
   achètent peu : **à régénérer et livrer** (voir § 5).
 - Trainer `apps/empire-train` : `--breed 0.3` (élevage : élite = 100 parents, 9 enfants
   chacun, sélection parmi tous), `--trials N` (N écoles dans une passe GPU, `{n}` dans
-  `--out` et `--from`), `--hidden H`, `--told --recall --journal` (ce que lit une école de
+  `--out` et `--from`), `--hidden H`, `--told --recall` (ce que lit une école de
   zéro ; par défaut rien), `--keep N` (instantanés `<out>.g<gen>.json`), `--measure N --gpu`
   (un siège contre cinq des `--against`, la seule note qui fasse foi), `--show`,
   `--deliver`. L'en-tête imprime la carte choisie.
@@ -141,12 +144,17 @@ l'instance précédente ; `libs/empire-lib/BRAIN.md` est la référence de fond.
 
 ## 5. La suite, dans l'ordre où l'utilisateur la voit
 
-1. Lire les mesures de la prolongation s62 (les six lectures restantes à 300), conclure
-   sur la mémoire ; si rien ne dépasse le témoin, prolonger à 600 ou durcir le pool.
-2. **Promouvoir** les meilleurs du témoin (46–48 % contre le pool A) dans un pool B avec
-   `promote.py`, relancer contre B.
-3. **Régénérer et livrer sept brains v2** dans `libs/empire-lib/brains` (tempéraments
-   distincts, `--deliver`), mettre `Brain::schools()` et `BRAIN.md` § 4 à jour.
+1. ~~Lire les mesures de la prolongation s62~~ **Fait le 14 septembre (s62c, 600 gén.,
+   `s62/measures-600.csv`)** : Chronique + recall 50 % (an 21) contre 44 % au témoin ;
+   recall seul = témoin mais plus vite ; le journal retire 3 à 6 points partout. Rapport
+   avec courbes publié en artefact. Suite : scolariser en `--told --recall`, retirer le
+   journal de la vue (règles v3), promouvoir le meilleur told+recall dans un pool B.
+2. ~~Promouvoir dans un pool B~~ **Fait** : sous v3 le pool B est la nouvelle référence
+   (s63 étape A), le pool C = B + t-4. Prochaine campagne : contre C.
+3. ~~Régénérer et livrer sept brains~~ **Fait le 14 septembre** (s63, v3, told + recall,
+   `BRAIN.md` § 4) ; `promote.py` a écrit `pools/C`. Le trainer a gagné `--trace FILE`
+   (une ligne par an de l'état du siège et des 32 cases de recall, CSV) et `--no-recall`
+   (ablation) ; l'analyse du recall est dans `BRAIN.md` § 1.
 4. Élevage × largeur (128–256), l'échelle de mutation (0,3 s'aplatit vers 300 gén., 0,1
    monte encore), le recall sur course longue.
 5. Pour la 3090, le prochain gain est **la mémoire privée par voie** : l'état d'une table

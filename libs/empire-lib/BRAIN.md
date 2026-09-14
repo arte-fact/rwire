@@ -1,4 +1,4 @@
-# Le Brain — point d'arrêt (13 septembre 2026, règles v2)
+# Le Brain — point d'arrêt (14 septembre 2026, règles v3)
 
 État : **en régénération**. Les brains livrés (`brains/*.f32`, s46a et s48b–d, s53) ont été
 formés sous la version 1 des règles ; le jeu tourne maintenant sous la **version 2**
@@ -18,13 +18,13 @@ lus une fois par an chacun.
 
 | Réseau | Entrées | Sorties | Rôle |
 |---|---|---|---|
-| `intendance` | `SIGHT` = 477 | `A_OUT` = 18 | rations, taxes, marché du grain, vente de terre, achats |
+| `intendance` | `SIGHT` = 201 | `A_OUT` = 18 | rations, taxes, marché du grain, vente de terre, achats |
 | `exterieur` | `SIGHT` + 18 | `B_OUT` = 51 (19 ordres + 32 de recall) | éclaireur, agents, puis expéditions (5 voisins + barbares) et béliers ; les 32 dernières sorties sont relues l'an d'après |
 
-Génome à 32 neurones : 33 445 poids (les deux réseaux bout à bout). Il n'y a **aucune règle
+Génome à 32 neurones : 15 781 poids (les deux réseaux bout à bout ; 33 445 sous v2, avec le journal). Il n'y a **aucune règle
 codée à la main** dans le jeu de l'ordinateur en dehors du décodage ci-dessous.
 
-### La vue (`sight`, 477 entrées) et ce qu'un brain en lit (`Reads`)
+### La vue (`sight`, 201 entrées) et ce qu'un brain en lit (`Reads`)
 
 Les parts sont lues telles quelles, les comptes en **échelle log** (`count(n, scale)`).
 
@@ -36,16 +36,14 @@ Les parts sont lues telles quelles, les comptes en **échelle log** (`count(n, s
   campagne (m'a attaqué, je l'ai attaqué, battu, arpents pris), rapport d'éclaireur et
   lecture d'agent, chacun avec son âge.
 - **Sa dernière réponse d'Extérieur (19 ordres + 32 de recall)**.
-- **Le journal (4 années × 69)**, la dernière année d'abord : son propre état de l'année
-  (titre, soldats, trésor, affamés), puis par voisin ce que tout le monde a vu (m'a attaqué,
-  je l'ai attaqué, m'a battu, je l'ai battu, arpents perdus contre moi, titre, vivant,
-  combien d'autres l'ont attaqué) et ce que **mon** éclaireur en a lu cette année-là (lu,
-  surface, garnison, murs, efficacité). Le journal public est tenu une fois par table
-  (`Memory::note`, `record`), les rapports par siège (`Sighted`).
+- ~~Le journal (4 années × 69)~~ : **retiré sous v3** (14 septembre). Il donnait d'office
+  l'état et les guerres de chaque royaume sur quatre ans et les rapports d'éclaireur du
+  siège ; s62c a montré qu'il coûtait trois à six points de sacres à toute lecture qui le
+  portait. Avec lui sont partis `Memory::note`, `Recorded`, `Sighted` et le bloc du noyau.
 
-Trois **drapeaux de lecture** par brain (`Reads`, portés par le fichier d'école et par le
+Deux **drapeaux de lecture** par brain (`Reads`, portés par le fichier d'école et par le
 siège dans le noyau GPU) : `told` (la Chronique, les ordres de l'an passé, les vieux
-rapports), `recall` (les 32 sorties relues), `journal`. Ce qu'un brain ne lit pas est à
+rapports), `recall` (les 32 sorties relues). Ce qu'un brain ne lit pas est à
 zéro sur sa vue : **une seule forme de génome sert toutes les lectures**, ce qui permet de
 les comparer à recette égale (s61, s62). Les `.f32` livrés lisent la Chronique seule.
 
@@ -61,15 +59,32 @@ les comparer à recette égale (s61, s62). Les `.f32` livrés lisent la Chroniqu
   entre au dossier et au journal, puis expéditions sur la vue rafraîchie. Pas de guerre
   avant l'an 3.
 
-### Le recall, ce qu'il fait vraiment
+### Le recall, ce qu'il fait vraiment (lu sur s63, 14 septembre)
 
-Lu le long de six parties (s59, élevage 0,3) : 4 à 9 cases sur 32 restent constantes, une
-douzaine bougent **une fois**, en marche d'escalier, quand le trésor et l'armée passent un
-seuil (vers l'an 15–18) — un **bit de phase** « assaut final », l'école sacre l'an d'après.
-Les mêmes cases dans une école, d'autres dans une autre ; aucune ne suit un événement
-ponctuel. Coupé à la mesure, s59 tombe de 55 % à 3 % de sacres. Ce n'est pas une mémoire
-d'événements, c'est un automate à deux ou trois états ; d'où le journal, qui donne
-l'histoire d'office.
+Tracé sur 200 parties par école (`--trace`, une ligne par an : l'état du siège et les 32
+cases écrites), à 100 générations (pool B) et à 400 (les tempéraments livrés) :
+
+- **À 100 générations, des intégrateurs à fuite.** Deux à sept cases figées, une seule
+  qui saute ; les autres suivent continûment une grandeur de l'état, presque toujours le
+  trésor en log (corrélations 0,6–0,75), sinon les réserves, les nobles, l'année. L'état
+  courant explique 28–40 % de leur variance, les deux années précédentes n'y ajoutent que
+  3–6 points (rien n'y mémorise un événement), mais la case de l'an d'avant porte le tout
+  à 49–55 % avec des coefficients de 0,4 à 0,9 : chaque case lisse la grandeur qu'elle
+  suit, une tendance plutôt qu'une valeur.
+- **À 400 générations, des bits de phase apparaissent.** Sept à treize cases sautent
+  (|Δ| > 0,5) au moins une fois par partie, de deux sortes : des **verrous d'ouverture**
+  qui basculent une fois pour toutes à l'an 2–5 dans presque toutes les parties (t-5 r9 et
+  r30, t-12 r8 et r25 : montée à 98 %, jamais redescendues — « la première année est
+  passée ») ; et des **bascules de milieu de partie** à l'an 8–15, quand le trésor passe
+  5 000–15 000 et l'armée 50–150, deux à trois fois par partie, pour moitié définitives —
+  elles précèdent le sacre de 8 à 14 ans dans plus de 95 % des parties sacrées : la phase
+  « assaut » de s59. L'état courant n'explique plus que 16–35 % de la variance, la case
+  d'avant beaucoup plus : l'automate remplace le lissage.
+- **Ablation** (`--no-recall`, entrées à zéro) : les sacres tombent de 33–36 % à 0–4 %
+  et les chutes montent de 45–50 % à 84–98 %. Une dépendance apprise, pas une mesure de
+  la valeur de la mémoire : le brain n'a jamais vu de zéros à cet endroit de sa vue. La
+  comparaison juste reste s62c, recall contre témoin à recette égale (même plafond, départ
+  deux fois plus rapide, sacre deux ans plus tôt ; avec la Chronique, +6 points).
 
 ## 2. L'école (`apps/empire-train`)
 
@@ -98,7 +113,7 @@ La première génération (10 000) reste une loterie.
   précédente (`Pace`). Sur `threadreaper` (3090 + 32 threads) : 8 essais h32 en 1,9 s la
   génération, 32 essais en 6,7 s.
 - `--hidden H` (couche cachée, les rivaux plus étroits sont élargis par des neurones muets),
-  `--told --recall --journal` (les lectures d'une école de zéro), `--keep N` (un instantané
+  `--told --recall` (les lectures d'une école de zéro), `--keep N` (un instantané
   toutes les N générations, pour les courbes), `--trials N` avec `{n}` dans `--out` et
   `--from`.
 - Sortie : `<out>.json` (moyenne, sigma, Hall, meilleur, parents, `widths`, `rules`, les
@@ -129,12 +144,23 @@ sauter le GPU).
 
 ## 4. Les brains livrés — ce qu'ils valent
 
-Les sept `.f32` sont de la **version 1** : s46a, s48b–d (les quatre sœurs) et s53 (deux
-rusheurs, une prudente). Sous v2 ils jouent encore mais achètent `envie⁴` au lieu de
-`envie` : ils sont à régénérer à partir du pool v2 (`run-s62.py`, étape A) dès qu'une
-campagne v2 donne des tempéraments stables. Ce qu'ils valaient sous v1 (13 septembre,
-`--measure 500` contre eux-mêmes) : s54a, la meilleure école v1, sacrait 68 % contre eux
-en médiane à l'an 23 ; un essai ordinaire de la même recette, 12 à 18 %.
+Les sept `.f32` sont de la **version 3**, livrés le 14 septembre depuis s63 (seize écoles
+de zéro contre le pool B, told + recall, 400 générations) ; `Brain::schools()` les lit à
+la forme actuelle avec `Reads::ALL`. Mesurés seuls contre cinq du pool B (500 tables) :
+
+| Brain | École | Sacres | An | Ce qui le distingue (200 parties tracées) |
+|---|---|---|---|---|
+| bâtisseuse | t-4 | 36 % | 22 | 1 300 moulins, les terres les plus vastes (20 800 arpents), 185 soldats |
+| garnison | t-5 | 33 % | 22 | la plus grosse armée entretenue (199), 38 000 boisseaux en grenier, jamais de bélier |
+| prudente | t-12 | 31 % | 21 | murs 6/10, 6 hospices, 8 palais, un éclaireur chaque année |
+| boutiquière | t-16 | 31 % | 19 | 19 000 livres de trésor, du grain à l'étal 9 ans sur 10 |
+| conquérante | t-14 | 26 % | 22 | 55 béliers, 18 chantiers, 113 foires, 171 hommes en marche par an |
+| soldat | t-2 | 25 % | 22 | le plus d'hommes en marche (173 par an), 640 moulins, 20 béliers |
+| fonceuse | t-8 | 24 % | 19 | sacre médian an 13 aux tables d'école, murs 4/10 et palais négligés |
+
+Pool de référence : `pools/B` (8 écoles de zéro, v3) ; `pools/C` = B où t-4 a remplacé le
+membre muet (`promote.py`). Trois des seize essais (t-3, t-7, t-9) sont restés sur le
+plateau pacifique (0 %), un (t-6) presque.
 
 ## 5. Inventaire des écoles
 
@@ -185,6 +211,8 @@ chacun, avec leurs `run-s*.sh`).
 | s60 | recall (sans Chronique) contre told (Chronique, sans recall), élevage 0,3, 100 gén. | told 40 % de médiane, recall 26 % : la Chronique donnée d'office bat l'automate à construire, à 100 gén. |
 | s61 | plan factoriel told × recall × journal sous v1 | interrompu deux fois par la boucle des béliers (400 000 béliers), abandonné pour v2 |
 | **s62** | **règles v2** : pool A régénéré de zéro (8/8 lignée entre clones), puis les huit lectures contre le pool, 100 gén. | rien 16 % de médiane (max 48), recall 13, les trois 11, journal 9, Chronique seule 3 : à 100 gén. toute entrée en plus ralentit ; s62b prolonge « les trois » et le témoin à 300 |
+| **s63** | **règles v3** (sans journal) : pool B de zéro (8 essais, told + recall, 100 gén., 7/8 sacrent), puis 16 essais de zéro contre B, 400 gén., 32 tables par génome | 12 essais sur 16 valides (20–36 % contre B, an 19–24), 3 sur le plateau pacifique ; **sept livrés** (§ 4) ; `promote.py` → pool C. Génération de 8 essais en 3 s, de 16 en 6,5 s |
+| **s62c** | **les huit lectures à 600 gén.** contre le pool A, de zéro (`run-s62c.py`, machine GPU, 32 tables par génome), 8 essais, mesure tous les 25 | **Chronique + recall 50 %** de médiane (33–59, sacre an 21, 51 % dès 400) ; témoin 44 % (38–54), recall 44 (part à 32 % à 100 contre 22), Chronique 46 (12–55, tard et fragile) ; **le journal retire 3 à 6 points partout** (journal 41, recall+journal 42, Chronique+journal 38, les trois 43). Plafond atteint entre 300 et 400, rien ne bouge en 200 de plus. La Chronique lit 1–2 rapports par partie contre 9 |
 
 Enseignements (détail dans la mémoire `empire-intel-findings`) :
 
@@ -237,7 +265,7 @@ python3 apps/empire-train/schools/run-s62.py
 # une campagne d'élevage de 8 essais contre le pool A, sur GPU (≈ 5 min pour 100 gén.)
 P=apps/empire-train/schools/pools/A
 target/release/empire-train --stage war $(for n in 1 2 3 4 5 6 7 8; do echo --against $P/pool-$n-war.json; done) \
-  --hall 0 --longest 100 --rank 40 --tables 32 --trials 8 --breed 0.3 --told --recall --journal \
+  --hall 0 --longest 100 --rank 40 --tables 32 --trials 8 --breed 0.3 --told --recall \
   --generations 300 --keep 25 --gpu --out "s63-{n}-war.json"
 
 # mesurer une école contre le pool (la seule note qui fasse foi), ou dérouler une partie
@@ -257,8 +285,10 @@ fichiers d'école d'une autre version sont refusés et le pool est régénéré.
 
 ## 7. Ouvert
 
-- Le recall sur une course longue (300–600 gén.) : en dessous à 100 gén., mais il monte
-  encore là où la Chronique s'aplatit (s60).
+- ~~Le recall sur une course longue~~ : tranché par s62c (600 gén.) — seul, il rejoint le
+  témoin (44 %) après un départ plus rapide ; avec la Chronique il fait 50 %, la seule
+  lecture au-dessus du témoin. Le journal baisse tout : à retirer de la vue (une décision
+  de règles, `RULES` à incrémenter, 8 800 poids de moins).
 - Élevage × largeur (128–256 neurones, où le tirage trouvait déjà des conquérants rapides).
 - L'échelle de mutation (0,3 converge plus vite mais s'aplatit vers 300 gén. ; 0,1 monte
   encore), à faire décroître le long de la course.
@@ -267,4 +297,5 @@ fichiers d'école d'une autre version sont refusés et le pool est régénéré.
   de 100 000 poids.
 - La fenêtre glissante complète (encodeur par année) si le journal ne suffit pas ; le
   dimensionnement est dans le brouillon « Brain à fenêtre glissante » du 13 septembre.
-- Livrer sept tempéraments v2 dans `brains/` et mettre `Brain::schools()` à jour.
+- Livrer sept tempéraments v2 dans `brains/` et mettre `Brain::schools()` à jour — à
+  scolariser en `--told --recall` (s62c), le meilleur essai (59 %) candidat au pool B.

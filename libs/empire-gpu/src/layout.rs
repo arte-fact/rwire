@@ -5,7 +5,7 @@
 //! aligned. The kernels are compiled for one hidden width, a multiple
 //! of 32 (they read it 32 neurons at a time).
 
-use empire_lib::brain::{Net, Shape, A_IN, A_OUT, B_IN, B_OUT, DEADBAND, ENTRY, JOURNAL_YEARS};
+use empire_lib::brain::{Net, Shape, A_IN, A_OUT, B_IN, B_OUT, DEADBAND};
 
 const fn laid_len(inputs: usize, outputs: usize, hidden: usize) -> usize {
     (inputs + 1) * hidden + outputs * (hidden + 4)
@@ -64,8 +64,7 @@ pub fn header(hidden: usize) -> String {
     format!(
         "const HIDDEN: u32 = {hidden}u;\nconst A_IN: u32 = {A_IN}u;\nconst A_OUT: u32 = {A_OUT}u;\n\
          const B_IN: u32 = {B_IN}u;\nconst B_OUT: u32 = {B_OUT}u;\nconst A_LEN: u32 = {}u;\n\
-         const GENOME: u32 = {}u;\nconst DEADBAND: f32 = {DEADBAND:?};\nconst LN_1_5: f32 = {:?};\n\
-         const JOURNAL_YEARS: u32 = {JOURNAL_YEARS}u;\nconst ENTRY: u32 = {ENTRY}u;\n",
+         const GENOME: u32 = {}u;\nconst DEADBAND: f32 = {DEADBAND:?};\nconst LN_1_5: f32 = {:?};\n",
         a_len(hidden) / 4,
         genome(hidden) / 4,
         1.5f32.ln()

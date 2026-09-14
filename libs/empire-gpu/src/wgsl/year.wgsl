@@ -139,39 +139,6 @@ fn close_year() {
             O[i].king = year;
         }
     }
-    // The year's record written down, the oldest year forgotten.
-    for (var y = JOURNAL_YEARS - 1u; y > 0u; y--) {
-        J[y] = J[y - 1u];
-    }
-    for (var r = 0u; r < 6u; r++) {
-        var starved = 0;
-        if (M[r].demo.has != 0) {
-            starved = M[r].demo.starvation;
-        }
-        J[0].realms[r].title = title(r);
-        J[0].realms[r].alive = i32(K[r].dead == 0);
-        J[0].realms[r].soldiers = K[r].soldiers;
-        J[0].realms[r].treasury = K[r].treasury;
-        J[0].realms[r].starved = starved;
-        J[0].realms[r].marched_by = H[r].marched_by;
-        J[0].realms[r].beaten_by = H[r].beaten_by;
-        J[0].realms[r].lost_to = H[r].lost_to;
-    }
-    // Each seat's side of it: what its éclaireurs read this year.
-    for (var s = 0u; s < 6u; s++) {
-        for (var y = JOURNAL_YEARS - 1u; y > 0u; y--) {
-            M[s].sighted[y] = M[s].sighted[y - 1u];
-        }
-        for (var r = 0u; r < 6u; r++) {
-            let d = M[s].dossiers[r];
-            let read = d.report != 0 && d.report_year == year;
-            M[s].sighted[0][r].read = i32(read);
-            M[s].sighted[0][r].surface = select(0, d.surface, read);
-            M[s].sighted[0][r].garrison = select(0, d.garrison, read);
-            M[s].sighted[0][r].forts = select(0, d.forts, read);
-            M[s].sighted[0][r].efficiency = select(0, d.efficiency, read);
-        }
-    }
     year += 1;
     // The table ends at the first Emperor, or when every realm has fallen.
     var crowned = false;
