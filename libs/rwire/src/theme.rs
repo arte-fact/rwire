@@ -514,9 +514,12 @@ impl ResolvedPalette {
 /// Generate base/reset CSS.
 ///
 /// Minimal normalization for consistent cross-browser behavior.
-/// Uses short CSS variable names.
+/// Uses short CSS variable names. On touch screens, no tap highlight (the
+/// translucent flash mobile browsers paint over anything clickable — a
+/// whole tap-to-continue screen would flash) and no double-tap zoom, so a
+/// double tap is an app gesture; pinch zoom stays.
 pub fn generate_base_css() -> &'static str {
-    "html{scroll-behavior:smooth}\
+    "html{scroll-behavior:smooth;-webkit-tap-highlight-color:transparent;touch-action:manipulation}\
      *,*::before,*::after{box-sizing:border-box}\
      body{margin:0;font-family:var(--Qft,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif);\
      line-height:var(--X3);color:var(--k);background:var(--a)}\
@@ -790,7 +793,7 @@ mod tests {
     #[test]
     fn test_base_css_size() {
         let css = generate_base_css();
-        assert!(css.len() < 640, "Base CSS too large: {} bytes", css.len());
+        assert!(css.len() < 720, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]
