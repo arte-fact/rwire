@@ -17,7 +17,7 @@ use rwire::theme::{css_var, IntoStyle, ResolvedPalette, ThemeStyle};
 /// All extended style presets (excludes built-in Soft).
 ///
 /// Useful for building UI controls that cycle through styles.
-pub const ALL: &[fn() -> ThemeStyle] = &[solid, brutalist, minimal, glass, neon];
+pub const ALL: &[fn() -> ThemeStyle] = &[solid, brutalist, minimal, glass, neon, cloth];
 
 /// Solid accents, medium radius, subtle shadows (the classic default look).
 pub fn solid() -> ThemeStyle {
@@ -49,6 +49,13 @@ pub fn neon() -> ThemeStyle {
     ThemeStyle::new("neon", "Neon", neon_color_css, neon_q_css)
 }
 
+/// Étoffe: gold hairlines on dark cloth, a serif body face and a lapidary
+/// display face (`--Qfd`, read by `St::FontDisplay`) — the look of a
+/// strategy game's menus. Pair with [`crate::palettes::cloth`].
+pub fn cloth() -> ThemeStyle {
+    ThemeStyle::new("cloth", "Étoffe", cloth_color_css, cloth_q_css)
+}
+
 /// Convenience enum for all extended styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Style {
@@ -57,6 +64,7 @@ pub enum Style {
     Minimal,
     Glass,
     Neon,
+    Cloth,
 }
 
 impl Style {
@@ -67,6 +75,7 @@ impl Style {
         Style::Minimal,
         Style::Glass,
         Style::Neon,
+        Style::Cloth,
     ];
 
     /// Get the human-readable label.
@@ -77,6 +86,7 @@ impl Style {
             Style::Minimal => "Minimal",
             Style::Glass => "Glass",
             Style::Neon => "Neon",
+            Style::Cloth => "Étoffe",
         }
     }
 }
@@ -89,6 +99,7 @@ impl IntoStyle for Style {
             Style::Minimal => minimal(),
             Style::Glass => glass(),
             Style::Neon => neon(),
+            Style::Cloth => cloth(),
         }
     }
 }
@@ -288,4 +299,39 @@ mod tests {
             );
         }
     }
+}
+
+// ============================================================================
+// Étoffe (cloth) Style
+// ============================================================================
+
+fn cloth_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    if is_dark {
+        css_var(css, "v", &rp.accent[6]); // primary: gold
+        css_var(css, "w", &rp.neutral[11]); // on-primary: night
+        css_var(css, "x", &rp.accent[4]); // primary-hover: brighter gold
+        css_var(css, "h", &rp.accent[8]); // border-default: a gold hairline
+        css.push_str("--g:transparent;");
+        css_var(css, "t", &rp.neutral[9]); // surface-raised
+    } else {
+        css_var(css, "v", &rp.accent[8]);
+        css_var(css, "w", &rp.neutral[0]);
+        css_var(css, "x", &rp.accent[9]);
+        css_var(css, "h", &rp.accent[6]);
+        css_var(css, "g", &rp.neutral[2]);
+        css_var(css, "t", &rp.neutral[0]);
+    }
+    css_var(css, "F", &rp.red[6]);
+    css_var(css, "G", &rp.red[0]);
+    css_var(css, "H", &rp.red[5]);
+}
+
+fn cloth_q_css(css: &mut String, _is_dark: bool) {
+    css.push_str("--Qft:\"EB Garamond\",Garamond,Georgia,serif;");
+    css.push_str("--Qfd:Cinzel,\"Trajan Pro\",Georgia,serif;");
+    css.push_str("--Qd:none;--Qgw:none;");
+    css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
+    css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+    css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+    css.push_str("--Qt:150ms;--Qts:none;");
 }
