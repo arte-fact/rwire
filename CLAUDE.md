@@ -61,6 +61,7 @@ rwire/
 │   ├── rwire-macros/        # Proc macros (#[handler], #[renderer], #[derive(State)])
 │   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
+│   ├── rwire-map/           # A pannable, zoomable SVG map: its runtime extension + builder helpers
 │   └── rwire-themes/        # Predefined styles and palettes
 ├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
@@ -279,10 +280,13 @@ what the user is typing.
   the readout and the track.
 - `el.data("autoscroll", "1")` on a scroll box keeps it scrolled to the bottom after every update
   (journals, logs).
-- `el.ext("map")` on an `<svg data-map>` loads the runtime's map extension: drag, pinch and
-  wheel move the `viewBox` client-side, then the view comes back through an
-  `<input data-map-view>` bound on `Ev::Input` (see `runtime/README.md`, "Lazy extensions";
-  `../marches` is the reference use).
+- **Runtime extensions** are lazy ESM modules the loader imports from `/_rw/ext/<name>.js` the
+  first time a batch hints `el.ext("<name>")`. The core vendors `vim`; any crate or app ships
+  its own through `ServerWithRoot::asset(path, content_type, bytes)`, which serves a file as
+  it is (before auth, like the PWA assets). `rwire-map` is the model: `el(El::Svg).map(extent,
+  view)` + `view_input(id, handler)` + `.serve_map()` on the server give a map that drags,
+  pinches and wheels client-side and reports its view back (`../marches` uses it). The
+  TypeScript sources live in `runtime/src/ext/`, built and vendored by `npm run sync`.
 
 ## Capsule Size (lazy delivery)
 

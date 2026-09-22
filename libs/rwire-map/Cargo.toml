@@ -1,0 +1,12 @@
+[package]
+name = "rwire-map"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+description = "A pannable, zoomable SVG map for rwire: the runtime extension and its builder helpers"
+keywords = ["web", "ui", "map", "svg"]
+categories = ["web-programming", "gui"]
+
+[dependencies]
+rwire = { path = "../rwire", version = "0.1.0" }

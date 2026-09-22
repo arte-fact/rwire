@@ -13,6 +13,7 @@ use async_tungstenite::tungstenite::Message;
 use bytes::Bytes;
 use futures::prelude::*;
 use std::any::{Any, TypeId};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::net::{AddrParseError, SocketAddr};
@@ -647,6 +648,17 @@ pub struct ServerWithRoot<F> {
     theme_provider: Option<ThemeProvider>,
     auth: Option<AuthGate>,
     config: ServerConfig,
+    assets: Vec<Asset>,
+}
+
+/// A file the server serves as it is, at a path of the application's choosing:
+/// a runtime extension of its own (`/_rw/ext/<name>.js`, what
+/// [`ElementBuilder::ext`] loads), an image, a font. Served before auth, like
+/// the PWA assets, so a browser can fetch it without a session.
+struct Asset {
+    path: String,
+    content_type: &'static str,
+    body: Cow<'static, [u8]>,
 }
 
 impl Server {
@@ -700,6 +712,7 @@ impl ServerBuilder {
             theme_provider: None,
             auth: None,
             config: ServerConfig::default(),
+            assets: Vec::new(),
         }
     }
 }
@@ -736,6 +749,24 @@ where
     /// /login` issues a random session cookie that subsequent requests (and the
     /// WebSocket upgrade) must present. `GET /logout` clears it. Off by default;
     /// wire it from env in the application so local development stays open.
+    /// Serve `body` as it is at `path` (`"/_rw/ext/map.js"`, `"/logo.png"`),
+    /// with the given content type. This is how an application, or a crate
+    /// beside the framework, ships a runtime extension of its own: the loader
+    /// asks for `/_rw/ext/<name>.js` the first time a batch hints `<name>`.
+    pub fn asset(
+        mut self,
+        path: impl Into<String>,
+        content_type: &'static str,
+        body: impl Into<Cow<'static, [u8]>>,
+    ) -> Self {
+        self.assets.push(Asset {
+            path: path.into(),
+            content_type,
+            body: body.into(),
+        });
+        self
+    }
+
     pub fn auth(mut self, user: impl Into<String>, password: impl Into<String>) -> Self {
         self.auth = Some(AuthGate::new(user.into(), password.into()));
         self
@@ -947,6 +978,7 @@ where
         // Fold a builder-level base_path into the capsule config as the final step, so it wins
         // regardless of chain order and works with or without a prior `.capsule_config(...)`.
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
+        let assets = Arc::new(self.assets);
 
         // Generate capsule - styled if config provided, basic otherwise.
         // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
@@ -1044,6 +1076,7 @@ where
             let config = Arc::clone(&config);
             let metrics = Arc::clone(&metrics);
             let pwa_assets = pwa_assets.clone();
+            let assets = Arc::clone(&assets);
             task::spawn(async move {
                 handle_client(
                     stream,
@@ -1059,6 +1092,7 @@ where
                     config,
                     metrics,
                     pwa_assets,
+                    assets,
                 )
                 .await;
             });
@@ -1408,10 +1442,7 @@ fn login_capsule_config(
 /// Vendored lazy runtime extensions, served at `/_rw/ext/{name}.js` and
 /// dynamic-imported by the core loader on a MOD_DEF hint. Same single-binary
 /// vendoring as the core runtime artifact; `npm run sync` is the write path.
-const EXTS: &[(&str, &str)] = &[
-    ("/_rw/ext/vim.js", include_str!("../assets/ext/vim.min.js")),
-    ("/_rw/ext/map.js", include_str!("../assets/ext/map.min.js")),
-];
+const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
 
 async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
     let response = format!(
@@ -1438,6 +1469,7 @@ async fn handle_client<F>(
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     pwa_assets: Option<Arc<crate::pwa::PwaAssets>>,
+    assets: Arc<Vec<Asset>>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -1458,14 +1490,21 @@ async fn handle_client<F>(
     // while the server is at capacity.
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
-        if let Some(&(_, body)) = EXTS
-            .iter()
-            .find(|(p, _)| Some(*p) == path.split('?').next())
-        {
+        let bare = path.split('?').next().unwrap_or(path);
+        if bare == "/_rw/ext/vim.js" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) = serve_ext_module(stream, body).await {
+            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
                 eprintln!("[{}] ext module error: {}", peer_addr, e);
+            }
+            return;
+        }
+        // The application's own files.
+        if let Some(a) = assets.iter().find(|a| a.path == bare) {
+            let mut drain = vec![0u8; n];
+            let _ = stream.read_exact(&mut drain).await;
+            if let Err(e) = crate::health::serve_static(stream, a.content_type, &a.body).await {
+                eprintln!("[{}] {} error: {}", peer_addr, bare, e);
             }
             return;
         }

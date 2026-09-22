@@ -71,14 +71,15 @@ RWIRE_RUNTIME=$PWD/dist/runtime.min.js cargo test -p rwire --test wire_roundtrip
 ## Lazy extensions (`src/ext/*.ts`)
 
 Separate ESM modules, built by `build.mjs` (the `EXTS` list) and vendored by `sync.mjs`
-into `libs/rwire/assets/ext/<name>.min.js`; the server serves them at `/_rw/ext/<name>.js`
-and the core loader imports one the first time a batch hints it (`MOD_DEF`, from
-`ElementBuilder::ext("<name>")`). A module exports `v` (a version stamp) and `i(document)`,
-its installer. Two exist:
+(`EXT_DEST`: vim into the core crate, map into `libs/rwire-map`); the core loader imports
+one from `/_rw/ext/<name>.js` the first time a batch hints it (`MOD_DEF`, from
+`ElementBuilder::ext("<name>")`). The core serves vim itself; any other module is served
+by the crate or app that ships it, through `ServerWithRoot::asset`. A module exports `v`
+(a version stamp) and `i(document)`, its installer. Two exist:
 
 - `vim` — modal editing on `[data-vim]` textareas (docs/vim-mode-design.md).
 - `map` — pan (drag), pinch and wheel zoom of an `<svg data-map viewBox>`; writes the
   `viewBox` itself and, 150 ms after the gesture, copies it into the value of the
   `<input data-map-view>` beside the svg and dispatches `input`, so a bound `Ev::Input`
   handler keeps the server's view in step. `data-map-extent="x y w h"` bounds the zoom.
-  Give the svg `St::TouchNone` so the page does not scroll under a drag.
+  The `rwire-map` crate wraps the contract (`MapExt::map`, `view_input`, `serve_map`).

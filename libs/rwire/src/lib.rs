@@ -94,7 +94,10 @@ pub use state::{
 pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 
 // Server exports
-pub use server::{persist_task, session_eviction_task, BroadcastMsg, Server, SharedServerState};
+pub use server::{
+    persist_task, session_eviction_task, BroadcastMsg, Server, ServerBuilder, ServerWithRoot,
+    SharedServerState,
+};
 
 // Store exports
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};

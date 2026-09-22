@@ -1085,6 +1085,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwire-map"
+version = "0.1.0"
+dependencies = [
+ "rwire",
+]
+
+[[package]]
 name = "rwire-markdown"
 version = "0.1.0"
 dependencies = [
