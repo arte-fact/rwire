@@ -318,6 +318,10 @@ CSS uses short variable names for minimal wire size. Semantic variables are defi
 | `--r`/`--s` | surface bg/hover | |
 | `--v`/`--w` | primary bg/hover | |
 
+Two font hooks: `--Qft` is the body face (the base CSS reads it on `body`; a `ThemeStyle`'s
+`q_css` sets it, `flat()` makes it mono) and `--Qfd` the display face read by `St::FontDisplay`
+(titles, labels, buttons — unset, it inherits the body face).
+
 Non-color primitives use short names: `--S4` (space-4), `--R2` (radius-md), `--Z1` (shadow-sm), `--T2` (text-sm), `--W5` (font-medium), `--X3` (leading-normal). Color scales: `--N` (neutral), `--U` (blue), `--O` (red), `--P` (green), `--M` (amber), `--Yw`/`--Yb` (white/black). Component hooks: `--Q` prefix (Qm=font-mono, Qc=bg-code, Qs=bg-sidebar, Qe=text-on-emphasis, Qh=header-h).
 
 The Rust `St` enum variant names (`St::BgApp`, `St::Primary`) serve as human-readable documentation for the short CSS names.

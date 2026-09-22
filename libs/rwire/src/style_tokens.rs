@@ -1042,6 +1042,9 @@ define_token_enum! {
         MaxHNone = 0x396 => "max-height:none",
         TopSm = 0x397 => "top:var(--S2)",
         RightSm = 0x398 => "right:var(--S2)",
+        /// The display face a theme style names in `--Qfd` (titles, labels,
+        /// buttons); the body face otherwise.
+        FontDisplay = 0x399 => "font-family:var(--Qfd,inherit)",
     }
 }
 

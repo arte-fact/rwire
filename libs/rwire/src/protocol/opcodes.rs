@@ -363,6 +363,24 @@ define_token_enum! {
         Style = 0x31 => "style",
         Details = 0x32 => "details",
         Summary = 0x33 => "summary",
+        // SVG drawing (0x34-0x43): what a map or a chart needs beyond shapes —
+        // reusable definitions, filters, patterns, gradients, text.
+        Defs = 0x34 => "defs",
+        Filter = 0x35 => "filter",
+        FeTurbulence = 0x36 => "feTurbulence",
+        FeColorMatrix = 0x37 => "feColorMatrix",
+        FeGaussianBlur = 0x38 => "feGaussianBlur",
+        Pattern = 0x39 => "pattern",
+        LinearGradient = 0x3A => "linearGradient",
+        RadialGradient = 0x3B => "radialGradient",
+        Stop = 0x3C => "stop",
+        Text = 0x3D => "text",
+        TSpan = 0x3E => "tspan",
+        ClipPath = 0x3F => "clipPath",
+        Use = 0x40 => "use",
+        Image = 0x41 => "image",
+        Polygon = 0x42 => "polygon",
+        Ellipse = 0x43 => "ellipse",
     }
 }
 
@@ -409,6 +427,22 @@ pub const SVG_ELEMENT_CODES: &[u8] = &[
     0x2E, // Polyline
     0x2F, // Rect
     0x30, // G
+    0x34, // Defs
+    0x35, // Filter
+    0x36, // FeTurbulence
+    0x37, // FeColorMatrix
+    0x38, // FeGaussianBlur
+    0x39, // Pattern
+    0x3A, // LinearGradient
+    0x3B, // RadialGradient
+    0x3C, // Stop
+    0x3D, // Text
+    0x3E, // TSpan
+    0x3F, // ClipPath
+    0x40, // Use
+    0x41, // Image
+    0x42, // Polygon
+    0x43, // Ellipse
 ];
 
 /// Symbols 0x00-0x7F are reserved/built-in
