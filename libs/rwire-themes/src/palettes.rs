@@ -472,9 +472,12 @@ pub fn cloth() -> ColorPalette {
             "#f3ecdc", "#e9e2d2", "#cfc7b5", "#9a9384", "#7d8797", "#5a6579", "#3d4a60", "#2b3a52",
             "#1e2d45", "#162640", "#101d33", "#0b1526",
         ]),
+        // The gold runs dark to bright: the accent steps are read as they
+        // are in the dark mode (n9 the hairline gold, n11 the gold of a
+        // title), so the cloth's is laid out for the dark.
         accent: ColorScale::from_hex([
-            "#fff8e6", "#fbefcc", "#f5e3a8", "#efd684", "#e8c872", "#dfb95e", "#c9a24d", "#b8913f",
-            "#a37f34", "#8c6c2a", "#745920", "#5c4617",
+            "#3d2e0e", "#4f3c13", "#5c4617", "#745920", "#8c6c2a", "#a37f34", "#b8913f", "#c9a24d",
+            "#d4ad55", "#dfb95e", "#e8c872", "#f5e3a8",
         ]),
         red: ColorScale::from_hex([
             "#fdf0f0", "#fae0e0", "#f5c4c4", "#f0a8a8", "#eb8c8c", "#e07a6b", "#c8524a", "#b0433b",

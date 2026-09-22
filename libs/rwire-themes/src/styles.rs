@@ -306,17 +306,24 @@ mod tests {
 // ============================================================================
 
 fn cloth_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    // The accent scale runs dark to bright (see `palettes::cloth`).
     if is_dark {
-        css_var(css, "v", &rp.accent[6]); // primary: gold
+        css_var(css, "v", &rp.accent[7]); // primary: gold
         css_var(css, "w", &rp.neutral[11]); // on-primary: night
-        css_var(css, "x", &rp.accent[4]); // primary-hover: brighter gold
-        css_var(css, "h", &rp.accent[8]); // border-default: a gold hairline
+        css_var(css, "x", &rp.accent[9]); // primary-hover: brighter gold
+        css_var(css, "h", &rp.accent[4]); // border-default: a gold hairline
         css.push_str("--g:transparent;");
         css_var(css, "t", &rp.neutral[9]); // surface-raised
+        css_var(css, "A", &rp.neutral[10]); // secondary: the cloth, darker
+        css_var(css, "B", &rp.accent[10]); // on-secondary: gold
+        css_var(css, "C", &rp.neutral[9]); // secondary-hover
+        css_var(css, "D", &rp.neutral[9]); // muted
+        css_var(css, "K", &rp.accent[8]); // focus ring
+        css_var(css, "L", &rp.accent[9]); // border-primary
     } else {
-        css_var(css, "v", &rp.accent[8]);
+        css_var(css, "v", &rp.accent[6]);
         css_var(css, "w", &rp.neutral[0]);
-        css_var(css, "x", &rp.accent[9]);
+        css_var(css, "x", &rp.accent[5]);
         css_var(css, "h", &rp.accent[6]);
         css_var(css, "g", &rp.neutral[2]);
         css_var(css, "t", &rp.neutral[0]);
