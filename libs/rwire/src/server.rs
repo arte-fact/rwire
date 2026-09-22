@@ -1408,7 +1408,10 @@ fn login_capsule_config(
 /// Vendored lazy runtime extensions, served at `/_rw/ext/{name}.js` and
 /// dynamic-imported by the core loader on a MOD_DEF hint. Same single-binary
 /// vendoring as the core runtime artifact; `npm run sync` is the write path.
-const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
+const EXTS: &[(&str, &str)] = &[
+    ("/_rw/ext/vim.js", include_str!("../assets/ext/vim.min.js")),
+    ("/_rw/ext/map.js", include_str!("../assets/ext/map.min.js")),
+];
 
 async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
     let response = format!(
@@ -1455,10 +1458,13 @@ async fn handle_client<F>(
     // while the server is at capacity.
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
-        if path.split('?').next() == Some("/_rw/ext/vim.js") {
+        if let Some(&(_, body)) = EXTS
+            .iter()
+            .find(|(p, _)| Some(*p) == path.split('?').next())
+        {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
+            if let Err(e) = serve_ext_module(stream, body).await {
                 eprintln!("[{}] ext module error: {}", peer_addr, e);
             }
             return;

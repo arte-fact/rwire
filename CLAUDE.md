@@ -279,6 +279,10 @@ what the user is typing.
   the readout and the track.
 - `el.data("autoscroll", "1")` on a scroll box keeps it scrolled to the bottom after every update
   (journals, logs).
+- `el.ext("map")` on an `<svg data-map>` loads the runtime's map extension: drag, pinch and
+  wheel move the `viewBox` client-side, then the view comes back through an
+  `<input data-map-view>` bound on `Ev::Input` (see `runtime/README.md`, "Lazy extensions";
+  `../marches` is the reference use).
 
 ## Capsule Size (lazy delivery)
 

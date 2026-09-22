@@ -1033,6 +1033,15 @@ define_token_enum! {
         TouchManipulation = 0x390 => "touch-action:manipulation",
         /// No translucent tap flash over a touched element.
         TapHighlightNone = 0x391 => "-webkit-tap-highlight-color:transparent",
+        // Panels and sheets (0x392-0x398): a side column's width, a bottom
+        // sheet's height, and where a floating control sits.
+        W20rem = 0x392 => "width:20rem",
+        W22rem = 0x393 => "width:22rem",
+        W2_75rem = 0x394 => "width:2.75rem",
+        MaxH60Dvh = 0x395 => "max-height:60dvh",
+        MaxHNone = 0x396 => "max-height:none",
+        TopSm = 0x397 => "top:var(--S2)",
+        RightSm = 0x398 => "right:var(--S2)",
     }
 }
 

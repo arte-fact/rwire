@@ -118,6 +118,12 @@ test("ext/vim.min.js stays within its own budget", async () => {
   assert.ok(gzipSync(out).length <= 5_200, "vim ext gzip exceeds 5200");
 });
 
+test("ext/map.min.js stays within its own budget", async () => {
+  const { readFileSync } = await import("node:fs");
+  const out = readFileSync(new URL("../dist/ext/map.min.js", import.meta.url));
+  assert.ok(out.length <= 4_000, `map ext ${out.length} bytes exceeds 4000`);
+});
+
 test("Tab indents on [data-tab-insert] fields; Shift+Tab dedents", async () => {
   const { installRouter } = await import("../src/router.ts");
   (globalThis as any).window = { addEventListener: () => {} };

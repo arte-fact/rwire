@@ -67,15 +67,16 @@ console.log(`runtime.min.js: ${min.length} bytes (${gz} gzipped)`);
 }
 
 // --- extensions: separately-built lazy modules (ESM for dynamic import) ---
+export const EXTS = ["vim", "map"];
 mkdirSync(new URL("dist/ext/", import.meta.url), { recursive: true });
-await build({
-  entryPoints: [new URL("src/ext/vim.ts", import.meta.url).pathname],
-  bundle: true,
-  format: "esm",
-  minify: true,
-  outfile: new URL("dist/ext/vim.min.js", import.meta.url).pathname,
-});
-{
-  const out = readFileSync(new URL("dist/ext/vim.min.js", import.meta.url));
-  console.log(`ext/vim.min.js: ${out.length} bytes (${gzipSync(out).length} gzipped)`);
+for (const name of EXTS) {
+  await build({
+    entryPoints: [new URL(`src/ext/${name}.ts`, import.meta.url).pathname],
+    bundle: true,
+    format: "esm",
+    minify: true,
+    outfile: new URL(`dist/ext/${name}.min.js`, import.meta.url).pathname,
+  });
+  const out = readFileSync(new URL(`dist/ext/${name}.min.js`, import.meta.url));
+  console.log(`ext/${name}.min.js: ${out.length} bytes (${gzipSync(out).length} gzipped)`);
 }
