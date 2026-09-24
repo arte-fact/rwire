@@ -320,6 +320,12 @@ fn cloth_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "D", &rp.neutral[9]); // muted
         css_var(css, "K", &rp.accent[8]); // focus ring
         css_var(css, "L", &rp.accent[9]); // border-primary
+                                          // The tones of a figure on the dark cloth: bright enough to read a
+                                          // gain or a loss at a glance (the default steps are meant for a
+                                          // light ground).
+        css_var(css, "o", &rp.green[4]); // success
+        css_var(css, "p", &rp.amber[5]); // warning
+        css_var(css, "q", &rp.red[5]); // error
     } else {
         css_var(css, "v", &rp.accent[6]);
         css_var(css, "w", &rp.neutral[0]);
