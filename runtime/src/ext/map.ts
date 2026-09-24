@@ -28,6 +28,10 @@ interface Gesture {
 
 const G = new WeakMap<SVGSVGElement, Gesture>();
 const installed = new WeakSet<Document>();
+/** The svg each pointer went down on: a drag is followed wherever the
+ * pointer goes, and let go wherever it comes up, without capturing it (a
+ * captured pointer's click would land on the svg, not on the region). */
+const active = new Map<number, SVGSVGElement>();
 
 const box = (el: SVGSVGElement): Box =>
   (el.getAttribute("viewBox") || "0 0 1 1").trim().split(/[\s,]+/).map(Number) as Box;
@@ -113,12 +117,12 @@ export function i(doc: Document): void {
     if (g.ptrs.size === 0) g.moved = false;
     g.ptrs.set(pe.pointerId, [pe.clientX, pe.clientY]);
     g.pinch = 0;
-    el.setPointerCapture && el.setPointerCapture(pe.pointerId);
+    active.set(pe.pointerId, el);
   });
   doc.addEventListener("pointermove", (e) => {
-    const el = target(e);
-    if (!el) return;
     const pe = e as PointerEvent;
+    const el = active.get(pe.pointerId);
+    if (!el) return;
     const g = gesture(el);
     const was = g.ptrs.get(pe.pointerId);
     if (!was) return;
@@ -143,10 +147,12 @@ export function i(doc: Document): void {
     }
   });
   const up = (e: Event) => {
-    const el = target(e);
+    const id = (e as PointerEvent).pointerId;
+    const el = active.get(id);
     if (!el) return;
+    active.delete(id);
     const g = gesture(el);
-    g.ptrs.delete((e as PointerEvent).pointerId);
+    g.ptrs.delete(id);
     g.pinch = 0;
   };
   doc.addEventListener("pointerup", up);
