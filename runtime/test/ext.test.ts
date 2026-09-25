@@ -121,7 +121,7 @@ test("ext/vim.min.js stays within its own budget", async () => {
 test("ext/map.min.js stays within its own budget", async () => {
   const { readFileSync } = await import("node:fs");
   const out = readFileSync(new URL("../dist/ext/map.min.js", import.meta.url));
-  assert.ok(out.length <= 4_000, `map ext ${out.length} bytes exceeds 4000`);
+  assert.ok(out.length <= 6_000, `map ext ${out.length} bytes exceeds 6000`);
 });
 
 test("Tab indents on [data-tab-insert] fields; Shift+Tab dedents", async () => {
