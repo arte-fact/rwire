@@ -15,7 +15,7 @@
 // or resize: a popover anchored to a region follows it.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 2;
+export const v = 3;
 
 type Box = [number, number, number, number];
 interface Gesture {
@@ -62,7 +62,11 @@ function scale(el: SVGSVGElement, b: Box): [number, number, number] {
 
 /** Pin every `[data-map-at="x y"]` element of the map's container at that
  * point of the map (map units), as `left`/`top` in px of the container: a
- * popover anchored to a region follows the drag and the zoom. */
+ * popover anchored to a region follows the drag and the zoom. The element
+ * is kept within the container (its own size and `data-map-margin`, px,
+ * counted), so a region dragged to the edge leaves its popover readable.
+ * Only a changed value is written: a patch that strips the style is
+ * repaired without looping. */
 function place(el: SVGSVGElement): void {
   const c = el.parentElement;
   if (!c) return;
@@ -73,8 +77,22 @@ function place(el: SVGSVGElement): void {
     const at = (n.getAttribute("data-map-at") || "").trim().split(/[\s,]+/).map(Number);
     if (at.length < 2 || at.some((v) => !isFinite(v))) return;
     const h = n as HTMLElement;
-    h.style.left = `${ox + (at[0] - b[0]) / s - cr.left}px`;
-    h.style.top = `${oy + (at[1] - b[1]) / s - cr.top}px`;
+    const m = Number(n.getAttribute("data-map-margin") || 8);
+    // Where the anchor lands, then clamped so the box (as laid out, its
+    // transform included) stays inside the container.
+    let x = ox + (at[0] - b[0]) / s - cr.left;
+    let y = oy + (at[1] - b[1]) / s - cr.top;
+    const r = h.getBoundingClientRect();
+    if (r.width && r.height) {
+      const dx = r.left - cr.left - parseFloat(h.style.left || "0");
+      const dy = r.top - cr.top - parseFloat(h.style.top || "0");
+      x = Math.min(Math.max(x, m - dx), cr.width - m - dx - r.width);
+      y = Math.min(Math.max(y, m - dy), cr.height - m - dy - r.height);
+    }
+    const left = `${Math.round(x)}px`;
+    const top = `${Math.round(y)}px`;
+    if (h.style.left !== left) h.style.left = left;
+    if (h.style.top !== top) h.style.top = top;
   });
 }
 
@@ -140,7 +158,7 @@ export function i(doc: Document): void {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-map-at", "viewBox"],
+      attributeFilter: ["data-map-at", "viewBox", "style"],
     });
   doc.defaultView && doc.defaultView.addEventListener("resize", later);
   doc.addEventListener(
