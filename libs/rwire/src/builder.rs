@@ -1821,6 +1821,10 @@ pub struct BuildContext {
     /// Remote handlers keyed by stable handler id (see [`crate::stable_handler_id`]).
     handlers: HashMap<u32, HandlerFn>,
     synced_elements: Vec<SyncedElement>,
+    /// The content hash of every synced region rendered, by id: the seed of
+    /// the connection's dedup, so the first update after the initial render
+    /// skips what it did not change.
+    synced_hashes: HashMap<u32, u64>,
     next_synced_id: u32,
     /// The synced region currently being emitted into, so nested regions record their
     /// owning parent (used to prune a swapped-out view's regions). Saved/restored
@@ -1925,6 +1929,7 @@ impl BuildContext {
             symbol_map: HashMap::new(),
             handlers: HashMap::new(),
             synced_elements: Vec::new(),
+            synced_hashes: HashMap::new(),
             next_synced_id: 0,
             current_synced_parent: None,
             word_counts: HashMap::new(),
@@ -2306,6 +2311,8 @@ impl BuildContext {
             });
 
             if let Some(rendered) = renderer.render_with_state(state) {
+                self.synced_hashes
+                    .insert(synced_id, rendered.content_hash());
                 // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
                 let ref_idx = self.buf.create_synced(synced_id);
                 // The synced element's own style tokens land on the wrapper —
@@ -2466,6 +2473,8 @@ impl BuildContext {
 
             // Use cached render from collect_symbols_multi (single-render path)
             if let Some(rendered) = self.synced_render_cache.remove(&synced_id) {
+                self.synced_hashes
+                    .insert(synced_id, rendered.content_hash());
                 let ref_idx = self.buf.create_synced(synced_id);
                 if !el.style_utils.is_empty() {
                     self.buf.style_multi(ref_idx, &el.style_utils);
@@ -2639,6 +2648,12 @@ impl BuildContext {
     /// Take the synced elements.
     pub fn take_synced_elements(&mut self) -> Vec<SyncedElement> {
         std::mem::take(&mut self.synced_elements)
+    }
+
+    /// Take the content hashes of the synced regions rendered, by id: what
+    /// the connection's update dedup starts from.
+    pub fn take_synced_hashes(&mut self) -> HashMap<u32, u64> {
+        std::mem::take(&mut self.synced_hashes)
     }
 
     /// Get the symbol map for tracking sent symbols.
@@ -3005,9 +3020,17 @@ pub fn build_synced_update_with_known_symbols(
                         if let Some(ref mut hashes) = prev_hashes {
                             let hash = child.content_hash();
                             if hashes.get(&child_id) == Some(&hash) {
+                                if trace {
+                                    eprintln!(
+                                        "[rwire-trace] se={child_id} nested of {parent_id}: skip: hash unchanged"
+                                    );
+                                }
                                 continue;
                             }
                             hashes.insert(child_id, hash);
+                        }
+                        if trace {
+                            eprintln!("[rwire-trace] se={child_id} nested of {parent_id}: RENDER");
                         }
                         collect_symbols_recursive_with_known(
                             &child,

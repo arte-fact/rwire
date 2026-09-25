@@ -2175,6 +2175,7 @@ impl ConnectionState {
 
         self.handlers = ctx.handlers().clone();
         self.synced_elements = ctx.take_synced_elements();
+        self.synced_hashes = ctx.take_synced_hashes();
         self.sent_symbols = ctx.take_symbol_map();
         self.client_actions = ctx.client_action_indices();
         // Prepend STYLE_DEF for the styles this render uses (lazy CSS): the capsule

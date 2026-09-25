@@ -320,6 +320,55 @@ fn test_nested_update_emits_wrapper_ids() {
     println!("  - Total bytes: {}", bytes.len());
 }
 
+/// The initial render seeds the dedup: an update that changes nothing after it,
+/// with the hashes the build context recorded, emits nothing — parent and nested
+/// child alike.
+#[test]
+fn test_initial_render_seeds_the_hash_dedup() {
+    use rwire::builder::{build_synced_update_with_known_symbols, SyncedElement};
+
+    let mut ctx = BuildContext::new();
+    let state = ParentState { count: 7 };
+    let boxed: Box<dyn std::any::Any + Send + Sync> = Box::new(state);
+    let state_ref: &(dyn std::any::Any + Send + Sync) = boxed.as_ref();
+    let mut states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<ParentState>(), state_ref);
+
+    let el = make_parent_renderer_with_nested();
+    ctx.collect_symbols_multi(&el, &states);
+    ctx.emit_multi(&el);
+    let synced = ctx.take_synced_elements();
+    let mut hashes = ctx.take_synced_hashes();
+    assert_eq!(
+        hashes.len(),
+        2,
+        "a hash for the parent and one for the nested child"
+    );
+
+    let mut handlers: std::collections::HashMap<u32, HandlerFn> = std::collections::HashMap::new();
+    let mut discovered: Vec<SyncedElement> = Vec::new();
+    let mut known = ctx.take_symbol_map();
+    let bytes = build_synced_update_with_known_symbols(
+        &synced,
+        &states,
+        &mut handlers,
+        ChangeSet::all(),
+        Some(&mut known),
+        None,
+        Some(&mut hashes),
+        None,
+        None,
+        Some(&mut discovered),
+        0,
+        None,
+    );
+    assert!(
+        bytes.is_empty(),
+        "nothing changed, nothing sent: {} bytes",
+        bytes.len()
+    );
+}
+
 /// A re-render reports the nested regions it produced, tagged with their parent —
 /// the hook the router uses to register a swapped-in view's renderers and prune the
 /// previous view's. Here the parent (id 0) re-render must surface the nested child

@@ -30,6 +30,23 @@ test("me syncs attributes both ways and copies __hk", () => {
   assert.equal(a.__hk, "r1_2");
 });
 
+test("me leaves a map's viewBox to the map extension", () => {
+  const a = div(),
+    b = div();
+  a.setAttribute("data-map-with", "1");
+  a.setAttribute("viewBox", "10 10 50 50");
+  b.setAttribute("data-map-with", "1");
+  me(a as any, b as any);
+  assert.equal(a.getAttribute("viewBox"), "10 10 50 50", "kept when the server sends none");
+  b.setAttribute("viewBox", "0 0 100 100");
+  me(a as any, b as any);
+  assert.equal(a.getAttribute("viewBox"), "10 10 50 50", "kept when the server sends another");
+  const c = div();
+  c.setAttribute("data-map", "1");
+  me(c as any, b as any);
+  assert.equal(c.getAttribute("viewBox"), "0 0 100 100", "taken when the map has none yet");
+});
+
 test("mk reuses nodes by id across reorder", () => {
   const live = div();
   const x = div("x"),

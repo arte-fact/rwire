@@ -17,13 +17,19 @@
 // the pointer as it hovers the map: a rubber band from a region to the
 // finger, before the second touch places the arrow. Maps stacked over the
 // primary (`svg[data-map-with]` in the same container) follow its view; a
-// `[data-map-view="x y w h"]` element sets the view once per value, for a
-// fly to a region or a zoom button rendered by the server. The Escape key clicks
+// `[data-map-view="x y w h"]` element sets the view once per value (a
+// fifth token, a serial, makes the same view a new value), for a fly to a
+// region or a zoom button rendered by the server. The morph leaves every
+// map's `viewBox` to this extension. The Escape key clicks
 // the element marked `data-map-escape`, if any: what the page does to let
-// go of a gesture (an arrow being drawn, a popover) is bound there.
+// go of a gesture (an arrow being drawn, a popover) is bound there. The
+// container of it all (the maps, the anchored elements, the view input, the
+// server's view) is the nearest `[data-map-box]` ancestor of the primary,
+// else its parent: a map rendered as its own region sits in a wrapper, and
+// the box says where its companions are.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 7;
+export const v = 9;
 
 type Box = [number, number, number, number];
 interface Gesture {
@@ -38,6 +44,10 @@ interface Gesture {
 }
 
 const G = new WeakMap<SVGSVGElement, Gesture>();
+
+/** The container of a map or of one of its companions. */
+const container = (el: Element): Element | null =>
+  el.parentElement ? el.parentElement.closest("[data-map-box]") || el.parentElement : null;
 const installed = new WeakSet<Document>();
 /** The svg each pointer went down on: a drag is followed wherever the
  * pointer goes, and let go wherever it comes up, without capturing it (a
@@ -76,7 +86,7 @@ function scale(el: SVGSVGElement, b: Box): [number, number, number] {
  * Only a changed value is written: a patch that strips the style is
  * repaired without looping. */
 function place(el: SVGSVGElement): void {
-  const c = el.parentElement;
+  const c = container(el);
   if (!c) return;
   const b = box(el);
   const [s, ox, oy] = scale(el, b);
@@ -122,7 +132,7 @@ function write(el: SVGSVGElement, b: Box): void {
   if (g.t) clearTimeout(g.t);
   g.t = setTimeout(() => {
     g.t = null;
-    const input = (el.parentElement || el.ownerDocument).querySelector(
+    const input = (container(el) || el.ownerDocument).querySelector(
       "input[data-map-view]",
     ) as HTMLInputElement | null;
     if (!input) return;
@@ -158,8 +168,7 @@ const target = (e: Event): SVGSVGElement | null => {
   const s = t.closest("svg[data-map],svg[data-map-with]") as SVGSVGElement | null;
   if (!s) return null;
   if (s.hasAttribute("data-map")) return s;
-  const c = s.parentElement;
-  return c ? (c.querySelector("svg[data-map]") as SVGSVGElement | null) : null;
+  return primary(container(s));
 };
 
 /** The primary map of a container, when the container holds one. */
@@ -168,7 +177,7 @@ const primary = (c: Element | null): SVGSVGElement | null =>
 
 /** Copy the primary's viewBox to the maps stacked with it. */
 function follow(el: SVGSVGElement): void {
-  const c = el.parentElement;
+  const c = container(el);
   if (!c) return;
   const vb = el.getAttribute("viewBox") || "";
   c.querySelectorAll("svg[data-map-with]").forEach((s) => {
@@ -185,9 +194,9 @@ function serverView(doc: Document): void {
     const want = n.getAttribute("data-map-view") || "";
     if (!want || applied.get(n) === want) return;
     applied.set(n, want);
-    const el = primary(n.parentElement);
+    const el = primary(container(n));
     if (!el) return;
-    const b = want.trim().split(/[\s,]+/).map(Number) as Box;
+    const b = want.trim().split(/[\s,]+/).slice(0, 4).map(Number) as Box;
     if (b.length === 4 && b.every((v) => isFinite(v)) && b[2] > 0 && b[3] > 0) {
       el.setAttribute("viewBox", b.map((v) => Math.round(v)).join(" "));
       follow(el);

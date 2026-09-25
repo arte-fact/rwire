@@ -9,6 +9,11 @@
 import { st, type RwEl } from "./state.ts";
 import { ls, lv, type LiveEl } from "./live.ts";
 
+/** The viewBox of a map (`data-map`) or of a map stacked over one
+ * (`data-map-with`) belongs to the map extension, not to the server. */
+const mapOwned = (e: Element, n: string): boolean =>
+  n === "viewBox" && (e.hasAttribute("data-map") || e.hasAttribute("data-map-with"));
+
 /** Morph one node: text value, attributes, then children (unless it's a
  * nested synced region — its own update owns it). */
 export function me(a: Node, b: Node): void {
@@ -24,8 +29,9 @@ export function me(a: Node, b: Node): void {
     const n = ba[k].name;
     // data-vim is input-method state owned by the vim extension: the server
     // renders the entry mode once; re-renders must not yank the user out of
-    // insert/visual.
-    if (n === "data-vim" && ae.hasAttribute(n)) continue;
+    // insert/visual. The viewBox of a map is the map extension's: the
+    // viewer's pan and zoom survive the server's re-render.
+    if ((n === "data-vim" || mapOwned(ae, n)) && ae.hasAttribute(n)) continue;
     if (ae.getAttribute(n) !== ba[k].value) {
       ae.setAttribute(n, ba[k].value);
       // Once the user has touched a control, setAttribute alone no longer
@@ -38,7 +44,7 @@ export function me(a: Node, b: Node): void {
   const aa = ae.attributes;
   for (let k = aa.length - 1; k >= 0; k--) {
     const n = aa[k].name;
-    if (!be.hasAttribute(n)) ae.removeAttribute(n);
+    if (!be.hasAttribute(n) && !mapOwned(ae, n)) ae.removeAttribute(n);
   }
   ae.__hk = be.__hk;
   ae.__k = be.__k;

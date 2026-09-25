@@ -117,13 +117,21 @@ pub fn anchored(x: f64, y: f64) -> String {
 /// follows the pointer over the map.
 pub const FOLLOW: &str = "data-map-follow";
 
+/// The attribute on the container of a map and its companions (the maps
+/// stacked over it, the anchored elements, the view input, the server's
+/// view): needed when the map is its own region, since a region sits in a
+/// wrapper of its own; else the map's parent is the container.
+pub const BOX: &str = "data-map-box";
+
 /// The attribute on an svg stacked over the primary map in the same
 /// container: it follows the primary's view; give it `pointer-events: none`
 /// so the primary gets the gestures.
 pub const WITH: &str = "data-map-with";
 
 /// The attribute on any element of the container carrying the view the
-/// server wants ("x y w h"): applied to the primary once per value.
+/// server wants ("x y w h"): applied to the primary once per value; a
+/// fifth token, a serial, makes the same view a new value. The maps'
+/// `viewBox` is otherwise the extension's: a re-render never resets it.
 pub const VIEW: &str = "data-map-view";
 
 /// The attribute on the element the Escape key clicks: bind there what
