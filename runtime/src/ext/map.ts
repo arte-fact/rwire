@@ -15,10 +15,12 @@
 // or resize: a popover anchored to a region follows it. A `<line
 // data-map-follow>` inside the svg has its far end (`x2`, `y2`) moved to
 // the pointer as it hovers the map: a rubber band from a region to the
-// finger, before the second touch places the arrow.
+// finger, before the second touch places the arrow. The Escape key clicks
+// the element marked `data-map-escape`, if any: what the page does to let
+// go of a gesture (an arrow being drawn, a popover) is bound there.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 4;
+export const v = 5;
 
 type Box = [number, number, number, number];
 interface Gesture {
@@ -164,6 +166,11 @@ export function i(doc: Document): void {
       attributeFilter: ["data-map-at", "viewBox", "style"],
     });
   doc.defaultView && doc.defaultView.addEventListener("resize", later);
+  doc.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key !== "Escape") return;
+    const out = doc.querySelector("[data-map-escape]") as HTMLElement | null;
+    if (out) out.click();
+  });
   doc.addEventListener(
     "wheel",
     (e) => {

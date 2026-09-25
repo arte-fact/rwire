@@ -117,6 +117,10 @@ pub fn anchored(x: f64, y: f64) -> String {
 /// follows the pointer over the map.
 pub const FOLLOW: &str = "data-map-follow";
 
+/// The attribute on the element the Escape key clicks: bind there what
+/// lets go of a gesture on the map (an arrow being drawn, a popover).
+pub const ESCAPE: &str = "data-map-escape";
+
 /// The server that ships the extension.
 pub trait ServeMap {
     fn serve_map(self) -> Self;
