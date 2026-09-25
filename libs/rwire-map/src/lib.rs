@@ -117,6 +117,15 @@ pub fn anchored(x: f64, y: f64) -> String {
 /// follows the pointer over the map.
 pub const FOLLOW: &str = "data-map-follow";
 
+/// The attribute on an svg stacked over the primary map in the same
+/// container: it follows the primary's view; give it `pointer-events: none`
+/// so the primary gets the gestures.
+pub const WITH: &str = "data-map-with";
+
+/// The attribute on any element of the container carrying the view the
+/// server wants ("x y w h"): applied to the primary once per value.
+pub const VIEW: &str = "data-map-view";
+
 /// The attribute on the element the Escape key clicks: bind there what
 /// lets go of a gesture on the map (an arrow being drawn, a popover).
 pub const ESCAPE: &str = "data-map-escape";
