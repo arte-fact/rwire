@@ -15,12 +15,13 @@
 // or resize: a popover anchored to a region follows it. A `<line
 // data-map-follow>` inside the svg has its far end (`x2`, `y2`) moved to
 // the pointer as it hovers the map: a rubber band from a region to the
-// finger, before the second touch places the arrow. The Escape key clicks
+// finger, before the second touch places the arrow. Several `svg[data-map]`
+// in one container move as one (an overlay over a base). The Escape key clicks
 // the element marked `data-map-escape`, if any: what the page does to let
 // go of a gesture (an arrow being drawn, a popover) is bound there.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 5;
+export const v = 6;
 
 type Box = [number, number, number, number];
 interface Gesture {
@@ -107,7 +108,13 @@ function placeAll(doc: Document): void {
 }
 
 function write(el: SVGSVGElement, b: Box): void {
-  el.setAttribute("viewBox", b.map((n) => Math.round(n)).join(" "));
+  const vb = b.map((n) => Math.round(n)).join(" ");
+  // Every map of the container moves as one: a page may stack an overlay
+  // svg (badges, arrows, the fog) over the base svg (the land, the regions).
+  const c = el.parentElement;
+  const all = c ? c.querySelectorAll("svg[data-map]") : [el];
+  all.forEach((s) => s.setAttribute("viewBox", vb));
+  el.setAttribute("viewBox", vb);
   place(el);
   const g = gesture(el);
   if (g.t) clearTimeout(g.t);
