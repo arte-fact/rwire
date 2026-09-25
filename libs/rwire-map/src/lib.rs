@@ -8,7 +8,9 @@
 //! svg and dispatches `input`, so a handler bound with [`view_input`] learns
 //! where the viewer looks and the next render agrees with the screen. Any
 //! element of the svg's container bearing [`anchored`] (`data-map-at="x y"`)
-//! is pinned at that point of the map through every drag, zoom or patch.
+//! is pinned at that point of the map through every drag, zoom or patch; a
+//! `<line>` bearing [`FOLLOW`] inside the svg has its far end moved to the
+//! pointer as it hovers the map (a rubber band).
 //!
 //! ```ignore
 //! use rwire_map::{parse_view, view_input, zoomed, MapExt, ServeMap, View};
@@ -110,6 +112,10 @@ pub const ANCHOR: &str = "data-map-at";
 pub fn anchored(x: f64, y: f64) -> String {
     format!("{x:.0} {y:.0}")
 }
+
+/// The attribute on a `<line>` of the map whose far end (`x2`, `y2`)
+/// follows the pointer over the map.
+pub const FOLLOW: &str = "data-map-follow";
 
 /// The server that ships the extension.
 pub trait ServeMap {

@@ -12,10 +12,13 @@
 // narrower than a sixty-fourth. A drag swallows the click that would follow.
 // Any `[data-map-at="x y"]` element in the svg's container is pinned at that
 // point of the map (its `left`/`top` in px), after every drag, zoom, patch
-// or resize: a popover anchored to a region follows it.
+// or resize: a popover anchored to a region follows it. A `<line
+// data-map-follow>` inside the svg has its far end (`x2`, `y2`) moved to
+// the pointer as it hovers the map: a rubber band from a region to the
+// finger, before the second touch places the arrow.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 3;
+export const v = 4;
 
 type Box = [number, number, number, number];
 interface Gesture {
@@ -184,6 +187,16 @@ export function i(doc: Document): void {
   });
   doc.addEventListener("pointermove", (e) => {
     const pe = e as PointerEvent;
+    const hovered = target(e);
+    if (hovered) {
+      const band = hovered.querySelector("line[data-map-follow]");
+      if (band) {
+        const b = box(hovered);
+        const [s, ox, oy] = scale(hovered, b);
+        band.setAttribute("x2", String(Math.round(b[0] + (pe.clientX - ox) * s)));
+        band.setAttribute("y2", String(Math.round(b[1] + (pe.clientY - oy) * s)));
+      }
+    }
     const el = active.get(pe.pointerId);
     if (!el) return;
     const g = gesture(el);
