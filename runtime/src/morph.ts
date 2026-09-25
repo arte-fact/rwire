@@ -73,6 +73,18 @@ export function me(a: Node, b: Node): void {
   mk(ae, be);
 }
 
+/** A fresh node takes the live content of every nested region inside it:
+ * the server skips a region whose output is unchanged, so its update will
+ * not come, and the empty placeholder would stay empty. */
+function carry(a: Element, n: Element): void {
+  if (typeof n.id === "string" && n.id.indexOf("__synced_") === 0 && !n.firstChild) {
+    const live = a.querySelector("#" + n.id);
+    if (live && live !== n) while (live.firstChild) n.appendChild(live.firstChild);
+  }
+  const ch = n.children;
+  for (let i = 0; i < ch.length; i++) carry(a, ch[i]);
+}
+
 /** Reconcile a's children toward b's: match by id, else positionally for
  * id-less same-type nodes; a changed __hk disqualifies reuse. */
 export function mk(a: Element, b: Element): void {
@@ -113,7 +125,10 @@ export function mk(a: Element, b: Element): void {
       if (m !== cur) a.insertBefore(m, cur);
       else cur = cur.nextSibling;
       me(m, bc);
-    } else a.insertBefore(bc, cur);
+    } else {
+      if (bc.nodeType === 1) carry(a, bc as Element);
+      a.insertBefore(bc, cur);
+    }
     bc = nb;
   }
   while (cur) {

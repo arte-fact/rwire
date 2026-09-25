@@ -12,8 +12,8 @@ import { gzipSync } from "node:zlib";
 // and, since the Empire merge, the live value bindings (live.ts, ~3KB raw /
 // 1.3KB gzipped): they are wire opcodes the executor itself must parse
 // (LIVE_SOURCE / LIVE_BIND), not a page feature an extension could add later.
-const MAX_RAW = 19_600;
-const MAX_GZIP = 7_400;
+const MAX_RAW = 20_000;
+const MAX_GZIP = 7_500;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

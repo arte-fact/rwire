@@ -92,6 +92,27 @@ test("a changed __hk disqualifies reuse (fresh listener wins)", () => {
   assert.equal(live.children[0], btn2, "replaced, not morphed");
 });
 
+test("a fresh node takes the live content of the nested regions inside it", () => {
+  const live = div(),
+    shadow = div();
+  const oldBox = div();
+  oldBox.__hk = "r1_1";
+  const region = div();
+  region.id = "__synced_9";
+  region.appendChild(div());
+  oldBox.appendChild(region);
+  live.appendChild(oldBox);
+  const newBox = div();
+  newBox.__hk = "r1_2";
+  const placeholder = div();
+  placeholder.id = "__synced_9";
+  newBox.appendChild(placeholder);
+  shadow.appendChild(newBox);
+  mk(live as any, shadow as any);
+  assert.equal(live.children[0], newBox, "the bound box is swapped for the fresh one");
+  assert.equal(placeholder.children.length, 1, "the region's live content moved into the placeholder");
+});
+
 test("me does not descend into nested __synced_ regions", () => {
   const a = div("__synced_7");
   const inner = div();
