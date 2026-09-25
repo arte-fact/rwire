@@ -190,20 +190,28 @@ pub async fn serve_ready(
 
 /// Serve a static byte body with a given content type and a long cache header.
 /// Used for PWA assets (manifest, service worker, icons).
-pub async fn serve_static(
+pub async fn serve_static(stream: TcpStream, content_type: &str, body: &[u8]) -> io::Result<()> {
+    serve_static_cached(stream, content_type, body, "public, max-age=3600").await
+}
+
+/// Serve a static body with the `Cache-Control` directive given: a file
+/// whose path carries its content's hash can be kept for a year, immutable.
+pub async fn serve_static_cached(
     mut stream: TcpStream,
     content_type: &str,
     body: &[u8],
+    cache: &str,
 ) -> io::Result<()> {
     let header = format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: {}\r\n\
          Content-Length: {}\r\n\
-         Cache-Control: public, max-age=3600\r\n\
+         Cache-Control: {}\r\n\
          Connection: close\r\n\
          \r\n",
         content_type,
-        body.len()
+        body.len(),
+        cache
     );
     stream.write_all(header.as_bytes()).await?;
     stream.write_all(body).await?;

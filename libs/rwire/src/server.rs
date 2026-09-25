@@ -659,7 +659,15 @@ struct Asset {
     path: String,
     content_type: &'static str,
     body: Cow<'static, [u8]>,
+    /// The `Cache-Control` directive it is served with.
+    cache: &'static str,
 }
+
+/// How long a browser keeps an asset served as it is: an hour.
+const ASSET_CACHE: &str = "public, max-age=3600";
+/// How long a browser keeps an asset whose path names its content: a year,
+/// never revalidated.
+const ASSET_CACHE_FOREVER: &str = "public, max-age=31536000, immutable";
 
 impl Server {
     /// Start building a server bound to the given address.
@@ -763,6 +771,25 @@ where
             path: path.into(),
             content_type,
             body: body.into(),
+            cache: ASSET_CACHE,
+        });
+        self
+    }
+
+    /// Serve a file as it is, kept by the browser for a year: for a path that
+    /// carries a hash of its content (`/_app/shapes-3fa9c1.svg`), so a new
+    /// content is a new path and the old one may live on in the cache.
+    pub fn asset_forever(
+        mut self,
+        path: impl Into<String>,
+        content_type: &'static str,
+        body: impl Into<Cow<'static, [u8]>>,
+    ) -> Self {
+        self.assets.push(Asset {
+            path: path.into(),
+            content_type,
+            body: body.into(),
+            cache: ASSET_CACHE_FOREVER,
         });
         self
     }
@@ -1503,7 +1530,9 @@ async fn handle_client<F>(
         if let Some(a) = assets.iter().find(|a| a.path == bare) {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) = crate::health::serve_static(stream, a.content_type, &a.body).await {
+            if let Err(e) =
+                crate::health::serve_static_cached(stream, a.content_type, &a.body, a.cache).await
+            {
                 eprintln!("[{}] {} error: {}", peer_addr, bare, e);
             }
             return;
