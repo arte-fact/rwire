@@ -381,6 +381,9 @@ define_token_enum! {
         Image = 0x41 => "image",
         Polygon = 0x42 => "polygon",
         Ellipse = 0x43 => "ellipse",
+        // Inline text (0x44-0x45): a line break and the small print.
+        Br = 0x44 => "br",
+        Small = 0x45 => "small",
     }
 }
 
