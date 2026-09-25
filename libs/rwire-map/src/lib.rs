@@ -6,7 +6,9 @@
 //! writing the `viewBox` client-side. Once a gesture is over, the extension
 //! copies the view into the value of an `<input data-map-view>` beside the
 //! svg and dispatches `input`, so a handler bound with [`view_input`] learns
-//! where the viewer looks and the next render agrees with the screen.
+//! where the viewer looks and the next render agrees with the screen. Any
+//! element of the svg's container bearing [`anchored`] (`data-map-at="x y"`)
+//! is pinned at that point of the map through every drag, zoom or patch.
 //!
 //! ```ignore
 //! use rwire_map::{parse_view, view_input, zoomed, MapExt, ServeMap, View};
@@ -97,6 +99,16 @@ pub fn view_input(id: &str, handler: HandlerSpec) -> ElementBuilder {
         .attr("data-map-view", "1")
         .attr("type", "hidden")
         .on(Ev::Input, handler)
+}
+
+/// The attribute pinning an element of the map's container at a point of
+/// the map: `el(El::Div).attr(ANCHOR, &anchored(x, y))` with
+/// `position: absolute`; the extension sets its `left` and `top`.
+pub const ANCHOR: &str = "data-map-at";
+
+/// The value of [`ANCHOR`] for a point of the map, in the svg's units.
+pub fn anchored(x: f64, y: f64) -> String {
+    format!("{x:.0} {y:.0}")
 }
 
 /// The server that ships the extension.

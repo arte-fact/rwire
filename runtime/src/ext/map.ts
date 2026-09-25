@@ -10,9 +10,12 @@
 // its next render agrees with the screen. `data-map-extent="x y w h"` (the
 // whole map) bounds the zoom: no wider than one and a half times it, no
 // narrower than a sixty-fourth. A drag swallows the click that would follow.
+// Any `[data-map-at="x y"]` element in the svg's container is pinned at that
+// point of the map (its `left`/`top` in px), after every drag, zoom, patch
+// or resize: a popover anchored to a region follows it.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 1;
+export const v = 2;
 
 type Box = [number, number, number, number];
 interface Gesture {
@@ -57,8 +60,32 @@ function scale(el: SVGSVGElement, b: Box): [number, number, number] {
   return [s, r.left + (r.width - b[2] / s) / 2, r.top + (r.height - b[3] / s) / 2];
 }
 
+/** Pin every `[data-map-at="x y"]` element of the map's container at that
+ * point of the map (map units), as `left`/`top` in px of the container: a
+ * popover anchored to a region follows the drag and the zoom. */
+function place(el: SVGSVGElement): void {
+  const c = el.parentElement;
+  if (!c) return;
+  const b = box(el);
+  const [s, ox, oy] = scale(el, b);
+  const cr = c.getBoundingClientRect();
+  c.querySelectorAll("[data-map-at]").forEach((n) => {
+    const at = (n.getAttribute("data-map-at") || "").trim().split(/[\s,]+/).map(Number);
+    if (at.length < 2 || at.some((v) => !isFinite(v))) return;
+    const h = n as HTMLElement;
+    h.style.left = `${ox + (at[0] - b[0]) / s - cr.left}px`;
+    h.style.top = `${oy + (at[1] - b[1]) / s - cr.top}px`;
+  });
+}
+
+/** Every map of the document, pinned afresh: after a patch, a resize. */
+function placeAll(doc: Document): void {
+  doc.querySelectorAll("svg[data-map]").forEach((el) => place(el as SVGSVGElement));
+}
+
 function write(el: SVGSVGElement, b: Box): void {
   el.setAttribute("viewBox", b.map((n) => Math.round(n)).join(" "));
+  place(el);
   const g = gesture(el);
   if (g.t) clearTimeout(g.t);
   g.t = setTimeout(() => {
@@ -98,6 +125,24 @@ const target = (e: Event): SVGSVGElement | null => {
 export function i(doc: Document): void {
   if (installed.has(doc)) return;
   installed.add(doc);
+  // Anchored elements: pinned now, after every patch of the page, on resize.
+  placeAll(doc);
+  let pending = 0;
+  const later = () => {
+    if (pending) return;
+    pending = requestAnimationFrame(() => {
+      pending = 0;
+      placeAll(doc);
+    });
+  };
+  if (typeof MutationObserver !== "undefined")
+    new MutationObserver(later).observe(doc.body || doc, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-map-at", "viewBox"],
+    });
+  doc.defaultView && doc.defaultView.addEventListener("resize", later);
   doc.addEventListener(
     "wheel",
     (e) => {
