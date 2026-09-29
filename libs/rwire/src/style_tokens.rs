@@ -938,11 +938,15 @@ define_token_enum! {
         Delay7 = 0x35A => "animation-delay:2.1s",
         Delay8 = 0x35B => "animation-delay:2.4s",
         // Counts the registered `--n` from its inline start (default 0) to the inline `--to`
-        // over 1.2s, rendered through `::after{content:counter(n)}` (see PSEUDO_GLOBAL_CSS),
-        // then fades out so a formatted value can take its place (AnimateFadeUp + Delay).
-        // The start is the inline `--d` (default 0s), not a Delay token: a single
+        // over 1.2s, then fades out so a formatted value can take its place (AnimateFadeUp +
+        // Delay). The start is the inline `--d` (default 0s), not a Delay token: a single
         // `animation-delay` would apply to the fade-out too and cut the count short.
-        CountUp = 0x35C => "animation:rw-count 1.2s var(--d,0s) cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s calc(var(--d,0s) + 1.2s) ease both;counter-reset:n var(--n)",
+        // The count is grouped by thousands with a narrow no-break space, as the value that
+        // replaces it: `--n` is split into counters — the sign, the millions, the thousands
+        // and the units, each either leading (unpadded, hidden at 0) or following (padded to
+        // three digits, hidden at -1) — shown by `::after` through the `rw-*` counter styles
+        // (see PSEUDO_GLOBAL_CSS). Mind the spaces around `+`/`-` in `calc`.
+        CountUp = 0x35C => "animation:rw-count 1.2s var(--d,0s) cubic-bezier(.2,.7,.3,1) both,rw-fade-out .15s calc(var(--d,0s) + 1.2s) ease both;--a:max(var(--n),-1*var(--n));--M:round(down,var(--a)/1000000,1);--K:round(down,var(--a)/1000,1);counter-reset:s clamp(0,-1*var(--n),1) m var(--M) ms min(var(--M),1) kp calc(mod(var(--K),1000) - (1 - min(var(--M),1))*(mod(var(--K),1000) + 1)) kl calc(mod(var(--K),1000)*(1 - min(var(--M),1))) ks min(var(--K),1) up calc(mod(var(--a),1000) - (1 - min(var(--K),1))*(mod(var(--a),1000) + 1)) ul calc(mod(var(--a),1000) - min(var(--K),1)*(mod(var(--a),1000) + 1))",
         TabularNums = 0x35D => "font-variant-numeric:tabular-nums",
         // Ledger row: label column takes the slack, figure column hugs its content.
         GridColsFrAuto = 0x35F => "grid-template-columns:minmax(0,1fr) auto",
@@ -1324,7 +1328,13 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@keyframes rw-sun-up{from{opacity:0;transform:translateY(40px)}}",
     "@keyframes rw-rain{to{background-position:0 44px,9px 78px}}",
     "@keyframes rw-snow{to{background-position:44px 85px,-22px 140px,43px 174px}}",
-    ".u860::after{content:counter(n)}",
+    "@counter-style rw-none{system:cyclic;symbols:\"\"}",
+    "@counter-style rw-lead{system:extends decimal;range:1 infinite;fallback:rw-none}",
+    "@counter-style rw-plain{system:extends decimal;range:0 infinite;fallback:rw-none}",
+    "@counter-style rw-pad3{system:extends decimal;pad:3 \"0\";range:0 infinite;fallback:rw-none}",
+    "@counter-style rw-sep{system:additive;additive-symbols:1 \"\\202F\",0 \"\"}",
+    "@counter-style rw-sign{system:additive;additive-symbols:1 \"-\",0 \"\"}",
+    ".u860::after{content:counter(s,rw-sign) counter(m,rw-lead) counter(ms,rw-sep) counter(kp,rw-pad3) counter(kl,rw-lead) counter(ks,rw-sep) counter(up,rw-pad3) counter(ul,rw-plain)}",
     "@media(prefers-reduced-motion:reduce){.u850,.u851,.u860,.u868,.u874,.u875,.u891,.u892,.u893,.u894,.u896,.u897,.u911{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
