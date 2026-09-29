@@ -16,13 +16,18 @@ use crate::theme::Theme;
 /// for the wire harness. See `runtime/README.md` for the module map and rules.
 const RUNTIME_JS: &str = include_str!("../assets/runtime.min.js");
 const EXT_VIM_JS_FOR_VERSION: &str = include_str!("../assets/ext/vim.min.js");
+const EXT_NUDGE_JS_FOR_VERSION: &str = include_str!("../assets/ext/nudge.min.js");
 
 /// Build stamp for lazy-extension URLs (`?v=`): changes whenever either
 /// artifact changes, so a rebuilt server can never be served a cached stale
-/// module. FNV-1a over both vendored artifacts.
+/// module. FNV-1a over the vendored artifacts.
 pub(crate) fn ext_version() -> String {
     let mut h: u32 = 0x811c_9dc5;
-    for b in RUNTIME_JS.bytes().chain(EXT_VIM_JS_FOR_VERSION.bytes()) {
+    for b in RUNTIME_JS
+        .bytes()
+        .chain(EXT_VIM_JS_FOR_VERSION.bytes())
+        .chain(EXT_NUDGE_JS_FOR_VERSION.bytes())
+    {
         h ^= u32::from(b);
         h = h.wrapping_mul(0x0100_0193);
     }

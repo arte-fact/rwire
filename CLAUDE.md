@@ -282,7 +282,8 @@ what the user is typing.
 - `el.data("autoscroll", "1")` on a scroll box keeps it scrolled to the bottom after every update
   (journals, logs).
 - **Runtime extensions** are lazy ESM modules the loader imports from `/_rw/ext/<name>.js` the
-  first time a batch hints `el.ext("<name>")`. The core vendors `vim`; any crate or app ships
+  first time a batch hints `el.ext("<name>")`. The core vendors `vim` and `nudge` (`el.nudge(input_id,
+  steps)`: a − / + button stepping a slider client-side); any crate or app ships
   its own through `ServerWithRoot::asset(path, content_type, bytes)`, which serves a file as
   it is (before auth, like the PWA assets). `rwire-map` is the model: `el(El::Svg).map(extent,
   view)` + `view_input(id, handler)` + `.serve_map()` on the server give a map that drags,

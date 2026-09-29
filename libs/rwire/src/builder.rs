@@ -757,6 +757,16 @@ impl ElementBuilder {
         self
     }
 
+    /// A click on this element moves the input whose id is `input_id` by
+    /// `steps` of its `step` (negative steps down), clamped to its bounds,
+    /// and fires its `input` and `change` events — a slider's − / + buttons,
+    /// client-side (the `nudge` extension).
+    pub fn nudge(self, input_id: &str, steps: i32) -> Self {
+        self.ext("nudge")
+            .data("nudge", &steps.to_string())
+            .data("nudge-for", input_id)
+    }
+
     pub fn attr(mut self, key: &str, value: &str) -> Self {
         self.attrs.push((key.to_string(), value.to_string()));
         self
@@ -3586,6 +3596,15 @@ mod map_def_tests {
             &bytes[..],
             &[crate::protocol::opcodes::MOD_DEF, 1, 3, b'v', b'i', b'm']
         );
+    }
+
+    #[test]
+    fn a_nudge_names_its_input_and_steps_and_hints_its_extension() {
+        let b = el(El::Button).nudge("rate", -2);
+        assert_eq!(b.exts, ["nudge"]);
+        let data: Vec<_> = b.attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert!(data.contains(&("data-nudge", "-2")), "{data:?}");
+        assert!(data.contains(&("data-nudge-for", "rate")), "{data:?}");
     }
 
     #[test]

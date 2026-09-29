@@ -1536,6 +1536,7 @@ fn login_capsule_config(
 /// dynamic-imported by the core loader on a MOD_DEF hint. Same single-binary
 /// vendoring as the core runtime artifact; `npm run sync` is the write path.
 const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
+const EXT_NUDGE_JS: &str = include_str!("../assets/ext/nudge.min.js");
 
 async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
     let response = format!(
@@ -1584,10 +1585,15 @@ async fn handle_client<F>(
     if peek_str.starts_with("GET ") {
         let (_, path) = request_line(&peek_str);
         let bare = path.split('?').next().unwrap_or(path);
-        if bare == "/_rw/ext/vim.js" {
+        let vendored = match bare {
+            "/_rw/ext/vim.js" => Some(EXT_VIM_JS),
+            "/_rw/ext/nudge.js" => Some(EXT_NUDGE_JS),
+            _ => None,
+        };
+        if let Some(module) = vendored {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
+            if let Err(e) = serve_ext_module(stream, module).await {
                 eprintln!("[{}] ext module error: {}", peer_addr, e);
             }
             return;
