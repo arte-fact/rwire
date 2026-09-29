@@ -64,6 +64,7 @@ define_token_enum! {
         AriaControls = 0x2D => "aria-controls",
         AriaChecked = 0x2E => "aria-checked",
         AriaLabelledby = 0x2F => "aria-labelledby",
+        AriaPressed = 0x30 => "aria-pressed",
 
         // Forms / inputs (0x50-0x5F)
         Min = 0x50 => "min",

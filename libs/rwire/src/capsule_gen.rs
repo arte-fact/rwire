@@ -82,8 +82,8 @@ pub struct FontFace {
 
 #[derive(Clone, Debug)]
 enum FontSource {
-    /// Google Fonts CDN import.
-    Google { weights: Vec<u16> },
+    /// Google Fonts CDN import; `italic` also imports each weight's italic.
+    Google { weights: Vec<u16>, italic: bool },
     /// Self-hosted font file.
     Custom {
         url: String,
@@ -101,9 +101,18 @@ impl FontFace {
             family: family.to_string(),
             source: FontSource::Google {
                 weights: weights.to_vec(),
+                italic: false,
             },
             display: FontDisplay::Swap,
         }
+    }
+
+    /// Also import the italic of each weight (Google Fonts only).
+    pub fn italic(mut self) -> Self {
+        if let FontSource::Google { italic, .. } = &mut self.source {
+            *italic = true;
+        }
+        self
     }
 
     /// Create a self-hosted font face definition.
@@ -164,16 +173,26 @@ impl FontFace {
         };
 
         match &self.source {
-            FontSource::Google { weights } => {
+            FontSource::Google { weights, italic } => {
                 let encoded_family = self.family.replace(' ', "+");
-                let wght = weights
+                let (axes, styles): (&str, &[u8]) = if *italic {
+                    ("ital,wght", &[0, 1])
+                } else {
+                    ("wght", &[0])
+                };
+                let tuples = styles
                     .iter()
-                    .map(|w| w.to_string())
+                    .flat_map(|ital| {
+                        weights.iter().map(move |w| match italic {
+                            true => format!("{ital},{w}"),
+                            false => w.to_string(),
+                        })
+                    })
                     .collect::<Vec<_>>()
                     .join(";");
                 format!(
-                    "@import url('https://fonts.googleapis.com/css2?family={}:wght@{}&display={}');\n",
-                    encoded_family, wght, display
+                    "@import url('https://fonts.googleapis.com/css2?family={}:{}@{}&display={}');\n",
+                    encoded_family, axes, tuples, display
                 )
             }
             FontSource::Custom {
@@ -472,6 +491,22 @@ fn base_path_js(base_path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_google_face_imports_its_italics_on_request() {
+        let upright = FontFace::google("EB Garamond", &[400, 600]).to_css();
+        assert!(
+            upright.contains("family=EB+Garamond:wght@400;600&"),
+            "{upright}"
+        );
+        let both = FontFace::google("EB Garamond", &[400, 600])
+            .italic()
+            .to_css();
+        assert!(
+            both.contains("family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&"),
+            "{both}"
+        );
+    }
+
     use super::*;
     use crate::theme::ThemeMode;
 
