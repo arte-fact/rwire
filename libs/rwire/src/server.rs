@@ -68,6 +68,11 @@ const MAX_CACHED_SESSIONS: usize = 10_000;
 /// Client→server traffic is small (binary events, route strings; the protocol
 /// decoder caps a parsed payload at 64KB), so a few hundred KB is generous while
 /// far below tungstenite's 64 MiB / 16 MiB defaults. Limits reads only.
+/// The answer to every client event, after its effects (see [`crate::protocol::opcodes::EVENT_ACK`]).
+const EVENT_ACK: [u8; 2] = [
+    crate::protocol::opcodes::EVENT_ACK,
+    crate::protocol::opcodes::BATCH_END,
+];
 const MAX_WS_MESSAGE_SIZE: usize = 256 * 1024;
 const MAX_WS_FRAME_SIZE: usize = 256 * 1024;
 
@@ -2668,116 +2673,125 @@ where
             }
         };
         match msg {
-            Ok(Message::Binary(data)) => match ClientEvent::decode(&data) {
-                Ok(event) => {
-                    consecutive_decode_errors = 0;
+            Ok(Message::Binary(data)) => {
+                match ClientEvent::decode(&data) {
+                    Ok(event) => {
+                        consecutive_decode_errors = 0;
 
-                    // Rate limit: drop well-formed events that exceed the per-connection
-                    // token bucket before doing any handler/render/broadcast work. The
-                    // client-side debounce is only advisory, so this is enforced here.
-                    if !conn_state.allow_event() {
-                        continue;
-                    }
+                        // Rate limit: drop well-formed events that exceed the per-connection
+                        // token bucket before doing any handler/render/broadcast work. The
+                        // client-side debounce is only advisory, so this is enforced here.
+                        if !conn_state.allow_event() {
+                            write.send(Message::Binary(EVENT_ACK.to_vec())).await?;
+                            continue;
+                        }
 
-                    println!(
-                        "[{}] Event: handler=0x{:02X} type={} target_ref={}",
-                        peer_addr,
-                        event.handler_idx,
-                        event.event_type_name(),
-                        event.target_ref
-                    );
-
-                    if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned() {
-                        // Create EventContext from payload and param_bytes. The action key is
-                        // (session, handler_id, param) — all present right here — so `defer()`
-                        // can drive the lifecycle with no developer-authored key.
-                        let action_key = ActionKey::new(
-                            conn_state.session_id.clone(),
+                        println!(
+                            "[{}] Event: handler=0x{:02X} type={} target_ref={}",
+                            peer_addr,
                             event.handler_idx,
-                            event.param_bytes.clone(),
+                            event.event_type_name(),
+                            event.target_ref
                         );
-                        let ctx = EventContext::new_with_params(event.payload, event.param_bytes)
-                            .with_session(conn_state.session_id.clone())
-                            .with_action(Arc::clone(&shared), action_key.clone());
-                        let state_type_id = handler.state_type_id();
 
-                        // Execute the handler against its state (shared cache or memory)
-                        // and learn whether it was shared/persisted (cache key).
-                        let cache_key = conn_state.dispatch_handler(&shared, &handler, &ctx)?;
+                        if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned()
+                        {
+                            // Create EventContext from payload and param_bytes. The action key is
+                            // (session, handler_id, param) — all present right here — so `defer()`
+                            // can drive the lifecycle with no developer-authored key.
+                            let action_key = ActionKey::new(
+                                conn_state.session_id.clone(),
+                                event.handler_idx,
+                                event.param_bytes.clone(),
+                            );
+                            let ctx =
+                                EventContext::new_with_params(event.payload, event.param_bytes)
+                                    .with_session(conn_state.session_id.clone())
+                                    .with_action(Arc::clone(&shared), action_key.clone());
+                            let state_type_id = handler.state_type_id();
 
-                        // Settle the action's phase now that the handler has returned and released
-                        // any shared-state write lock it held. A deferred handler is marked
-                        // `Loading` here (NOT inside `defer()`, which runs while a `&mut
-                        // SharedState` handler still holds the shared-cache lock that
-                        // `set_action_loading` re-enters — an in-handler set self-deadlocks). A
-                        // handler that did NOT defer clears any entry a prior deferred run left, so
-                        // a stale spinner or error can't outlive a completed immediate click.
-                        if ctx.was_deferred() {
-                            shared.set_action_loading(action_key.clone());
-                            spawn_action_timeout(Arc::clone(&shared), action_key);
-                        } else if shared.action_phase(&action_key).is_some() {
-                            shared.resolve_action(action_key, None);
-                        }
+                            // Execute the handler against its state (shared cache or memory)
+                            // and learn whether it was shared/persisted (cache key).
+                            let cache_key = conn_state.dispatch_handler(&shared, &handler, &ctx)?;
 
-                        // Re-render this handler's state type (TypeId-filtered; hash
-                        // dedup skips identical output). Persisted/shared state is
-                        // injected from the cache the handler just wrote.
-                        let changes = handler.changes();
-                        let update = conn_state.build_type_update(
-                            &shared,
-                            state_type_id,
-                            changes,
-                            cache_key.as_deref(),
-                        )?;
-
-                        if !update.is_empty() {
-                            write.send(Message::Binary(update.to_vec())).await?;
-                        }
-
-                        // A handler may have requested a client navigation (e.g. it
-                        // created a resource and wants the URL to reflect it). Flush
-                        // it after the DOM update so the page is already in the new
-                        // state when the URL changes.
-                        if let Some(nav) = ctx.take_navigation() {
-                            let mut buf = crate::protocol::OpcodeBuffer::new();
-                            if nav.replace {
-                                buf.route_replace_inline(&nav.url);
-                            } else {
-                                buf.route_push_inline(&nav.url);
+                            // Settle the action's phase now that the handler has returned and released
+                            // any shared-state write lock it held. A deferred handler is marked
+                            // `Loading` here (NOT inside `defer()`, which runs while a `&mut
+                            // SharedState` handler still holds the shared-cache lock that
+                            // `set_action_loading` re-enters — an in-handler set self-deadlocks). A
+                            // handler that did NOT defer clears any entry a prior deferred run left, so
+                            // a stale spinner or error can't outlive a completed immediate click.
+                            if ctx.was_deferred() {
+                                shared.set_action_loading(action_key.clone());
+                                spawn_action_timeout(Arc::clone(&shared), action_key);
+                            } else if shared.action_phase(&action_key).is_some() {
+                                shared.resolve_action(action_key, None);
                             }
-                            write.send(Message::Binary(buf.finish().to_vec())).await?;
-                            // The app's route state follows the new URL exactly as it
-                            // would after a client-side navigation.
-                            for update in conn_state.apply_route(
+
+                            // Re-render this handler's state type (TypeId-filtered; hash
+                            // dedup skips identical output). Persisted/shared state is
+                            // injected from the cache the handler just wrote.
+                            let changes = handler.changes();
+                            let update = conn_state.build_type_update(
                                 &shared,
-                                route_handler.as_deref(),
-                                &nav.url,
-                            )? {
+                                state_type_id,
+                                changes,
+                                cache_key.as_deref(),
+                            )?;
+
+                            if !update.is_empty() {
                                 write.send(Message::Binary(update.to_vec())).await?;
                             }
+
+                            // A handler may have requested a client navigation (e.g. it
+                            // created a resource and wants the URL to reflect it). Flush
+                            // it after the DOM update so the page is already in the new
+                            // state when the URL changes.
+                            if let Some(nav) = ctx.take_navigation() {
+                                let mut buf = crate::protocol::OpcodeBuffer::new();
+                                if nav.replace {
+                                    buf.route_replace_inline(&nav.url);
+                                } else {
+                                    buf.route_push_inline(&nav.url);
+                                }
+                                write.send(Message::Binary(buf.finish().to_vec())).await?;
+                                // The app's route state follows the new URL exactly as it
+                                // would after a client-side navigation.
+                                for update in conn_state.apply_route(
+                                    &shared,
+                                    route_handler.as_deref(),
+                                    &nav.url,
+                                )? {
+                                    write.send(Message::Binary(update.to_vec())).await?;
+                                }
+                            }
+                        } else {
+                            eprintln!(
+                                "[{}] No handler registered for index {}",
+                                peer_addr, event.handler_idx
+                            );
                         }
-                    } else {
+                    }
+                    Err(e) => {
+                        consecutive_decode_errors += 1;
                         eprintln!(
-                            "[{}] No handler registered for index {}",
-                            peer_addr, event.handler_idx
+                            "[{}] Failed to decode event: {} ({}/{})",
+                            peer_addr, e, consecutive_decode_errors, MAX_CONSECUTIVE_DECODE_ERRORS
                         );
+                        if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS {
+                            eprintln!(
+                                "[{}] Too many consecutive decode errors, disconnecting",
+                                peer_addr
+                            );
+                            break;
+                        }
                     }
                 }
-                Err(e) => {
-                    consecutive_decode_errors += 1;
-                    eprintln!(
-                        "[{}] Failed to decode event: {} ({}/{})",
-                        peer_addr, e, consecutive_decode_errors, MAX_CONSECUTIVE_DECODE_ERRORS
-                    );
-                    if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS {
-                        eprintln!(
-                            "[{}] Too many consecutive decode errors, disconnecting",
-                            peer_addr
-                        );
-                        break;
-                    }
-                }
-            },
+                // Every event is acknowledged once its effects are on the wire, so the
+                // client knows when to release the control it marked busy on the tap
+                // (an event that changed nothing would otherwise get no answer at all).
+                write.send(Message::Binary(EVENT_ACK.to_vec())).await?;
+            }
             Ok(Message::Text(text)) => {
                 // Route changes also drive a re-render (and possibly a broadcast), so
                 // they draw from the same per-connection rate budget as events.

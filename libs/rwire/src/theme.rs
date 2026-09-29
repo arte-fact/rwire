@@ -530,7 +530,8 @@ pub fn generate_base_css() -> &'static str {
      ::-webkit-scrollbar{width:6px;height:6px}\
      ::-webkit-scrollbar-track{background:transparent}\
      ::-webkit-scrollbar-thumb{background:var(--c);border-radius:3px}\
-     ::-webkit-scrollbar-thumb:hover{background:var(--e)}\n"
+     ::-webkit-scrollbar-thumb:hover{background:var(--e)}\
+     [data-busy]{cursor:progress;opacity:.6;transition:opacity .25s .2s}\n"
 }
 
 /// Generate complete theme CSS from a Theme value.
@@ -793,7 +794,9 @@ mod tests {
     #[test]
     fn test_base_css_size() {
         let css = generate_base_css();
-        assert!(css.len() < 720, "Base CSS too large: {} bytes", css.len());
+        // +~70B (2026-09): the tapped control waiting on the server (`data-busy`, set by the
+        // runtime at the tap) dims after 200ms; client-set, so it can't ride STYLE_DEF.
+        assert!(css.len() < 800, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]

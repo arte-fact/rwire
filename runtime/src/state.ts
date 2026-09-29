@@ -41,6 +41,8 @@ export const st = {
   pm: null as PendingMorph | null,
   /** Told at every BATCH_END: a batch applied end to end (connect.ts resets its backoff on it). */
   onBatch: null as (() => void) | null,
+  /** Events sent and not yet acknowledged (EVENT_ACK): the busy controls wait on them. */
+  pe: 0,
 };
 
 // Name maps: (code → name), delivered lazily over the wire via MAP_DEF and
@@ -63,4 +65,5 @@ export function resetSession(): void {
   st.wt = [];
   st.K = {};
   st.sc = 0;
+  st.pe = 0;
 }

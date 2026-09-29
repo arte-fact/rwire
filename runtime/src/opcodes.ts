@@ -58,6 +58,7 @@ export const MOD_DEF = 0x8b;
 export const SYMBOLS = 0xf0;
 export const SYMBOLS_EXTEND = 0xf1;
 export const WORD_TABLE = 0xf2;
+export const EVENT_ACK = 0xf3;
 export const SET_TEXT_WORDS = 0x13;
 export const SET_TEXT_INT = 0x15;
 export const SET_KEY = 0x16;

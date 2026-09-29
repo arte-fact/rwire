@@ -38,6 +38,16 @@ export function gp(e: Event, el: RwEl): string {
   return "";
 }
 
+/** Put an event on the wire, counted until the server acknowledges it. A
+ * socket that is not open drops it (the reconnect overlay says why). */
+function tx(msg: Uint8Array): void {
+  const w = st.w;
+  if (w && w.readyState === 1) {
+    w.send(msg);
+    st.pe++;
+  }
+}
+
 /** Send a plain remote event. */
 export function se(h: number, t: number, f: number, e: Event, el: RwEl): void {
   const p = gp(e, el),
@@ -49,7 +59,7 @@ export function se(h: number, t: number, f: number, e: Event, el: RwEl): void {
   const msg = new Uint8Array(a.length + pb.length);
   for (let j = 0; j < a.length; j++) msg[j] = a[j];
   msg.set(pb, a.length);
-  st.w!.send(msg);
+  tx(msg);
 }
 
 /** Send a remote event carrying ItemRef param bytes. */
@@ -75,7 +85,7 @@ export function sep(
   j += prm.length;
   for (const b of pl) msg[j++] = b;
   msg.set(pb, j);
-  st.w!.send(msg);
+  tx(msg);
 }
 
 /** Debounce input events 250ms per element (`__t` timer expando); everything

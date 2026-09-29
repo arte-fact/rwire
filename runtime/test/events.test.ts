@@ -10,7 +10,7 @@ let sent: Uint8Array[];
 beforeEach(() => {
   doc = makeDom().document;
   sent = [];
-  st.w = { send: (m: Uint8Array) => sent.push(m), close() {} } as any;
+  st.w = { send: (m: Uint8Array) => sent.push(m), close() {}, readyState: 1 } as any;
 });
 
 const fakeEv = (type: string, target?: unknown) => {

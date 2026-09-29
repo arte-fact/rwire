@@ -12,8 +12,10 @@ import { gzipSync } from "node:zlib";
 // and, since the Empire merge, the live value bindings (live.ts, ~3KB raw /
 // 1.3KB gzipped): they are wire opcodes the executor itself must parse
 // (LIVE_SOURCE / LIVE_BIND), not a page feature an extension could add later.
-const MAX_RAW = 20_000;
-const MAX_GZIP = 7_500;
+// +500B raw / +200B gzip (2026-09-29): the tap's busy state and EVENT_ACK counting — it must
+// run synchronously in the dispatcher on a page's first tap, so it cannot be lazy.
+const MAX_RAW = 20_500;
+const MAX_GZIP = 7_700;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

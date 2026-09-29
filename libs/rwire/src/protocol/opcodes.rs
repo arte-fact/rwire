@@ -285,6 +285,11 @@ pub const SYMBOLS_EXTEND: u8 = 0xF1;
 /// Used with SET_TEXT_WORDS for efficient text encoding.
 pub const WORD_TABLE: u8 = 0xF2;
 
+/// The server has handled one client event and put its effects on the wire (sent
+/// after them, alone in its batch: `[EVENT_ACK, BATCH_END]`). The runtime releases
+/// the controls it marked busy when the tap fired once every event is acknowledged.
+pub const EVENT_ACK: u8 = 0xF3;
+
 /// Set text content from word indices. Format: [SET_TEXT_WORDS, ref, count, idx0, idx1, ...]
 /// Words are joined with spaces. More compact than symbol table for repeated words.
 pub const SET_TEXT_WORDS: u8 = 0x13;

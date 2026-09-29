@@ -12,7 +12,7 @@ import { sep } from "./events.ts";
 import { fm } from "./morph.ts";
 import { BL, xi } from "./bind.ts";
 import { fl2, fb2, sl2, sb2, uf2, us2 } from "./actions.ts";
-import { bind } from "./delegate.ts";
+import { bind, ack } from "./delegate.ts";
 import { ls, ul, lv, lb, type LiveBind, type LiveEl, type LiveSum } from "./live.ts";
 
 /** Extensions already imported (once per page). */
@@ -574,6 +574,9 @@ export function x(d: Uint8Array): void {
         const le = r[f] as LiveEl;
         (le.__lb || (le.__lb = [])).push(b);
         for (const h of b.c || [c]) (lb[h] || (lb[h] = [])).push(b);
+      } else if (o === OP.EVENT_ACK) {
+        // Sent alone after an event's effects: they are applied already.
+        ack();
       } else if (o === OP.BATCH_END) {
         fm();
         // A scroll box marked data-autoscroll follows its bottom (journals, logs).

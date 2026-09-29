@@ -50,7 +50,7 @@ beforeEach(() => {
   resetDelegation();
   sent = [];
   closed = 0;
-  st.w = { send: (m: Uint8Array) => sent.push(m), close: () => closed++ } as any;
+  st.w = { send: (m: Uint8Array) => sent.push(m), close: () => closed++, readyState: 1 } as any;
   st.pm = null;
   st.DS = null;
   resetSession();
@@ -322,6 +322,35 @@ test("BIND_REMOTE sets __hk and a click dispatches through the document", () => 
   t.fire("click");
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], 0);
+});
+
+test("a tap marks its control busy until every event is acknowledged; a second tap is not sent", () => {
+  const t = doc.createElement("button");
+  t.id = "b";
+  doc.body.appendChild(t);
+  run(syms("b"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(9)]);
+  t.fire("click");
+  assert.equal(sent.length, 1);
+  assert.equal(t.getAttribute("aria-busy"), "true", "busy at the tap, before any answer");
+  assert.ok(t.hasAttribute("data-busy"));
+  t.fire("click");
+  assert.equal(sent.length, 1, "the busy control ignores a second tap");
+  x(new Uint8Array([0xf3, 0xff])); // EVENT_ACK
+  assert.ok(!t.hasAttribute("data-busy"), "released by the acknowledgement");
+  assert.equal(t.getAttribute("aria-busy"), null);
+  t.fire("click");
+  assert.equal(sent.length, 2, "a released control sends again");
+});
+
+test("a closed socket sends nothing, so nothing waits busy", () => {
+  const b = doc.createElement("button");
+  b.id = "c";
+  doc.body.appendChild(b);
+  run(syms("c"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(4)]);
+  (st.w as any).readyState = 3;
+  b.fire("click");
+  assert.equal(sent.length, 0, "nothing on a closed socket");
+  assert.ok(!b.hasAttribute("data-busy"), "nothing to wait for");
 });
 
 test("delegation bubbles: a child click fires the parent's binding once", () => {
