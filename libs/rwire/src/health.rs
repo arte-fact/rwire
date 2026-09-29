@@ -276,6 +276,42 @@ pub async fn serve_unavailable(mut stream: TcpStream, reason: &str) -> io::Resul
     Ok(())
 }
 
+/// A human-facing 503: a browser navigation reached a proxied path with no live upstream
+/// (a stale preview link, a service mid-restart). Unlike [`serve_unavailable`] — JSON for
+/// health probes — this renders a small dark page carrying the resolver's `message`, so the
+/// person who clicked sees what happened instead of raw JSON or, worse, the app shell.
+pub async fn serve_unavailable_page(mut stream: TcpStream, message: &str) -> io::Result<()> {
+    let escaped = message
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let body = format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <title>Not running</title></head>\
+         <body style=\"margin:0;min-height:100dvh;display:flex;align-items:center;\
+         justify-content:center;background:#2e3440;color:#d8dee9;\
+         font-family:ui-monospace,monospace\">\
+         <div style=\"max-width:32rem;padding:2rem;text-align:center\">\
+         <div style=\"font-size:2rem;margin-bottom:0.75rem\">503</div>\
+         <div style=\"font-size:0.9rem;line-height:1.6;color:#aeb6c4\">{escaped}</div>\
+         </div></body></html>"
+    );
+    let http_response = format!(
+        "HTTP/1.1 503 Service Unavailable\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        body.len(),
+        body
+    );
+    stream.write_all(http_response.as_bytes()).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

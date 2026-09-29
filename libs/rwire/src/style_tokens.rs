@@ -1049,6 +1049,12 @@ define_token_enum! {
         /// The display face a theme style names in `--Qfd` (titles, labels,
         /// buttons); the body face otherwise.
         FontDisplay = 0x399 => "font-family:var(--Qfd,inherit)",
+        /// A spinner ring in the element's own foreground colour, with the right edge cut as the
+        /// spin gap. Bundled into one rule so the gap is deterministic — a separate
+        /// `border-right-color:transparent` token would lose to a later `border-color` class in
+        /// the cascade. Pair with a width (`Border2`) + `RoundedFull` + `AnimateSpinFast`; the
+        /// element must keep a live `color` (hide a label with `FontSize0`, not `TextTransparent`).
+        SpinnerRingCurrent = 0x39A => "border-style:solid;border-color:currentColor;border-right-color:transparent",
     }
 }
 

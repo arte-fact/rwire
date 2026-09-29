@@ -54,6 +54,7 @@
 mod token_macro;
 
 pub mod action;
+pub mod actions;
 pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
@@ -79,6 +80,7 @@ pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
 // Builder API exports
+pub use actions::{reflect_action, reflect_action_errors, ActionKey, Actions, Phase, Resolver};
 pub use builder::{el, ElementBuilder, ElementKey, LiveBind, LiveOutput, LiveSource, LiveSum};
 
 // Item reference exports
@@ -109,7 +111,7 @@ pub use persist::{PersistError, PersistRegistry, PersistableType, SqliteStore};
 pub use rusqlite;
 
 // Config exports
-pub use config::{ProxyResolver, ServerConfig};
+pub use config::{ProxyDecision, ProxyResolver, ServerConfig};
 
 // Registry exports
 pub use pwa::{Pwa, PwaDisplay};

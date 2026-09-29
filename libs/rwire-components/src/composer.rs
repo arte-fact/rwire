@@ -26,8 +26,10 @@
 //!     .build()
 //! ```
 
+use crate::tooltip::Tooltip;
+use crate::{Spinner, SpinnerSize};
 use rwire::style_tokens::St;
-use rwire::{el, icons, At, Av, El, ElementBuilder, Ev, HandlerSpec, Pc};
+use rwire::{el, icons, reflect_action, At, Av, El, ElementBuilder, Ev, HandlerSpec, Pc};
 use std::borrow::Cow;
 
 /// Composer builder.
@@ -43,6 +45,9 @@ pub struct Composer {
     max_height: Option<Cow<'static, str>>,
     hidden_fields: Vec<(Cow<'static, str>, Cow<'static, str>)>,
     on_draft: Option<HandlerSpec>,
+    /// When set, the send button skips action reflection. Inverted so the derived `Default`
+    /// (false) keeps reflection **on** — like [`crate::Button`].
+    reflect_off: bool,
 }
 
 impl Composer {
@@ -108,6 +113,14 @@ impl Composer {
         self
     }
 
+    /// Opt the send button out of automatic action reflection (on by default): when the
+    /// `on_submit` handler defers, the send button spins while the work runs and turns
+    /// destructive with the message on a tooltip if it fails. See [`crate::Button::reflect`].
+    pub fn reflect(mut self, enabled: bool) -> Self {
+        self.reflect_off = !enabled;
+        self
+    }
+
     pub fn compact(mut self, compact: bool) -> Self {
         self.compact = compact;
         self
@@ -156,26 +169,26 @@ impl Composer {
 
     fn send_button(&self) -> ElementBuilder {
         let label = self.send_label.as_deref().unwrap_or("Send").to_owned();
-        el(El::Button)
-            .at(At::Type, Av::Submit)
-            .at_str(At::AriaLabel, &label)
-            .st([
-                St::BorderNone,
-                St::DisplayFlex,
-                St::ItemsCenter,
-                St::GapSm,
-                St::PxMd,
-                St::PySm,
-                St::RoundedMd,
-                St::BgAccent,
-                St::TextOnAccent,
-                St::CursorPointer,
-            ])
-            .hover([St::BgAccentHover])
-            .append([
-                el(El::Span).text(&label),
-                icons::icon_sized(icons::Icon::ArrowUp, 16),
-            ])
+        match &self.on_submit {
+            // Reflect the submit action on the send button — same contract as `Button`.
+            Some(spec) if !self.reflect_off => {
+                let handler_id = spec.handler_id;
+                let param = spec.param_bytes.clone().unwrap_or_default();
+                let (l_idle, l_load, l_err) = (label.clone(), label.clone(), label);
+                reflect_action(
+                    handler_id,
+                    param,
+                    move || send_button_el(&l_idle, SendPhase::Idle),
+                    move || send_button_el(&l_load, SendPhase::Loading),
+                    move |message| {
+                        Tooltip::new(message.to_string())
+                            .child(send_button_el(&l_err, SendPhase::Errored))
+                            .build()
+                    },
+                )
+            }
+            _ => send_button_el(&label, SendPhase::Idle),
+        }
     }
 
     /// Build the composer into an ElementBuilder.
@@ -233,5 +246,51 @@ impl Composer {
         ])
         .pseudo(Pc::FocusWithin, [St::BorderAccent])
         .append([field, actions])
+    }
+}
+
+/// The send button's reflected phases.
+enum SendPhase {
+    Idle,
+    Loading,
+    Errored,
+}
+
+/// Render the send button in one phase. Constant footprint across all three: `Loading` swaps the
+/// arrow for a spinner and blocks pointer events; `Errored` recolours destructive (still a submit,
+/// so it retries) — matching `Button`'s reflection.
+fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
+    let mut tokens = vec![
+        St::BorderNone,
+        St::DisplayFlex,
+        St::ItemsCenter,
+        St::GapSm,
+        St::PxMd,
+        St::PySm,
+        St::RoundedMd,
+        St::CursorPointer,
+    ];
+    match phase {
+        SendPhase::Idle => tokens.extend([St::BgAccent, St::TextOnAccent]),
+        SendPhase::Loading => tokens.extend([
+            St::BgAccent,
+            St::TextOnAccent,
+            St::Opacity50,
+            St::PointerEventsNone,
+        ]),
+        SendPhase::Errored => tokens.extend([St::BgDestructive, St::TextOnDestructive]),
+    }
+    let trailing = match phase {
+        SendPhase::Loading => Spinner::new().size(SpinnerSize::Sm).build(),
+        _ => icons::icon_sized(icons::Icon::ArrowUp, 16),
+    };
+    let button = el(El::Button)
+        .at(At::Type, Av::Submit)
+        .at_str(At::AriaLabel, label)
+        .st(tokens)
+        .append([el(El::Span).text(label), trailing]);
+    match phase {
+        SendPhase::Idle => button.hover([St::BgAccentHover]),
+        _ => button,
     }
 }

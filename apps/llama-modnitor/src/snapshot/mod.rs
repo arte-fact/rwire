@@ -292,8 +292,6 @@ pub struct LlmNode {
     pub chat_log: Vec<ChatTurn>,
     /// Benchmark results as `(label, "N t/s")` pairs.
     pub bench_results: Vec<(String, String)>,
-    /// Whether a benchmark run is in progress.
-    pub bench_running: bool,
     /// A pending action awaiting confirmation (`"stop"` / `"configure"`).
     pub pending: Option<String>,
 }

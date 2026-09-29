@@ -9,31 +9,40 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rwire::{ChangeSet, SharedServerState};
+use rwire::{ChangeSet, Resolver, SharedServerState};
 
 use crate::convert;
 use crate::snapshot::{App, EngineKind, NodeStats, OrphanProc};
 
 use super::ChildEntry;
 
-/// Run a chat completion on a background thread, replacing the node's trailing
-/// (pending) assistant turn with the reply.
+/// Run a chat completion on a background thread. On success the assistant reply is appended to the
+/// node's conversation and `resolver.ok()` returns the Send button to idle; on failure
+/// `resolver.err(..)` surfaces the message (no reply turn is added).
 pub fn spawn_chat(
     shared: Arc<SharedServerState>,
     id: u64,
     port: u16,
     model: String,
     messages: Vec<(String, String)>,
+    resolver: Resolver,
 ) {
-    std::thread::spawn(move || {
-        let reply = chat_once(port, &model, &messages).unwrap_or_else(|e| format!("[error] {e}"));
-        shared.update_shared_changed::<App>(ChangeSet::from_fields(&[App::FIELD_NODES]), |app| {
-            if let Some(node) = app.nodes.iter_mut().find(|n| n.id == id)
-                && let Some(last) = node.chat_log.last_mut()
-            {
-                last.content = reply;
-            }
-        });
+    std::thread::spawn(move || match chat_once(port, &model, &messages) {
+        Ok(reply) => {
+            shared.update_shared_changed::<App>(
+                ChangeSet::from_fields(&[App::FIELD_NODES]),
+                |app| {
+                    if let Some(node) = app.nodes.iter_mut().find(|n| n.id == id) {
+                        node.chat_log.push(crate::snapshot::ChatTurn {
+                            role: "assistant".into(),
+                            content: reply.clone(),
+                        });
+                    }
+                },
+            );
+            resolver.ok();
+        }
+        Err(e) => resolver.err(e),
     });
 }
 
@@ -73,32 +82,29 @@ pub const BENCH_PP: [u32; 3] = [512, 1024, 4096];
 
 pub const BENCH_TG: [u32; 3] = [64, 128, 256];
 
-/// Run the pp/tg benchmark suite on a background thread, writing each result
-/// into the node as it completes and clearing `bench_running` at the end.
-pub fn spawn_bench(shared: Arc<SharedServerState>, id: u64, port: u16) {
+/// Run the pp/tg benchmark suite on a background thread, writing each result into the node as it
+/// completes; `resolver.ok()` at the end returns the triggering button to idle.
+pub fn spawn_bench(shared: Arc<SharedServerState>, id: u64, port: u16, resolver: Resolver) {
     std::thread::spawn(move || {
-        let push = |label: String, value: String, done: bool| {
+        let push = |label: String, value: String| {
             let sh = &shared;
             sh.update_shared_changed::<App>(ChangeSet::from_fields(&[App::FIELD_NODES]), |app| {
                 if let Some(node) = app.nodes.iter_mut().find(|n| n.id == id) {
                     node.bench_results.push((label.clone(), value.clone()));
-                    if done {
-                        node.bench_running = false;
-                    }
                 }
             });
         };
         for &n in &BENCH_PP {
             let r = bench_one(port, n, 1)
                 .map_or_else(|| "failed".into(), |(pp, _)| format!("{pp:.0} t/s"));
-            push(format!("pp{n}"), r, false);
+            push(format!("pp{n}"), r);
         }
-        for (i, &n) in BENCH_TG.iter().enumerate() {
-            let last = i == BENCH_TG.len() - 1;
+        for &n in &BENCH_TG {
             let r = bench_one(port, 64, n)
                 .map_or_else(|| "failed".into(), |(_, tg)| format!("{tg:.0} t/s"));
-            push(format!("tg{n}"), r, last);
+            push(format!("tg{n}"), r);
         }
+        resolver.ok();
     });
 }
 

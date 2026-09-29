@@ -307,6 +307,7 @@ fn emit_updates(variants: &[u8]) -> Vec<u8> {
             Some(&mut sent_css),
             Some(&mut sent_maps),
             None,
+            None,
             0,
             None,
         );

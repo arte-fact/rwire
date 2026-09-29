@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
     build_synced_update_with_known_symbols, extract_renderers, BuildContext, ClientActionIndices,
     ElementBuilder, SyncedElement,
@@ -230,6 +231,49 @@ impl SharedServerState {
             // except_conn_id = 0 is never a real connection id (ids start at 1).
             self.broadcast(&key, TypeId::of::<T>(), changes, 0);
         }
+    }
+
+    // ── Async-action registry (see `crate::actions`) ──────────────────────────
+    // All mutations go through `update_shared_changed::<Actions>`, so every phase
+    // change broadcasts to subscribed connections exactly like any shared state.
+
+    /// Mark an action `Loading` (called by `EventContext::defer`).
+    pub fn set_action_loading(&self, key: ActionKey) {
+        self.update_shared_changed::<Actions>(ChangeSet::all(), move |a| {
+            a.set(key, Phase::Loading);
+        });
+    }
+
+    /// Resolve an action: `None` removes it (success → idle); `Some(msg)` marks it `Errored`.
+    pub fn resolve_action(&self, key: ActionKey, error: Option<String>) {
+        self.update_shared_changed::<Actions>(ChangeSet::all(), move |a| match error {
+            Some(msg) => a.set(key, Phase::Errored(msg)),
+            None => a.clear(&key),
+        });
+    }
+
+    /// Timeout backstop: fail an action **only if** it is still `Loading`, so a resolution that
+    /// already landed isn't clobbered and no wasted broadcast is sent for a settled action.
+    pub fn fail_action_if_loading(&self, key: ActionKey, message: &str) {
+        if self.action_phase(&key) == Some(Phase::Loading) {
+            self.resolve_action(key, Some(message.to_string()));
+        }
+    }
+
+    /// Drop every action for a session (called when its connection ends).
+    pub fn drop_action_session(&self, session: &str) {
+        let session = session.to_string();
+        self.update_shared_changed::<Actions>(ChangeSet::all(), move |a| a.drop_session(&session));
+    }
+
+    /// Read an action's current phase (introspection / backstop / tests).
+    pub fn action_phase(&self, key: &ActionKey) -> Option<Phase> {
+        let cache = self.shared_cache.read().unwrap_or_else(|e| e.into_inner());
+        let cache_key = shared_cache_key(StorageType::Shared, Some(Actions::TABLE_NAME), "")?;
+        cache
+            .get(&cache_key)
+            .and_then(|b| b.downcast_ref::<Actions>())
+            .and_then(|a| a.phase(key).cloned())
     }
 
     /// Allocate unique connection ID.
@@ -622,6 +666,16 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
         task::sleep(ttl / 2).await;
         shared.evict_expired_sessions(ttl);
     }
+}
+
+/// Backstop for a deferred action: after [`crate::actions::LOADING_TIMEOUT`], fail it if it is
+/// still `Loading`, so a worker that crashed or forgot to resolve can't leave a control spinning
+/// forever. Spawned by `EventContext::defer`; it exits as soon as it fires.
+pub(crate) fn spawn_action_timeout(shared: Arc<SharedServerState>, key: ActionKey) {
+    task::spawn(async move {
+        task::sleep(crate::actions::LOADING_TIMEOUT).await;
+        shared.fail_action_if_loading(key, "timed out");
+    });
 }
 
 // ============================================================================
@@ -1326,7 +1380,14 @@ async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &s
     let mut upstream = match TcpStream::connect(("127.0.0.1", port)).await {
         Ok(upstream) => upstream,
         Err(_) => {
-            let _ = crate::health::serve_unavailable(stream, "preview_unreachable").await;
+            // A human clicked a link to a service that resolved but isn't answering — a page,
+            // not JSON (this is a browser navigation, not a health probe).
+            let _ = crate::health::serve_unavailable_page(
+                stream,
+                "The service behind this link isn't responding — it may be restarting. \
+                 Try again from the page that linked here.",
+            )
+            .await;
             return;
         }
     };
@@ -1640,15 +1701,24 @@ async fn handle_client<F>(
     }
 
     // Reverse-proxy gate (after auth, so previews inherit the gate): a matched path forwards to a
-    // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw bytes.
+    // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw
+    // bytes. A path the resolver claims without a live upstream gets the human 503 page — never
+    // the app shell (see `ProxyDecision::Gone`).
     if let Some(resolver) = config.proxy.as_ref() {
         let (_, path) = request_line(&peek_str);
-        if let Some((port, prefix)) = resolver.resolve(path) {
-            let mut head = vec![0u8; n];
-            if stream.read_exact(&mut head).await.is_ok() {
-                serve_proxy(stream, head, port, &prefix).await;
+        match resolver.resolve(path) {
+            Some(crate::config::ProxyDecision::Forward { port, prefix }) => {
+                let mut head = vec![0u8; n];
+                if stream.read_exact(&mut head).await.is_ok() {
+                    serve_proxy(stream, head, port, &prefix).await;
+                }
+                return;
             }
-            return;
+            Some(crate::config::ProxyDecision::Gone { message }) => {
+                let _ = crate::health::serve_unavailable_page(stream, &message).await;
+                return;
+            }
+            None => {}
         }
     }
 
@@ -1884,52 +1954,111 @@ impl ConnectionState {
             .shared_cache
             .read()
             .map_err(|_| "shared cache lock poisoned")?;
-        let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-            self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
-        for (tid, key) in
-            shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
-        {
-            if let Some(state) = cache_guard.get(&key) {
-                states_map.insert(tid, state.as_ref());
+        // Floor new nested ids above every id this client holds, so a region minted by
+        // this update can never collide with (and be morph-preserved as) a live span.
+        let synced_id_floor = self
+            .synced_elements
+            .iter()
+            .map(|se| se.id + 1)
+            .max()
+            .unwrap_or(0);
+        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
+        let mut rerendered: Vec<u32> = Vec::new();
+        let update = {
+            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+            for (tid, key) in
+                shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+            {
+                if let Some(state) = cache_guard.get(&key) {
+                    states_map.insert(tid, state.as_ref());
+                }
             }
-        }
-        if let Some(key) = inject_key {
-            if let Some(state) = cache_guard.get(key) {
+            if let Some(state) = inject_key.and_then(|key| cache_guard.get(key)) {
                 states_map.insert(changed_type, state.as_ref());
             }
-        }
-        let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
-        let update = build_synced_update_with_known_symbols(
-            &self.synced_elements,
-            &states_map,
-            &mut self.handlers,
-            changes,
-            Some(&mut self.sent_symbols),
-            Some(changed_type),
-            Some(&mut self.synced_hashes),
-            Some(&mut self.sent_css),
-            Some(&mut self.sent_maps),
-            Some(&mut discovered),
-            0,
-            Some(&self.client_actions),
-        );
+            build_synced_update_with_known_symbols(
+                &self.synced_elements,
+                &states_map,
+                &mut self.handlers,
+                changes,
+                Some(&mut self.sent_symbols),
+                Some(changed_type),
+                Some(&mut self.synced_hashes),
+                Some(&mut self.sent_css),
+                Some(&mut self.sent_maps),
+                Some(&mut discovered),
+                Some(&mut rerendered),
+                synced_id_floor,
+                Some(&self.client_actions),
+            )
+        };
         drop(cache_guard);
-        // Adopt the renderers seen during this pass: a nested closure region's
-        // renderer changes whenever its parent re-renders.
+        // A re-rendered region may have changed its set of nested regions: register the
+        // new ones, drop the ones that no longer exist, and subscribe any shared state the
+        // newcomers read. The kept ones adopt their parent's fresh renderer even when
+        // nothing re-rendered (a closure region's renderer changes with its parent).
+        self.reconcile_nested_regions(discovered, &rerendered);
+        if !rerendered.is_empty() {
+            for (_, key) in
+                shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+            {
+                if self.subscribed_keys.insert(key.clone()) {
+                    shared.subscribe(self.connection_id, &key);
+                }
+            }
+        }
+        Ok(update)
+    }
+
+    /// Reconcile nested-region registrations after an update pass: `discovered` is every
+    /// nested region encountered while re-rendering (kept + new), `rerendered` the regions
+    /// that re-rendered. A registered region whose parent re-rendered without re-discovering
+    /// it is gone from the client DOM — unregister it (and, transitively, its own children)
+    /// so no later broadcast re-renders a stale span. Kept regions get their freshly-built
+    /// renderer (its closures may capture newer content); new ones are registered.
+    fn reconcile_nested_regions(
+        &mut self,
+        discovered: Vec<crate::builder::SyncedElement>,
+        rerendered: &[u32],
+    ) {
+        let discovered_ids: std::collections::HashSet<u32> =
+            discovered.iter().map(|d| d.id).collect();
+        let rerendered_set: std::collections::HashSet<u32> = rerendered.iter().copied().collect();
+        let mut dropped: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        loop {
+            let mut changed = false;
+            for se in &self.synced_elements {
+                let Some(parent) = se.parent else { continue };
+                if dropped.contains(&se.id) {
+                    continue;
+                }
+                let orphaned = dropped.contains(&parent);
+                let stale = rerendered_set.contains(&parent) && !discovered_ids.contains(&se.id);
+                if orphaned || stale {
+                    dropped.insert(se.id);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        if !dropped.is_empty() {
+            self.synced_elements.retain(|se| !dropped.contains(&se.id));
+            self.synced_hashes.retain(|id, _| !dropped.contains(id));
+        }
         for region in discovered {
-            match self
+            if let Some(existing) = self
                 .synced_elements
                 .iter_mut()
                 .find(|se| se.id == region.id)
             {
-                Some(se) => {
-                    se.renderer = region.renderer;
-                    se.deps = region.deps;
-                }
-                None => self.synced_elements.push(region),
+                *existing = region;
+            } else {
+                self.synced_elements.push(region);
             }
         }
-        Ok(update)
     }
 
     /// Run `handler` against its state. Shared/persisted state executes on (and is
@@ -2112,6 +2241,7 @@ impl ConnectionState {
         self.synced_elements.retain(|se| !stale.contains(&se.id));
 
         let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
+        let mut rerendered: Vec<u32> = Vec::new();
         let update = {
             let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
                 self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
@@ -2140,18 +2270,15 @@ impl ConnectionState {
                 Some(&mut self.sent_css),
                 Some(&mut self.sent_maps),
                 Some(&mut discovered),
+                Some(&mut rerendered),
                 synced_id_floor,
                 Some(&self.client_actions),
             )
         };
 
-        // Register the new view's regions so later state changes re-render them, and
-        // subscribe any shared/persisted state they read.
-        for region in discovered {
-            if !self.synced_elements.iter().any(|se| se.id == region.id) {
-                self.synced_elements.push(region);
-            }
-        }
+        // Register the new view's regions (refreshing kept ones), drop any the swap
+        // re-rendered away, and subscribe any shared/persisted state they read.
+        self.reconcile_nested_regions(discovered, &rerendered);
         for (_, key) in
             shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
         {
@@ -2276,11 +2403,14 @@ impl ConnectionState {
 struct ConnectionGuard {
     shared: Arc<SharedServerState>,
     connection_id: u64,
+    session: String,
 }
 
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.shared.unregister_connection(self.connection_id);
+        // GC this session's action entries so the registry stays bounded by live sessions.
+        self.shared.drop_action_session(&self.session);
     }
 }
 
@@ -2327,6 +2457,7 @@ where
     let _cleanup = ConnectionGuard {
         shared: Arc::clone(&shared),
         connection_id,
+        session: session_id.as_str().to_string(),
     };
 
     // Create per-connection state with the session ID from cookie
@@ -2557,14 +2688,36 @@ where
                     );
 
                     if let Some(handler) = conn_state.handlers.get(&event.handler_idx).cloned() {
-                        // Create EventContext from payload and param_bytes
+                        // Create EventContext from payload and param_bytes. The action key is
+                        // (session, handler_id, param) — all present right here — so `defer()`
+                        // can drive the lifecycle with no developer-authored key.
+                        let action_key = ActionKey::new(
+                            conn_state.session_id.clone(),
+                            event.handler_idx,
+                            event.param_bytes.clone(),
+                        );
                         let ctx = EventContext::new_with_params(event.payload, event.param_bytes)
-                            .with_session(conn_state.session_id.clone());
+                            .with_session(conn_state.session_id.clone())
+                            .with_action(Arc::clone(&shared), action_key.clone());
                         let state_type_id = handler.state_type_id();
 
                         // Execute the handler against its state (shared cache or memory)
                         // and learn whether it was shared/persisted (cache key).
                         let cache_key = conn_state.dispatch_handler(&shared, &handler, &ctx)?;
+
+                        // Settle the action's phase now that the handler has returned and released
+                        // any shared-state write lock it held. A deferred handler is marked
+                        // `Loading` here (NOT inside `defer()`, which runs while a `&mut
+                        // SharedState` handler still holds the shared-cache lock that
+                        // `set_action_loading` re-enters — an in-handler set self-deadlocks). A
+                        // handler that did NOT defer clears any entry a prior deferred run left, so
+                        // a stale spinner or error can't outlive a completed immediate click.
+                        if ctx.was_deferred() {
+                            shared.set_action_loading(action_key.clone());
+                            spawn_action_timeout(Arc::clone(&shared), action_key);
+                        } else if shared.action_phase(&action_key).is_some() {
+                            shared.resolve_action(action_key, None);
+                        }
 
                         // Re-render this handler's state type (TypeId-filtered; hash
                         // dedup skips identical output). Persisted/shared state is
@@ -2733,6 +2886,63 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_loading_then_success_clears_to_idle() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 0x42, Vec::new());
+        assert_eq!(shared.action_phase(&key), None, "starts idle");
+        shared.set_action_loading(key.clone());
+        assert_eq!(shared.action_phase(&key), Some(Phase::Loading));
+        shared.resolve_action(key.clone(), None);
+        assert_eq!(shared.action_phase(&key), None, "success removes the entry");
+    }
+
+    #[test]
+    fn action_error_records_the_message() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 1, b"row".to_vec());
+        shared.set_action_loading(key.clone());
+        shared.resolve_action(key.clone(), Some("working tree is dirty".into()));
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("working tree is dirty".into()))
+        );
+    }
+
+    #[test]
+    fn timeout_backstop_only_fails_still_loading_actions() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 2, Vec::new());
+        // No entry → no-op.
+        shared.fail_action_if_loading(key.clone(), "timed out");
+        assert_eq!(shared.action_phase(&key), None);
+        // Loading → failed.
+        shared.set_action_loading(key.clone());
+        shared.fail_action_if_loading(key.clone(), "timed out");
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("timed out".into()))
+        );
+        // Already resolved (not Loading) → the backstop must not clobber the real outcome.
+        shared.fail_action_if_loading(key.clone(), "second message");
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("timed out".into()))
+        );
+    }
+
+    #[test]
+    fn dropping_a_session_clears_only_its_actions() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let a = ActionKey::new("a".into(), 1, Vec::new());
+        let b = ActionKey::new("b".into(), 1, Vec::new());
+        shared.set_action_loading(a.clone());
+        shared.set_action_loading(b.clone());
+        shared.drop_action_session("a");
+        assert_eq!(shared.action_phase(&a), None);
+        assert_eq!(shared.action_phase(&b), Some(Phase::Loading));
+    }
 
     #[test]
     fn apply_base_path_folds_a_prefix_and_drops_empty() {

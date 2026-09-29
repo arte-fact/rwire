@@ -74,6 +74,13 @@ appears in the design-system app automatically. Gate with
 
 - Wrap changing UI in `#[renderer]` (a synced region); static scaffolding stays plain `el()`.
   Keep hot regions small — a token stream should repaint one entry, not a board.
+- **Async actions**: a handler that hands work to a background thread calls `ctx.defer()` →
+  returns a `Send` `Resolver`; `resolver.ok()` / `.err(msg)` resolves it out-of-band later. The
+  triggering `Button` / `Composer` / form-submit then spins in place and clears (or turns
+  destructive with the message) **for free** — reflection is on by default (`.reflect(false)`
+  opts out), identity is keyless `(session, handler_id, param)`, and a handler that returns
+  without deferring never spins. Page-level error surfaces: `ActionErrors` (inline) /
+  `ActionToasts` (toast). See `docs/async-action-design.md`.
 - Lists: `ItemRef` + `iter_with_ref()` + `on_ref()` — no `data-*` index strings for identity.
   (Plain `.data(…)` payloads on buttons are fine for handler args.)
 - Navigate with `Link::route(…)`, never raw `<a href>` (that's a full reload).

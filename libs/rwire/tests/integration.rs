@@ -206,8 +206,18 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
             .unwrap()
             .root(build_simple)
             .config(ServerConfig::new().proxy(ProxyResolver::new(|path| {
-                path.starts_with("/preview/x")
-                    .then(|| (19010u16, "/preview/x".to_string()))
+                if path.starts_with("/preview/x") {
+                    Some(rwire::ProxyDecision::Forward {
+                        port: 19010,
+                        prefix: "/preview/x".to_string(),
+                    })
+                } else if path.starts_with("/preview/") {
+                    Some(rwire::ProxyDecision::Gone {
+                        message: "this preview isn't running".to_string(),
+                    })
+                } else {
+                    None
+                }
             })))
             .run()
             .await;
@@ -226,6 +236,20 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
         "proxy must strip the prefix and forward: {proxied_resp}"
     );
 
+    // A claimed path with no live upstream gets the human 503 page — never the app shell
+    // (a stale preview link must not open a second copy of the app).
+    let mut gone = TcpStream::connect("127.0.0.1:19011").await.unwrap();
+    gone.write_all(b"GET /preview/dead/whatever HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .unwrap();
+    let gone_resp = read_full_http_response(&mut gone).await;
+    assert!(
+        gone_resp.contains("503")
+            && gone_resp.contains("this preview isn't running")
+            && !gone_resp.contains("__rwx"),
+        "a Gone path serves the 503 page, not the capsule: {gone_resp}"
+    );
+
     // A non-matching path is served by the app itself, not proxied.
     let mut direct = TcpStream::connect("127.0.0.1:19011").await.unwrap();
     direct
@@ -239,6 +263,7 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
     );
 
     drop(proxied);
+    drop(gone);
     drop(direct);
     upstream.cancel().await;
     server.cancel().await;

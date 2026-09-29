@@ -23,7 +23,10 @@
 use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+use crate::actions::{ActionKey, Resolver};
+use crate::server::SharedServerState;
 
 // ============================================================================
 // Fine-Grained Reactivity Types
@@ -258,6 +261,19 @@ pub struct EventContext {
     /// The connection's session id — app-level identity for shared-state
     /// handlers (presence, membership, per-user authorization).
     session: Option<String>,
+    /// Set by `defer()`: the handler claimed this action for later resolution.
+    deferred: Cell<bool>,
+    /// The action this event drives, if dispatched through the real event loop.
+    /// Present only there (route/synthetic/test contexts leave it `None`), so
+    /// `defer()` can mark the action `Loading` and mint a `Resolver`.
+    action: Option<ActionSlot>,
+}
+
+/// What `defer()` needs to drive the action lifecycle: the shared-state handle to
+/// broadcast phase changes through, and this action's key.
+struct ActionSlot {
+    shared: Arc<SharedServerState>,
+    key: ActionKey,
 }
 
 /// A server-initiated client navigation requested from a handler.
@@ -275,6 +291,8 @@ impl EventContext {
             param_bytes: Vec::new(),
             navigation: Cell::new(None),
             session: None,
+            deferred: Cell::new(false),
+            action: None,
         }
     }
 
@@ -286,6 +304,8 @@ impl EventContext {
             param_bytes,
             navigation: Cell::new(None),
             session: None,
+            deferred: Cell::new(false),
+            action: None,
         }
     }
 
@@ -297,6 +317,8 @@ impl EventContext {
             param_bytes: Vec::new(),
             navigation: Cell::new(None),
             session: None,
+            deferred: Cell::new(false),
+            action: None,
         }
     }
 
@@ -479,6 +501,43 @@ impl EventContext {
     pub fn with_session(mut self, session: String) -> Self {
         self.session = Some(session);
         self
+    }
+
+    /// Attach the action this event drives (done by the server at dispatch), giving `defer()`
+    /// the shared handle and key it needs to drive the lifecycle.
+    pub fn with_action(mut self, shared: Arc<SharedServerState>, key: ActionKey) -> Self {
+        self.action = Some(ActionSlot { shared, key });
+        self
+    }
+
+    /// Hand this action's completion off to background work.
+    ///
+    /// Call this in a handler that spawns a thread/task instead of finishing synchronously: it
+    /// marks the action `Loading` (the triggering control immediately shows a spinner via the
+    /// shared-state broadcast) and returns a [`Resolver`] to move into the background work. When
+    /// that work finishes it calls [`Resolver::ok`] (control returns to idle) or
+    /// [`Resolver::err`] (message surfaces). An action left unresolved is failed by a timeout
+    /// backstop, so a control never spins forever.
+    ///
+    /// Reflection is automatic and complete: any control bound to a handler that defers shows
+    /// loading and surfaces errors; one that never defers resolves in the same round-trip and
+    /// shows nothing. Deferral is thus a runtime fact, not a guess from the handler's signature.
+    pub fn defer(&self) -> Resolver {
+        self.deferred.set(true);
+        match &self.action {
+            // Only claim the action + hand back a live resolver. Marking it `Loading` (and arming
+            // the timeout) is done by the server *after* the handler returns — a `&mut SharedState`
+            // handler runs holding the shared-cache write lock, and `set_action_loading` re-enters
+            // that lock, so setting it here would self-deadlock. The deferred work outlives the
+            // handler, so the post-handler `Loading` still lands before the resolver's `ok`/`err`.
+            Some(slot) => Resolver::new(Arc::clone(&slot.shared), slot.key.clone()),
+            None => Resolver::noop(),
+        }
+    }
+
+    /// Whether the handler claimed this action for later (server-internal).
+    pub(crate) fn was_deferred(&self) -> bool {
+        self.deferred.get()
     }
 
     /// The connection's session id — stable across reconnects for the cookie

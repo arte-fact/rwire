@@ -18,6 +18,14 @@ First public release. Highlights of what the framework ships with:
 - **Reactivity**: `#[renderer]`/`#[handler]` with compile-time field-dependency
   bitmasks; DOM morphing with keyed list diffing (`.key()`) that preserves
   input values, scroll, and focus across reorders.
+- **Async actions**: `ctx.defer()` hands a handler's work to a background
+  thread and returns a `Send` `Resolver` (`ok()` / `err(msg)`); the action's
+  `loading → done | errored` lifecycle is broadcast over shared state, so the
+  triggering control reflects it with **no key and no extra code**. `Button`,
+  `Composer`, and form-submit are action-aware by default (`.reflect(false)`
+  opts out); `ActionErrors` / `ActionToasts` are opt-in page-level error
+  surfaces. Identity is keyless `(session, handler_id, param)`. See
+  `docs/async-action-design.md` and the `async-action` example.
 - **State tiers**: per-connection memory, SQLite-persisted (schema generated
   from the derive), and shared-with-broadcast across connections.
 - **Streaming**: one-shot visibility sentinels (`on_visible`) and the

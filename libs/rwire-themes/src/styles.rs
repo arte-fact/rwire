@@ -219,6 +219,54 @@ fn neon_q_css(css: &mut String, _is_dark: bool) {
     css.push_str("--Qt:50ms;--Qts:0 0 8px currentColor;");
 }
 
+// ============================================================================
+// Étoffe (cloth) Style
+// ============================================================================
+
+fn cloth_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    // The accent scale runs dark to bright (see `palettes::cloth`).
+    if is_dark {
+        css_var(css, "v", &rp.accent[7]); // primary: gold
+        css_var(css, "w", &rp.neutral[11]); // on-primary: night
+        css_var(css, "x", &rp.accent[9]); // primary-hover: brighter gold
+        css_var(css, "h", &rp.accent[4]); // border-default: a gold hairline
+        css.push_str("--g:transparent;");
+        css_var(css, "t", &rp.neutral[9]); // surface-raised
+        css_var(css, "A", &rp.neutral[10]); // secondary: the cloth, darker
+        css_var(css, "B", &rp.accent[10]); // on-secondary: gold
+        css_var(css, "C", &rp.neutral[9]); // secondary-hover
+        css_var(css, "D", &rp.neutral[9]); // muted
+        css_var(css, "K", &rp.accent[8]); // focus ring
+        css_var(css, "L", &rp.accent[9]); // border-primary
+                                          // The tones of a figure on the dark cloth: bright enough to read a
+                                          // gain or a loss at a glance (the default steps are meant for a
+                                          // light ground).
+        css_var(css, "o", &rp.green[4]); // success
+        css_var(css, "p", &rp.amber[5]); // warning
+        css_var(css, "q", &rp.red[5]); // error
+    } else {
+        css_var(css, "v", &rp.accent[6]);
+        css_var(css, "w", &rp.neutral[0]);
+        css_var(css, "x", &rp.accent[5]);
+        css_var(css, "h", &rp.accent[6]);
+        css_var(css, "g", &rp.neutral[2]);
+        css_var(css, "t", &rp.neutral[0]);
+    }
+    css_var(css, "F", &rp.red[6]);
+    css_var(css, "G", &rp.red[0]);
+    css_var(css, "H", &rp.red[5]);
+}
+
+fn cloth_q_css(css: &mut String, _is_dark: bool) {
+    css.push_str("--Qft:\"EB Garamond\",Garamond,Georgia,serif;");
+    css.push_str("--Qfd:Cinzel,\"Trajan Pro\",Georgia,serif;");
+    css.push_str("--Qd:none;--Qgw:none;");
+    css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
+    css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+    css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+    css.push_str("--Qt:150ms;--Qts:none;");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,52 +347,4 @@ mod tests {
             );
         }
     }
-}
-
-// ============================================================================
-// Étoffe (cloth) Style
-// ============================================================================
-
-fn cloth_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
-    // The accent scale runs dark to bright (see `palettes::cloth`).
-    if is_dark {
-        css_var(css, "v", &rp.accent[7]); // primary: gold
-        css_var(css, "w", &rp.neutral[11]); // on-primary: night
-        css_var(css, "x", &rp.accent[9]); // primary-hover: brighter gold
-        css_var(css, "h", &rp.accent[4]); // border-default: a gold hairline
-        css.push_str("--g:transparent;");
-        css_var(css, "t", &rp.neutral[9]); // surface-raised
-        css_var(css, "A", &rp.neutral[10]); // secondary: the cloth, darker
-        css_var(css, "B", &rp.accent[10]); // on-secondary: gold
-        css_var(css, "C", &rp.neutral[9]); // secondary-hover
-        css_var(css, "D", &rp.neutral[9]); // muted
-        css_var(css, "K", &rp.accent[8]); // focus ring
-        css_var(css, "L", &rp.accent[9]); // border-primary
-                                          // The tones of a figure on the dark cloth: bright enough to read a
-                                          // gain or a loss at a glance (the default steps are meant for a
-                                          // light ground).
-        css_var(css, "o", &rp.green[4]); // success
-        css_var(css, "p", &rp.amber[5]); // warning
-        css_var(css, "q", &rp.red[5]); // error
-    } else {
-        css_var(css, "v", &rp.accent[6]);
-        css_var(css, "w", &rp.neutral[0]);
-        css_var(css, "x", &rp.accent[5]);
-        css_var(css, "h", &rp.accent[6]);
-        css_var(css, "g", &rp.neutral[2]);
-        css_var(css, "t", &rp.neutral[0]);
-    }
-    css_var(css, "F", &rp.red[6]);
-    css_var(css, "G", &rp.red[0]);
-    css_var(css, "H", &rp.red[5]);
-}
-
-fn cloth_q_css(css: &mut String, _is_dark: bool) {
-    css.push_str("--Qft:\"EB Garamond\",Garamond,Georgia,serif;");
-    css.push_str("--Qfd:Cinzel,\"Trajan Pro\",Georgia,serif;");
-    css.push_str("--Qd:none;--Qgw:none;");
-    css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
-    css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
-    css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
-    css.push_str("--Qt:150ms;--Qts:none;");
 }

@@ -24,9 +24,10 @@
 //!     .build()
 //! ```
 
+use crate::tooltip::Tooltip;
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
-use rwire::{el, icons, El, ElementBuilder, Ev, HandlerSpec, Icon};
+use rwire::{el, icons, reflect_action, El, ElementBuilder, Ev, HandlerSpec, Icon, ItemRef};
 use std::borrow::Cow;
 
 /// Button visual intent.
@@ -71,6 +72,19 @@ pub struct Button {
     loading: bool,
     full_width: bool,
     extra_class: Option<Cow<'static, str>>,
+    /// Extra hover style tokens applied to the built button, composing with the intent's own
+    /// hover treatment (e.g. a destructive text tint on a ghost icon button). Kept on the
+    /// builder — an `ElementBuilder::hover` chained after `on_click` would land on the
+    /// action-reflection wrapper, which is `display:contents` and has no box to hover.
+    hover_extra: Vec<St>,
+    /// `data-*` attributes applied to the built button — the payload the click handler reads
+    /// via `ctx.data(...)`. Kept on the builder for the same reason as `hover_extra`: chained
+    /// after `on_click` they'd land on the reflection wrapper, which the client's click payload
+    /// collection never reads (it looks at the bound element, walking up only for `data-id`).
+    data: Vec<(String, String)>,
+    /// When set, `on_click` skips action reflection and binds a plain click. Inverted so the
+    /// derived `Default` (false) keeps reflection **on** — the intended default.
+    reflect_off: bool,
 }
 
 #[rwire::component]
@@ -167,6 +181,24 @@ impl Button {
         self
     }
 
+    /// Add hover style tokens on top of the intent's own hover treatment — e.g. a destructive
+    /// text tint on a ghost icon button. Set here (not via `ElementBuilder::hover` chained
+    /// after `on_click`), so the tokens land on the button element rather than its action
+    /// reflection wrapper, which is `display:contents` and has no box to hover.
+    pub fn hover(mut self, tokens: impl IntoIterator<Item = St>) -> Self {
+        self.hover_extra.extend(tokens);
+        self
+    }
+
+    /// Set a `data-*` attribute on the built button — the payload its click handler reads via
+    /// `ctx.data(key)`. Set here (not via `ElementBuilder::data` chained after `on_click`), so
+    /// the attribute lands on the button element rather than its action-reflection wrapper,
+    /// which the client's click payload collection never reads.
+    pub fn data(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.data.push((key.into(), value.into()));
+        self
+    }
+
     /// Set an accessible label (`aria-label`). Recommended for icon-only buttons,
     /// which have no visible text for assistive technology to announce.
     pub fn aria_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
@@ -230,7 +262,10 @@ impl Button {
         }
 
         if self.loading {
-            tokens.extend([St::PositionRelative, St::TextTransparent]);
+            // The label is hidden by wrapping it in an opacity:0 span at build time (keeps its
+            // box, so the footprint never changes), leaving the button's own colour live — so the
+            // ::after ring can tint itself from the foreground via currentColor.
+            tokens.push(St::PositionRelative);
         }
         if self.full_width {
             tokens.push(St::WFull);
@@ -262,10 +297,17 @@ impl Button {
             builder = builder.after([
                 St::ContentEmpty,
                 St::PositionAbsolute,
+                // inset:0 + margin:auto centres the fixed-size ring on both axes for any button
+                // width; an insetless absolute ::after drifts to where the label used to sit.
+                St::Inset0,
+                St::MAuto,
                 St::W1rem,
                 St::H1rem,
+                // 2px ring tinted from the button's own foreground (currentColor stays live
+                // because the label is hidden with font-size:0, not colour:transparent). The ring
+                // colour + spin gap are one bundled token so the gap is cascade-order-proof.
                 St::Border2,
-                St::BorderRTransparent,
+                St::SpinnerRingCurrent,
                 St::RoundedFull,
                 St::AnimateSpinFast,
             ]);
@@ -304,6 +346,12 @@ impl Button {
             tokens.push(St::AspectSquare);
         }
         let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
+        if !self.hover_extra.is_empty() {
+            builder = builder.hover(self.hover_extra.clone());
+        }
+        for (key, value) in &self.data {
+            builder = builder.data(key, value);
+        }
 
         // Render the icon and text as element children so the appended icon isn't
         // clobbered by `textContent` (and stays *before* the label). Text-only
@@ -317,7 +365,13 @@ impl Button {
                 None => builder.append([icon_el]),
             };
         } else if let Some(t) = text {
-            builder = builder.text(&t);
+            if self.loading {
+                // Keep the label's box (constant footprint) but invisible, so the centred spinner
+                // reads over it and the button doesn't shrink to the ring.
+                builder = builder.append([el(El::Span).st([St::Opacity0]).text(&t)]);
+            } else {
+                builder = builder.text(&t);
+            }
         }
 
         if let Some(label) = self.aria_label {
@@ -341,9 +395,106 @@ impl Button {
         self.build().at_str(At::Form, form_id)
     }
 
-    /// Build with click handler.
+    /// Opt this button out of (or back into) automatic action reflection.
+    ///
+    /// Reflection is **on by default**: a button whose `on_click` handler defers shows a spinner
+    /// while the work runs and surfaces its error, with no extra code. Pass `false` for the rare
+    /// button that must never reflect (e.g. one already inside a hand-rolled reflecting region).
+    pub fn reflect(mut self, enabled: bool) -> Self {
+        self.reflect_off = !enabled;
+        self
+    }
+
+    /// Build with a click handler.
+    ///
+    /// By default the button is **action-aware**: it reflects the lifecycle of the action its
+    /// handler drives (see [`rwire::actions`]). While the action is `Loading` it shows an in-place
+    /// spinner (constant footprint); if it fails it turns destructive and carries the message on a
+    /// hover tooltip, staying clickable as retry; otherwise it renders normally. A handler that
+    /// never defers has no action entry, so the button simply behaves as a plain button — the
+    /// reflection is free and complete. Opt out with [`Button::reflect(false)`](Self::reflect).
     pub fn on_click(self, handler: HandlerSpec) -> ElementBuilder {
-        self.build().on(Ev::Click, handler)
+        if self.reflect_off {
+            return self.build().on(Ev::Click, handler);
+        }
+        let handler_id = handler.handler_id;
+        let param = handler.param_bytes.clone().unwrap_or_default();
+        let (idle_btn, loading_btn, err_btn) = (self.clone(), self.clone(), self);
+        let (idle_handler, err_handler) = (handler.clone(), handler);
+        reflect_action(
+            handler_id,
+            param,
+            move || idle_btn.clone().build().on(Ev::Click, idle_handler.clone()),
+            move || loading_btn.clone().loading(true).disabled(true).build(),
+            move |message| {
+                Tooltip::new(message.to_string())
+                    .child(
+                        err_btn
+                            .clone()
+                            .intent(ButtonIntent::Destructive)
+                            .build()
+                            .on(Ev::Click, err_handler.clone()),
+                    )
+                    .build()
+            },
+        )
+    }
+
+    /// Build with a click handler scoped to a list item — the action-aware equivalent of
+    /// [`ElementBuilder::on_ref`](rwire::ElementBuilder::on_ref).
+    ///
+    /// Encodes `item_ref` into the handler's param bytes, so each item's button reflects its own
+    /// action independently: clicking one row's button spins only that row. Otherwise identical to
+    /// [`Button::on_click`](Self::on_click).
+    pub fn on_click_ref<T: 'static>(
+        self,
+        handler: HandlerSpec,
+        item_ref: ItemRef<T>,
+    ) -> ElementBuilder {
+        let mut param_bytes = Vec::new();
+        item_ref.encode(&mut param_bytes);
+        self.on_click(handler.with_param_bytes(param_bytes))
+    }
+
+    /// Build as a form-submit button (`type="submit"`) that reflects the **form's** submit action.
+    ///
+    /// A submit button owns no event — the surrounding `<form>` does — so pass the same
+    /// `HandlerSpec` the form binds (`el(El::Form).on(Ev::Submit, save())` + `.submit(&save())`).
+    /// The button then mirrors that action's lifecycle exactly like [`Button::on_click`]: an
+    /// in-place spinner while `Loading`, destructive with the message on a hover tooltip when
+    /// `Errored`. No event is bound to the button itself; clicking it submits the form natively,
+    /// which is also the retry.
+    pub fn submit(self, action: &HandlerSpec) -> ElementBuilder {
+        if self.reflect_off {
+            return self.build().at(At::Type, Av::Submit);
+        }
+        let handler_id = action.handler_id;
+        let param = action.param_bytes.clone().unwrap_or_default();
+        let (idle_btn, loading_btn, err_btn) = (self.clone(), self.clone(), self);
+        reflect_action(
+            handler_id,
+            param,
+            move || idle_btn.clone().build().at(At::Type, Av::Submit),
+            move || {
+                loading_btn
+                    .clone()
+                    .loading(true)
+                    .disabled(true)
+                    .build()
+                    .at(At::Type, Av::Submit)
+            },
+            move |message| {
+                Tooltip::new(message.to_string())
+                    .child(
+                        err_btn
+                            .clone()
+                            .intent(ButtonIntent::Destructive)
+                            .build()
+                            .at(At::Type, Av::Submit),
+                    )
+                    .build()
+            },
+        )
     }
 }
 
@@ -405,11 +556,21 @@ mod tests {
         let btn = Button::primary("Save").loading(true);
         let tokens = btn.compute_tokens();
         assert!(tokens.contains(&St::PositionRelative));
-        assert!(tokens.contains(&St::TextTransparent));
+        // The button keeps its own colour live (label hidden via an opacity:0 span at build time)
+        // so the ring can read the foreground through currentColor.
+        assert!(!tokens.contains(&St::TextTransparent));
         let built = btn.build();
         let groups = built.get_pseudo_groups();
         // Should have after group for spinner
-        assert!(groups.iter().any(|(pc, _)| *pc == 0x08)); // Pc::After
+        let after = groups
+            .iter()
+            .find(|(pc, _)| *pc == 0x08) // Pc::After
+            .expect("loading button renders an ::after spinner");
+        // The ring tints from currentColor (bundled with its spin gap) and is centred via
+        // inset:0 + margin:auto so it renders and sits dead-centre on any button width.
+        assert!(after.1.contains(&(St::SpinnerRingCurrent as u16)));
+        assert!(after.1.contains(&(St::Inset0 as u16)));
+        assert!(after.1.contains(&(St::MAuto as u16)));
     }
 
     #[test]
@@ -417,6 +578,87 @@ mod tests {
         assert_eq!(Button::new().size(ButtonSize::Sm).icon_px(), 12);
         assert_eq!(Button::new().size(ButtonSize::Md).icon_px(), 14);
         assert_eq!(Button::new().size(ButtonSize::Lg).icon_px(), 16);
+    }
+
+    #[test]
+    fn test_on_click_ref_encodes_param_and_reflects() {
+        use rwire::ChangeSet;
+
+        #[derive(rwire::State, Default)]
+        #[storage(memory)]
+        struct S;
+        fn noop(_s: &mut S) {}
+        let spec = || HandlerSpec::from_fn_with_changes::<S>(noop, ChangeSet::all());
+
+        let item = ItemRef::<S>::new(3);
+        let mut expected = Vec::new();
+        item.encode(&mut expected);
+
+        // reflect(false): the click handler carries the encoded item_ref as its param bytes.
+        let plain = Button::primary("Run")
+            .reflect(false)
+            .on_click_ref(spec(), item);
+        let events = plain.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].1.param_bytes.as_deref(),
+            Some(expected.as_slice())
+        );
+
+        // Default: wrapped in a display:contents reflection region keyed to that param.
+        let reflected = Button::primary("Run").on_click_ref(spec(), ItemRef::<S>::new(3));
+        assert!(reflected
+            .get_style_utils()
+            .contains(&(St::DisplayContents as u16)));
+    }
+
+    #[test]
+    fn test_submit_reflects_the_forms_action_without_binding_events() {
+        use rwire::ChangeSet;
+
+        #[derive(rwire::State, Default)]
+        #[storage(memory)]
+        struct S;
+        fn noop(_s: &mut S) {}
+        let spec = || HandlerSpec::from_fn_with_changes::<S>(noop, ChangeSet::all());
+
+        // reflect(false): a plain type=submit button, no events (the form owns the submit).
+        let plain = Button::outline("Save").reflect(false).submit(&spec());
+        assert!(plain.events().is_empty());
+        assert!(plain.to_static_html().contains("type=\"submit\""));
+
+        // Default: wrapped in a display:contents reflection region keyed to the form's action.
+        let reflected = Button::outline("Save").submit(&spec());
+        assert!(reflected
+            .get_style_utils()
+            .contains(&(St::DisplayContents as u16)));
+    }
+
+    #[test]
+    fn test_data_and_hover_land_on_the_button_not_the_wrapper() {
+        use rwire::ChangeSet;
+
+        #[derive(rwire::State, Default)]
+        #[storage(memory)]
+        struct S;
+        fn noop(_s: &mut S) {}
+        let spec = HandlerSpec::from_fn_with_changes::<S>(noop, ChangeSet::all());
+
+        // The payload must sit on the <button> element itself: the client's click payload
+        // collection reads the bound element's dataset, never the reflection wrapper's.
+        let plain = Button::secondary("Edit")
+            .data("name", "k1")
+            .hover([St::TextError])
+            .reflect(false)
+            .on_click(spec);
+        assert_eq!(
+            plain.attributes().iter().find(|(k, _)| k == "data-name"),
+            Some(&("data-name".to_string(), "k1".to_string()))
+        );
+        assert!(plain
+            .get_pseudo_groups()
+            .iter()
+            .any(|(_, tokens)| tokens.contains(&(St::TextError as u16))));
     }
 
     #[test]
@@ -451,13 +693,18 @@ mod tests {
 
     #[test]
     fn test_loading_hides_icon() {
-        // The spinner overlay replaces the icon, so it isn't rendered while loading.
+        // The spinner overlay replaces the icon, so it isn't rendered while loading. The label is
+        // kept — in an invisible span, not textContent — so the button's footprint never shrinks
+        // to the ring and the ring can read the live foreground via currentColor.
         let btn = Button::primary("Save")
             .icon(Icon::Check)
             .loading(true)
             .build();
-        assert!(btn.children().is_empty());
-        assert_eq!(btn.text_content(), Some("Save"));
+        assert_eq!(btn.text_content(), None);
+        let kids = btn.children();
+        assert_eq!(kids.len(), 1); // just the hidden label span — no icon
+        assert_eq!(kids[0].el_type(), El::Span);
+        assert_eq!(kids[0].text_content(), Some("Save"));
     }
 
     #[test]

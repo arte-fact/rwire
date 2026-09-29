@@ -45,6 +45,18 @@ test("gp collects control value on input/change", () => {
   assert.deepEqual(JSON.parse(p), { t: "text", v: "draft" });
 });
 
+test("gp resolves the control from the event target when bound on a wrapper", () => {
+  // rwire's Select binds change on a wrapper div (the arrow overlay): the payload must
+  // carry the inner <select>'s value, not the div's (which has none). Regression guard:
+  // this fix was once hand-patched into the minified artifact only, and a rebuild from
+  // source silently dropped it — every <select> in the apps then no-op'd again.
+  const wrap = doc.createElement("div");
+  const sel = doc.createElement("select");
+  sel.value = "ag-default";
+  const p = gp(fakeEv("change", sel) as any, wrap as any);
+  assert.deepEqual(JSON.parse(p), { t: "text", v: "ag-default" });
+});
+
 test("gp collects data-* on click, empty when none", () => {
   const el = doc.createElement("button");
   el.dataset.filter = "done";

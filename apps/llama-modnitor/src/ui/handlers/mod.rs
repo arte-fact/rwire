@@ -57,7 +57,6 @@ pub fn add_node(app: &mut App) {
             chat_input: String::new(),
             chat_log: Vec::new(),
             bench_results: Vec::new(),
-            bench_running: false,
             pending: None,
         });
         app.selection.keys.clear();

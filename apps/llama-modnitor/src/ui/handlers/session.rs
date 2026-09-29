@@ -49,8 +49,9 @@ pub fn update_chat_input(app: &mut App, ctx: &EventContext) {
     }
 }
 
-/// Append the prompt to the conversation and send the full history; the reply
-/// (replacing the pending assistant turn) arrives asynchronously.
+/// Append the prompt to the conversation and send the full history; the Send button reflects the
+/// deferred request (spins until the reply lands, or shows the error), and the reply is appended
+/// asynchronously.
 #[handler]
 pub fn send_chat(app: &mut App, ctx: &EventContext) {
     let Some(idx) = ctx.item_index() else { return };
@@ -64,18 +65,13 @@ pub fn send_chat(app: &mut App, ctx: &EventContext) {
             content: prompt,
         });
         node.chat_input.clear();
-        // The history to send is the real turns so far (before the placeholder).
         let messages: Vec<(String, String)> = node
             .chat_log
             .iter()
             .map(|t| (t.role.clone(), t.content.clone()))
             .collect();
-        node.chat_log.push(ChatTurn {
-            role: "assistant".into(),
-            content: "…".into(),
-        });
         let model = short_path(&node.model).to_string();
-        launcher::request_chat(node.id, node.port, model, messages);
+        launcher::request_chat(node.id, node.port, model, messages, ctx.defer());
     }
 }
 
@@ -100,16 +96,17 @@ pub fn toggle_bench(app: &mut App, ctx: &EventContext) {
     }
 }
 
-/// Start a pp/tg benchmark run; results stream in asynchronously.
+/// Start a pp/tg benchmark run; results stream in asynchronously and the Run button reflects the
+/// deferred action (spins until the suite finishes).
 #[handler]
 pub fn run_bench(app: &mut App, ctx: &EventContext) {
     let Some(idx) = ctx.item_index() else { return };
     if let Some(node) = app.nodes.get_mut(idx) {
-        if node.bench_running || node.port == 0 {
+        if node.port == 0 {
             return;
         }
-        node.bench_running = true;
         node.bench_results.clear();
-        launcher::request_bench(node.id, node.port);
+        let (id, port) = (node.id, node.port);
+        launcher::request_bench(id, port, ctx.defer());
     }
 }

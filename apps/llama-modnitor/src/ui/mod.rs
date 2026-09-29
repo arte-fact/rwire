@@ -10,7 +10,8 @@
 
 use rwire::{El, ElementBuilder, Ev, IterWithRef, St, Style, el, renderer};
 use rwire_components::{
-    Badge, Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack, StackJustify, Text,
+    ActionToasts, Badge, Button, ButtonSize, Card, Container, ContainerSize, Gap, Stack,
+    StackJustify, Text,
 };
 
 mod handlers;
@@ -55,6 +56,9 @@ pub fn app() -> ElementBuilder {
                     Text::heading1("Node Monitor").build(),
                     render_hardware(),
                     render_nodes(),
+                    // Fixed, bottom-right toasts for any failed async action (e.g. a chat
+                    // request against a down engine); clears on retry.
+                    ActionToasts::new().build(),
                 ])
                 .build(),
         )

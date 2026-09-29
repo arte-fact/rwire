@@ -358,6 +358,37 @@ impl IntoPalette for Palette {
     }
 }
 
+/// Étoffe: dark blue cloth and gold, the neutrals running from bone to
+/// night and the accent the gold of a hairline. Meant for the dark mode,
+/// with [`crate::styles::cloth`].
+pub fn cloth() -> ColorPalette {
+    ColorPalette {
+        neutral: ColorScale::from_hex([
+            "#f3ecdc", "#e9e2d2", "#cfc7b5", "#9a9384", "#7d8797", "#5a6579", "#3d4a60", "#2b3a52",
+            "#1e2d45", "#162640", "#101d33", "#0b1526",
+        ]),
+        // The gold runs dark to bright: the accent steps are read as they
+        // are in the dark mode (n9 the hairline gold, n11 the gold of a
+        // title), so the cloth's is laid out for the dark.
+        accent: ColorScale::from_hex([
+            "#3d2e0e", "#4f3c13", "#5c4617", "#745920", "#8c6c2a", "#a37f34", "#b8913f", "#c9a24d",
+            "#d4ad55", "#dfb95e", "#e8c872", "#f5e3a8",
+        ]),
+        red: ColorScale::from_hex([
+            "#fdf0f0", "#fae0e0", "#f5c4c4", "#f0a8a8", "#eb8c8c", "#e07a6b", "#c8524a", "#b0433b",
+            "#98352e", "#802822", "#681c17", "#50110d",
+        ]),
+        green: ColorScale::from_hex([
+            "#f1f7ef", "#e3efdf", "#c7dfc0", "#a9cfa0", "#8fd19e", "#70ad66", "#5a9a52", "#4a8343",
+            "#3b6c35", "#2d5628", "#20401c", "#142b11",
+        ]),
+        amber: ColorScale::from_hex([
+            "#fff8e0", "#fff0c0", "#ffe490", "#ffd860", "#ffcc40", "#f0c030", "#d79921", "#c88c18",
+            "#b97f0f", "#aa7206", "#9b6500", "#8c5800",
+        ]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,36 +491,5 @@ mod tests {
         assert_eq!(Palette::Nord.id(), "nord");
         assert_eq!(Palette::TokyoNight.id(), "tokyo-night");
         assert_eq!(Palette::RosePine.id(), "rose-pine");
-    }
-}
-
-/// Étoffe: dark blue cloth and gold, the neutrals running from bone to
-/// night and the accent the gold of a hairline. Meant for the dark mode,
-/// with [`crate::styles::cloth`].
-pub fn cloth() -> ColorPalette {
-    ColorPalette {
-        neutral: ColorScale::from_hex([
-            "#f3ecdc", "#e9e2d2", "#cfc7b5", "#9a9384", "#7d8797", "#5a6579", "#3d4a60", "#2b3a52",
-            "#1e2d45", "#162640", "#101d33", "#0b1526",
-        ]),
-        // The gold runs dark to bright: the accent steps are read as they
-        // are in the dark mode (n9 the hairline gold, n11 the gold of a
-        // title), so the cloth's is laid out for the dark.
-        accent: ColorScale::from_hex([
-            "#3d2e0e", "#4f3c13", "#5c4617", "#745920", "#8c6c2a", "#a37f34", "#b8913f", "#c9a24d",
-            "#d4ad55", "#dfb95e", "#e8c872", "#f5e3a8",
-        ]),
-        red: ColorScale::from_hex([
-            "#fdf0f0", "#fae0e0", "#f5c4c4", "#f0a8a8", "#eb8c8c", "#e07a6b", "#c8524a", "#b0433b",
-            "#98352e", "#802822", "#681c17", "#50110d",
-        ]),
-        green: ColorScale::from_hex([
-            "#f1f7ef", "#e3efdf", "#c7dfc0", "#a9cfa0", "#8fd19e", "#70ad66", "#5a9a52", "#4a8343",
-            "#3b6c35", "#2d5628", "#20401c", "#142b11",
-        ]),
-        amber: ColorScale::from_hex([
-            "#fff8e0", "#fff0c0", "#ffe490", "#ffd860", "#ffcc40", "#f0c030", "#d79921", "#c88c18",
-            "#b97f0f", "#aa7206", "#9b6500", "#8c5800",
-        ]),
     }
 }
