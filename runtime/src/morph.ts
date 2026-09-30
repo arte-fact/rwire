@@ -9,10 +9,13 @@
 import { st, type RwEl } from "./state.ts";
 import { ls, lv, type LiveEl } from "./live.ts";
 
-/** The viewBox of a map (`data-map`) or of a map stacked over one
- * (`data-map-with`) belongs to the map extension, not to the server. */
+/** Attributes a client extension owns, which re-renders leave alone: the
+ * viewBox of a map (`data-map`) or of a map stacked over one
+ * (`data-map-with`), and any attribute an element names in its `data-own`
+ * (the server sets it once, when the element is created). */
 const mapOwned = (e: Element, n: string): boolean =>
-  n === "viewBox" && (e.hasAttribute("data-map") || e.hasAttribute("data-map-with"));
+  (n === "viewBox" && (e.hasAttribute("data-map") || e.hasAttribute("data-map-with"))) ||
+  (" " + e.getAttribute("data-own") + " ").indexOf(" " + n + " ") >= 0;
 
 /** Morph one node: text value, attributes, then children (unless it's a
  * nested synced region — its own update owns it). */

@@ -47,6 +47,26 @@ test("me leaves a map's viewBox to the map extension", () => {
   assert.equal(c.getAttribute("viewBox"), "0 0 100 100", "taken when the map has none yet");
 });
 
+test("me leaves the attributes an element names in data-own to the client", () => {
+  const a = div(),
+    b = div();
+  a.setAttribute("data-own", "style class");
+  a.setAttribute("class", "leaf open");
+  a.setAttribute("style", "transform: translateX(-40px)");
+  a.setAttribute("data-at", "2");
+  b.setAttribute("data-own", "style class");
+  b.setAttribute("class", "leaf");
+  b.setAttribute("data-at", "3");
+  me(a as any, b as any);
+  assert.equal(a.getAttribute("class"), "leaf open", "the client's class stays");
+  assert.equal(a.getAttribute("style"), "transform: translateX(-40px)", "the client's style stays");
+  assert.equal(a.getAttribute("data-at"), "3", "what it does not own follows the server");
+  const c = div();
+  c.setAttribute("data-own", "style class");
+  me(c as any, b as any);
+  assert.equal(c.getAttribute("class"), "leaf", "taken from the server when the element has none");
+});
+
 test("mk reuses nodes by id across reorder", () => {
   const live = div();
   const x = div("x"),

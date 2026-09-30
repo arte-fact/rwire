@@ -7,11 +7,12 @@ import { copyFileSync, mkdirSync } from "node:fs";
 const dest = new URL("../libs/rwire/assets/runtime.min.js", import.meta.url);
 copyFileSync(new URL("dist/runtime.min.js", import.meta.url), dest);
 console.log(`synced → ${dest.pathname}`);
-// Where each extension is vendored: vim and nudge in the core crate, map in rwire-map.
+// Where each extension is vendored: vim, nudge and liasse in the core crate, map in rwire-map.
 const EXT_DEST = {
   vim: "../libs/rwire/assets/ext/vim.min.js",
   map: "../libs/rwire-map/assets/map.min.js",
   nudge: "../libs/rwire/assets/ext/nudge.min.js",
+  liasse: "../libs/rwire/assets/ext/liasse.min.js",
 };
 for (const name of EXTS) {
   const extDest = new URL(EXT_DEST[name], import.meta.url);

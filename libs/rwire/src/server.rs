@@ -1537,6 +1537,7 @@ fn login_capsule_config(
 /// vendoring as the core runtime artifact; `npm run sync` is the write path.
 const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
 const EXT_NUDGE_JS: &str = include_str!("../assets/ext/nudge.min.js");
+const EXT_LIASSE_JS: &str = include_str!("../assets/ext/liasse.min.js");
 
 async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
     let response = format!(
@@ -1588,6 +1589,7 @@ async fn handle_client<F>(
         let vendored = match bare {
             "/_rw/ext/vim.js" => Some(EXT_VIM_JS),
             "/_rw/ext/nudge.js" => Some(EXT_NUDGE_JS),
+            "/_rw/ext/liasse.js" => Some(EXT_LIASSE_JS),
             _ => None,
         };
         if let Some(module) = vendored {

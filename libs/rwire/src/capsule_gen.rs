@@ -17,6 +17,7 @@ use crate::theme::Theme;
 const RUNTIME_JS: &str = include_str!("../assets/runtime.min.js");
 const EXT_VIM_JS_FOR_VERSION: &str = include_str!("../assets/ext/vim.min.js");
 const EXT_NUDGE_JS_FOR_VERSION: &str = include_str!("../assets/ext/nudge.min.js");
+const EXT_LIASSE_JS_FOR_VERSION: &str = include_str!("../assets/ext/liasse.min.js");
 
 /// Build stamp for lazy-extension URLs (`?v=`): changes whenever either
 /// artifact changes, so a rebuilt server can never be served a cached stale
@@ -27,6 +28,7 @@ pub(crate) fn ext_version() -> String {
         .bytes()
         .chain(EXT_VIM_JS_FOR_VERSION.bytes())
         .chain(EXT_NUDGE_JS_FOR_VERSION.bytes())
+        .chain(EXT_LIASSE_JS_FOR_VERSION.bytes())
     {
         h ^= u32::from(b);
         h = h.wrapping_mul(0x0100_0193);
