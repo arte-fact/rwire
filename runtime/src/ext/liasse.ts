@@ -39,7 +39,7 @@
 // field's. Arrow keys turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 3;
+export const v = 4;
 
 type El = HTMLElement;
 
@@ -60,7 +60,9 @@ export function i(doc: Document): void {
   installed.add(doc);
   const win = doc.defaultView || (globalThis as unknown as Window);
   const reduce = !!(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  const STEP = 14;
+  // The edges of the leaves under the open one: a few pixels each, two at most.
+  const STEP = 6,
+    EDGES = 2;
 
   let pile: El | null = null;
   let bundle = "";
@@ -117,10 +119,10 @@ export function i(doc: Document): void {
       if (at === 0 && dx > 0) d = dx * 0.25;
       return `translate3d(${d}px,0,0) rotate(${(d / w) * (soberLeaves ? 1.5 : 6)}deg)`;
     }
-    const depth = i - at;
+    const depth = Math.min(i - at, EDGES);
     const lift = dx < 0 && depth === 1 ? Math.min(1, -dx / w) : 0;
     const k = depth - lift;
-    return `translate3d(${k * 5}px,${k * STEP}px,0)`;
+    return `translate3d(${k * 3}px,${k * STEP}px,0)`;
   }
 
   /** Each turned leaf's foot sits on the foot of the screen, never below the
@@ -156,7 +158,7 @@ export function i(doc: Document): void {
     if (dx > 0 && at > 0) leaves[at - 1].style.zIndex = "60";
     footTurned();
     pile.classList.add("pile-edges");
-    pile.style.setProperty("--edges", (N - 1 - at) * STEP + 14 + "px");
+    pile.style.setProperty("--edges", Math.min(N - 1 - at, EDGES) * STEP + 8 + "px");
     showSeal();
   }
 
