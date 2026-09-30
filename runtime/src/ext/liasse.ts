@@ -24,6 +24,10 @@
 //   `data-seal-at` and no piece is laid; a touch on it ties the bundle (a
 //   copy of it is folded, corded and sent left while the server answers).
 //   `.cord` and `.knot` inside the bundle are its cord and wax.
+// - A submit button `[data-stamp="F"]` is a cachet: pressed, it prints
+//   `<span class="imprint">F</span>` on its leaf (`.stamped`), then submits
+//   its form a moment later; a piece so sealed goes off to the right while the
+//   server answers. The imprint fades if the server keeps the paper.
 // - `[data-motion]` radios (value `amples` or `sobres`) set the motions,
 //   remembered on the device; `body.sober-leaves` / `body.sober-bundles`
 //   carry the choice to the stylesheet.
@@ -34,7 +38,7 @@
 // field's. Arrow keys turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 1;
+export const v = 2;
 
 type El = HTMLElement;
 
@@ -366,6 +370,36 @@ export function i(doc: Document): void {
     paint(0, false);
   }
 
+  // A cachet pressed on its leaf, then the form it seals submitted.
+  function stampWith(stamp: HTMLButtonElement): void {
+    const leaf = (stamp.closest(".leaf") as El | null) || (stamp.parentElement as El);
+    const mark = doc.createElement("span");
+    mark.className = "imprint";
+    mark.textContent = stamp.getAttribute("data-stamp") || "";
+    leaf.appendChild(mark);
+    leaf.classList.add("stamped");
+    stamp.setAttribute("data-stamped", "");
+    win.setTimeout(() => {
+      stamp.click();
+      stamp.removeAttribute("data-stamped");
+      if (piece === leaf) {
+        piece = null;
+        leaf.classList.add("moving");
+        leaf.style.transform = soberLeaves ? "translate3d(28px,0,0)" : `translate3d(${width() * 1.08}px,0,0)`;
+        leaf.style.opacity = "0";
+        paint(0, false);
+      }
+      // Kept by the server (a refusal in the margin): the wax lifts.
+      win.setTimeout(() => {
+        if (!leaf.isConnected) return;
+        mark.remove();
+        leaf.classList.remove("stamped");
+        leaf.style.opacity = "";
+        if (!piece && leaf.classList.contains("piece")) layPiece(leaf);
+      }, 1600);
+    }, T(560, 260, true));
+  }
+
   // --- following the server -------------------------------------------------
   function sync(): void {
     const p = doc.querySelector<El>("[data-liasse]");
@@ -473,6 +507,14 @@ export function i(doc: Document): void {
         return;
       }
       const t = e.target as Element | null;
+      const stamp = t && t.closest && (t.closest("[data-stamp]") as HTMLButtonElement | null);
+      if (stamp && !stamp.hasAttribute("data-stamped")) {
+        if (stamp.form && !stamp.form.checkValidity()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        stampWith(stamp);
+        return;
+      }
       const seal = t && t.closest && (t.closest("[data-seal]") as El | null);
       if (seal && pile && !busy && !seal.classList.contains("hidden-away")) {
         // A seal that submits a form ties nothing the form would refuse.

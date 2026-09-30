@@ -768,6 +768,18 @@ impl ElementBuilder {
             .data("nudge-for", input_id)
     }
 
+    /// This element reads, as the input `input_id` moves, the word of the
+    /// mark within `near` of its value, or else `rest` (the `nudge`
+    /// extension). The server writes the first reading itself.
+    pub fn nudge_say(self, input_id: &str, marks: &[(i32, &str)], near: i32, rest: &str) -> Self {
+        let marks: Vec<String> = marks.iter().map(|(v, w)| format!("{v}:{w}")).collect();
+        self.ext("nudge")
+            .data("nudge-say", input_id)
+            .data("nudge-marks", &marks.join("|"))
+            .data("nudge-near", &near.to_string())
+            .data("nudge-rest", rest)
+    }
+
     /// The long step of a held [`nudge`](Self::nudge): after a few repeats
     /// it moves by `steps` (same sign as the nudge's), on round counts.
     pub fn nudge_big(self, steps: i32) -> Self {
@@ -3609,11 +3621,24 @@ mod map_def_tests {
     fn a_nudge_names_its_input_and_steps_and_hints_its_extension() {
         let b = el(El::Button).nudge("rate", -2);
         assert_eq!(b.exts, ["nudge"]);
-        let data: Vec<_> = b.attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let data: Vec<_> = b
+            .attrs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
         assert!(data.contains(&("data-nudge", "-2")), "{data:?}");
         assert!(data.contains(&("data-nudge-for", "rate")), "{data:?}");
+        let say =
+            el(El::Small).nudge_say("rate", &[(25, "l'usage"), (35, "lourd")], 0, "par un point");
+        assert!(say
+            .attrs
+            .iter()
+            .any(|(k, v)| k == "data-nudge-marks" && v == "25:l'usage|35:lourd"));
         let held = el(El::Button).nudge("rate", 10).nudge_big(50);
-        assert!(held.attrs.iter().any(|(k, v)| k == "data-nudge-big" && v == "50"));
+        assert!(held
+            .attrs
+            .iter()
+            .any(|(k, v)| k == "data-nudge-big" && v == "50"));
     }
 
     #[test]

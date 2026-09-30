@@ -92,3 +92,31 @@ test("held, a nudge repeats, then takes its big step on round counts; the closin
   plus.click();
   assert.equal(input.value, "160", "the next tap counts again");
 });
+
+test("as the input moves, its says read the nearest mark and its nudges tell their bound", () => {
+  const doc = makeDom().document as any;
+  install(doc);
+  const input = field(doc, { min: "0", max: "100", value: "45" });
+  const minus = nudger(doc, -5),
+    plus = nudger(doc, 5);
+  const say = doc.createElement("small");
+  say.setAttribute("data-nudge-say", "n");
+  say.setAttribute("data-nudge-marks", "50:le besoin|100:l'abondance");
+  say.setAttribute("data-nudge-near", "2");
+  say.setAttribute("data-nudge-rest", "par un demi");
+  doc.body.appendChild(say);
+  input.value = "49";
+  input.fire("input", { target: input });
+  assert.equal(say.textContent, "le besoin", "within the nearness");
+  assert.equal(say.getAttribute("data-named"), "true");
+  input.value = "40";
+  input.fire("input", { target: input });
+  assert.equal(say.textContent, "par un demi");
+  assert.equal(say.getAttribute("data-named"), "false");
+  assert.equal(minus.getAttribute("aria-disabled"), "false");
+  input.value = "100";
+  input.fire("input", { target: input });
+  assert.equal(say.textContent, "l'abondance");
+  assert.equal(plus.getAttribute("aria-disabled"), "true", "+ stands on the max");
+  assert.equal(minus.getAttribute("aria-disabled"), "false");
+});

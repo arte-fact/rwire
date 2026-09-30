@@ -284,8 +284,8 @@ what the user is typing.
 - **Runtime extensions** are lazy ESM modules the loader imports from `/_rw/ext/<name>.js` the
   first time a batch hints `el.ext("<name>")`. The core vendors `vim`, `nudge` (`el.nudge(input_id,
   steps)`: a − / + button stepping a slider client-side onto round counts; held, it repeats, then
-  takes `.nudge_big(steps)`) and `liasse` (a bundle of leaves turned
-  under the thumb; its DOM contract heads `runtime/src/ext/liasse.ts`); an element's `data-own`
+  takes `.nudge_big(steps)`; `.nudge_say(id, marks, near, rest)` names the value) and `liasse` (a bundle of leaves turned
+  under the thumb, and the `data-stamp` cachet; its DOM contract heads `runtime/src/ext/liasse.ts`); an element's `data-own`
   names attributes the client owns, which re-renders leave alone. Any crate or app ships
   its own through `ServerWithRoot::asset(path, content_type, bytes)`, which serves a file as
   it is (before auth, like the PWA assets). `rwire-map` is the model: `el(El::Svg).map(extent,
