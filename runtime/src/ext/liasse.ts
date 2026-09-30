@@ -15,7 +15,8 @@
 //   - `data-seal-at`: the leaf the seal shows on.
 // - Its `.leaf` children, in order, are the leaves. A `.leaf.piece` child is
 //   a paper laid over the bundle (a dossier, letters patent); `.letter`
-//   makes it as tall as its text. Each leaf's text is in its `.scroll`,
+//   makes it as tall as its text, and laying it leaves the page's scroll
+//   alone (the stylesheet sets it at the foot of the screen). Each leaf's text is in its `.scroll`,
 //   which ends with an optional `.folio`.
 // - A turn is told to the server by clicking the bundle's hidden
 //   `[data-page="i"]` button; `data-page` equal to the count of leaves means
@@ -38,7 +39,7 @@
 // field's. Arrow keys turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 2;
+export const v = 3;
 
 type El = HTMLElement;
 
@@ -348,7 +349,9 @@ export function i(doc: Document): void {
     pile.style.setProperty("--piece-min", pile.offsetHeight + "px");
     p.style.transform = soberLeaves ? "translate3d(28px,0,0)" : `translate3d(${width() * 1.08}px,0,0)`;
     if (soberLeaves) p.style.opacity = "0";
-    win.scrollTo(0, 0);
+    // A letter lies at the foot of the screen, out of the page's scroll: the
+    // page stays where the reader was.
+    if (!p.classList.contains("letter")) win.scrollTo(0, 0);
     void p.offsetHeight;
     p.classList.add("moving");
     p.style.transform = "";
