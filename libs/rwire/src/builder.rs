@@ -758,13 +758,20 @@ impl ElementBuilder {
     }
 
     /// A click on this element moves the input whose id is `input_id` by
-    /// `steps` of its `step` (negative steps down), clamped to its bounds,
-    /// and fires its `input` and `change` events — a slider's − / + buttons,
-    /// client-side (the `nudge` extension).
+    /// `steps` of its `step` (negative steps down), landing on a multiple of
+    /// that move, clamped to its bounds (reached even off the grid), and
+    /// fires its `input` and `change` events — a slider's − / + buttons,
+    /// client-side (the `nudge` extension). Held down, it repeats.
     pub fn nudge(self, input_id: &str, steps: i32) -> Self {
         self.ext("nudge")
             .data("nudge", &steps.to_string())
             .data("nudge-for", input_id)
+    }
+
+    /// The long step of a held [`nudge`](Self::nudge): after a few repeats
+    /// it moves by `steps` (same sign as the nudge's), on round counts.
+    pub fn nudge_big(self, steps: i32) -> Self {
+        self.data("nudge-big", &steps.to_string())
     }
 
     pub fn attr(mut self, key: &str, value: &str) -> Self {
@@ -3605,6 +3612,8 @@ mod map_def_tests {
         let data: Vec<_> = b.attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         assert!(data.contains(&("data-nudge", "-2")), "{data:?}");
         assert!(data.contains(&("data-nudge-for", "rate")), "{data:?}");
+        let held = el(El::Button).nudge("rate", 10).nudge_big(50);
+        assert!(held.attrs.iter().any(|(k, v)| k == "data-nudge-big" && v == "50"));
     }
 
     #[test]
