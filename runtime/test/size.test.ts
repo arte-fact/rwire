@@ -14,8 +14,10 @@ import { gzipSync } from "node:zlib";
 // (LIVE_SOURCE / LIVE_BIND), not a page feature an extension could add later.
 // +500B raw / +200B gzip (2026-09-29): the tap's busy state and EVENT_ACK counting — it must
 // run synchronously in the dispatcher on a page's first tap, so it cannot be lazy.
-const MAX_RAW = 20_500;
-const MAX_GZIP = 7_700;
+// +100B raw / +50B gzip (2026-09-30): on a reopen, the reload when /ready names another
+// runtime version — a page left open across a deploy otherwise keeps its old extensions.
+const MAX_RAW = 20_600;
+const MAX_GZIP = 7_750;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

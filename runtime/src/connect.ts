@@ -2,7 +2,8 @@
 // full client-state reset on reopen (the server replays the page onto a clean
 // slate; name maps intentionally survive — MAP_DEF re-delivery is per
 // connection), and the stale-capsule escape hatch (after 2 failed retries,
-// reload once /ready answers — a deploy may have shipped a new capsule).
+// reload once /ready answers — a deploy may have shipped a new capsule),
+// and on a reopen, the reload when /ready names another runtime version.
 
 import { st, resetSession } from "./state.ts";
 import { resetActions } from "./actions.ts";
@@ -33,6 +34,13 @@ export function bj(u: string): string {
   return BASE + u;
 }
 
+/** Reload once /ready answers, if `when` says so of its answer. */
+const rl = (when: (r: Response) => unknown): void => {
+  fetch("/ready", { cache: "no-store" })
+    .then((r) => when(r) && location.reload())
+    .catch(() => {});
+};
+
 export function connect(): void {
   const w = new WebSocket(
     (location.protocol === "https:" ? "wss://" : "ws://") + location.host + BASE,
@@ -43,6 +51,9 @@ export function connect(): void {
     clearTimeout(ot);
     ov(false);
     if (rn) {
+      // A deploy while the page was open: if the server now runs another
+      // runtime (or core extension) than the one loaded, load the new one.
+      rl((r: any) => (r = r.headers.get("x-rwv")) && r != RWV);
       // Full re-render incoming: clear everything the server owns.
       document.body
         .querySelectorAll(":scope>:not(script):not(style)")
@@ -71,10 +82,7 @@ export function connect(): void {
     rn = true;
     clearTimeout(ot);
     ot = setTimeout(() => ov(true, !navigator.onLine), 600);
-    if (op && rc >= 2)
-      fetch("/ready", { cache: "no-store" })
-        .then(() => location.reload())
-        .catch(() => {});
+    if (op && rc >= 2) rl(() => 1);
     setTimeout(connect, Math.min(1000 * Math.pow(2, rc++), 30000));
   };
   w.onerror = () => {};

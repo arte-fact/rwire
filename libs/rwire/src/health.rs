@@ -170,6 +170,8 @@ pub async fn serve_ready(
         "HTTP/1.1 {} {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
+         Cache-Control: no-store\r\n\
+         X-Rwv: {}\r\n\
          Connection: close\r\n\
          \r\n\
          {}",
@@ -180,6 +182,7 @@ pub async fn serve_ready(
             "Service Unavailable"
         },
         body.len(),
+        crate::capsule_gen::ext_version(),
         body
     );
 
