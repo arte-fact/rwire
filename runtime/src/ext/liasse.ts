@@ -34,12 +34,16 @@
 //   carry the choice to the stylesheet.
 //
 // A horizontal drag anywhere on the page turns the open leaf (to the left:
-// the next; to the right: the one before, drawn back by its foot); a
-// vertical one scrolls the page. A drag begun on a field or a slider is the
-// field's. Arrow keys turn, Escape lays a piece back.
+// the next slides in under it; to the right: the one before slides back over
+// it), flat, at the thumb's own speed; a vertical one scrolls the page. The
+// leaf coming in is laid with its head at the top of the screen wherever the
+// page is scrolled, and only once it has settled does it become the open
+// leaf, the page put back to its top in the same instant: nothing is seen
+// to scroll. A drag begun on a field or a slider is the field's. Arrow keys
+// turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 4;
+export const v = 5;
 
 type El = HTMLElement;
 
@@ -74,6 +78,13 @@ export function i(doc: Document): void {
   let ghost: El | null = null;
   let drag: Drag | null = null;
   let dragged = false;
+  // The page's scroll when a turn began: the leaf coming in is laid that far
+  // down, so its head meets the top of the screen.
+  let align = 0;
+  // A slide under way: the swap it ends with, and its timer.
+  let settle: (() => void) | null = null;
+  let settling: ReturnType<typeof setTimeout> | undefined;
+  let resting: ReturnType<typeof setTimeout> | undefined;
 
   // --- motions --------------------------------------------------------------
   let mode = "amples";
@@ -105,35 +116,25 @@ export function i(doc: Document): void {
   function rest(i: number, dx: number): string {
     const w = width();
     const N = leaves.length;
+    // Flat: no leaf tilts. A leaf on its way in (drawn back, or lifted as
+    // the open one goes) is laid with its head at the top of the screen.
     if (i < at) {
-      // Turned leaves wait to the left, their lower corner tilted into view
-      // at the foot of the screen; drawn back, the leaf straightens.
-      const off = -w * 1.08;
+      // Turned leaves wait wholly off-screen to the left.
+      const off = -w * 1.04;
       const back = i === at - 1 && dx > 0 ? Math.min(dx, -off) : 0;
-      return `translate3d(${off + back}px,0,0) rotate(${-7 * (1 + back / off)}deg)`;
+      return `translate3d(${off + back}px,${back > 0 ? align : 0}px,0)`;
     }
     if (i === at) {
       let d = dx < 0 ? dx : 0;
-      // The last leaf turns away only where turning ends the bundle.
+      // The last leaf slides away only where turning ends the bundle.
       if (at === N - 1 && dx < 0 && ends() !== "turn") d = dx * 0.25;
       if (at === 0 && dx > 0) d = dx * 0.25;
-      return `translate3d(${d}px,0,0) rotate(${(d / w) * (soberLeaves ? 1.5 : 6)}deg)`;
+      return `translate3d(${d}px,0,0)`;
     }
     const depth = Math.min(i - at, EDGES);
     const lift = dx < 0 && depth === 1 ? Math.min(1, -dx / w) : 0;
     const k = depth - lift;
-    return `translate3d(${k * 3}px,${k * STEP}px,0)`;
-  }
-
-  /** Each turned leaf's foot sits on the foot of the screen, never below the
-   * bundle's own foot (a turned leaf must not lengthen the page). */
-  function footTurned(): void {
-    if (!pile) return;
-    const open = leaves[at];
-    const foot = Math.min(win.innerHeight - pile.getBoundingClientRect().top, open ? open.offsetHeight : 0);
-    leaves.forEach((leaf, i) => {
-      leaf.style.top = i < at ? foot - leaf.offsetHeight + "px" : "";
-    });
+    return `translate3d(${k * 3}px,${k * STEP + (lift > 0 ? align : 0)}px,0)`;
   }
 
   function paint(dx: number, animate: boolean): void {
@@ -151,12 +152,13 @@ export function i(doc: Document): void {
       // never slides under the one still flying off.
       leaf.style.zIndex = String(i < at ? 20 + i : i === at ? 45 : 40 - (i - at));
       leaf.style.transform = rest(i, dx);
+      // Buried leaves are not drawn at all.
+      leaf.style.visibility = i > at + EDGES || i < at - 1 ? "hidden" : "";
       leaf.setAttribute("aria-hidden", i === at && !piece ? "false" : "true");
       (leaf as El & { inert: boolean }).inert = i !== at || !!piece;
     });
     // A leaf drawn back comes over everything.
     if (dx > 0 && at > 0) leaves[at - 1].style.zIndex = "60";
-    footTurned();
     pile.classList.add("pile-edges");
     pile.style.setProperty("--edges", Math.min(N - 1 - at, EDGES) * STEP + 8 + "px");
     showSeal();
@@ -171,6 +173,15 @@ export function i(doc: Document): void {
     });
   }
 
+  /** The neighbours' text is hidden again only once no thumb and no slide
+   * is at work: a timer from an earlier turn never hides a leaf under way. */
+  function restText(): void {
+    win.clearTimeout(resting);
+    resting = win.setTimeout(() => {
+      if (!drag && !settle && pile) pile.classList.remove("dragging");
+    }, 400);
+  }
+
   /** Tell the server which leaf lies open (or that the last was turned past). */
   function tell(i: number): void {
     const b = pile && pile.querySelector<El>(`[data-page="${i}"]`);
@@ -179,14 +190,17 @@ export function i(doc: Document): void {
   }
 
   // --- turning --------------------------------------------------------------
-  function go(i: number): void {
+  /** Turn to leaf `i`; `dur` is the time the slide takes, the thumb's speed
+   * leaving it, a beat at least. */
+  function go(i: number, dur?: number): void {
     if (busy || !pile) return;
     const N = leaves.length;
+    dur = Math.round(dur || T(340, 220));
     if (i === N && ends() === "turn") {
       // Turning past the last leaf: it flies off, and the bundle goes.
       const last = leaves[at];
       last.classList.add("animating");
-      last.style.transform = `translate3d(${-width() * (soberLeaves ? 0.5 : 1.1)}px,0,0) rotate(${soberLeaves ? -1.5 : -6}deg)`;
+      last.style.transform = `translate3d(${-width() * (soberLeaves ? 0.5 : 1.04)}px,0,0)`;
       if (soberLeaves) last.style.opacity = "0";
       win.setTimeout(() => {
         depart();
@@ -198,65 +212,55 @@ export function i(doc: Document): void {
       paint(0, true);
       return;
     }
-    if (i < at && soberLeaves && !reduce) {
-      // Sober: the screen goes to the top at once, and the leaf fades in with
-      // a short slide from the left; the one that was open settles under it.
-      const back = leaves[i];
-      const settling = leaves[at];
-      at = i;
-      paint(0, false);
-      win.scrollTo(0, 0);
-      settling.style.opacity = "0";
-      win.setTimeout(() => (settling.style.opacity = ""), 240);
-      back.style.opacity = "0";
-      back.style.transform = "translate3d(-24px,0,0)";
-      void back.offsetHeight;
-      back.classList.add("animating");
-      back.style.opacity = "";
-      back.style.transform = rest(at, 0);
-    } else if (i < at) {
-      // Drawn back: the screen goes to the top at once, and the leaf, held
-      // where it was seen, glides to its place in one move, across and up;
-      // the one that was open settles into the pile under it.
-      const leaf = leaves[i];
-      const left = leaves[at];
-      const from = pile.getBoundingClientRect().top + (parseFloat(leaf.style.top) || 0);
-      const was = leaf.style.transform;
-      const leftRect = left.getBoundingClientRect();
-      at = i;
-      paint(0, false);
-      win.scrollTo(0, 0);
-      const dy = from - pile.getBoundingClientRect().top;
-      leaf.style.transform = `translate3d(0,${dy}px,0) ${was}`;
-      const settled = left.getBoundingClientRect();
-      left.style.transform = `translate3d(${leftRect.left - settled.left}px,${leftRect.top - settled.top}px,0) ${rest(at + 1, 0)}`;
-      void leaf.offsetHeight;
-      for (const l of [leaf, left]) {
-        l.classList.add("animating");
-        l.style.transitionDuration = reduce ? "" : ".52s";
-      }
-      leaf.style.transform = rest(at, 0);
-      left.style.transform = rest(at + 1, 0);
-      win.setTimeout(() => {
-        leaf.style.transitionDuration = "";
-        left.style.transitionDuration = "";
-      }, 560);
+    // Flat: the leaves slide across, the one coming in laid with its head at
+    // the top of the screen. Only when it has settled does it become the
+    // open leaf, and the page is put back to its top in the same instant:
+    // the screen shows the same thing before and after, so nothing is seen
+    // to scroll.
+    if (!drag) align = Math.max(0, Math.round(win.scrollY));
+    pile.classList.add("dragging");
+    const coming = leaves[i];
+    const moving = [coming];
+    coming.classList.add("animating");
+    if (i < at) {
+      // Drawn back over the open leaf.
+      coming.style.zIndex = "60";
+      coming.style.transform = `translate3d(0,${align}px,0)`;
     } else {
-      // The leaf turned away stays on top while it flies off, then lies under
-      // the pile; a drag begun meanwhile repaints and puts the dragged leaf over it.
+      // The open leaf slides away; the next, lifted, takes its place.
       const gone = leaves[at];
-      at = i;
-      paint(0, true);
+      gone.classList.add("animating");
+      moving.push(gone);
       gone.style.zIndex = "60";
-      if (soberLeaves) gone.style.opacity = "0";
-      win.setTimeout(() => {
-        const k = leaves.indexOf(gone);
-        if (k >= 0 && k < at && !drag) gone.style.zIndex = String(20 + k);
-        gone.style.opacity = "";
-      }, T(420, 240));
-      win.scrollTo({ top: 0, behavior: reduce || soberLeaves ? "auto" : "smooth" });
+      gone.style.transform = `translate3d(${-width() * 1.04}px,0,0)`;
+      coming.style.transform = `translate3d(0,${align}px,0)`;
+      leaves.forEach((l, k) => {
+        if (k > i) {
+          l.classList.add("animating");
+          moving.push(l);
+          const m = Math.min(k - i, EDGES);
+          l.style.transform = `translate3d(${m * 3}px,${m * STEP}px,0)`;
+        }
+      });
     }
-    tell(at);
+    for (const l of moving) l.style.transitionDuration = dur + "ms";
+    // The swap and the scroll in one frame, unseen; a thumb landing before
+    // the slide is over settles it at once and goes on from there.
+    settle = () => {
+      win.clearTimeout(settling);
+      settle = null;
+      at = i;
+      align = 0;
+      for (const l of moving) l.style.transitionDuration = "";
+      paint(0, false);
+      win.scrollTo(0, 0);
+      // At the swap the leaf passed behind hides its text at once: the
+      // edges that stick out show bare paper.
+      if (!drag && pile) pile.classList.remove("dragging");
+    };
+    settling = win.setTimeout(settle, dur);
+    // The server is told the leaf turned to at once, while it slides in.
+    tell(i);
   }
 
   // --- a bundle comes, a bundle goes ----------------------------------------
@@ -449,6 +453,7 @@ export function i(doc: Document): void {
     if (busy || !pile || (e.pointerType === "mouse" && e.button !== 0)) return;
     const t = e.target as Element | null;
     if (t && t.closest && t.closest("input, textarea, select, [data-no-turn]")) return;
+    if (settle) settle();
     drag = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, axis: "", dx: 0 };
   });
   doc.addEventListener("pointermove", (e) => {
@@ -459,6 +464,7 @@ export function i(doc: Document): void {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       drag.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
       if (drag.axis === "x") {
+        align = Math.max(0, Math.round(win.scrollY));
         try {
           doc.documentElement.setPointerCapture(e.pointerId);
         } catch (err) {
@@ -481,21 +487,23 @@ export function i(doc: Document): void {
     const s = drag;
     drag = null;
     if (s.axis !== "x" || !pile) return;
-    // The leaves keep their text until the move they started is over.
-    win.setTimeout(() => {
-      if (!drag && pile) pile.classList.remove("dragging");
-    }, 620);
     const w = width();
     const v = s.dx / Math.max(1, e.timeStamp - s.t);
+    // The way left to go, at the thumb's own speed: a flick ends fast.
+    const dur = Math.max(120, Math.min(T(340, 220), (w - Math.min(w, Math.abs(s.dx))) / Math.max(0.8, Math.abs(v))));
     if (piece) {
       if (s.dx > w * 0.25 || v > 0.5) liftPiece();
       else {
         piece.classList.add("moving");
         piece.style.transform = "";
       }
-    } else if (s.dx < -w * 0.25 || v < -0.5) go(at + 1);
-    else if (s.dx > w * 0.25 || v > 0.5) go(at - 1);
-    else paint(0, true);
+    } else if (s.dx < -w * 0.25 || v < -0.5) go(at + 1, dur);
+    else if (s.dx > w * 0.25 || v > 0.5) go(at - 1, dur);
+    else {
+      align = 0;
+      paint(0, true);
+      restText();
+    }
     // A drag is no tap: the button under the thumb is not pressed.
     dragged = true;
     win.setTimeout(() => (dragged = false), 50);
@@ -563,19 +571,6 @@ export function i(doc: Document): void {
     setMotion();
   });
 
-  let queued = false;
-  win.addEventListener(
-    "scroll",
-    () => {
-      if (queued || at === 0) return;
-      queued = true;
-      win.requestAnimationFrame(() => {
-        queued = false;
-        footTurned();
-      });
-    },
-    { passive: true },
-  );
   win.addEventListener("resize", () => {
     if (!busy && !drag) paint(0, false);
   });
