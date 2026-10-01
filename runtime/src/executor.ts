@@ -124,7 +124,8 @@ export function x(d: Uint8Array): void {
         i += fl;
         const [k, l] = rv(d, i);
         i += l;
-        r[f].className = st.s[k] || "";
+        // As an attribute: an SVG element's className is not assignable.
+        r[f].setAttribute("class", st.s[k] || "");
       } else if (o === OP.SET_ATTR) {
         const [f, fl] = rv(d, i);
         i += fl;

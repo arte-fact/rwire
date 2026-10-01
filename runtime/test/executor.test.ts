@@ -194,6 +194,8 @@ test("SET_CLASS, SET_ATTR (A-map + symbols), SET_DATA", () => {
     [0x14, 0, ...vint(0x83), ...vint(0x84)], // dataset
   );
   assert.equal(t.className, "c1 c2");
+  // Set as an attribute: assigning className does nothing on an SVG element.
+  assert.equal(t.getAttribute("class"), "c1 c2");
   assert.equal(t.getAttribute("id"), "newid");
   assert.equal(t.dataset.key, "val");
 });
