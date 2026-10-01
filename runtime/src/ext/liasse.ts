@@ -10,9 +10,8 @@
 //   - `data-bundle`: a key that changes when another bundle replaces this one
 //     (the new one then comes in from the right);
 //   - `data-at`: the leaf the server holds open;
-//   - `data-ends`: `seal` (sealed from a leaf), `turn` (turned past its last
-//     leaf) or `auto` (taken away by the table);
-//   - `data-seal-at`: the leaf the seal shows on.
+//   - `data-ends`: `seal` (signed from a leaf), `turn` (turned past its last
+//     leaf) or `auto` (taken away by the table).
 // - Its `.leaf` children, in order, are the leaves. A `.leaf.piece` child is
 //   a paper laid over the bundle (a dossier, letters patent); `.letter`
 //   makes it as tall as its text, and laying it leaves the page's scroll
@@ -21,10 +20,13 @@
 // - A turn is told to the server by clicking the bundle's hidden
 //   `[data-page="i"]` button; `data-page` equal to the count of leaves means
 //   "past the last". A piece is laid back by clicking its `[data-piece-close]`.
-// - `[data-seal]` (anywhere) is the one seal: it shows while the open leaf is
-//   `data-seal-at` and no piece is laid; a touch on it ties the bundle (a
-//   copy of it is folded, corded and sent left while the server answers).
-//   `.cord` and `.knot` inside the bundle are its cord and wax.
+// - `[data-sign]` is the signature line at the foot of the leaf a bundle is
+//   signed from: touched, its `.hand` (the seigneur's name, or the value of
+//   the input `data-sign-from` names) is written by hand (`.signing`,
+//   `--dur` set to the pen's time), then the button's own action goes
+//   (a click, or the form it submits) and the bundle slides off to the left
+//   while the server answers; the next comes in from the right. A bundle
+//   the server keeps (a refusal) slides back.
 // - A submit button `[data-stamp="F"]` is a cachet: pressed, it prints
 //   `<span class="imprint">F</span>` on its leaf (`.stamped`), then submits
 //   its form a moment later; a piece so sealed goes off to the right while the
@@ -43,7 +45,7 @@
 // turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 5;
+export const v = 6;
 
 type El = HTMLElement;
 
@@ -75,7 +77,9 @@ export function i(doc: Document): void {
   let leaves: El[] = [];
   let piece: El | null = null;
   let busy = false;
-  let ghost: El | null = null;
+  // When the bundle slid off (0: it did not), and which bundle it was.
+  let sentAt = 0;
+  let leaving = "";
   let drag: Drag | null = null;
   let dragged = false;
   // The page's scroll when a turn began: the leaf coming in is laid that far
@@ -107,10 +111,6 @@ export function i(doc: Document): void {
 
   const width = () => (pile ? pile.getBoundingClientRect().width : win.innerWidth);
   const ends = () => (pile && pile.dataset.ends) || "seal";
-  const sealAt = () => {
-    const s = pile && pile.dataset.sealAt;
-    return s === undefined || s === null || s === "" ? -1 : +s;
-  };
 
   // --- where each leaf lies -------------------------------------------------
   function rest(i: number, dx: number): string {
@@ -161,16 +161,6 @@ export function i(doc: Document): void {
     if (dx > 0 && at > 0) leaves[at - 1].style.zIndex = "60";
     pile.classList.add("pile-edges");
     pile.style.setProperty("--edges", Math.min(N - 1 - at, EDGES) * STEP + 8 + "px");
-    showSeal();
-  }
-
-  // --- the seal -------------------------------------------------------------
-  function showSeal(): void {
-    const here = !!pile && !busy && !piece && !ghost && ends() === "seal" && at === sealAt();
-    doc.querySelectorAll<El>("[data-seal]").forEach((s) => {
-      s.hidden = false;
-      s.classList.toggle("hidden-away", !here);
-    });
   }
 
   /** The neighbours' text is hidden again only once no thumb and no slide
@@ -264,88 +254,42 @@ export function i(doc: Document): void {
   }
 
   // --- a bundle comes, a bundle goes ----------------------------------------
+  const OUT = () => T(420, 300, true);
+  /** The new bundle: once the one before has slid off, the table stays bare
+   * a moment, then it slides in from the right. */
   function arrive(): void {
     if (!pile) return;
     busy = true;
-    pile.style.visibility = "";
-    pile.style.height = "";
-    pile.className = "pile pile-edges above";
-    paint(0, false);
-    win.scrollTo(0, 0);
-    // The table stays bare a moment, then the bundle comes in from the right.
+    const wait = sentAt ? Math.max(0, sentAt + OUT() - Date.now()) : 0;
+    sentAt = 0;
     win.setTimeout(() => {
-      win.requestAnimationFrame(() => {
-        if (!pile) return;
-        pile.className = "pile pile-edges";
-        win.setTimeout(() => {
-          busy = false;
-          showSeal();
-        }, T(900, 300, true));
-      });
-    }, T(450, 150, true));
+      if (!pile) return;
+      pile.className = "pile pile-edges above";
+      paint(0, false);
+      win.scrollTo(0, 0);
+      win.setTimeout(() => {
+        win.requestAnimationFrame(() => {
+          if (!pile) return;
+          pile.className = "pile pile-edges";
+          win.setTimeout(() => {
+            busy = false;
+          }, T(550, 300, true));
+        });
+      }, T(300, 150, true));
+    }, wait);
   }
 
-  /** The bundle done: a copy of it gathers its leaves, is tied (a single
-   * leaf is only sealed at its corner) and goes out to the left, while the
-   * real one, hidden, receives the next from the server. */
+  /** The bundle done: it slides off to the left while the server answers;
+   * kept by the server (a refusal), it slides back. */
   function depart(): void {
-    if (!pile || ghost) return;
+    if (!pile || sentAt) return;
     busy = true;
-    showSeal();
-    win.scrollTo(0, 0);
-    const r = pile.getBoundingClientRect();
-    const g = pile.cloneNode(true) as El;
-    g.removeAttribute("data-liasse");
-    g.removeAttribute("id");
-    g.querySelectorAll("[id],[data-page],[data-seal],[data-piece-close]").forEach((e) => {
-      if (e.hasAttribute("data-page") || e.hasAttribute("data-seal") || e.hasAttribute("data-piece-close")) e.remove();
-      else e.removeAttribute("id");
-    });
-    g.querySelectorAll(".leaf.piece").forEach((e) => e.remove());
-    g.setAttribute("aria-hidden", "true");
-    g.style.position = "fixed";
-    g.style.left = r.left + "px";
-    g.style.top = r.top + "px";
-    g.style.width = r.width + "px";
-    g.style.margin = "0";
-    g.style.zIndex = "70";
-    g.style.height = Math.min(pile.offsetHeight, win.innerHeight - 50) + "px";
-    doc.body.appendChild(g);
-    ghost = g;
-    pile.style.visibility = "hidden";
-    const ls = Array.from(g.querySelectorAll<El>(":scope > .leaf"));
-    const single = ls.length === 1;
-    g.classList.add("folding");
-    ls.forEach((leaf, i) => {
-      leaf.style.top = "";
-      leaf.classList.remove("open", "next", "turned", "animating");
-      leaf.classList.toggle("deep", i > 0);
-      leaf.classList.toggle("under", i > 0);
-      leaf.style.transform = `translate3d(${i * 2}px,${i * 2}px,0)`;
-      leaf.style.zIndex = String(40 - i);
-      leaf.style.opacity = "";
-    });
-    const leaving = pile.dataset.bundle || "";
-    const folded = single ? T(120, 60, true) : T(500, 250, true);
-    const sent = single ? T(1300, 850, true) : T(2150, 1150, true);
-    const gone = single ? T(2250, 1250, true) : T(3100, 1550, true);
-    if (single) {
-      g.classList.add("single");
-      g.classList.toggle("unsealed", ends() !== "seal");
-    }
-    win.setTimeout(() => g.classList.add("folded"), folded);
-    win.setTimeout(() => g.classList.add("sent"), reduce ? 50 : sent);
+    sentAt = Date.now();
+    leaving = pile.dataset.bundle || "";
+    pile.classList.add("sent");
     win.setTimeout(() => {
-      g.remove();
-      ghost = null;
-      // The next bundle comes as soon as the server has sent it; if the
-      // server kept this one (a refusal), it comes back.
-      if (pile && (pile.dataset.bundle || "") === leaving) {
-        win.setTimeout(() => {
-          if (pile && (pile.dataset.bundle || "") === leaving) arrive();
-        }, 1200);
-      } else arrive();
-    }, reduce ? 150 : gone);
+      if (pile && sentAt && (pile.dataset.bundle || "") === leaving) arrive();
+    }, OUT() + 1200);
   }
 
   // --- pieces ---------------------------------------------------------------
@@ -377,6 +321,27 @@ export function i(doc: Document): void {
       if (close) close.click();
     }, T(300, 300));
     paint(0, false);
+  }
+
+  // The seigneur's name written on the line, then the line's own action.
+  function signWith(sign: HTMLButtonElement): void {
+    const hand = sign.querySelector<El>(".hand");
+    const from = sign.getAttribute("data-sign-from");
+    const input = from ? (doc.getElementById(from) as HTMLInputElement | null) : null;
+    const name = (input && input.value.trim()) || (hand && hand.textContent) || "";
+    if (hand) hand.textContent = name;
+    // The pen takes about a tenth of a second a letter.
+    const dur = reduce ? 10 : Math.min(1800, Math.max(700, 95 * name.length));
+    sign.style.setProperty("--dur", dur + "ms");
+    sign.classList.add("signing");
+    sign.blur();
+    busy = true;
+    win.setTimeout(() => {
+      busy = false;
+      sign.setAttribute("data-signed", "");
+      sign.click();
+      depart();
+    }, dur + (reduce ? 50 : 700));
   }
 
   // A cachet pressed on its leaf, then the form it seals submitted.
@@ -414,7 +379,6 @@ export function i(doc: Document): void {
     const p = doc.querySelector<El>("[data-liasse]");
     if (!p) {
       pile = null;
-      showSeal();
       return;
     }
     const key = p.dataset.bundle || "";
@@ -431,8 +395,7 @@ export function i(doc: Document): void {
       at = Math.min(sAt, Math.max(0, leaves.length - 1));
       serverAt = sAt;
       piece = null;
-      if (!ghost) arrive();
-      else pile.style.visibility = "hidden";
+      arrive();
     } else if (sAt !== serverAt && !drag) {
       // The server moved the bundle (a reconnection, another device).
       serverAt = sAt;
@@ -444,7 +407,7 @@ export function i(doc: Document): void {
     const pc = p.querySelector<El>(":scope > .leaf.piece");
     if (pc && pc !== piece) layPiece(pc);
     else if (!pc && piece) piece = null;
-    if (changed && !fresh && !drag && !ghost) paint(0, false);
+    if (changed && !fresh && !drag && !sentAt) paint(0, false);
     setMotion();
   }
 
@@ -528,20 +491,18 @@ export function i(doc: Document): void {
         stampWith(stamp);
         return;
       }
-      const seal = t && t.closest && (t.closest("[data-seal]") as El | null);
-      if (seal && pile && !busy && !seal.classList.contains("hidden-away")) {
-        // A seal that submits a form ties nothing the form would refuse.
-        const f = seal.getAttribute("form");
-        const form = f ? (doc.getElementById(f) as HTMLFormElement | null) : null;
-        if (form && !form.checkValidity()) return;
-        // The floating seal fades where it is; the bundle is tied with its own.
-        seal.blur();
-        seal.classList.add("fading");
-        win.setTimeout(() => {
-          seal.classList.remove("fading");
-          seal.classList.add("hidden-away");
-        }, T(400, 400, true));
-        depart();
+      const sign = t && t.closest && (t.closest("[data-sign]") as HTMLButtonElement | null);
+      if (sign && pile && !sign.hasAttribute("data-signed")) {
+        if (busy || sign.classList.contains("signing")) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        // A line that submits a form signs nothing the form would refuse.
+        if (sign.form && !sign.form.checkValidity()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        signWith(sign);
       }
     },
     true,
@@ -580,7 +541,7 @@ export function i(doc: Document): void {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-at", "data-bundle", "data-ends", "data-seal-at"],
+      attributeFilter: ["data-at", "data-bundle", "data-ends"],
     });
   setMotion();
   sync();
