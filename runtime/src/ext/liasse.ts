@@ -27,10 +27,10 @@
 //   (a click, or the form it submits) and the bundle slides off to the left
 //   while the server answers; the next comes in from the right. A bundle
 //   the server keeps (a refusal) slides back.
-// - A submit button `[data-stamp="F"]` is a cachet: pressed, it prints
-//   `<span class="imprint">F</span>` on its leaf (`.stamped`), then submits
-//   its form a moment later; a piece so sealed goes off to the right while the
-//   server answers. The imprint fades if the server keeps the paper.
+//   A `[data-sign]` on a `.leaf.piece` signs that letter instead: written,
+//   it submits its form and the piece goes off to the right while the
+//   server answers; kept by the server (a refusal in the margin), the
+//   letter is laid back, its line blank again.
 // - `[data-motion]` radios (value `amples` or `sobres`) set the motions,
 //   remembered on the device; `body.sober-leaves` / `body.sober-bundles`
 //   carry the choice to the stylesheet.
@@ -45,7 +45,7 @@
 // turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 7;
+export const v = 8;
 
 type El = HTMLElement;
 
@@ -264,6 +264,7 @@ export function i(doc: Document): void {
     sentAt = 0;
     win.setTimeout(() => {
       if (!pile) return;
+      pile.querySelectorAll(".sign-line.signing").forEach(unsign);
       pile.className = "pile pile-edges above";
       paint(0, false);
       win.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
@@ -340,22 +341,12 @@ export function i(doc: Document): void {
       busy = false;
       sign.setAttribute("data-signed", "");
       sign.click();
-      depart();
-    }, dur + (reduce ? 50 : 700));
-  }
-
-  // A cachet pressed on its leaf, then the form it seals submitted.
-  function stampWith(stamp: HTMLButtonElement): void {
-    const leaf = (stamp.closest(".leaf") as El | null) || (stamp.parentElement as El);
-    const mark = doc.createElement("span");
-    mark.className = "imprint";
-    mark.textContent = stamp.getAttribute("data-stamp") || "";
-    leaf.appendChild(mark);
-    leaf.classList.add("stamped");
-    stamp.setAttribute("data-stamped", "");
-    win.setTimeout(() => {
-      stamp.click();
-      stamp.removeAttribute("data-stamped");
+      const leaf = sign.closest(".leaf.piece") as El | null;
+      if (!leaf) {
+        depart();
+        return;
+      }
+      // A letter signed goes off to the right while the server answers.
       if (piece === leaf) {
         piece = null;
         leaf.classList.add("moving");
@@ -363,15 +354,21 @@ export function i(doc: Document): void {
         leaf.style.opacity = "0";
         paint(0, false);
       }
-      // Kept by the server (a refusal in the margin): the wax lifts.
+      // Kept by the server (a refusal in the margin): laid back, blank.
       win.setTimeout(() => {
         if (!leaf.isConnected) return;
-        mark.remove();
-        leaf.classList.remove("stamped");
+        unsign(sign);
         leaf.style.opacity = "";
         if (!piece && leaf.classList.contains("piece")) layPiece(leaf);
       }, 1600);
-    }, T(560, 260, true));
+    }, dur + (reduce ? 50 : 700));
+  }
+
+  /** A signature line blank again (the server kept what it signed). */
+  function unsign(sign: Element): void {
+    sign.classList.remove("signing");
+    sign.removeAttribute("data-signed");
+    (sign as El).style.removeProperty("--dur");
   }
 
   // --- following the server -------------------------------------------------
@@ -483,14 +480,6 @@ export function i(doc: Document): void {
         return;
       }
       const t = e.target as Element | null;
-      const stamp = t && t.closest && (t.closest("[data-stamp]") as HTMLButtonElement | null);
-      if (stamp && !stamp.hasAttribute("data-stamped")) {
-        if (stamp.form && !stamp.form.checkValidity()) return;
-        e.preventDefault();
-        e.stopPropagation();
-        stampWith(stamp);
-        return;
-      }
       const sign = t && t.closest && (t.closest("[data-sign]") as HTMLButtonElement | null);
       if (sign && pile && !sign.hasAttribute("data-signed")) {
         if (busy || sign.classList.contains("signing")) {
