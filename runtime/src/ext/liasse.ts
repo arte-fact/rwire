@@ -24,9 +24,10 @@
 //   signed from: touched, its `.hand` (the seigneur's name, or the value of
 //   the input `data-sign-from` names) is written by hand (`.signing`,
 //   `--dur` set to the pen's time), then the button's own action goes
-//   (a click, or the form it submits) and the bundle slides off to the left
-//   while the server answers; the next comes in from the right. A bundle
-//   the server keeps (a refusal) slides back.
+//   (a click, or the form it submits); a copy of the open leaf (`.leaf.ghost`,
+//   then `.sent`) slides off to the left while the bundle hides and the
+//   server answers; the next comes in from the right. A bundle the server
+//   keeps (a refusal) comes back.
 //   A `[data-sign]` on a `.leaf.piece` signs that letter instead: written,
 //   it submits its form and the piece goes off to the right while the
 //   server answers; kept by the server (a refusal in the margin), the
@@ -45,7 +46,7 @@
 // turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 8;
+export const v = 9;
 
 type El = HTMLElement;
 
@@ -187,15 +188,9 @@ export function i(doc: Document): void {
     const N = leaves.length;
     dur = Math.round(dur || T(340, 220));
     if (i === N && ends() === "turn") {
-      // Turning past the last leaf: it flies off, and the bundle goes.
-      const last = leaves[at];
-      last.classList.add("animating");
-      last.style.transform = `translate3d(${-width() * (soberLeaves ? 0.5 : 1.04)}px,0,0)`;
-      if (soberLeaves) last.style.opacity = "0";
-      win.setTimeout(() => {
-        depart();
-        tell(N);
-      }, T(300, 220));
+      // Turning past the last leaf: the bundle goes.
+      depart();
+      tell(N);
       return;
     }
     if (i < 0 || i >= N || i === at) {
@@ -255,39 +250,53 @@ export function i(doc: Document): void {
 
   // --- a bundle comes, a bundle goes ----------------------------------------
   const OUT = () => T(420, 300, true);
-  /** The new bundle: once the one before has slid off, the table stays bare
-   * a moment, then it slides in from the right. */
+  /** The new bundle: laid at once, out of sight, so nothing shows before it
+   * is in place; once the one before has gone and the table stayed bare a
+   * moment, it comes in from the right. */
   function arrive(): void {
     if (!pile) return;
     busy = true;
     const wait = sentAt ? Math.max(0, sentAt + OUT() - Date.now()) : 0;
     sentAt = 0;
+    pile.querySelectorAll(".sign-line.signing").forEach(unsign);
+    pile.className = "pile pile-edges above";
+    paint(0, false);
+    win.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
     win.setTimeout(() => {
       if (!pile) return;
-      pile.querySelectorAll(".sign-line.signing").forEach(unsign);
-      pile.className = "pile pile-edges above";
-      paint(0, false);
-      win.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
-      win.setTimeout(() => {
-        win.requestAnimationFrame(() => {
-          if (!pile) return;
-          pile.className = "pile pile-edges";
-          win.setTimeout(() => {
-            busy = false;
-          }, T(550, 300, true));
-        });
-      }, T(300, 150, true));
-    }, wait);
+      pile.style.visibility = "";
+      win.requestAnimationFrame(() => {
+        if (!pile) return;
+        pile.className = "pile pile-edges";
+        win.setTimeout(() => {
+          busy = false;
+        }, T(550, 300, true));
+      });
+    }, wait + T(300, 150, true));
   }
 
-  /** The bundle done: it slides off to the left while the server answers;
-   * kept by the server (a refusal), it slides back. */
+  /** The bundle done: a copy of its open leaf goes off to the left, while
+   * the bundle itself hides until the server has sent the next; kept by
+   * the server (a refusal), it comes back. */
   function depart(): void {
     if (!pile || sentAt) return;
     busy = true;
     sentAt = Date.now();
     leaving = pile.dataset.bundle || "";
-    pile.classList.add("sent");
+    const open = leaves[at];
+    if (open) {
+      const r = open.getBoundingClientRect();
+      const g = open.cloneNode(true) as El;
+      g.removeAttribute("id");
+      g.querySelectorAll("[id]").forEach((e) => e.removeAttribute("id"));
+      g.className = "leaf ghost";
+      g.setAttribute("aria-hidden", "true");
+      g.style.cssText = `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${Math.min(r.height, win.innerHeight - r.top)}px`;
+      doc.body.appendChild(g);
+      win.requestAnimationFrame(() => g.classList.add("sent"));
+      win.setTimeout(() => g.remove(), OUT() + 200);
+    }
+    pile.style.visibility = "hidden";
     win.setTimeout(() => {
       if (pile && sentAt && (pile.dataset.bundle || "") === leaving) arrive();
     }, OUT() + 1200);
