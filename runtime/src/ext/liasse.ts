@@ -45,7 +45,7 @@
 // turn, Escape lays a piece back.
 
 /** Version stamp logged by the loader — bump with every change. */
-export const v = 6;
+export const v = 7;
 
 type El = HTMLElement;
 
@@ -243,7 +243,7 @@ export function i(doc: Document): void {
       align = 0;
       for (const l of moving) l.style.transitionDuration = "";
       paint(0, false);
-      win.scrollTo(0, 0);
+      win.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
       // At the swap the leaf passed behind hides its text at once: the
       // edges that stick out show bare paper.
       if (!drag && pile) pile.classList.remove("dragging");
@@ -266,7 +266,7 @@ export function i(doc: Document): void {
       if (!pile) return;
       pile.className = "pile pile-edges above";
       paint(0, false);
-      win.scrollTo(0, 0);
+      win.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
       win.setTimeout(() => {
         win.requestAnimationFrame(() => {
           if (!pile) return;
@@ -301,7 +301,7 @@ export function i(doc: Document): void {
     if (soberLeaves) p.style.opacity = "0";
     // A letter lies at the foot of the screen, out of the page's scroll: the
     // page stays where the reader was.
-    if (!p.classList.contains("letter")) win.scrollTo(0, 0);
+    if (!p.classList.contains("letter")) win.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
     void p.offsetHeight;
     p.classList.add("moving");
     p.style.transform = "";
