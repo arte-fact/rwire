@@ -10,26 +10,53 @@ round-trip tests, docs site, live dogfooding). What's missing is almost entirely
 *packaging* (Phase 2, mechanical) plus two adopter-facing gaps (T1, T2) that should land
 before any announcement because they're the first things a skeptical evaluator will test.
 
-**2026-07-06: COMPLETE — 28/28.** Every phase closed: workspace consolidation,
-release mechanics, all six technical gaps (including the two announce
-blockers, SSR-lite, and event delegation), positioning, the runtime
-extraction, and the full content/chat/editor feature track with three live
-E2E harnesses. What remains is human: push, publish (macros → rwire →
-components/themes/markdown), announce.
+**2026-07-07: ENGINEERING COMPLETE — 28/28 phases closed + vim mode v1 shipped.**
+Every phase closed: workspace consolidation, release mechanics, all six technical
+gaps (including the two announce blockers, SSR-lite, and event delegation),
+positioning, the runtime extraction, and the content/chat/editor feature track
+with three live E2E harnesses. On top of that, the vim mode for `rwire-editor`
+landed in full (v1–v8: motions, operators, text objects, char-seek, registers,
+dot-repeat, status-bar search) as a lazy runtime extension — see
+`docs/vim-mode-design.md`.
 
-Extended 2026-07-06 with the runtime-extraction decision (Phase 5, supersedes P2) and
-the content & editing feature track (Phase 6).
+**What remains is human:** publish the crates to crates.io (order:
+`rwire-macros` → `rwire` → `rwire-components`/`rwire-themes`/`rwire-markdown`,
+then `rwire-editor`) and announce. The repo is public and pushed (verified
+2026-07-07: `origin/main` == HEAD, 0 unpushed commits), but **no crates have
+been published and no release tag exists yet**.
 
-**Status notes (2026-07-06):**
-- The repo is **already public** at `github.com/arte-fact/rwire` (the claw rwire-app
-  template tracks it as a git dep). Phase 2 hygiene — R1 LICENSE above all — is
-  therefore *overdue*, not preparatory. crates.io name availability (R3) still
-  unverified.
-- claw-rwire's Platform II roadmap now formally **adopts** F7 (`Chat` family, P4a),
-  F2 (`FileTree`/`FileExplorer`, P5c), and optionally F1 (`StreamedContent`, P4c
-  logs) — no hand-rolls. That makes **Phase 5 → F1 → F7 the hot path**: claw's
-  Platform II blocks on it.
-- First F7 brick shipped: `El::Details`/`El::Summary` (commit `6260436`).
+**Status notes (2026-07-07):**
+- The repo is public at `github.com/arte-fact/rwire` and fully pushed.
+  crates.io names verified free (R3).
+- F4 (code coloration) turned out **already done**: the highlighter covers
+  Rust, JS/TS, CSS, JSON, TOML, YAML, Bash, SQL — HTML/Markdown remain as a
+  nice-to-have, not a blocker.
+- The vim mode ships with a live E2E harness (`runtime/e2e/editor.mjs` covers
+  the toggle, `data-vim` entry mode, and the mode chip). Only the docs-site
+  section is still open (M4 in `docs/vim-mode-design.md`).
+- Post-release backlog (non-blocking): L6 deduplication (AUDIT_ROADMAP),
+  HTML/Markdown highlighting, Code of Conduct (deferred until community
+  activity justifies it).
+
+## Real-world consumers (verified 2026-07-07)
+
+rwire is dogfooded by two real applications beyond the in-tree examples:
+
+| App | Location | What it is | rwire surface used |
+|---|---|---|---|
+| **llama-modnitor** | `apps/llama-modnitor/` (in-workspace) | Live hardware monitor dashboard: CPU/memory/GPU readings pushed over the wire from a background poller thread; planned LLM launcher UI | `rwire` core, `rwire-components` (Badge, Progress, Stack, Button, Text), `rwire-themes`; shared-state push model |
+| **claw-rwire** | `github.com/arte-fact/claw-rwire` (out-of-tree, path dep) | Clean-room rewrite of a personal AI assistant ("claw"): web-first agent console with chat, workspaces, task board, file explorer, review surfaces | `rwire` core, `rwire-components`, `rwire-markdown`, `rwire-themes`; adopts the `Chat` family, `FileTree`/`FileExplorer`, and `StreamedContent` from rwire (Phase 6 F2/F7/F1) |
+
+claw-rwire's roadmap formally **adopts** rwire's F7 (`Chat` family), F2
+(`FileTree`/`FileExplorer`), and F1 (`StreamedContent`) — its Platform II
+milestones block on those landing upstream. Its friction reports
+(`docs/component-adoption.md`, `docs/rwire-migration.md`) feed directly into
+rwire's component library and token system. A consumer smoke-check
+(`cargo check --manifest-path ../claw-rwire/Cargo.toml`) is part of the
+pre-commit checklist (W2).
+
+The rwire apps themselves (website, docs, design system, examples gallery)
+are also built with rwire — the framework eats its own cooking end to end.
 
 **Suggested sequence:** Phase 1 (housekeeping) → Phase 2 (mechanics) → Phase 5 (runtime
 extraction) → T1 + T2 → announce as experimental 0.1 with remaining items stated as
