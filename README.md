@@ -219,7 +219,7 @@ fn toggle_mode(theme: &mut Theme) {
 
 ### Component Library
 
-`rwire-components` provides 55 prebuilt components (buttons, cards, modals, navigation, forms, chat — `Composer`/`ChatScroll` — status — `Chip`/`Badge`/`StatusDot` — …), all built from `St` tokens.
+`rwire-components` provides 90+ prebuilt components (buttons, cards, modals, navigation, forms, chat — `Composer`/`ChatScroll` — status — `Chip`/`Badge`/`StatusDot` — …), all built from `St` tokens.
 
 ## Project Structure
 
@@ -229,22 +229,41 @@ rwire/
 │   ├── rwire/               # Core framework: builder, protocol, state, router,
 │   │                        #   store, theme, style_tokens, attr_tokens, tokens/
 │   ├── rwire-macros/        # Proc macros: #[handler], #[renderer], #[derive(State)], #[theme]
-│   ├── rwire-components/    # UI component library (55 components)
+│   ├── rwire-components/    # UI component library (90+ components)
+│   ├── rwire-editor/        # FileEditor kit: file explorer + code editor + vim mode
 │   ├── rwire-themes/        # Predefined palettes + style presets
 │   └── rwire-markdown/      # Markdown rendering for docs
 ├── apps/
 │   ├── rwire-website/       # Marketing landing page
 │   ├── rwire-docs/          # Documentation site
 │   ├── rwire-design-system/ # Component catalog / showcase
-│   └── rwire-examples/      # Examples gallery
-└── examples/
-    ├── chat/                # Multi-tab chatroom on shared state (ChatItem + broadcast)
-    ├── editor/              # File explorer + view/edit: dirty marks, gated save, resizable split
-    ├── counter/             # Simple counter
-    ├── todolist/            # Todo list with filtering
-    ├── todo-combined/       # Todo list with ItemRef + JSON file persistence
-    └── fine-grained/        # Fine-grained reactivity demo
+│   ├── rwire-examples/      # Examples gallery
+│   └── llama-modnitor/      # Real-world consumer: live hardware monitor dashboard
+├── examples/
+│   ├── chat/                # Multi-tab chatroom on shared state (ChatItem + broadcast)
+│   ├── editor/              # File explorer + view/edit: dirty marks, gated save, resizable split, vim mode
+│   ├── counter/             # Simple counter
+│   ├── todolist/            # Todo list with filtering
+│   ├── todo-combined/       # Todo list with ItemRef + JSON file persistence
+│   └── fine-grained/        # Fine-grained reactivity demo
 ```
+
+## Real-world consumers
+
+rwire is dogfooded by real applications, not just examples:
+
+- **[llama-modnitor](apps/llama-modnitor/)** (in-workspace) — a live hardware monitor
+  dashboard: CPU/memory/GPU readings pushed over the wire, with a planned LLM
+  launcher UI. A background thread mutates shared state; rwire diffs and pushes.
+- **[claw-rwire](https://github.com/arte-fact/claw-rwire)** (out-of-tree, path dep) —
+  a clean-room rewrite of a personal AI assistant ("claw") on rwire. Web-UI-first
+  agent console with chat, workspaces, task board, file explorer, and review
+  surfaces. Its roadmap formally adopts rwire's `Chat` family, `FileTree`/
+  `FileExplorer`, and `StreamedContent` — and its friction reports feed directly
+  into rwire's component library.
+- **The rwire apps themselves** — the [website](apps/rwire-website/),
+  [docs site](apps/rwire-docs/), [design system](apps/rwire-design-system/), and
+  [examples gallery](apps/rwire-examples/) are all built with rwire.
 
 ## Supported Elements
 
@@ -293,7 +312,7 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Multi-state support (memory, persisted)
 - [x] ItemRef for dynamic list binding
 - [x] Style token system + reactive theming (palettes, dark/light, style presets)
-- [x] Component library (55 components)
+- [x] Component library (90+ components)
 - [x] Keyed children (`.key()` — list reorders move nodes, preserving input/focus state)
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
@@ -301,9 +320,9 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Static first paint (SSR-lite: default-state HTML + its CSS in the capsule)
 
 ### Planned
-- [ ] Event delegation for large lists
-- [ ] Database persistence adapters
-- [ ] Authentication middleware
+- [ ] Syntax highlighting for more languages in `rwire-markdown` (HTML/Markdown still pending; Rust, JS/TS, CSS, JSON, TOML, YAML, Bash, SQL done)
+- [ ] Deeper database persistence adapters (SQLite state storage shipped; richer adapters open)
+- [ ] Code of Conduct (deferred until community activity justifies it)
 
 ## License
 
