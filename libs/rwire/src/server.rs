@@ -1659,10 +1659,34 @@ async fn handle_client<F>(
         let is_ws = capsule::is_websocket_upgrade(&peek_str);
 
         if method == "POST" && path == "/login" {
-            // Drain the request (headers + small form body) before responding.
+            // Drain the request (headers + form body) before responding. The
+            // peek only reflects the bytes available *so far*: consume them,
+            // then keep reading until the head is closed and the declared
+            // body is complete — the form body may arrive after the head.
             let mut buf = vec![0u8; n];
             let _ = stream.read_exact(&mut buf).await;
-            let request = String::from_utf8_lossy(&buf);
+            let mut request = String::from_utf8_lossy(&buf).into_owned();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let complete = request
+                    .split_once("\r\n\r\n")
+                    .map(|(head, body)| {
+                        let want = header_value(head, "content-length")
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        body.len() >= want
+                    })
+                    .unwrap_or(false);
+                if complete {
+                    break;
+                }
+                match stream.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(k) => {
+                        request.push_str(&String::from_utf8_lossy(&chunk[..k]));
+                    }
+                }
+            }
             if let Some(token) = gate.login(request_body(&request)) {
                 println!("[{peer_addr}] login OK");
                 let cookie = format!(
@@ -1680,8 +1704,21 @@ async fn handle_client<F>(
 
         if method == "GET" && path == "/logout" {
             gate.logout(&peek_str);
+            // Drain the head (it may be larger than the first peek, and a
+            // fragmented read would leave read_exact waiting forever).
             let mut buf = vec![0u8; n];
             let _ = stream.read_exact(&mut buf).await;
+            let mut drained = String::from_utf8_lossy(&buf).into_owned();
+            let mut chunk = [0u8; 4096];
+            while !drained.contains("\r\n\r\n") {
+                match stream.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(k) => drained.push_str(&String::from_utf8_lossy(&chunk[..k])),
+                }
+                if drained.len() > 64 * 1024 {
+                    break;
+                }
+            }
             let expired = format!("{AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
             let _ = capsule::serve_redirect(stream, "/", Some(&expired)).await;
             return;
