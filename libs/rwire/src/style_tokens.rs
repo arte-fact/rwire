@@ -904,6 +904,8 @@ define_token_enum! {
         TextOnSuccess = 0x39B => "color:var(--o2)",
         TextOnWarning = 0x39C => "color:var(--p2)",
         TextOnError = 0x39D => "color:var(--q2)",
+        BorderSuccess = 0x39E => "border:1px solid var(--o)",
+        BorderError = 0x39F => "border:1px solid var(--q)",
 
         // Font reset for form controls — the full `font` shorthand (inherits family,
         // size, weight, style, line-height) so inputs/buttons match the page font, unlike
