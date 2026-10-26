@@ -613,6 +613,11 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     css_var(&mut css, "o", &rp.green[8]); // success
     css_var(&mut css, "p", &rp.amber[8]); // warning
     css_var(&mut css, "q", &rp.red[8]); // error
+                                        // On-colors for the solid semantic backgrounds: white on dark fills, the
+                                        // darkest neutral on bright fills (relative luminance threshold).
+    css_var(&mut css, "o2", &on_solid_color(&rp.green[8], &rp));
+    css_var(&mut css, "p2", &on_solid_color(&rp.amber[8], &rp));
+    css_var(&mut css, "q2", &on_solid_color(&rp.red[8], &rp));
     css_var(&mut css, "F", &rp.red[8]); // destructive
     css_var(&mut css, "G", &rp.white); // on-destructive
     css_var(&mut css, "H", &rp.red[9]); // destructive-hover
@@ -669,6 +674,28 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         );
     }
     css
+}
+
+/// Relative luminance of a hex color (0.0-1.0). Non-hex values (oklch…)
+/// return None — the caller falls back to a safe default.
+fn hex_luminance(hex: &str) -> Option<f64> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let channel = |s: &str| u16::from_str_radix(s, 16).ok().map(|v| v as f64 / 255.0);
+    let (r, g, b) = (channel(&h[0..2])?, channel(&h[2..4])?, channel(&h[4..6])?);
+    // WCAG relative luminance (approximation sans linéarisation fine)
+    Some(0.2126 * r + 0.7152 * g + 0.0722 * b)
+}
+
+/// On-color for a solid semantic background: white on dark fills, the darkest
+/// neutral of the palette on bright fills (threshold 0.55).
+fn on_solid_color(bg: &str, rp: &ResolvedPalette) -> String {
+    match hex_luminance(bg) {
+        Some(l) if l > 0.55 => rp.neutral[11].clone(),
+        _ => rp.white.clone(),
+    }
 }
 
 /// Write `--{name}:{value};` to a CSS string.

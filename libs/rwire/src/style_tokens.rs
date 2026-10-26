@@ -900,6 +900,10 @@ define_token_enum! {
         TextOnWarningSubtle = 0x340 => "color:var(--N1)",
         BgErrorSubtle = 0x341 => "background:var(--P)",
         TextOnErrorSubtle = 0x342 => "color:var(--P1)",
+        // On-colors for solid semantic backgrounds (mode-aware vars --o2/--p2/--q2)
+        TextOnSuccess = 0x39B => "color:var(--o2)",
+        TextOnWarning = 0x39C => "color:var(--p2)",
+        TextOnError = 0x39D => "color:var(--q2)",
 
         // Font reset for form controls — the full `font` shorthand (inherits family,
         // size, weight, style, line-height) so inputs/buttons match the page font, unlike
