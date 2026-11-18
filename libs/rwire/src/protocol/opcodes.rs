@@ -389,6 +389,8 @@ define_token_enum! {
         // Inline text (0x44-0x45): a line break and the small print.
         Br = 0x44 => "br",
         Small = 0x45 => "small",
+        // Embedded content (0x46): a framed page (e.g. a self-hosted player).
+        Iframe = 0x46 => "iframe",
     }
 }
 
