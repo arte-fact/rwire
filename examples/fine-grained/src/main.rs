@@ -72,7 +72,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Fine-Grained Reactivity with TypeId Filtering");
     println!("Watch this console: each click should only trigger ONE renderer!");

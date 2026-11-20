@@ -25,14 +25,14 @@ Add rwire and the async runtime to your `Cargo.toml`:
 ```toml
 [dependencies]
 rwire = "0.1"
-async-std = { version = "1.12", features = ["attributes"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 Or use cargo-add:
 
 ```bash
 cargo add rwire
-cargo add async-std --features attributes
+cargo add tokio --features macros,rt-multi-thread
 ```
 
 ## Hello World
@@ -42,7 +42,7 @@ Replace `src/main.rs` with:
 ```rust
 use rwire::{el, El, Server};
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(|| {

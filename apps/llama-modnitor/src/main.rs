@@ -45,7 +45,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load environment variables from a .env file if present (see .env.example).
     // Real environment variables already set take precedence over the file.

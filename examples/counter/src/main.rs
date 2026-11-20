@@ -2,7 +2,6 @@
 
 use std::error::Error;
 
-use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::theme::Theme;
 use rwire::{handler, renderer, theme, ElementBuilder, Server, St, State};
@@ -22,7 +21,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(app)

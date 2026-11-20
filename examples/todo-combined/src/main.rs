@@ -407,7 +407,7 @@ fn todo_theme() -> Theme {
     Theme::light()
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("rwire Server - Todo Combined Demo");
     println!("==================================");
@@ -481,7 +481,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn background persist task
     let persist_shared = Arc::clone(&shared);
     let persist_store = store.clone();
-    async_std::task::spawn(async move {
+    tokio::spawn(async move {
         persist_task(persist_shared, persist_store).await;
     });
 

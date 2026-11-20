@@ -165,7 +165,7 @@ fn site_theme() -> Theme {
     Theme::default().palette(palettes::nord())
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env();
 
