@@ -1613,6 +1613,42 @@ mod tests {
         }
     }
 
+    /// The Médiathèque tokens (on-colors, solid semantic borders): each emits its own
+    /// `.u{code}` rule, holds a code no other token uses, and reads a theme variable the
+    /// theme actually defines.
+    #[test]
+    fn mediatheque_tokens_emit_their_css_under_unique_codes() {
+        let tokens = [
+            (St::TextOnSuccess, "color:var(--o2)", "--o2:"),
+            (St::TextOnWarning, "color:var(--p2)", "--p2:"),
+            (St::TextOnError, "color:var(--q2)", "--q2:"),
+            (St::BorderSuccess, "border:1px solid var(--o)", "--o:"),
+            (St::BorderError, "border:1px solid var(--q)", "--q:"),
+        ];
+        let themes = [
+            crate::theme::generate_theme_css(&crate::theme::Theme::default()),
+            crate::theme::generate_theme_css(&crate::theme::Theme::dark()),
+        ];
+        for (st, decl, var) in tokens {
+            let code = st.as_u16();
+            assert_eq!(st.css(), decl);
+            assert_eq!(lookup_util_css(code), Some(decl));
+            assert_eq!(
+                UTIL_MAPPINGS.iter().filter(|(c, _)| *c == code).count(),
+                1,
+                "{st:?} (0x{code:03X}) must own its code"
+            );
+            let css = generate_utility_css(&HashSet::from([code]));
+            assert!(
+                css.contains(&format!(".u{code}{{{decl}}}")),
+                "{st:?} rule missing: {css}"
+            );
+            for theme_css in &themes {
+                assert!(theme_css.contains(var), "{var} undefined for {st:?}");
+            }
+        }
+    }
+
     #[test]
     fn test_no_duplicate_pc_codes() {
         let mut seen: HashSet<u8> = HashSet::new();

@@ -209,6 +209,34 @@ mod tests {
         assert_eq!(At::Xmlns.as_u8(), 0x40);
     }
 
+    /// `aria-pressed` (pressable chips/toggles) owns its code and names its attribute.
+    #[test]
+    fn aria_pressed_has_a_unique_code_and_its_name() {
+        let code = At::AriaPressed.as_u8();
+        assert_eq!(At::AriaPressed.name(), "aria-pressed");
+        assert_eq!(At::try_from(code), Ok(At::AriaPressed));
+        let owners: Vec<_> = AT_MAPPINGS.iter().filter(|(c, _)| *c == code).collect();
+        assert_eq!(owners, [&(code, "aria-pressed")]);
+    }
+
+    #[test]
+    fn test_no_duplicate_at_av_codes() {
+        let mut seen = std::collections::HashSet::new();
+        for (code, name) in AT_MAPPINGS {
+            assert!(
+                seen.insert(*code),
+                "duplicate At code 0x{code:02X} ({name})"
+            );
+        }
+        seen.clear();
+        for (code, value) in AV_MAPPINGS {
+            assert!(
+                seen.insert(*code),
+                "duplicate Av code 0x{code:02X} ({value})"
+            );
+        }
+    }
+
     #[test]
     fn test_av_repr_u8() {
         assert_eq!(Av::Empty.as_u8(), 0x00);
