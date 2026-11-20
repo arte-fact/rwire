@@ -425,6 +425,16 @@ impl SyncedRenderer for OutletRenderer {
     fn deps(&self) -> RendererDeps {
         RendererDeps::always()
     }
+
+    fn is_outlet(&self) -> bool {
+        true
+    }
+}
+
+/// Whether the page tree `root` holds an [`outlet`], directly or inside another
+/// region's output.
+pub(crate) fn has_outlet(root: &ElementBuilder) -> bool {
+    crate::builder::tree_has_region(root, &|region| region.is_outlet())
 }
 
 /// Place where the matched route view renders. Put one in your shell (next to the

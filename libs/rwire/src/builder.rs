@@ -282,6 +282,37 @@ pub fn extract_renderers(el: &ElementBuilder) -> Vec<Box<dyn SyncedRenderer>> {
     renderers
 }
 
+/// Whether `root` contains a synced region matching `found`, including regions that
+/// only appear in another region's output: like a connection's discovery pass, each
+/// region is rendered with its default state and its output searched in turn (to a
+/// bounded depth, so a self-nesting renderer cannot loop).
+pub(crate) fn tree_has_region(
+    root: &ElementBuilder,
+    found: &dyn Fn(&dyn SyncedRenderer) -> bool,
+) -> bool {
+    const MAX_NESTING: usize = 32;
+    fn walk(
+        el: &ElementBuilder,
+        found: &dyn Fn(&dyn SyncedRenderer) -> bool,
+        depth: usize,
+    ) -> bool {
+        if let Some(renderer) = &el.synced {
+            if found(renderer.as_ref()) {
+                return true;
+            }
+            if depth < MAX_NESTING {
+                let state = renderer.create_default_state();
+                let rendered = renderer.render_with_state(state.as_ref());
+                if rendered.is_some_and(|out| walk(&out, found, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        el.children.iter().any(|child| walk(child, found, depth))
+    }
+    walk(root, found, 0)
+}
+
 /// Create a new element builder.
 ///
 /// # Example
@@ -368,6 +399,12 @@ pub trait SyncedRenderer: Send + Sync {
     /// preserves a live span with the *wrong* content in the *wrong* slot.
     fn identity(&self) -> Option<u64> {
         None
+    }
+    /// Whether this region is the router's [`outlet`](crate::router::outlet). Only the
+    /// built-in outlet answers `true`; the server checks at startup that an app which
+    /// registers a `Router` has one.
+    fn is_outlet(&self) -> bool {
+        false
     }
 }
 

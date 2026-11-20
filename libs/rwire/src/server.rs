@@ -742,6 +742,15 @@ impl Server {
 /// Marker type for the Server namespace.
 pub struct Server;
 
+/// Startup error when `.routes(..)` is set but the page tree has no `outlet()`.
+pub const ROUTER_WITHOUT_OUTLET: &str = "rwire: a Router is registered with `.routes(..)` \
+     but the page tree passed to `.root(..)` has no `outlet()` (looked through every synced \
+     region rendered with its default state), so navigation would have nothing to re-render \
+     and the page would freeze. Put `rwire::outlet()` in the persistent shell where the \
+     matched view should render, or drop `.routes(..)` and route with `on_route` instead \
+     (one routing model per page tree: see .claude/skills/rwire/SKILL.md, section 4, \
+     \"Reactivity + routing rules\").";
+
 impl ServerBuilder {
     /// Configure persist interval (default 100ms).
     pub fn persist_interval(mut self, interval: Duration) -> Self {
@@ -973,8 +982,9 @@ where
     ///
     /// On every navigation, the framework updates the built-in `CurrentRoute` state and the
     /// `outlet()` in your shell renders the matched view. Place an `outlet()` in the tree passed
-    /// to [`root`](Self::root) — installing a router without one leaves navigation with nothing
-    /// to re-render. This is an alternative to the `on_route` + root-rerender model; use one or
+    /// to [`root`](Self::root) — directly or inside a renderer's output. Without one,
+    /// [`run`](Self::run) refuses to start ([`ROUTER_WITHOUT_OUTLET`]): navigation would have
+    /// nothing to re-render. This is an alternative to the `on_route` + root-rerender model; use one or
     /// the other, not both. (Capsule contents are not affected: names and CSS stream lazily over
     /// the wire regardless of routes.)
     pub fn routes(mut self, router: crate::router::Router) -> Self {
@@ -1002,14 +1012,18 @@ where
             .shared
             .unwrap_or_else(|| SharedServerState::new(self.persist_interval));
 
-        // Install the app's router (if any) so each connection's `outlet()` renders the
-        // matched view, and the startup analysis below tree-shakes the "/" view.
-        if let Some(router) = self.router {
-            crate::router::install_router(std::sync::Arc::new(router));
-        }
-
         // Pre-analyze the root element to determine used types for tree shaking
         let root_element = (self.root)();
+
+        // Install the app's router (if any) so each connection's `outlet()` renders the
+        // matched view, and the startup analysis below tree-shakes the "/" view. A router
+        // with no `outlet()` to drive would leave every navigation frozen: refuse to start.
+        if let Some(router) = self.router {
+            if !crate::router::has_outlet(&root_element) {
+                return Err(ROUTER_WITHOUT_OUTLET.into());
+            }
+            crate::router::install_router(std::sync::Arc::new(router));
+        }
         let mut ctx = BuildContext::new();
 
         // Extract renderers and create default states for proper tree walking
