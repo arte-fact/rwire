@@ -2452,17 +2452,22 @@ impl ConnectionState {
         let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
         let mut rerendered: Vec<u32> = Vec::new();
         let update = {
-            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
             // `states` only holds defaults for shared state; the authoritative copy is
             // in the shared cache. Override before rendering so the swapped-in view
-            // doesn't paint from empty defaults.
+            // doesn't paint from empty defaults. The page's known regions are not
+            // enough: the new view's regions (nested ones included) are registered
+            // only after this render, so look them up in the view itself.
             let cache_guard = shared
                 .shared_cache
                 .read()
                 .map_err(|_| "shared cache lock poisoned")?;
+            let view_keys = self.view_state_keys(&cache_guard, &view);
+            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
             for (tid, key) in
                 shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+                    .into_iter()
+                    .chain(view_keys)
             {
                 if let Some(state) = cache_guard.get(&key) {
                     states_map.insert(tid, state.as_ref());
@@ -2496,6 +2501,67 @@ impl ConnectionState {
             }
         }
         Ok(update)
+    }
+
+    /// Every shared/persisted state `view` reads, as `(type, cache key)`, nested regions
+    /// included. Found like the connection's opening pass finds the page's regions:
+    /// render the view, collect its regions, and repeat with the states found until no
+    /// new type appears. Each pass renders with the cached copies found so far, so a
+    /// region that only exists for the real data (not the empty default) counts too.
+    fn view_state_keys(
+        &self,
+        cache: &HashMap<String, Box<dyn Any + Send + Sync>>,
+        view: &ElementBuilder,
+    ) -> Vec<(TypeId, String)> {
+        let mut defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+        let mut keys: Vec<(TypeId, String)> = Vec::new();
+        loop {
+            let (new_types, found) = {
+                let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                    self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+                for (tid, state) in &defaults {
+                    states.entry(*tid).or_insert(state.as_ref());
+                }
+                for (tid, key) in &keys {
+                    if let Some(state) = cache.get(key) {
+                        states.insert(*tid, state.as_ref());
+                    }
+                }
+                let mut ctx = BuildContext::new();
+                if states.is_empty() {
+                    let placeholder: () = ();
+                    ctx.collect_symbols(view, &placeholder);
+                    ctx.emit(view, &placeholder);
+                } else {
+                    ctx.collect_symbols_multi(view, &states);
+                    ctx.emit_multi(view);
+                }
+                let synced = ctx.take_synced_elements();
+                let found = shared_persisted_keys(ctx.handlers(), &synced, &self.session_id);
+                let new_types: Vec<(TypeId, Box<dyn Any + Send + Sync>)> = synced
+                    .iter()
+                    .filter(|se| !states.contains_key(&se.state_type_id))
+                    .map(|se| (se.state_type_id, se.create_default_state()))
+                    .collect();
+                (new_types, found)
+            };
+            let mut grew = false;
+            for (tid, state) in new_types {
+                if let std::collections::hash_map::Entry::Vacant(slot) = defaults.entry(tid) {
+                    slot.insert(state);
+                    grew = true;
+                }
+            }
+            for key in found {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                    grew = true;
+                }
+            }
+            if !grew {
+                return keys;
+            }
+        }
     }
 
     /// Render the full initial DOM for this connection: render every region with the
