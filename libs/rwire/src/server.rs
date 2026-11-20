@@ -4,14 +4,8 @@
 //! - HTTP GET / → capsule HTML
 //! - WebSocket upgrade → binary DOM protocol with state management
 
-use async_std::future::timeout;
-use async_std::net::{TcpListener, TcpStream};
-use async_std::task;
-use async_tungstenite::accept_async_with_config;
-use async_tungstenite::tungstenite::protocol::WebSocketConfig;
-use async_tungstenite::tungstenite::Message;
 use bytes::Bytes;
-use futures::prelude::*;
+use futures::{SinkExt, StreamExt};
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +14,12 @@ use std::net::{AddrParseError, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
+use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
@@ -645,7 +645,7 @@ impl SharedServerState {
 pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist::SqliteStore) {
     loop {
         // Wait for persist interval
-        task::sleep(shared.persist_interval).await;
+        tokio::time::sleep(shared.persist_interval).await;
 
         // Persist dirty state
         match shared.persist_dirty(&store) {
@@ -668,7 +668,7 @@ pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist:
 /// are removed to prevent unbounded memory growth.
 pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration) {
     loop {
-        task::sleep(ttl / 2).await;
+        tokio::time::sleep(ttl / 2).await;
         shared.evict_expired_sessions(ttl);
     }
 }
@@ -677,8 +677,8 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
 /// still `Loading`, so a worker that crashed or forgot to resolve can't leave a control spinning
 /// forever. Spawned by `EventContext::defer`; it exits as soon as it fires.
 pub(crate) fn spawn_action_timeout(shared: Arc<SharedServerState>, key: ActionKey) {
-    task::spawn(async move {
-        task::sleep(crate::actions::LOADING_TIMEOUT).await;
+    tokio::spawn(async move {
+        tokio::time::sleep(crate::actions::LOADING_TIMEOUT).await;
         shared.fail_action_if_loading(key, "timed out");
     });
 }
@@ -1174,7 +1174,7 @@ where
             let shared = Arc::clone(&shared);
             // Disconnected sessions keep their state for a day, so a phone that
             // switches apps (or a PWA relaunch) comes back to the same seat.
-            task::spawn(session_eviction_task(shared, Duration::from_secs(86_400)));
+            tokio::spawn(session_eviction_task(shared, Duration::from_secs(86_400)));
         }
 
         while let Ok((stream, peer_addr)) = listener.accept().await {
@@ -1191,7 +1191,7 @@ where
             let metrics = Arc::clone(&metrics);
             let pwa_assets = pwa_assets.clone();
             let assets = Arc::clone(&assets);
-            task::spawn(async move {
+            tokio::spawn(async move {
                 handle_client(
                     stream,
                     peer_addr,
@@ -1221,7 +1221,7 @@ where
 ///
 /// Without this, a quick restart fails with "Address already in use" while
 /// sockets from the previous process linger in `TIME_WAIT`. Returns a
-/// non-blocking async-std listener.
+/// non-blocking tokio listener (must be called inside the runtime).
 fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
 
@@ -1238,7 +1238,7 @@ fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
 
     let std_listener: std::net::TcpListener = socket.into();
     std_listener.set_nonblocking(true)?;
-    Ok(TcpListener::from(std_listener))
+    TcpListener::from_std(std_listener)
 }
 
 /// Returned by `run()` when both [`ServerWithRoot::auth`] and
@@ -1440,10 +1440,10 @@ async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &s
     // response, or either side closing a WebSocket) ends the exchange. The inner scope drops both
     // copy futures — releasing their borrows on `stream` — before the final flush.
     {
-        let mut client_read = stream.clone();
-        let mut upstream_write = upstream.clone();
-        let to_upstream = futures::io::copy(&mut client_read, &mut upstream_write);
-        let to_client = futures::io::copy(&mut upstream, &mut stream);
+        let (mut client_read, mut client_write) = stream.split();
+        let (mut upstream_read, mut upstream_write) = upstream.split();
+        let to_upstream = tokio::io::copy(&mut client_read, &mut upstream_write);
+        let to_client = tokio::io::copy(&mut upstream_read, &mut client_write);
         futures::pin_mut!(to_upstream, to_client);
         let _ = futures::future::select(to_upstream, to_client).await;
     }
@@ -2543,7 +2543,7 @@ struct ConnContext<F> {
 }
 
 async fn handle_websocket<F>(
-    ws_stream: async_tungstenite::WebSocketStream<TcpStream>,
+    ws_stream: tokio_tungstenite::WebSocketStream<TcpStream>,
     peer_addr: SocketAddr,
     cx: ConnContext<F>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
@@ -2739,7 +2739,7 @@ where
             if Instant::now() >= due {
                 if auth.identify(head).await.is_none() {
                     println!("[{}] delegated auth: identity revoked, closing", peer_addr);
-                    let frame = async_tungstenite::tungstenite::protocol::CloseFrame {
+                    let frame = tokio_tungstenite::tungstenite::protocol::CloseFrame {
                         code: crate::delegated_auth::CLOSE_UNAUTHORIZED.into(),
                         reason: "unauthorized".into(),
                     };

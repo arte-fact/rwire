@@ -1,14 +1,13 @@
 //! Integration tests for the rwire server.
 
-use async_std::io::ReadExt;
-use async_std::net::{TcpListener, TcpStream};
-use async_std::prelude::*;
-use async_std::task;
 use rwire::{
     el, El, ElementBuilder, Ev, HandlerSpec, MemoryState, ProxyResolver, Server, ServerConfig,
     State, StorageType,
 };
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpListener, TcpStream};
 
 /// Read a full HTTP response by parsing Content-Length and reading until complete.
 async fn read_full_http_response(stream: &mut TcpStream) -> String {
@@ -89,10 +88,10 @@ fn build_simple() -> ElementBuilder {
 }
 
 /// Test that server binds and accepts connections
-#[async_std::test]
+#[tokio::test]
 async fn test_server_accepts_http() {
     // Start server in background
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19001")
             .unwrap()
             .root(build_simple)
@@ -101,7 +100,7 @@ async fn test_server_accepts_http() {
     });
 
     // Give server time to start
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Connect and send HTTP request
     let mut stream = TcpStream::connect("127.0.0.1:19001").await.unwrap();
@@ -125,7 +124,7 @@ async fn test_server_accepts_http() {
     );
 
     drop(stream);
-    server_task.cancel().await;
+    server_task.abort();
 }
 
 /// The element/event/attribute/style-token name maps ship empty: each entry is
@@ -133,9 +132,9 @@ async fn test_server_accepts_http() {
 /// (the name-map analogue of lazy CSS). So the served capsule inlines no names — and a
 /// token reached only through a plain helper can never be missing, since its name is
 /// sent exactly when its opcode is.
-#[async_std::test]
+#[tokio::test]
 async fn test_capsule_ships_empty_name_maps() {
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19002")
             .unwrap()
             .root(build_simple)
@@ -143,7 +142,7 @@ async fn test_capsule_ships_empty_name_maps() {
             .await;
     });
 
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19002").await.unwrap();
     stream
@@ -164,14 +163,14 @@ async fn test_capsule_ships_empty_name_maps() {
     );
 
     drop(stream);
-    server_task.cancel().await;
+    server_task.abort();
 }
 
 /// A minimal upstream that echoes the request path it received, so a proxy test can assert the
 /// prefix was stripped. Responds `Connection: close` so the reader sees EOF.
-async fn spawn_echo_upstream(addr: &'static str) -> task::JoinHandle<()> {
+async fn spawn_echo_upstream(addr: &'static str) -> tokio::task::JoinHandle<()> {
     let listener = TcpListener::bind(addr).await.unwrap();
-    task::spawn(async move {
+    tokio::spawn(async move {
         loop {
             let Ok((mut sock, _)) = listener.accept().await else {
                 break;
@@ -198,10 +197,10 @@ async fn spawn_echo_upstream(addr: &'static str) -> task::JoinHandle<()> {
 
 /// The reverse proxy forwards a matched path to the upstream with its prefix stripped, and leaves
 /// unmatched paths to the app itself — the same-origin preview mechanism (claw's P2 CD flow).
-#[async_std::test]
+#[tokio::test]
 async fn proxy_forwards_matched_paths_and_strips_prefix() {
     let upstream = spawn_echo_upstream("127.0.0.1:19010").await;
-    let server = task::spawn(async {
+    let server = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19011")
             .unwrap()
             .root(build_simple)
@@ -222,7 +221,7 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
             .run()
             .await;
     });
-    task::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     // A proxied path reaches the upstream with `/preview/x` stripped off.
     let mut proxied = TcpStream::connect("127.0.0.1:19011").await.unwrap();
@@ -265,14 +264,14 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
     drop(proxied);
     drop(gone);
     drop(direct);
-    upstream.cancel().await;
-    server.cancel().await;
+    upstream.abort();
+    server.abort();
 }
 
 /// Test that counter app capsule has correct elements
-#[async_std::test]
+#[tokio::test]
 async fn test_counter_capsule() {
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19003")
             .unwrap()
             .root(build_counter)
@@ -280,7 +279,7 @@ async fn test_counter_capsule() {
             .await;
     });
 
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19003").await.unwrap();
     stream
@@ -299,13 +298,13 @@ async fn test_counter_capsule() {
     assert!(!response_str.contains("1:'click'"));
 
     drop(stream);
-    server_task.cancel().await;
+    server_task.abort();
 }
 
 /// Test WebSocket upgrade detection
-#[async_std::test]
+#[tokio::test]
 async fn test_websocket_upgrade() {
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19004")
             .unwrap()
             .root(build_simple)
@@ -313,7 +312,7 @@ async fn test_websocket_upgrade() {
             .await;
     });
 
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19004").await.unwrap();
 
@@ -345,13 +344,13 @@ Sec-WebSocket-Version: 13\r\n\r\n";
     );
 
     drop(stream);
-    server_task.cancel().await;
+    server_task.abort();
 }
 
 /// Test multiple concurrent connections
-#[async_std::test]
+#[tokio::test]
 async fn test_concurrent_connections() {
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19005")
             .unwrap()
             .root(build_simple)
@@ -359,12 +358,12 @@ async fn test_concurrent_connections() {
             .await;
     });
 
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Spawn multiple concurrent requests
     let handles: Vec<_> = (0..5)
         .map(|_| {
-            task::spawn(async {
+            tokio::spawn(async {
                 let mut stream = TcpStream::connect("127.0.0.1:19005").await.unwrap();
                 stream
                     .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
@@ -383,16 +382,16 @@ async fn test_concurrent_connections() {
 
     // Wait for all requests
     for handle in handles {
-        assert!(handle.await);
+        assert!(handle.await.unwrap());
     }
 
-    server_task.cancel().await;
+    server_task.abort();
 }
 
 /// Test capsule content-length header
-#[async_std::test]
+#[tokio::test]
 async fn test_content_length() {
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19006")
             .unwrap()
             .root(build_simple)
@@ -400,7 +399,7 @@ async fn test_content_length() {
             .await;
     });
 
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let mut stream = TcpStream::connect("127.0.0.1:19006").await.unwrap();
     stream
@@ -450,15 +449,15 @@ async fn test_content_length() {
     assert_eq!(content_length, body.len());
 
     drop(stream);
-    server_task.cancel().await;
+    server_task.abort();
 }
 
 /// T2: a browser cross-origin WebSocket handshake is refused with 403; the
 /// same-origin one (and a configured extra origin) upgrade normally.
-#[async_std::test]
+#[tokio::test]
 async fn test_websocket_origin_gate() {
     use rwire::ServerConfig;
-    let server_task = task::spawn(async {
+    let server_task = tokio::spawn(async {
         let _ = Server::bind("127.0.0.1:19021")
             .unwrap()
             .root(build_simple)
@@ -466,7 +465,7 @@ async fn test_websocket_origin_gate() {
             .run()
             .await;
     });
-    task::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     async fn handshake(origin: Option<&str>) -> String {
         let mut stream = TcpStream::connect("127.0.0.1:19021").await.unwrap();
@@ -508,5 +507,5 @@ async fn test_websocket_origin_gate() {
         "expected 101, got: {r}"
     );
 
-    server_task.cancel().await;
+    server_task.abort();
 }

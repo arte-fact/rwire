@@ -7,19 +7,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_std::io::{ReadExt, WriteExt};
-use async_std::net::{TcpListener, TcpStream};
-use async_std::task;
-use async_tungstenite::tungstenite::client::IntoClientRequest;
-use async_tungstenite::tungstenite::http::HeaderValue;
-use async_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use async_tungstenite::tungstenite::Message;
 use futures::{SinkExt, StreamExt};
 use rwire::delegated_auth::CLOSE_UNAUTHORIZED;
 use rwire::{
     el, handler, renderer, AuthRequest, DelegatedAuth, El, ElementBuilder, Ev, Identity, Server,
     State, AUTH_CONFLICT,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::Message;
 
 const COOKIE: &str = "hub_session";
 const TOKEN: &str = "tok-ada";
@@ -40,10 +39,10 @@ impl Hub {
         hub.valid.lock().unwrap().insert(TOKEN.to_string());
         let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
         let served = hub.clone();
-        task::spawn(async move {
+        tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
                 let hub = served.clone();
-                task::spawn(async move {
+                tokio::spawn(async move {
                     let head = read_head(&mut stream).await;
                     hub.calls.fetch_add(1, Ordering::SeqCst);
                     let token = head
@@ -145,7 +144,7 @@ fn app() -> ElementBuilder {
 }
 
 async fn start(port: u16, auth: DelegatedAuth) {
-    task::spawn(async move {
+    tokio::spawn(async move {
         let _ = Server::bind(&format!("127.0.0.1:{port}"))
             .unwrap()
             .root(app)
@@ -153,7 +152,7 @@ async fn start(port: u16, auth: DelegatedAuth) {
             .run()
             .await;
     });
-    task::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
 }
 
 // ── HTTP helpers ────────────────────────────────────────────────────────────
@@ -184,7 +183,7 @@ async fn ws_handshake(port: u16, cookie: Option<&str>) -> String {
     String::from_utf8_lossy(&response[..n]).into_owned()
 }
 
-type Ws = async_tungstenite::WebSocketStream<TcpStream>;
+type Ws = tokio_tungstenite::WebSocketStream<TcpStream>;
 
 async fn ws_connect(port: u16, cookie: &str) -> Ws {
     let mut request = format!("ws://127.0.0.1:{port}/")
@@ -195,7 +194,7 @@ async fn ws_connect(port: u16, cookie: &str) -> Ws {
         HeaderValue::from_str(&format!("{COOKIE}={cookie}")).unwrap(),
     );
     let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let (ws, _) = async_tungstenite::client_async(request, stream)
+    let (ws, _) = tokio_tungstenite::client_async(request, stream)
         .await
         .expect("handshake");
     ws
@@ -203,7 +202,7 @@ async fn ws_connect(port: u16, cookie: &str) -> Ws {
 
 /// Read until a binary frame contains `needle`.
 async fn wait_for(ws: &mut Ws, needle: &str) {
-    let found = async_std::future::timeout(Duration::from_secs(5), async {
+    let found = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(Ok(message)) = ws.next().await {
             if let Message::Binary(data) = message {
                 if data.windows(needle.len()).any(|w| w == needle.as_bytes()) {
@@ -226,7 +225,7 @@ fn click(handler_id: u32) -> Message {
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-#[async_std::test]
+#[tokio::test]
 async fn valid_cookie_serves_the_page_and_handlers_see_the_identity() {
     let hub = Hub::start(19161).await;
     start(19061, hub_auth(19161)).await;
@@ -248,7 +247,7 @@ async fn valid_cookie_serves_the_page_and_handlers_see_the_identity() {
     );
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn anonymous_or_invalid_page_is_sent_to_login_with_next() {
     let hub = Hub::start(19162).await;
     start(19062, hub_auth(19162)).await;
@@ -267,7 +266,7 @@ async fn anonymous_or_invalid_page_is_sent_to_login_with_next() {
     }
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn websocket_without_a_valid_cookie_is_refused() {
     let hub = Hub::start(19163).await;
     start(19063, hub_auth(19163)).await;
@@ -286,7 +285,7 @@ async fn websocket_without_a_valid_cookie_is_refused() {
     );
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn a_revoked_identity_closes_the_open_websocket() {
     let hub = Hub::start(19164).await;
     start(19064, hub_auth(19164).cache_ttl(Duration::from_millis(200))).await;
@@ -295,7 +294,7 @@ async fn a_revoked_identity_closes_the_open_websocket() {
     wait_for(&mut ws, "who: not asked").await;
     hub.revoke(TOKEN);
 
-    let closed = async_std::future::timeout(Duration::from_secs(5), async {
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(message) = ws.next().await {
             if let Ok(Message::Close(Some(frame))) = message {
                 return Some(frame.code);
@@ -311,9 +310,9 @@ async fn a_revoked_identity_closes_the_open_websocket() {
     assert!(reconnect.starts_with("HTTP/1.1 401"), "{reconnect}");
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn form_auth_and_delegated_auth_are_exclusive() {
-    let result = async_std::future::timeout(
+    let result = tokio::time::timeout(
         Duration::from_secs(5),
         Server::bind("127.0.0.1:19065")
             .unwrap()
@@ -337,10 +336,10 @@ fn on_connect(who: &mut Who, ctx: &EventContext) {
     }
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn on_route_sees_the_identity_so_renderers_can_show_it() {
     let _hub = Hub::start(19166).await;
-    task::spawn(async move {
+    tokio::spawn(async move {
         let _ = Server::bind("127.0.0.1:19066")
             .unwrap()
             .root(app)
@@ -349,7 +348,7 @@ async fn on_route_sees_the_identity_so_renderers_can_show_it() {
             .run()
             .await;
     });
-    task::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     let mut ws = ws_connect(19066, TOKEN).await;
     // What the browser runtime sends on every open.

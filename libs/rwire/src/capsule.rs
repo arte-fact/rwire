@@ -8,9 +8,9 @@
 //! The capsule is tree-shaken to include only the element types and event types
 //! actually used by the application.
 
-use async_std::io::WriteExt;
-use async_std::net::TcpStream;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 use crate::capsule_gen::{render_static_page, CapsuleConfig};
 use crate::session::{SessionId, COOKIE_MAX_AGE_SECS};

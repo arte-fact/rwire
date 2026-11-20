@@ -242,7 +242,7 @@ impl DelegatedAuth {
             return Some(identity);
         }
         let validation = (self.validate)(request);
-        let identity = async_std::future::timeout(self.timeout, validation)
+        let identity = tokio::time::timeout(self.timeout, validation)
             .await
             .ok()
             .flatten()?;
@@ -356,74 +356,65 @@ mod tests {
         assert!(printed.contains("ada"));
     }
 
-    #[test]
-    fn successes_are_cached_failures_are_not() {
+    #[tokio::test]
+    async fn successes_are_cached_failures_are_not() {
         let calls = Arc::new(AtomicUsize::new(0));
         let auth = counting(Arc::clone(&calls));
-        async_std::task::block_on(async {
-            for _ in 0..5 {
-                let identity = auth.identify(&head("good")).await.expect("valid");
-                assert_eq!(identity.id(), "ada");
-                assert_eq!(identity.data::<String>().map(String::as_str), Some("good"));
-            }
-            assert_eq!(calls.load(Ordering::SeqCst), 1, "one call for N requests");
+        for _ in 0..5 {
+            let identity = auth.identify(&head("good")).await.expect("valid");
+            assert_eq!(identity.id(), "ada");
+            assert_eq!(identity.data::<String>().map(String::as_str), Some("good"));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "one call for N requests");
 
-            for _ in 0..3 {
-                assert!(auth.identify(&head("bad")).await.is_none());
-            }
-            assert_eq!(calls.load(Ordering::SeqCst), 4, "every failure re-asks");
-        });
+        for _ in 0..3 {
+            assert!(auth.identify(&head("bad")).await.is_none());
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 4, "every failure re-asks");
     }
 
-    #[test]
-    fn expired_success_is_validated_again() {
+    #[tokio::test]
+    async fn expired_success_is_validated_again() {
         let calls = Arc::new(AtomicUsize::new(0));
         let auth = counting(Arc::clone(&calls)).cache_ttl(Duration::from_millis(30));
-        async_std::task::block_on(async {
-            assert!(auth.identify(&head("good")).await.is_some());
-            async_std::task::sleep(Duration::from_millis(60)).await;
-            assert!(auth.identify(&head("good")).await.is_some());
-        });
+        assert!(auth.identify(&head("good")).await.is_some());
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(auth.identify(&head("good")).await.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
-    #[test]
-    fn missing_cookie_never_reaches_the_validator() {
+    #[tokio::test]
+    async fn missing_cookie_never_reaches_the_validator() {
         let calls = Arc::new(AtomicUsize::new(0));
         let auth = counting(Arc::clone(&calls));
         let anonymous = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
         let empty = "GET / HTTP/1.1\r\nCookie: sid=\r\n\r\n";
-        async_std::task::block_on(async {
-            assert!(auth.identify(anonymous).await.is_none());
-            assert!(auth.identify(empty).await.is_none());
-        });
+        assert!(auth.identify(anonymous).await.is_none());
+        assert!(auth.identify(empty).await.is_none());
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
-    #[test]
-    fn cache_is_bounded() {
+    #[tokio::test]
+    async fn cache_is_bounded() {
         let auth = DelegatedAuth::new("sid", |req: AuthRequest| {
             let id = req.cookie("sid").unwrap_or("").to_string();
             async move { Some(Identity::new(id)) }
         })
         .cache_capacity(3);
-        async_std::task::block_on(async {
-            for i in 0..10 {
-                assert!(auth.identify(&head(&format!("t{i}"))).await.is_some());
-            }
-        });
+        for i in 0..10 {
+            assert!(auth.identify(&head(&format!("t{i}"))).await.is_some());
+        }
         assert_eq!(auth.cache_len(), 3);
     }
 
-    #[test]
-    fn slow_validator_counts_as_failure() {
+    #[tokio::test]
+    async fn slow_validator_counts_as_failure() {
         let auth = DelegatedAuth::new("sid", |_req: AuthRequest| async {
-            async_std::task::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
             Some(Identity::new("late"))
         })
         .timeout(Duration::from_millis(20));
-        let identity = async_std::task::block_on(auth.identify(&head("good")));
-        assert!(identity.is_none());
+        assert!(auth.identify(&head("good")).await.is_none());
     }
 
     #[test]
