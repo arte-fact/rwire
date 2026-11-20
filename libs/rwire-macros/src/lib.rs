@@ -67,6 +67,9 @@ pub fn derive_client_state(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(State, attributes(storage, key))]
 pub fn derive_state(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    if let Err(err) = check_field_count(&input) {
+        return err.to_compile_error().into();
+    }
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -146,7 +149,8 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
     // Emit `FIELD_<NAME>: u8` field-index constants for named-field structs, so
     // renderers/handlers can declare fine-grained dependencies/changes via
     // `RendererDeps::from_fields` / `ChangeSet::from_fields`. Bit indices match
-    // the ChangeSet/RendererDeps u64 mask (effective for the first 64 fields).
+    // the ChangeSet/RendererDeps u64 mask; `check_field_count` (above) rejects a
+    // struct with more than `MAX_STATE_FIELDS` named fields, so every index fits.
     let field_consts: Vec<proc_macro2::TokenStream> = match &input.data {
         syn::Data::Struct(data) => data
             .fields
@@ -191,6 +195,38 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// The most named fields a `State` struct may have: the fine-grained reactivity
+/// masks (`RendererDeps` / `ChangeSet`) are a `u64`, one bit per field.
+const MAX_STATE_FIELDS: usize = 64;
+
+/// Reject a named-field struct with more than [`MAX_STATE_FIELDS`] fields. Past
+/// that, `RendererDeps::from_fields` would drop the extra field indices and the
+/// renderers reading those fields would silently never re-render.
+fn check_field_count(input: &DeriveInput) -> syn::Result<()> {
+    let syn::Data::Struct(data) = &input.data else {
+        return Ok(());
+    };
+    let syn::Fields::Named(fields) = &data.fields else {
+        return Ok(());
+    };
+    let count = fields.named.len();
+    if count <= MAX_STATE_FIELDS {
+        return Ok(());
+    }
+    Err(syn::Error::new_spanned(
+        &input.ident,
+        format!(
+            "`{}` has {count} fields, but a `State` struct holds at most \
+             {MAX_STATE_FIELDS}: renderer dependencies are tracked in a 64-bit mask, \
+             one bit per field, so fields past the 64th would never trigger a \
+             re-render. Split it into several `State` structs (for instance the \
+             per-view UI flags apart from the shared data), or group related \
+             fields into a nested struct held by one field.",
+            input.ident
+        ),
+    ))
 }
 
 /// Parse the #[storage(...)] attribute.
@@ -720,4 +756,44 @@ pub fn derive_selector(input: TokenStream) -> TokenStream {
 pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Pass the impl block through unchanged.
     item
+}
+
+#[cfg(test)]
+mod field_count_tests {
+    use super::*;
+
+    fn named_struct(fields: usize) -> DeriveInput {
+        let fields =
+            (0..fields).map(|i| syn::Ident::new(&format!("f{i}"), proc_macro2::Span::call_site()));
+        syn::parse_quote! { struct Big { #(#fields: u8),* } }
+    }
+
+    #[test]
+    fn sixty_four_fields_are_accepted() {
+        assert!(check_field_count(&named_struct(64)).is_ok());
+        assert!(check_field_count(&named_struct(0)).is_ok());
+    }
+
+    #[test]
+    fn sixty_five_fields_are_rejected_with_a_message_naming_the_struct() {
+        let err = check_field_count(&named_struct(65))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("`Big` has 65 fields"), "{err}");
+        assert!(err.contains("at most 64"), "{err}");
+        assert!(
+            err.contains("Split it into several `State` structs"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn tuple_unit_and_enum_states_are_not_counted() {
+        let tuple: DeriveInput = syn::parse_quote! { struct T(u8, u8); };
+        let unit: DeriveInput = syn::parse_quote! { struct U; };
+        let en: DeriveInput = syn::parse_quote! { enum E { A, B } };
+        for input in [tuple, unit, en] {
+            assert!(check_field_count(&input).is_ok());
+        }
+    }
 }
