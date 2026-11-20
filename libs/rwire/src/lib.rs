@@ -60,6 +60,7 @@ pub mod builder;
 pub mod capsule;
 pub mod capsule_gen;
 pub mod config;
+pub mod delegated_auth;
 pub mod form;
 pub mod health;
 pub mod icons;
@@ -100,6 +101,10 @@ pub use server::{
     persist_task, session_eviction_task, BroadcastMsg, Server, ServerBuilder, ServerWithRoot,
     SharedServerState,
 };
+
+// Delegated authentication exports
+pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity};
+pub use server::AUTH_CONFLICT;
 
 // Store exports
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};

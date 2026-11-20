@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use crate::actions::{ActionKey, Resolver};
+use crate::delegated_auth::Identity;
 use crate::server::SharedServerState;
 
 // ============================================================================
@@ -261,6 +262,8 @@ pub struct EventContext {
     /// The connection's session id — app-level identity for shared-state
     /// handlers (presence, membership, per-user authorization).
     session: Option<String>,
+    /// Who the connection belongs to, under delegated authentication.
+    identity: Option<Identity>,
     /// Set by `defer()`: the handler claimed this action for later resolution.
     deferred: Cell<bool>,
     /// The action this event drives, if dispatched through the real event loop.
@@ -291,6 +294,7 @@ impl EventContext {
             param_bytes: Vec::new(),
             navigation: Cell::new(None),
             session: None,
+            identity: None,
             deferred: Cell::new(false),
             action: None,
         }
@@ -304,6 +308,7 @@ impl EventContext {
             param_bytes,
             navigation: Cell::new(None),
             session: None,
+            identity: None,
             deferred: Cell::new(false),
             action: None,
         }
@@ -317,6 +322,7 @@ impl EventContext {
             param_bytes: Vec::new(),
             navigation: Cell::new(None),
             session: None,
+            identity: None,
             deferred: Cell::new(false),
             action: None,
         }
@@ -503,6 +509,13 @@ impl EventContext {
         self
     }
 
+    /// Attach the identity established at the WebSocket handshake by delegated
+    /// authentication (done by the server at dispatch).
+    pub fn with_identity(mut self, identity: Option<Identity>) -> Self {
+        self.identity = identity;
+        self
+    }
+
     /// Attach the action this event drives (done by the server at dispatch), giving `defer()`
     /// the shared handle and key it needs to drive the lifecycle.
     pub fn with_action(mut self, shared: Arc<SharedServerState>, key: ActionKey) -> Self {
@@ -545,6 +558,14 @@ impl EventContext {
     /// (the event itself carries no identity).
     pub fn session_id(&self) -> Option<&str> {
         self.session.as_deref()
+    }
+
+    /// Who this connection belongs to, when the server delegates authentication
+    /// ([`ServerWithRoot::auth_with`](crate::ServerWithRoot::auth_with)). Fixed at the
+    /// WebSocket handshake; the connection is closed if a later re-validation fails.
+    /// `None` without delegated authentication.
+    pub fn identity(&self) -> Option<&Identity> {
+        self.identity.as_ref()
     }
 
     /// Get the item index from the parameter bytes.

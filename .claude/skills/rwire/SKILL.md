@@ -89,6 +89,17 @@ appears in the design-system app automatically. Gate with
 - Enter-to-submit on a textarea: set `data-enter-submit` (the runtime handles
   preventDefault + `requestSubmit`; Shift+Enter falls through to a newline). Don't bind
   keydown yourself — rwire `preventDefault`s bound keydowns, which blocks typing.
+- **Auth — pick one gate.** `.auth(user, password)` is rwire's own login form.
+  `.auth_with(DelegatedAuth::new("cookie", validator).login_url(url))` delegates to an identity
+  provider: the async validator gets the request head (`AuthRequest`: cookies, headers) and
+  returns `Option<Identity>` (`id` + opaque `data`, e.g. the token to call the provider on the
+  user's behalf). Pages without identity → `303` to `login_url?next=<path>`; WebSocket → `401`.
+  Successes only are cached (`cache_ttl`, default 30 s; bounded by `cache_capacity`); open
+  sockets are re-validated every TTL and closed (code 4401) once revoked — the client then
+  reloads onto the login. Handlers read `ctx.identity()`; renderers have no context, so copy what
+  they show into state from `on_route` (it runs on connect and sees the identity). Both gates
+  at once → `run()` fails with `AUTH_CONFLICT`. A tokio validator: `Handle::spawn` the check and
+  `await` a `tokio::sync::oneshot` — no tokio needed on rwire's side. Never log the cookie.
 
 ## 5. Traps a real app hit (each cost a debugging session)
 

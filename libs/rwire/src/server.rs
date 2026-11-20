@@ -706,6 +706,7 @@ pub struct ServerWithRoot<F> {
     router: Option<crate::router::Router>,
     theme_provider: Option<ThemeProvider>,
     auth: Option<AuthGate>,
+    delegated: Option<Arc<crate::delegated_auth::DelegatedAuth>>,
     config: ServerConfig,
     assets: Vec<Asset>,
 }
@@ -778,6 +779,7 @@ impl ServerBuilder {
             router: None,
             theme_provider: None,
             auth: None,
+            delegated: None,
             config: ServerConfig::default(),
             assets: Vec::new(),
         }
@@ -805,17 +807,6 @@ impl<F> ServerWithRoot<F>
 where
     F: Fn() -> ElementBuilder + Send + Sync + Clone + 'static,
 {
-    /// Set a pre-created shared server state.
-    ///
-    /// Use this when you need to hydrate state from a database before running
-    /// the server. This allows persistence to be configured before accepting
-    /// connections.
-    /// Gate all access — the page *and* the WebSocket — behind a login form.
-    ///
-    /// Unauthenticated page requests get the login page; a successful `POST
-    /// /login` issues a random session cookie that subsequent requests (and the
-    /// WebSocket upgrade) must present. `GET /logout` clears it. Off by default;
-    /// wire it from env in the application so local development stays open.
     /// Serve `body` as it is at `path` (`"/_rw/ext/map.js"`, `"/logo.png"`),
     /// with the given content type. This is how an application, or a crate
     /// beside the framework, ships a runtime extension of its own: the loader
@@ -853,8 +844,32 @@ where
         self
     }
 
+    /// Gate all access — the page *and* the WebSocket — behind a login form.
+    ///
+    /// Unauthenticated page requests get the login page; a successful `POST
+    /// /login` issues a random session cookie that subsequent requests (and the
+    /// WebSocket upgrade) must present. `GET /logout` clears it. Off by default;
+    /// wire it from env in the application so local development stays open.
+    ///
+    /// Exclusive with [`Self::auth_with`]: configuring both makes `run()` fail
+    /// with [`AUTH_CONFLICT`].
     pub fn auth(mut self, user: impl Into<String>, password: impl Into<String>) -> Self {
         self.auth = Some(AuthGate::new(user.into(), password.into()));
+        self
+    }
+
+    /// Delegate authentication to an external authority (an identity hub, an SSO
+    /// gateway): every page request and WebSocket handshake carrying the session
+    /// cookie is judged by the validator, successes are cached briefly, and open
+    /// WebSockets are re-validated. Handlers read the result with
+    /// [`EventContext::identity`](crate::EventContext::identity). See
+    /// [`DelegatedAuth`](crate::DelegatedAuth) for the options and
+    /// [`crate::delegated_auth`] for the behaviour.
+    ///
+    /// Exclusive with [`Self::auth`]: configuring both makes `run()` fail with
+    /// [`AUTH_CONFLICT`] rather than silently keep one of them.
+    pub fn auth_with(mut self, auth: crate::delegated_auth::DelegatedAuth) -> Self {
+        self.delegated = Some(Arc::new(auth));
         self
     }
 
@@ -882,6 +897,11 @@ where
         self
     }
 
+    /// Set a pre-created shared server state.
+    ///
+    /// Use this when you need to hydrate state from a database before running
+    /// the server. This allows persistence to be configured before accepting
+    /// connections.
     pub fn with_shared_state(mut self, shared: Arc<SharedServerState>) -> Self {
         self.shared = Some(shared);
         self
@@ -995,6 +1015,9 @@ where
 
     /// Run the server, accepting connections until shutdown.
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
+        if self.auth.is_some() && self.delegated.is_some() {
+            return Err(AUTH_CONFLICT.into());
+        }
         let listener = bind_reusable(self.addr)?;
 
         // Use provided shared state or create new
@@ -1129,6 +1152,10 @@ where
         if auth.is_some() {
             println!("Auth: HTTP Basic enabled");
         }
+        let delegated = self.delegated;
+        if delegated.is_some() {
+            println!("Auth: delegated");
+        }
 
         // Admission control: a shared registry tracks live connections so the
         // accept loop can reject over-limit clients (total + per-IP) before doing
@@ -1158,6 +1185,7 @@ where
             let initial_theme = initial_theme.clone();
             let composite_table = Arc::clone(&composite_table);
             let auth = Arc::clone(&auth);
+            let delegated = delegated.clone();
             let registry = Arc::clone(&registry);
             let config = Arc::clone(&config);
             let metrics = Arc::clone(&metrics);
@@ -1174,6 +1202,7 @@ where
                     initial_theme,
                     composite_table,
                     auth,
+                    delegated,
                     registry,
                     config,
                     metrics,
@@ -1211,6 +1240,11 @@ fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
     std_listener.set_nonblocking(true)?;
     Ok(TcpListener::from(std_listener))
 }
+
+/// Returned by `run()` when both [`ServerWithRoot::auth`] and
+/// [`ServerWithRoot::auth_with`] are configured: the two gates are exclusive, and
+/// silently keeping one would leave the application believing in the other.
+pub const AUTH_CONFLICT: &str = "rwire: both `.auth(user, password)` and `.auth_with(DelegatedAuth)` are configured; they are exclusive. Keep the form login (`auth`) or delegate to your identity provider (`auth_with`), not both.";
 
 /// Auth session cookie name.
 const AUTH_COOKIE: &str = "rwire_auth";
@@ -1558,6 +1592,7 @@ async fn handle_client<F>(
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
     auth: Arc<Option<AuthGate>>,
+    delegated: Option<Arc<crate::delegated_auth::DelegatedAuth>>,
     registry: Arc<ConnectionRegistry>,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
@@ -1742,6 +1777,34 @@ async fn handle_client<F>(
         // Valid session: fall through to normal capsule/WebSocket handling.
     }
 
+    // Delegated auth gate (page + WebSocket): the application's validator decides
+    // who the request belongs to. Without an identity, a page goes to the external
+    // login URL and a handshake gets 401. The cookie is never logged.
+    let mut identity = None;
+    if let Some(delegated) = delegated.as_ref() {
+        match delegated.identify(&peek_str).await {
+            Some(found) => identity = Some(found),
+            None => {
+                if capsule::is_websocket_upgrade(&peek_str) {
+                    // As with the form gate, a stale tab's reconnects are expected:
+                    // the client reloads after repeated rejects and lands on the login.
+                    let _ = capsule::serve_unauthorized(stream).await;
+                } else {
+                    let (_, path) = request_line(&peek_str);
+                    let target = delegated.login_redirect(path);
+                    let mut buf = vec![0u8; n];
+                    let _ = stream.read_exact(&mut buf).await;
+                    println!("[{peer_addr}] delegated auth: no identity, sent to login");
+                    let _ = match target {
+                        Some(location) => capsule::serve_redirect(stream, &location, None).await,
+                        None => capsule::serve_unauthorized(stream).await,
+                    };
+                }
+                return;
+            }
+        }
+    }
+
     // Reverse-proxy gate (after auth, so previews inherit the gate): a matched path forwards to a
     // pooled local port, streaming both directions — a WebSocket upgrade rides through as raw
     // bytes. A path the resolver claims without a live upstream gets the human 503 page — never
@@ -1843,6 +1906,8 @@ async fn handle_client<F>(
                         initial_theme,
                         composite_table,
                         metrics,
+                        identity,
+                        revalidate: delegated.map(|d| (d, peek_str.clone().into_owned())),
                     },
                 )
                 .await
@@ -1935,6 +2000,8 @@ struct ConnectionState {
     event_tokens: f64,
     /// When `event_tokens` was last refilled.
     last_event_refill: Instant,
+    /// Who the connection belongs to, under delegated auth (set at the handshake).
+    identity: Option<crate::delegated_auth::Identity>,
 }
 
 impl ConnectionState {
@@ -1954,6 +2021,7 @@ impl ConnectionState {
             // Start with a full bucket so a fresh connection can burst.
             event_tokens: EVENT_BUCKET_CAPACITY,
             last_event_refill: Instant::now(),
+            identity: None,
         }
     }
 
@@ -2178,7 +2246,9 @@ impl ConnectionState {
             }
         }
         if let Some(handler) = route_handler {
-            let ctx = EventContext::from_text(path);
+            let ctx = EventContext::from_text(path)
+                .with_session(self.session_id.clone())
+                .with_identity(self.identity.clone());
             let state_type_id = handler.state_type_id();
             if crate::router::installed_router().is_some() {
                 // A router owns the route view + nav re-render (above). Run the app's
@@ -2466,6 +2536,10 @@ struct ConnContext<F> {
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
     metrics: Arc<Metrics>,
+    /// Identity established by delegated auth at the handshake.
+    identity: Option<crate::delegated_auth::Identity>,
+    /// Delegated auth and the handshake head, to re-validate the open connection.
+    revalidate: Option<(Arc<crate::delegated_auth::DelegatedAuth>, String)>,
 }
 
 async fn handle_websocket<F>(
@@ -2484,6 +2558,8 @@ where
         initial_theme,
         composite_table,
         metrics,
+        identity,
+        revalidate,
     } = cx;
     let (mut write, mut read) = ws_stream.split();
 
@@ -2504,6 +2580,7 @@ where
 
     // Create per-connection state with the session ID from cookie
     let mut conn_state = ConnectionState::new(connection_id, session_id);
+    conn_state.identity = identity;
 
     // Build the root element, wrapping with theme synced region if theme is configured.
     // Theme synced builder must be a sibling of the root (not a child), because
@@ -2628,6 +2705,11 @@ where
     const MAX_CONSECUTIVE_DECODE_ERRORS: u32 = 10;
     const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
     let mut awaiting_pong = false;
+    // Last time the client was heard from (or pinged): the heartbeat fires
+    // HEARTBEAT_INTERVAL after it. Reads may also wake earlier to re-validate.
+    let mut quiet_since = Instant::now();
+    let revalidate_every = revalidate.as_ref().map(|(auth, _)| auth.revalidate_every());
+    let mut next_revalidation = revalidate_every.map(|every| Instant::now() + every);
     // Stop racing the broadcast channel if it ever closes (avoids busy-looping
     // on a permanently-ready Err). It stays open for the connection's lifetime.
     let mut broadcast_open = true;
@@ -2649,6 +2731,29 @@ where
             break;
         }
 
+        // Delegated auth: re-validate the handshake's credentials once per cache
+        // TTL (so the validator is asked at most that often per credential). A
+        // revoked identity closes the socket; the client's reconnect is then
+        // refused with 401 and, after its retries, it reloads onto the login page.
+        if let (Some((auth, head)), Some(due)) = (revalidate.as_ref(), next_revalidation) {
+            if Instant::now() >= due {
+                if auth.identify(head).await.is_none() {
+                    println!("[{}] delegated auth: identity revoked, closing", peer_addr);
+                    let frame = async_tungstenite::tungstenite::protocol::CloseFrame {
+                        code: crate::delegated_auth::CLOSE_UNAUTHORIZED.into(),
+                        reason: "unauthorized".into(),
+                    };
+                    let _ = write.send(Message::Close(Some(frame))).await;
+                    break;
+                }
+                next_revalidation = revalidate_every.map(|every| Instant::now() + every);
+            }
+        }
+        let mut wait = HEARTBEAT_INTERVAL.saturating_sub(quiet_since.elapsed());
+        if let Some(due) = next_revalidation {
+            wait = wait.min(due.saturating_duration_since(Instant::now()));
+        }
+
         // Race the client read against the broadcast channel. A broadcast means
         // some state changed outside this connection's events (a background task
         // via `notify_all`, or another connection's persisted write); re-render
@@ -2656,7 +2761,7 @@ where
         // unchanged renders off the wire.
         let read_result = if broadcast_open {
             use futures::future::{select, Either};
-            let read_fut = timeout(HEARTBEAT_INTERVAL, read.next());
+            let read_fut = timeout(wait, read.next());
             let bcast_fut = broadcast_rx.recv();
             futures::pin_mut!(read_fut, bcast_fut);
             match select(read_fut, bcast_fut).await {
@@ -2682,22 +2787,31 @@ where
                     if !update.is_empty() {
                         write.send(Message::Binary(update.to_vec())).await?;
                     }
+                    // As before re-validation existed, any loop turn restarts the
+                    // heartbeat wait.
+                    quiet_since = Instant::now();
                     continue;
                 }
             }
         } else {
-            timeout(HEARTBEAT_INTERVAL, read.next()).await
+            timeout(wait, read.next()).await
         };
 
         let msg = match read_result {
             Ok(Some(msg)) => {
                 awaiting_pong = false; // any message = alive
+                quiet_since = Instant::now();
                 metrics.messages_received.inc();
                 msg
             }
             Ok(None) => break, // stream ended
             Err(_) => {
+                // Woken early to re-validate (handled at the top of the loop).
+                if quiet_since.elapsed() < HEARTBEAT_INTERVAL {
+                    continue;
+                }
                 // Timeout — no message in 30s
+                quiet_since = Instant::now();
                 if awaiting_pong {
                     println!("[{}] Heartbeat timeout, disconnecting", peer_addr);
                     break;
@@ -2744,6 +2858,7 @@ where
                             let ctx =
                                 EventContext::new_with_params(event.payload, event.param_bytes)
                                     .with_session(conn_state.session_id.clone())
+                                    .with_identity(conn_state.identity.clone())
                                     .with_action(Arc::clone(&shared), action_key.clone());
                             let state_type_id = handler.state_type_id();
 
