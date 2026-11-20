@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
     build_synced_update_with_known_symbols, extract_renderers, BuildContext, ClientActionIndices,
-    ElementBuilder, SyncedElement,
+    ElementBuilder, SyncedElement, SyncedRenderer,
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
@@ -1161,23 +1161,19 @@ where
             let composite_css = ctx.composite_table().generate_css();
             let mut config = config.with_composite_css(composite_css);
 
-            // Static first paint (SSR): render the root at default state into
-            // the capsule, and inline exactly the utility CSS its classes
-            // reference (they'd otherwise arrive lazily, after first paint).
-            let mut ssr_css = String::new();
+            // Static first paint (SSR): rendered per request (see `Page::Ssr`), for
+            // the requested route and the current shared state. Leave a slot for
+            // the markup and one for the utility CSS its classes reference (they'd
+            // otherwise arrive lazily, after first paint).
             if config.ssr {
-                config.ssr_html = root_element.to_static_html();
-                for key in root_element.static_style_rules() {
-                    if let Some(rule) = key.to_css_rule() {
-                        ssr_css.push_str(&rule);
-                        ssr_css.push('\n');
-                    }
-                }
+                config.ssr_html = SSR_HTML_SLOT.to_string();
             }
 
             // Generate CSS and embed in capsule HTML <style> tag.
             let mut css = capsule_gen::generate_capsule_css(&config);
-            css.push_str(&ssr_css);
+            if config.ssr {
+                css.push_str(SSR_CSS_SLOT);
+            }
             let capsule = capsule_gen::generate_styled_capsule(&config, &css);
 
             // PWA: version the service-worker cache by the capsule's hash so a new
@@ -1194,7 +1190,7 @@ where
         };
 
         let capsule_size = capsule.len();
-        let capsule = Arc::new(capsule);
+        let capsule = Arc::new(Page::new(capsule));
         let composite_table = Arc::new(ctx.composite_table().clone());
 
         println!("Server listening on http://{}", self.addr);
@@ -1308,6 +1304,92 @@ where
         println!("Server stopped");
         Ok(())
     }
+}
+
+/// Where the per-request static first paint goes in an `ssr(true)` capsule.
+const SSR_HTML_SLOT: &str = "\u{1}rwire-ssr-html\u{1}";
+/// Where the CSS of that paint goes, inside the capsule's `<style>`.
+const SSR_CSS_SLOT: &str = "\u{1}rwire-ssr-css\u{1}";
+
+/// The page served for a `GET`: the capsule as generated at startup, or, with
+/// `ssr(true)`, the capsule around a static first paint rendered per request.
+enum Page {
+    Fixed(String),
+    /// The capsule split at [`SSR_CSS_SLOT`] and [`SSR_HTML_SLOT`].
+    Ssr {
+        head: String,
+        mid: String,
+        tail: String,
+    },
+}
+
+impl Page {
+    fn new(capsule: String) -> Self {
+        let Some((head, rest)) = capsule.split_once(SSR_CSS_SLOT) else {
+            return Page::Fixed(capsule);
+        };
+        let Some((mid, tail)) = rest.split_once(SSR_HTML_SLOT) else {
+            return Page::Fixed(capsule);
+        };
+        Page::Ssr {
+            head: head.to_string(),
+            mid: mid.to_string(),
+            tail: tail.to_string(),
+        }
+    }
+
+    /// The page for a `GET` of `target` (path and query, as on the request line).
+    fn render<F>(&self, root: &F, shared: &SharedServerState, target: &str) -> Cow<'_, str>
+    where
+        F: Fn() -> ElementBuilder,
+    {
+        match self {
+            Page::Fixed(capsule) => Cow::Borrowed(capsule),
+            Page::Ssr { head, mid, tail } => {
+                let (html, css) = render_ssr(&root(), shared, target);
+                Cow::Owned([head.as_str(), &css, mid, &html, tail].concat())
+            }
+        }
+    }
+}
+
+/// The static first paint of `root` at `target` and the CSS its classes need.
+///
+/// The router's outlet renders the requested route (the query and fragment are
+/// not part of it). Regions over `#[storage(shared)]` state render the current
+/// shared copy: it is the same for every visitor of the page. Memory and
+/// persisted state belong to a connection or a session, which a plain `GET`
+/// does not have yet, so their regions render the state's default; the live
+/// render replaces the paint on the first WebSocket frame.
+fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, target: &str) -> (String, String) {
+    let path = target.split(['?', '#']).next().unwrap_or("");
+    let mut route = crate::router::CurrentRoute::default();
+    if path.starts_with('/') {
+        route.set_path(path);
+    }
+    let cache = shared
+        .shared_cache
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
+    let state_for = |renderer: &dyn SyncedRenderer| -> Option<&dyn Any> {
+        if renderer.state_type_id() == TypeId::of::<crate::router::CurrentRoute>() {
+            return Some(&route);
+        }
+        if renderer.storage_type() != StorageType::Shared {
+            return None;
+        }
+        let key = shared_cache_key(StorageType::Shared, renderer.table_name(), "")?;
+        cache.get(&key).map(|state| state.as_ref() as &dyn Any)
+    };
+    let html = root.to_static_html_with(&state_for);
+    let mut css = String::new();
+    for key in root.static_style_rules_with(&state_for) {
+        if let Some(rule) = key.to_css_rule() {
+            css.push_str(&rule);
+            css.push('\n');
+        }
+    }
+    (html, css)
 }
 
 /// Bind a TCP listener with `SO_REUSEADDR` set.
@@ -1683,7 +1765,7 @@ async fn handle_client<F>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     root: Arc<F>,
-    capsule: Arc<String>,
+    capsule: Arc<Page>,
     shared: Arc<SharedServerState>,
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
@@ -2044,9 +2126,12 @@ async fn handle_client<F>(
         // HTTPS (auto-detected from the proxy's X-Forwarded-Proto), or when the
         // config forces it on. Off for plain-HTTP dev so the cookie isn't dropped.
         let secure_cookie = config.secure_cookies || forwarded_https(&peek_str);
+        // Rendered here, past the auth gates above: the static paint (and the shared
+        // state in it) reaches exactly the visitors the live page would.
+        let page = capsule.render(root.as_ref(), &shared, request_line(&peek_str).1);
         if let Err(e) = capsule::serve(
             stream,
-            &capsule,
+            &page,
             Some(&session_id),
             is_new_session,
             secure_cookie,

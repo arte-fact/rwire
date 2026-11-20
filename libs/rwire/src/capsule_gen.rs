@@ -216,11 +216,11 @@ pub struct CapsuleConfig {
     pub theme: Theme,
     /// Pre-generated composite CSS from style grouping (`.c{id}{declarations}`)
     pub(crate) composite_css: String,
-    /// Render the root tree (default state) into the capsule for a static
-    /// first paint — crawlers and no-JS clients see real HTML; the live render
-    /// replaces it when the WebSocket delivers the first frame.
+    /// Render the page into the capsule for a static first paint — crawlers and
+    /// no-JS clients see real HTML; the live render replaces it when the
+    /// WebSocket delivers the first frame.
     pub(crate) ssr: bool,
-    /// The pre-rendered HTML (filled by the server at startup when `ssr`).
+    /// The markup of the mount div (with `ssr`, the server's per-request slot).
     pub(crate) ssr_html: String,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
@@ -275,8 +275,11 @@ impl CapsuleConfig {
         self
     }
 
-    /// Enable a static first paint: the capsule ships the root tree rendered
-    /// at its default state (plus the CSS its classes need). The live render
+    /// Enable a static first paint: each page load ships the root tree
+    /// rendered for the requested route (plus the CSS its classes need). Regions
+    /// over `#[storage(shared)]` state show its current value; memory and
+    /// persisted state (per connection or session) show their default. The page
+    /// is served past the auth gate, like the live page. The live render
     /// replaces it on the first WebSocket frame.
     pub fn ssr(mut self, ssr: bool) -> Self {
         self.ssr = ssr;

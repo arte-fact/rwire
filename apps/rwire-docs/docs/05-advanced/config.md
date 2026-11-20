@@ -145,12 +145,22 @@ CapsuleConfig::new()
 .capsule_config(CapsuleConfig::new().ssr(true))
 ```
 
-With `ssr(true)`, the capsule ships the root tree rendered at its **default
-state** (synced regions included), plus exactly the utility CSS those classes
-need — so crawlers and no-JS clients see real content, and humans get a paint
-before the WebSocket connects. The live render replaces it on the first
-frame. Current limitation: every path serves the root's static paint (routed
-views render after connect).
+With `ssr(true)`, every page load ships the root tree rendered for the
+**requested route** (the router's `outlet()` renders the matched view), plus
+exactly the utility CSS those classes need — so crawlers and no-JS clients see
+real content, and humans get a paint before the WebSocket connects. The live
+render replaces it on the first frame.
+
+Which state the paint shows:
+
+- `#[storage(shared)]` state: its **current** value, the same for every visitor.
+- `#[storage(memory)]` and `#[storage(persisted)]` state: the **default**.
+  They belong to a connection or a session, which a plain `GET` doesn't have
+  yet; the live render fills them in.
+
+The paint is rendered after the auth gate (`auth()` or `auth_with()`): a
+visitor who would get the login page instead of the app gets no static paint
+either, and so never sees the shared state.
 
 ## Health Check Endpoints
 

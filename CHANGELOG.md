@@ -27,6 +27,20 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   frames; with Nagle the second waited for the client's delayed ACK, so every
   click round trip cost ~40 ms on any runtime.
 
+### Fixed: first render of routed views and the static first paint
+
+- A region inside the router's `outlet()` that reads `#[storage(shared)]`
+  state painted the state's empty default when its route was opened or
+  navigated to, until the next broadcast. The route swap now finds every
+  shared/persisted state the new view reads (nested regions included) and
+  renders the cached copy.
+- `ssr(true)` rendered the root once, at startup, at the default state and
+  the default route: `/posts/x` served the `/` view with empty content. The
+  static paint is now rendered per request, for the requested route, with
+  the current shared state; memory and persisted state render their default
+  (they belong to a connection or a session). It is rendered past the auth
+  gate, like the live page.
+
 First public release. Highlights of what the framework ships with:
 
 - **Core**: server-owned state over a binary WebSocket protocol; ~16KB

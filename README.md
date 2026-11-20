@@ -37,8 +37,8 @@ personal apps** — anywhere the server is close and the audience is bounded.
 Know the trade-offs before the features: every non-cosmetic interaction is a
 WebSocket round-trip, server memory scales with open connections (single
 process, no horizontal-scaling story yet — partition, don't pool), and the
-static first paint (`ssr(true)`) shows default-state content until the
-socket connects. If those hurt your use case, a different
+static first paint (`ssr(true)`) shows shared state only, with per-user
+state at its default until the socket connects. If those hurt your use case, a different
 architecture will serve you better; see
 [How rwire Compares](apps/rwire-docs/docs/05-advanced/comparison.md) for an
 honest look at the design space, and
@@ -317,7 +317,7 @@ A common subset (see the `Ev` enum for the full list):
 - [x] Client actions (Target/Selector) and CSS transitions
 - [x] Router, form, and style helpers
 - [x] Health checks and metrics
-- [x] Static first paint (SSR-lite: default-state HTML + its CSS in the capsule)
+- [x] Static first paint (SSR-lite: the requested route with the current shared state + its CSS)
 
 ### Planned
 - [ ] Syntax highlighting for more languages in `rwire-markdown` (HTML/Markdown still pending; Rust, JS/TS, CSS, JSON, TOML, YAML, Bash, SQL done)
