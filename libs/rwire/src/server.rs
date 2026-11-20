@@ -52,6 +52,9 @@ pub enum BroadcastMsg {
         /// Which fields changed
         changes: ChangeSet,
     },
+    /// The server is shutting down (see [`ServerWithRoot::run_until`]): close
+    /// the WebSocket with 1001 "going away" and end the connection.
+    Shutdown,
 }
 
 /// Cached session state for reconnection.
@@ -339,6 +342,19 @@ impl SharedServerState {
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .insert(conn_id, sender);
+    }
+
+    /// Ask every open connection to close (graceful shutdown). Best effort: a
+    /// connection whose channel is full misses it and is aborted after the grace
+    /// period instead.
+    pub fn close_all_connections(&self) {
+        let senders = self
+            .broadcast_senders
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        for sender in senders.values() {
+            let _ = sender.try_send(BroadcastMsg::Shutdown);
+        }
     }
 
     /// Unregister connection on disconnect.
@@ -1013,8 +1029,33 @@ where
             .clone()
     }
 
-    /// Run the server, accepting connections until shutdown.
+    /// Run the server, accepting connections until the process ends.
+    ///
+    /// Must be awaited inside a tokio runtime (`#[tokio::main]`, or
+    /// `tokio::spawn(server.run())` from an application that already has one).
+    /// For a clean stop, use [`Self::run_until`].
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
+        self.run_until(std::future::pending()).await
+    }
+
+    /// Run the server until `shutdown` resolves, then stop gracefully: stop
+    /// accepting, close every WebSocket with 1001 "going away" (the client
+    /// reconnects once a server is back), wait up to [`SHUTDOWN_GRACE`] for
+    /// connections to end, abort the rest, and return `Ok(())`.
+    ///
+    /// ```ignore
+    /// let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    /// let server = tokio::spawn(server.run_until(async { let _ = stopped.await; }));
+    /// // … later, e.g. on Ctrl-C:
+    /// let _ = stop.send(());
+    /// ```
+    ///
+    /// State persisted by the application's own `persist_task` is not flushed
+    /// here: call `SharedServerState::flush_all_dirty` after it returns.
+    pub async fn run_until(
+        self,
+        shutdown: impl std::future::Future<Output = ()> + Send,
+    ) -> Result<(), Box<dyn Error>> {
         if self.auth.is_some() && self.delegated.is_some() {
             return Err(AUTH_CONFLICT.into());
         }
@@ -1170,14 +1211,31 @@ where
         );
 
         // Spawn session eviction task (5-minute TTL)
-        {
+        let eviction = {
             let shared = Arc::clone(&shared);
             // Disconnected sessions keep their state for a day, so a phone that
             // switches apps (or a PWA relaunch) comes back to the same seat.
-            tokio::spawn(session_eviction_task(shared, Duration::from_secs(86_400)));
-        }
+            tokio::spawn(session_eviction_task(shared, Duration::from_secs(86_400)))
+        };
 
-        while let Ok((stream, peer_addr)) = listener.accept().await {
+        // Every connection task is tracked, so a shutdown can wait for them.
+        let mut connections = tokio::task::JoinSet::new();
+        let mut shutdown = std::pin::pin!(shutdown);
+        loop {
+            let accepted = {
+                use futures::future::{select, Either};
+                let accept = std::pin::pin!(listener.accept());
+                match select(accept, shutdown.as_mut()).await {
+                    Either::Left((Ok(accepted), _)) => Some(accepted),
+                    // The listener failed (as before: stop serving) or shutdown fired.
+                    Either::Left((Err(_), _)) | Either::Right(_) => None,
+                }
+            };
+            let Some((stream, peer_addr)) = accepted else {
+                break;
+            };
+            // Reap finished connections so the set only holds live ones.
+            while connections.try_join_next().is_some() {}
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
             let shared = Arc::clone(&shared);
@@ -1191,7 +1249,7 @@ where
             let metrics = Arc::clone(&metrics);
             let pwa_assets = pwa_assets.clone();
             let assets = Arc::clone(&assets);
-            tokio::spawn(async move {
+            connections.spawn(async move {
                 handle_client(
                     stream,
                     peer_addr,
@@ -1213,6 +1271,23 @@ where
             });
         }
 
+        // Graceful stop: no new connections, ask open sockets to close, give them
+        // a bounded time, then abort whatever is left (dropping the set aborts).
+        drop(listener);
+        eviction.abort();
+        shared.close_all_connections();
+        let drained = timeout(SHUTDOWN_GRACE, async {
+            while connections.join_next().await.is_some() {}
+        })
+        .await;
+        if drained.is_err() {
+            println!(
+                "Shutdown: {} connection(s) still open after {:?}, aborting",
+                connections.len(),
+                SHUTDOWN_GRACE
+            );
+        }
+        println!("Server stopped");
         Ok(())
     }
 }
@@ -1245,6 +1320,10 @@ fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
 /// [`ServerWithRoot::auth_with`] are configured: the two gates are exclusive, and
 /// silently keeping one would leave the application believing in the other.
 pub const AUTH_CONFLICT: &str = "rwire: both `.auth(user, password)` and `.auth_with(DelegatedAuth)` are configured; they are exclusive. Keep the form login (`auth`) or delegate to your identity provider (`auth_with`), not both.";
+
+/// How long [`ServerWithRoot::run_until`] waits for open connections to close
+/// before aborting them.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// Auth session cookie name.
 const AUTH_COOKIE: &str = "rwire_auth";
@@ -2769,6 +2848,15 @@ where
                 Either::Right((Err(_), _)) => {
                     broadcast_open = false;
                     continue;
+                }
+                Either::Right((Ok(BroadcastMsg::Shutdown), _)) => {
+                    let frame = tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                        code:
+                            tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away,
+                        reason: "server shutting down".into(),
+                    };
+                    let _ = write.send(Message::Close(Some(frame))).await;
+                    break;
                 }
                 Either::Right((
                     Ok(BroadcastMsg::StateChanged {
