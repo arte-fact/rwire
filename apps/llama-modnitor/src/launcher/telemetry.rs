@@ -156,16 +156,14 @@ pub fn scan_engine_procs() -> Vec<(u32, String)> {
 pub fn summarize_cmd(cmd: &str) -> String {
     let toks: Vec<&str> = cmd.split_whitespace().collect();
     let base = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
-    let exe = toks.first().map(|t| base(t)).unwrap_or_default();
+    let exe = base(toks.first().copied().unwrap_or_default());
     let after = |flags: &[&str]| {
         toks.iter()
             .position(|t| flags.contains(t))
             .and_then(|i| toks.get(i + 1))
             .map(|s| base(s))
     };
-    let port = after(&["--port"])
-        .map(|p| format!(":{p}"))
-        .unwrap_or_default();
+    let port = after(&["--port"]).map_or_else(String::new, |p| format!(":{p}"));
     let model = after(&["-m", "--model"]).unwrap_or_default();
     format!("{exe} {port} {model}")
         .split_whitespace()
