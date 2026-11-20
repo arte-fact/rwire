@@ -72,3 +72,18 @@ First public release. Highlights of what the framework ships with:
   status-bar search; lazy-loaded as a runtime extension, off by default).
 - **Ops**: /health, /ready, Prometheus /metrics, PWA support, reconnect
   overlay, reverse-proxy base-path mounting.
+
+### Guardrails
+
+Two mistakes that used to fail silently now fail loudly. Both are breaking
+for an app that hit them, which was already broken:
+
+- `#[derive(State)]` refuses a struct with more than 64 named fields at
+  compile time. Renderer dependencies are a 64-bit mask, and fields past
+  the 64th never triggered a re-render. The error names the struct and its
+  field count; split the state, or nest related fields.
+- `run()` refuses to start when `.routes(..)` is set but the page tree has
+  no `outlet()`, even inside a renderer's output (`ROUTER_WITHOUT_OUTLET`).
+  Such a page served normally, then froze on the first navigation. A
+  renderer that only reads `CurrentRoute` does not count as an outlet
+  (`SyncedRenderer::is_outlet`).

@@ -99,7 +99,7 @@ pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 // Server exports
 pub use server::{
     persist_task, session_eviction_task, BroadcastMsg, Server, ServerBuilder, ServerWithRoot,
-    SharedServerState,
+    SharedServerState, ROUTER_WITHOUT_OUTLET,
 };
 
 // Delegated authentication exports
