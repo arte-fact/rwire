@@ -3623,6 +3623,49 @@ mod map_def_tests {
         assert!(map_def_prefix(&referenced, &mut sent).is_empty());
     }
 
+    /// `El::Iframe` owns its element code, is named "iframe" in the table, and an
+    /// emitted iframe carries that name to the client through `MAP_DEF` (as an HTML
+    /// element, kind 0) along with its `src`.
+    #[test]
+    fn iframe_encodes_and_ships_its_name() {
+        let code = El::Iframe.as_u8();
+        assert_eq!(El::Iframe.name(), "iframe");
+        assert_eq!(El::try_from(code), Ok(El::Iframe));
+        let owners: Vec<_> = ELEMENT_MAPPINGS
+            .iter()
+            .filter(|(c, _)| *c == code)
+            .collect();
+        assert_eq!(owners, [&(code, "iframe")]);
+        assert!(
+            !SVG_ELEMENT_CODES.contains(&code),
+            "iframe is an HTML element"
+        );
+
+        let src = "https://player.example/embed/42";
+        let frame = el(El::Iframe).at_str(At::Src, src);
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&frame, &());
+        ctx.emit(&frame, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+
+        let needle = [&[0u8, code, 6][..], b"iframe"].concat();
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MAP_DEF entry for iframe missing"
+        );
+        assert!(maps.contains(&(NAME_ELEMENT, code)));
+        assert!(
+            bytes.windows(src.len()).any(|w| w == src.as_bytes()),
+            "src missing from the symbol table"
+        );
+        assert_eq!(
+            frame.to_static_html(),
+            format!("<iframe src=\"{src}\"></iframe>")
+        );
+    }
+
     #[test]
     fn map_def_prefix_tags_svg_elements_with_kind_6() {
         // 0x18 is an SVG element code, so it is emitted with wire kind 6 — the client

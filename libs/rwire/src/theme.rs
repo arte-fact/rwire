@@ -613,6 +613,11 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     css_var(&mut css, "o", &rp.green[8]); // success
     css_var(&mut css, "p", &rp.amber[8]); // warning
     css_var(&mut css, "q", &rp.red[8]); // error
+                                        // On-colors for the solid semantic backgrounds: white on dark fills, the
+                                        // darkest neutral on bright fills (relative luminance threshold).
+    css_var(&mut css, "o2", &on_solid_color(&rp.green[8], &rp));
+    css_var(&mut css, "p2", &on_solid_color(&rp.amber[8], &rp));
+    css_var(&mut css, "q2", &on_solid_color(&rp.red[8], &rp));
     css_var(&mut css, "F", &rp.red[8]); // destructive
     css_var(&mut css, "G", &rp.white); // on-destructive
     css_var(&mut css, "H", &rp.red[9]); // destructive-hover
@@ -669,6 +674,56 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         );
     }
     css
+}
+
+/// Relative luminance of a hex color (0.0-1.0). Non-hex values (oklch…)
+/// return None — the caller falls back to a safe default.
+fn hex_luminance(hex: &str) -> Option<f64> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let channel = |s: &str| u16::from_str_radix(s, 16).ok().map(|v| v as f64 / 255.0);
+    let (r, g, b) = (channel(&h[0..2])?, channel(&h[2..4])?, channel(&h[4..6])?);
+    // WCAG relative luminance (approximation sans linéarisation fine)
+    Some(0.2126 * r + 0.7152 * g + 0.0722 * b)
+}
+
+/// Luminance of an `oklch(L C H)` color on the same scale as [`hex_luminance`]:
+/// the color is converted to its sRGB hex (gamut-clamped) and measured there, so
+/// one formula and one threshold serve both notations. `L` is a number (0-1) or
+/// a percentage, `C` a number or a percentage (100% = 0.4), `H` a number with an
+/// optional `deg`; an alpha (`/ a`) is ignored. Anything else returns None.
+fn oklch_luminance(color: &str) -> Option<f64> {
+    let inner = color
+        .trim()
+        .strip_prefix("oklch(")?
+        .strip_suffix(')')?
+        .split('/')
+        .next()?;
+    let parts: Vec<&str> = inner.split_whitespace().collect();
+    let [l, c, h] = parts.as_slice() else {
+        return None;
+    };
+    let number = |s: &str| s.parse::<f32>().ok().filter(|v| v.is_finite());
+    let scaled = |s: &str, full: f32| match s.strip_suffix('%') {
+        Some(pct) => number(pct).map(|v| v / 100.0 * full),
+        None => number(s),
+    };
+    let l = scaled(l, 1.0)?.clamp(0.0, 1.0);
+    let c = scaled(c, 0.4)?.max(0.0);
+    let h = number(h.strip_suffix("deg").unwrap_or(h))?;
+    hex_luminance(&crate::tokens::palette::oklch_to_hex(l, c, h))
+}
+
+/// On-color for a solid semantic background: white on dark fills, the darkest
+/// neutral of the palette on bright fills (threshold 0.55). Hex and `oklch()`
+/// fills are measured; any other notation falls back to white.
+fn on_solid_color(bg: &str, rp: &ResolvedPalette) -> String {
+    match hex_luminance(bg).or_else(|| oklch_luminance(bg)) {
+        Some(l) if l > 0.55 => rp.neutral[11].clone(),
+        _ => rp.white.clone(),
+    }
 }
 
 /// Write `--{name}:{value};` to a CSS string.
@@ -929,5 +984,87 @@ mod tests {
         let custom = ThemeStyle::new("custom", "Custom", soft_color_css, soft_q_css);
         theme.set_style(custom);
         assert_eq!(theme.style.id(), "custom");
+    }
+
+    /// The default palette is oklch: the bright amber fill gets the dark text, the
+    /// darker green and red fills keep white — in the generated CSS too.
+    #[test]
+    fn on_colors_follow_oklch_fills_of_the_default_palette() {
+        let rp = ResolvedPalette::new(&Theme::default());
+        let dark = rp.neutral[11].clone();
+        assert_eq!(rp.amber[8], "oklch(0.75 0.18 85)");
+        assert_eq!(on_solid_color(&rp.amber[8], &rp), dark);
+        assert_eq!(on_solid_color(&rp.green[8], &rp), rp.white);
+        assert_eq!(on_solid_color(&rp.red[8], &rp), rp.white);
+        for theme in [Theme::default(), Theme::dark()] {
+            let css = generate_theme_css(&theme);
+            assert!(
+                css.contains(&format!("--p2:{dark}")),
+                "warning on-color: {css}"
+            );
+            assert!(css.contains(&format!("--o2:{}", rp.white)));
+            assert!(css.contains(&format!("--q2:{}", rp.white)));
+        }
+    }
+
+    #[test]
+    fn on_solid_color_reads_oklch_numbers_and_percentages() {
+        let rp = ResolvedPalette::new(&Theme::default());
+        let dark = rp.neutral[11].clone();
+        for bright in [
+            "oklch(0.75 0.18 85)",
+            "oklch(75% 0.18 85)",
+            "oklch(75% 45% 85deg)",
+            "oklch(0.95 0.02 250 / 0.5)",
+            " oklch(0.9 0 0) ",
+        ] {
+            assert_eq!(on_solid_color(bright, &rp), dark, "{bright}");
+        }
+        for deep in ["oklch(0.3 0.1 250)", "oklch(30% 0.1 250)", "oklch(0 0 0)"] {
+            assert_eq!(on_solid_color(deep, &rp), rp.white, "{deep}");
+        }
+    }
+
+    /// The oklch path measures on the hex scale: a gray sits on the same side of the
+    /// threshold in both notations.
+    #[test]
+    fn oklch_and_hex_luminance_agree() {
+        let mid_gray = crate::tokens::palette::oklch_to_hex(0.6, 0.0, 0.0);
+        for (oklch, hex) in [
+            ("oklch(1 0 0)", "#ffffff"),
+            ("oklch(0 0 0)", "#000000"),
+            ("oklch(0.6 0 0)", mid_gray.as_str()),
+        ] {
+            let (a, b) = (oklch_luminance(oklch).unwrap(), hex_luminance(hex).unwrap());
+            assert!((a - b).abs() < 1e-9, "{oklch} {a} vs {hex} {b}");
+        }
+    }
+
+    #[test]
+    fn on_solid_color_keeps_the_hex_rule() {
+        let rp = ResolvedPalette::new(&Theme::default());
+        assert_eq!(on_solid_color("#ffd700", &rp), rp.neutral[11]);
+        assert_eq!(on_solid_color("#1e3a8a", &rp), rp.white);
+        // 0.2126*0x80 + 0.7152*0x80 + 0.0722*0x80, over 255: just under the threshold.
+        assert!((hex_luminance("#808080").unwrap() - 128.0 / 255.0).abs() < 1e-9);
+        assert_eq!(on_solid_color("#808080", &rp), rp.white);
+    }
+
+    #[test]
+    fn on_solid_color_falls_back_to_white_on_unreadable_values() {
+        let rp = ResolvedPalette::new(&Theme::default());
+        for value in [
+            "var(--x)",
+            "rgb(255 255 0)",
+            "oklch(abc 0.1 20)",
+            "oklch(0.9 0.1)",
+            "oklch(0.9 0.1 20 30)",
+            "oklch(0.9 0.1 20",
+            "oklch(NaN 0 0)",
+            "",
+        ] {
+            assert_eq!(oklch_luminance(value), None, "{value:?}");
+            assert_eq!(on_solid_color(value, &rp), rp.white, "{value:?}");
+        }
     }
 }
