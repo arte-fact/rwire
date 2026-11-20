@@ -27,6 +27,11 @@ First public release. Highlights of what the framework ships with:
   opts out); `ActionErrors` / `ActionToasts` are opt-in page-level error
   surfaces. Identity is keyless `(session, handler_id, param)`. See
   `docs/async-action-design.md` and the `async-action` example.
+- **Hosting from tokio**: the `tokio-bridge` example runs rwire on its own
+  thread inside a `#[tokio::main]` application — snapshots flow tokio → rwire
+  through a `tokio::sync` channel into `update_shared_if`, and handlers hand
+  work to tokio through a captured `Handle`. rwire itself stays on async-std
+  with no tokio dependency; the pattern and its traps are in the skill.
 - **State tiers**: per-connection memory, SQLite-persisted (schema generated
   from the derive), and shared-with-broadcast across connections.
 - **Streaming**: one-shot visibility sentinels (`on_visible`) and the
