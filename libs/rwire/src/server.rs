@@ -1234,6 +1234,10 @@ where
             let Some((stream, peer_addr)) = accepted else {
                 break;
             };
+            // An event's answer is two small frames (the DOM update, then EVENT_ACK).
+            // With Nagle on, the second waits for the client's ACK of the first,
+            // which delayed-ACK holds back ~40 ms: every click would pay it.
+            let _ = stream.set_nodelay(true);
             // Reap finished connections so the set only holds live ones.
             while connections.try_join_next().is_some() {}
             let root = Arc::clone(&root);
