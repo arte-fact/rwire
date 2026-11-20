@@ -8,6 +8,25 @@ never see a compatibility matrix — recompiling is the whole migration.
 
 ## 0.1.0 — unreleased (crates not yet published to crates.io)
 
+### Breaking: rwire runs on tokio
+
+async-std is discontinued; rwire now runs on **tokio** (and tokio-tungstenite
+for the WebSocket). Applications start with `#[tokio::main]` instead of
+`#[async_std::main]` and depend on `tokio = { version = "1", features =
+["macros", "rt-multi-thread"] }` instead of async-std — that is the whole
+migration for an app that only awaited `run()`. `Server::run()` must be awaited
+inside a tokio runtime; inside an existing tokio application the server is a
+plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
+`health` and `capsule` take a tokio `TcpStream`; `BroadcastMsg` gains a
+`Shutdown` variant.
+
+- **Graceful stop**: `ServerWithRoot::run_until(shutdown)` stops accepting,
+  closes open WebSockets with 1001 "going away", waits up to `SHUTDOWN_GRACE`
+  (5 s) and returns.
+- **Latency**: accepted sockets set `TCP_NODELAY`. An event's answer is two
+  frames; with Nagle the second waited for the client's delayed ACK, so every
+  click round trip cost ~40 ms on any runtime.
+
 First public release. Highlights of what the framework ships with:
 
 - **Core**: server-owned state over a binary WebSocket protocol; ~16KB

@@ -98,8 +98,15 @@ appears in the design-system app automatically. Gate with
   sockets are re-validated every TTL and closed (code 4401) once revoked — the client then
   reloads onto the login. Handlers read `ctx.identity()`; renderers have no context, so copy what
   they show into state from `on_route` (it runs on connect and sees the identity). Both gates
-  at once → `run()` fails with `AUTH_CONFLICT`. A tokio validator: `Handle::spawn` the check and
-  `await` a `tokio::sync::oneshot` — no tokio needed on rwire's side. Never log the cookie.
+  at once → `run()` fails with `AUTH_CONFLICT`. The validator runs on rwire's tokio runtime, so
+  it can call reqwest / a hub client directly. Never log the cookie.
+- **Runtime: tokio.** `#[tokio::main]` and `Server::…run().await`; inside an existing tokio app
+  (axum, an SSE client) it is just a task: `tokio::spawn(server.run_until(stop))`. Handlers run on
+  the runtime: `tokio::spawn` / `tokio::time` work there, but never block in a handler (no
+  `std::thread::sleep`, no blocking I/O, no `block_on`) — `spawn_blocking` or `ctx.defer()` + a
+  thread for that. Background code reaches the UI through `server.shared_state()` taken before
+  `run()` (`update_shared_if` broadcasts only real changes; sync, callable from any thread).
+  `run_until(fut)` stops cleanly: listener closed, sockets closed with 1001, 5 s grace.
 
 ## 5. Traps a real app hit (each cost a debugging session)
 

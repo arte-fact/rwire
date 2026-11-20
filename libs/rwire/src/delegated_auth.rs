@@ -14,10 +14,10 @@
 //! - re-validates open WebSockets every [`DelegatedAuth::cache_ttl`], closing one
 //!   whose identity is gone (close code [`CLOSE_UNAUTHORIZED`]).
 //!
-//! The validator is a plain `Future + Send`: rwire does not care which runtime
-//! produced it. A tokio-based check (reqwest, a hub client) hands its work to a
-//! captured `tokio::runtime::Handle` and awaits the answer on a
-//! `tokio::sync::oneshot`, which needs no tokio reactor to be awaited.
+//! The validator is a plain `Future + Send` polled on rwire's tokio runtime, so
+//! it can use tokio-based clients (reqwest, a hub SDK) directly. It runs once
+//! per uncached credential and must not block the thread: do blocking work in
+//! `tokio::task::spawn_blocking`.
 
 use std::any::Any;
 use std::collections::HashMap;
