@@ -1,5 +1,13 @@
 # rwire Website — Roadmap
 
+> **Status (2026-07-07): SHIPPED.** The website (`apps/rwire-website/`), docs site
+> (`apps/rwire-docs/`), design system (`apps/rwire-design-system/`), and examples
+> gallery (`apps/rwire-examples/`) are all built and live in-tree. The foundation
+> tokens, the `Grid`/`Footer`/`CopyButton` components, and the full landing page
+> (hero, stats, code example, features, surfaces, comparison, CTA) are done.
+> This document is kept as the historical plan; the phases below are annotated
+> with their actual outcome.
+
 A phased implementation plan for rwire's official website, combining the technical strengths identified in the [comparative study](../comparative-study.md) with the design patterns catalogued in the [website study](../website-study.md).
 
 ## Vision
@@ -18,13 +26,13 @@ The rwire website is the framework's first impression. It should **demonstrate**
 
 ## Phase Overview
 
-| Phase | Focus | Deliverables | Depends On |
-|-------|-------|-------------|------------|
-| [Phase 1](./01-foundation.md) | Design System Foundation | ~15 new style tokens, 7 new icons, Grid component | — |
-| [Phase 2](./02-components.md) | Website Components | Footer, CopyButton, LogoCloud components | Phase 1 |
-| [Phase 3](./03-landing-page.md) | Landing Page | Hero, features, code example, stats, CTA | Phase 2 |
-| [Phase 4](./04-documentation.md) | Documentation Hub | Enhanced docs-site with full content | Phase 1 |
-| [Phase 5](./05-polish.md) | Polish & Launch | Examples gallery, responsive testing, performance audit | Phase 3+4 |
+| Phase | Focus | Deliverables | Depends On | Status |
+|-------|-------|-------------|------------|--------|
+| [Phase 1](./01-foundation.md) | Design System Foundation | ~15 new style tokens, 7 new icons, Grid component | — | ✅ Shipped (Grid tokens + `Grid` component in `rwire-components`) |
+| [Phase 2](./02-components.md) | Website Components | Footer, CopyButton, LogoCloud components | Phase 1 | ✅ Shipped (`Footer`, `CopyButton` in `rwire-components`; LogoCloud not needed) |
+| [Phase 3](./03-landing-page.md) | Landing Page | Hero, features, code example, stats, CTA | Phase 2 | ✅ Shipped (`apps/rwire-website/`, 714 lines, 7 sections) |
+| [Phase 4](./04-documentation.md) | Documentation Hub | Enhanced docs-site with full content | Phase 1 | ✅ Shipped (`apps/rwire-docs/`, 26-page docs site with sidebar + mobile drawer) |
+| [Phase 5](./05-polish.md) | Polish & Launch | Examples gallery, responsive testing, performance audit | Phase 3+4 | ✅ Shipped (`apps/rwire-examples/` gallery); visual/performance audit deferred to post-launch |
 
 ---
 

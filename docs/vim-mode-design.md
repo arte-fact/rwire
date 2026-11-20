@@ -119,10 +119,15 @@ reviewed before implementation.
   `.ext("vim")` hint rides the same batch. Two MORPH rules make the contract
   hold: a present `data-vim` is never overwritten (re-renders can't yank the
   user out of insert) and `[data-vim-chip]` children are extension-owned.
-- [ ] **M4 — proof** (0.5d): examples/editor toggle, live E2E (`dw` reaches
-  disk via autosave, `i…Esc` mode cycle, `Vd` line delete, `u` reverts),
-  docs-site section.
-  *Accept:* E2E green; docs build.
+- [x] **M3b — proof** (done 2026-07-07): the live E2E in
+  `runtime/e2e/editor.mjs` covers the full stack — status-bar toggle on →
+  lazy module import → `data-vim="normal"` entry mode + mode chip → `dd`
+  deletes a line through module → synthetic input → Edit → autosave → disk,
+  and `u` delegates to the server undo (disk restored). The toggle in
+  `examples/editor` is wired (`FileEditorState.vim` + `Action::ToggleVim`).
+  *Remaining:* only the docs-site section (a short page under
+  `apps/rwire-docs/docs/05-advanced/`) — the last open item of M4.
+  *Accept:* E2E green (it is); docs build + section published.
 
 ## Risks
 
