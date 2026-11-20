@@ -3,15 +3,13 @@
 //! and refuses to start without one, instead of serving a page whose navigation
 //! freezes. With an outlet (or without a router), the server starts as before.
 
-use async_std::io::ReadExt;
-use async_std::net::TcpStream;
-use async_std::prelude::*;
-use async_std::task;
 use rwire::{
     el, outlet, renderer, CurrentRoute, El, ElementBuilder, Router, Server, State,
     ROUTER_WITHOUT_OUTLET,
 };
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 fn router() -> Router {
     Router::new()
@@ -62,7 +60,7 @@ async fn assert_refuses(port: u16, root: fn() -> ElementBuilder) {
         .root(root)
         .routes(router())
         .run();
-    let result = async_std::future::timeout(Duration::from_secs(5), run)
+    let result = tokio::time::timeout(Duration::from_secs(5), run)
         .await
         .expect("run() kept serving instead of refusing to start");
     let err = result.expect_err("a router without an outlet must not start");
@@ -71,7 +69,7 @@ async fn assert_refuses(port: u16, root: fn() -> ElementBuilder) {
 
 /// The server must start and serve the page.
 async fn assert_serves(port: u16, root: fn() -> ElementBuilder, with_router: bool) {
-    let server = task::spawn(async move {
+    let server = tokio::spawn(async move {
         let builder = Server::bind(&format!("127.0.0.1:{port}"))
             .unwrap()
             .root(root);
@@ -82,7 +80,7 @@ async fn assert_serves(port: u16, root: fn() -> ElementBuilder, with_router: boo
         };
         builder.run().await.map_err(|e| e.to_string())
     });
-    task::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
     let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
         .await
         .expect("the server did not start");
@@ -98,30 +96,30 @@ async fn assert_serves(port: u16, root: fn() -> ElementBuilder, with_router: boo
         String::from_utf8_lossy(&head[..n])
     );
     drop(stream);
-    server.cancel().await;
+    server.abort();
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn router_without_outlet_refuses_to_start() {
     assert_refuses(19041, shell_without_outlet).await;
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn a_current_route_reader_is_not_an_outlet() {
     assert_refuses(19042, shell_with_only_a_route_reader).await;
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn router_with_outlet_starts() {
     assert_serves(19043, shell_with_outlet, true).await;
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn an_outlet_inside_a_renderer_is_found() {
     assert_serves(19044, shell_with_nested_outlet, true).await;
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn no_router_needs_no_outlet() {
     assert_serves(19045, shell_without_outlet, false).await;
 }
