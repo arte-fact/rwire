@@ -12,7 +12,7 @@ An rwire application is a standard Rust binary crate. There is no special projec
 
 ```
 my-app/
-├── Cargo.toml          # rwire + async-std dependencies
+├── Cargo.toml          # rwire + tokio dependencies
 ├── src/
 │   └── main.rs         # Server setup, state, handlers, renderers, UI
 └── todo.db             # (optional) SQLite file for persisted state
@@ -38,7 +38,7 @@ There is no `public/` directory, no `index.html`, no `package.json`. The server 
 Every rwire app starts with `Server::bind()`. The builder pattern configures the server before starting it:
 
 ```rust
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("127.0.0.1:9000")?
         .persist_interval(Duration::from_millis(100)) // flush rate (set before .root)

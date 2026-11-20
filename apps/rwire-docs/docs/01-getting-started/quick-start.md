@@ -20,7 +20,7 @@ Add dependencies to `Cargo.toml`:
 ```toml
 [dependencies]
 rwire = "0.1"
-async-std = { version = "1.12", features = ["attributes"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ## 2. Define State
@@ -100,7 +100,7 @@ Only the `<span>` inside this renderer is updated when the count changes. The su
 The `Server::bind` function starts the server. Pass your root UI function to `.root()` and call `.run().await` to start listening.
 
 ```rust
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(app)
@@ -148,7 +148,7 @@ fn decrement(state: &mut Counter) {
     state.count -= 1;
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(app)

@@ -1,8 +1,8 @@
 //! Health check endpoints for load balancers and orchestration.
 
-use async_std::io::WriteExt;
-use async_std::net::TcpStream;
 use std::io;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 use crate::registry::ConnectionRegistry;
 

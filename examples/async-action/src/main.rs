@@ -15,7 +15,6 @@ use std::error::Error;
 use std::thread;
 use std::time::Duration;
 
-use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::form::{Field, Form};
 use rwire::style_tokens::St;
@@ -95,7 +94,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("async-action on http://0.0.0.0:9008");
     Server::bind("0.0.0.0:9008")?

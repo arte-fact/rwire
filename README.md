@@ -56,7 +56,7 @@ struct Counter {
     count: i32,
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("127.0.0.1:9000")?
         .root(build_counter)

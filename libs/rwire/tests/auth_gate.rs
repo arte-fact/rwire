@@ -5,12 +5,11 @@
 //! segment to route the request, so it must keep reading until the declared body is
 //! complete before checking the credentials — otherwise valid credentials fail.
 
-use async_std::io::ReadExt;
-use async_std::net::TcpStream;
-use async_std::prelude::*;
-use async_std::task;
 use rwire::{el, El, ElementBuilder, Server};
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 const USER: &str = "admin";
 const PASSWORD: &str = "secret";
@@ -20,8 +19,8 @@ fn build_simple() -> ElementBuilder {
 }
 
 /// Start a gated server on `port` and give it time to bind.
-async fn start_gated(port: u16) -> task::JoinHandle<()> {
-    let handle = task::spawn(async move {
+async fn start_gated(port: u16) -> tokio::task::JoinHandle<()> {
+    let handle = tokio::spawn(async move {
         let _ = Server::bind(&format!("127.0.0.1:{port}"))
             .unwrap()
             .root(build_simple)
@@ -29,7 +28,7 @@ async fn start_gated(port: u16) -> task::JoinHandle<()> {
             .run()
             .await;
     });
-    task::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
     handle
 }
 
@@ -42,17 +41,18 @@ async fn post_in_segments(port: u16, segments: &[&[u8]]) -> String {
     stream.set_nodelay(true).unwrap();
     for (i, segment) in segments.iter().enumerate() {
         if i > 0 {
-            task::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
         stream.write_all(segment).await.unwrap();
         stream.flush().await.unwrap();
     }
     let mut response = Vec::new();
-    let read = async_std::io::timeout(Duration::from_secs(5), async {
-        stream.read_to_end(&mut response).await
-    })
-    .await;
-    assert!(read.is_ok(), "the gate never answered: {read:?}");
+    let read =
+        tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response)).await;
+    assert!(
+        matches!(read, Ok(Ok(_))),
+        "the gate never answered: {read:?}"
+    );
     String::from_utf8_lossy(&response).into_owned()
 }
 
@@ -78,19 +78,19 @@ fn assert_logged_in(response: &str) {
 }
 
 /// Head in one segment, form body in the next: the login must succeed.
-#[async_std::test]
+#[tokio::test]
 async fn login_succeeds_when_the_body_arrives_after_the_head() {
     let server = start_gated(19031).await;
     let body = format!("username={USER}&password={PASSWORD}");
     let head = login_head(&body);
     let response = post_in_segments(19031, &[head.as_bytes(), body.as_bytes()]).await;
     assert_logged_in(&response);
-    server.cancel().await;
+    server.abort();
 }
 
 /// The head itself split after the request line, then the body split in two: the gate
 /// reads until the head is closed and every declared body byte is in.
-#[async_std::test]
+#[tokio::test]
 async fn login_succeeds_when_head_and_body_are_both_fragmented() {
     let server = start_gated(19032).await;
     let body = format!("username={USER}&password={PASSWORD}");
@@ -108,11 +108,11 @@ async fn login_succeeds_when_head_and_body_are_both_fragmented() {
     )
     .await;
     assert_logged_in(&response);
-    server.cancel().await;
+    server.abort();
 }
 
 /// Control: fragmentation must not turn wrong credentials into a session.
-#[async_std::test]
+#[tokio::test]
 async fn fragmented_login_with_a_wrong_password_is_refused() {
     let server = start_gated(19033).await;
     let body = format!("username={USER}&password=wrong");
@@ -126,5 +126,5 @@ async fn fragmented_login_with_a_wrong_password_is_refused() {
         !response.starts_with("HTTP/1.1 303"),
         "a wrong password must not redirect into the app:\n{response}"
     );
-    server.cancel().await;
+    server.abort();
 }

@@ -14,7 +14,6 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::style_tokens::St;
 use rwire::theme::Theme;
@@ -148,7 +147,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("chatroom on http://127.0.0.1:9007 — open it in several tabs");
     Server::bind("127.0.0.1:9007")?

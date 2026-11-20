@@ -63,7 +63,7 @@ fn site_theme() -> Theme {
     Theme::default().accent("#5e81ac")
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env();
 
@@ -330,7 +330,7 @@ fn render_count(state: &Counter) -> ElementBuilder {
     Text::heading1(state.count.to_string()).build()
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::bind("0.0.0.0:9000")?
         .root(root)

@@ -8,6 +8,25 @@ never see a compatibility matrix — recompiling is the whole migration.
 
 ## 0.1.0 — unreleased (crates not yet published to crates.io)
 
+### Breaking: rwire runs on tokio
+
+async-std is discontinued; rwire now runs on **tokio** (and tokio-tungstenite
+for the WebSocket). Applications start with `#[tokio::main]` instead of
+`#[async_std::main]` and depend on `tokio = { version = "1", features =
+["macros", "rt-multi-thread"] }` instead of async-std — that is the whole
+migration for an app that only awaited `run()`. `Server::run()` must be awaited
+inside a tokio runtime; inside an existing tokio application the server is a
+plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
+`health` and `capsule` take a tokio `TcpStream`; `BroadcastMsg` gains a
+`Shutdown` variant.
+
+- **Graceful stop**: `ServerWithRoot::run_until(shutdown)` stops accepting,
+  closes open WebSockets with 1001 "going away", waits up to `SHUTDOWN_GRACE`
+  (5 s) and returns.
+- **Latency**: accepted sockets set `TCP_NODELAY`. An event's answer is two
+  frames; with Nagle the second waited for the client's delayed ACK, so every
+  click round trip cost ~40 ms on any runtime.
+
 First public release. Highlights of what the framework ships with:
 
 - **Core**: server-owned state over a binary WebSocket protocol; ~16KB
@@ -53,3 +72,18 @@ First public release. Highlights of what the framework ships with:
   status-bar search; lazy-loaded as a runtime extension, off by default).
 - **Ops**: /health, /ready, Prometheus /metrics, PWA support, reconnect
   overlay, reverse-proxy base-path mounting.
+
+### Guardrails
+
+Two mistakes that used to fail silently now fail loudly. Both are breaking
+for an app that hit them, which was already broken:
+
+- `#[derive(State)]` refuses a struct with more than 64 named fields at
+  compile time. Renderer dependencies are a 64-bit mask, and fields past
+  the 64th never triggered a re-render. The error names the struct and its
+  field count; split the state, or nest related fields.
+- `run()` refuses to start when `.routes(..)` is set but the page tree has
+  no `outlet()`, even inside a renderer's output (`ROUTER_WITHOUT_OUTLET`).
+  Such a page served normally, then froze on the first navigation. A
+  renderer that only reads `CurrentRoute` does not count as an outlet
+  (`SyncedRenderer::is_outlet`).

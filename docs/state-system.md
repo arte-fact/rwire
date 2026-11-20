@@ -328,7 +328,7 @@ use rwire::{Server, SharedServerState};
 use rwire::persist::SqliteStore;
 use std::time::Duration;
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize SQLite store
     let store = SqliteStore::file("./app.db")?;
@@ -340,7 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start background persistence task
     let store_clone = store.clone();
     let shared_clone = shared.clone();
-    async_std::task::spawn(async move {
+    tokio::spawn(async move {
         rwire::server::persist_task(shared_clone, store_clone).await;
     });
 

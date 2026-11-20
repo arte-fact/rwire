@@ -18,7 +18,7 @@
 //!     count: i32,
 //! }
 //!
-//! #[async_std::main]
+//! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     Server::bind("127.0.0.1:9000")?
 //!         .root(build_counter)
@@ -99,12 +99,12 @@ pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 // Server exports
 pub use server::{
     persist_task, session_eviction_task, BroadcastMsg, Server, ServerBuilder, ServerWithRoot,
-    SharedServerState,
+    SharedServerState, ROUTER_WITHOUT_OUTLET,
 };
 
 // Delegated authentication exports
 pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity};
-pub use server::AUTH_CONFLICT;
+pub use server::{AUTH_CONFLICT, SHUTDOWN_GRACE};
 
 // Store exports
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};

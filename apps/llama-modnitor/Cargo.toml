@@ -7,7 +7,7 @@ edition = "2024"
 rwire = { path = "../../libs/rwire" }
 rwire-components = { path = "../../libs/rwire-components" }
 rwire-themes = { path = "../../libs/rwire-themes" }
-async-std = { version = "1.12", features = ["attributes"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

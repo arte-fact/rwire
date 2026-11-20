@@ -4,14 +4,8 @@
 //! - HTTP GET / → capsule HTML
 //! - WebSocket upgrade → binary DOM protocol with state management
 
-use async_std::future::timeout;
-use async_std::net::{TcpListener, TcpStream};
-use async_std::task;
-use async_tungstenite::accept_async_with_config;
-use async_tungstenite::tungstenite::protocol::WebSocketConfig;
-use async_tungstenite::tungstenite::Message;
 use bytes::Bytes;
-use futures::prelude::*;
+use futures::{SinkExt, StreamExt};
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +14,12 @@ use std::net::{AddrParseError, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
+use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
@@ -52,6 +52,9 @@ pub enum BroadcastMsg {
         /// Which fields changed
         changes: ChangeSet,
     },
+    /// The server is shutting down (see [`ServerWithRoot::run_until`]): close
+    /// the WebSocket with 1001 "going away" and end the connection.
+    Shutdown,
 }
 
 /// Cached session state for reconnection.
@@ -339,6 +342,19 @@ impl SharedServerState {
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .insert(conn_id, sender);
+    }
+
+    /// Ask every open connection to close (graceful shutdown). Best effort: a
+    /// connection whose channel is full misses it and is aborted after the grace
+    /// period instead.
+    pub fn close_all_connections(&self) {
+        let senders = self
+            .broadcast_senders
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        for sender in senders.values() {
+            let _ = sender.try_send(BroadcastMsg::Shutdown);
+        }
     }
 
     /// Unregister connection on disconnect.
@@ -645,7 +661,7 @@ impl SharedServerState {
 pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist::SqliteStore) {
     loop {
         // Wait for persist interval
-        task::sleep(shared.persist_interval).await;
+        tokio::time::sleep(shared.persist_interval).await;
 
         // Persist dirty state
         match shared.persist_dirty(&store) {
@@ -668,7 +684,7 @@ pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist:
 /// are removed to prevent unbounded memory growth.
 pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration) {
     loop {
-        task::sleep(ttl / 2).await;
+        tokio::time::sleep(ttl / 2).await;
         shared.evict_expired_sessions(ttl);
     }
 }
@@ -677,8 +693,8 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
 /// still `Loading`, so a worker that crashed or forgot to resolve can't leave a control spinning
 /// forever. Spawned by `EventContext::defer`; it exits as soon as it fires.
 pub(crate) fn spawn_action_timeout(shared: Arc<SharedServerState>, key: ActionKey) {
-    task::spawn(async move {
-        task::sleep(crate::actions::LOADING_TIMEOUT).await;
+    tokio::spawn(async move {
+        tokio::time::sleep(crate::actions::LOADING_TIMEOUT).await;
         shared.fail_action_if_loading(key, "timed out");
     });
 }
@@ -742,6 +758,15 @@ impl Server {
 
 /// Marker type for the Server namespace.
 pub struct Server;
+
+/// Startup error when `.routes(..)` is set but the page tree has no `outlet()`.
+pub const ROUTER_WITHOUT_OUTLET: &str = "rwire: a Router is registered with `.routes(..)` \
+     but the page tree passed to `.root(..)` has no `outlet()` (looked through every synced \
+     region rendered with its default state), so navigation would have nothing to re-render \
+     and the page would freeze. Put `rwire::outlet()` in the persistent shell where the \
+     matched view should render, or drop `.routes(..)` and route with `on_route` instead \
+     (one routing model per page tree: see .claude/skills/rwire/SKILL.md, section 4, \
+     \"Reactivity + routing rules\").";
 
 impl ServerBuilder {
     /// Configure persist interval (default 100ms).
@@ -993,8 +1018,9 @@ where
     ///
     /// On every navigation, the framework updates the built-in `CurrentRoute` state and the
     /// `outlet()` in your shell renders the matched view. Place an `outlet()` in the tree passed
-    /// to [`root`](Self::root) — installing a router without one leaves navigation with nothing
-    /// to re-render. This is an alternative to the `on_route` + root-rerender model; use one or
+    /// to [`root`](Self::root) — directly or inside a renderer's output. Without one,
+    /// [`run`](Self::run) refuses to start ([`ROUTER_WITHOUT_OUTLET`]): navigation would have
+    /// nothing to re-render. This is an alternative to the `on_route` + root-rerender model; use one or
     /// the other, not both. (Capsule contents are not affected: names and CSS stream lazily over
     /// the wire regardless of routes.)
     pub fn routes(mut self, router: crate::router::Router) -> Self {
@@ -1013,8 +1039,33 @@ where
             .clone()
     }
 
-    /// Run the server, accepting connections until shutdown.
+    /// Run the server, accepting connections until the process ends.
+    ///
+    /// Must be awaited inside a tokio runtime (`#[tokio::main]`, or
+    /// `tokio::spawn(server.run())` from an application that already has one).
+    /// For a clean stop, use [`Self::run_until`].
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
+        self.run_until(std::future::pending()).await
+    }
+
+    /// Run the server until `shutdown` resolves, then stop gracefully: stop
+    /// accepting, close every WebSocket with 1001 "going away" (the client
+    /// reconnects once a server is back), wait up to [`SHUTDOWN_GRACE`] for
+    /// connections to end, abort the rest, and return `Ok(())`.
+    ///
+    /// ```ignore
+    /// let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    /// let server = tokio::spawn(server.run_until(async { let _ = stopped.await; }));
+    /// // … later, e.g. on Ctrl-C:
+    /// let _ = stop.send(());
+    /// ```
+    ///
+    /// State persisted by the application's own `persist_task` is not flushed
+    /// here: call `SharedServerState::flush_all_dirty` after it returns.
+    pub async fn run_until(
+        self,
+        shutdown: impl std::future::Future<Output = ()> + Send,
+    ) -> Result<(), Box<dyn Error>> {
         if self.auth.is_some() && self.delegated.is_some() {
             return Err(AUTH_CONFLICT.into());
         }
@@ -1025,14 +1076,18 @@ where
             .shared
             .unwrap_or_else(|| SharedServerState::new(self.persist_interval));
 
-        // Install the app's router (if any) so each connection's `outlet()` renders the
-        // matched view, and the startup analysis below tree-shakes the "/" view.
-        if let Some(router) = self.router {
-            crate::router::install_router(std::sync::Arc::new(router));
-        }
-
         // Pre-analyze the root element to determine used types for tree shaking
         let root_element = (self.root)();
+
+        // Install the app's router (if any) so each connection's `outlet()` renders the
+        // matched view, and the startup analysis below tree-shakes the "/" view. A router
+        // with no `outlet()` to drive would leave every navigation frozen: refuse to start.
+        if let Some(router) = self.router {
+            if !crate::router::has_outlet(&root_element) {
+                return Err(ROUTER_WITHOUT_OUTLET.into());
+            }
+            crate::router::install_router(std::sync::Arc::new(router));
+        }
         let mut ctx = BuildContext::new();
 
         // Extract renderers and create default states for proper tree walking
@@ -1170,14 +1225,35 @@ where
         );
 
         // Spawn session eviction task (5-minute TTL)
-        {
+        let eviction = {
             let shared = Arc::clone(&shared);
             // Disconnected sessions keep their state for a day, so a phone that
             // switches apps (or a PWA relaunch) comes back to the same seat.
-            task::spawn(session_eviction_task(shared, Duration::from_secs(86_400)));
-        }
+            tokio::spawn(session_eviction_task(shared, Duration::from_secs(86_400)))
+        };
 
-        while let Ok((stream, peer_addr)) = listener.accept().await {
+        // Every connection task is tracked, so a shutdown can wait for them.
+        let mut connections = tokio::task::JoinSet::new();
+        let mut shutdown = std::pin::pin!(shutdown);
+        loop {
+            let accepted = {
+                use futures::future::{select, Either};
+                let accept = std::pin::pin!(listener.accept());
+                match select(accept, shutdown.as_mut()).await {
+                    Either::Left((Ok(accepted), _)) => Some(accepted),
+                    // The listener failed (as before: stop serving) or shutdown fired.
+                    Either::Left((Err(_), _)) | Either::Right(_) => None,
+                }
+            };
+            let Some((stream, peer_addr)) = accepted else {
+                break;
+            };
+            // An event's answer is two small frames (the DOM update, then EVENT_ACK).
+            // With Nagle on, the second waits for the client's ACK of the first,
+            // which delayed-ACK holds back ~40 ms: every click would pay it.
+            let _ = stream.set_nodelay(true);
+            // Reap finished connections so the set only holds live ones.
+            while connections.try_join_next().is_some() {}
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
             let shared = Arc::clone(&shared);
@@ -1191,7 +1267,7 @@ where
             let metrics = Arc::clone(&metrics);
             let pwa_assets = pwa_assets.clone();
             let assets = Arc::clone(&assets);
-            task::spawn(async move {
+            connections.spawn(async move {
                 handle_client(
                     stream,
                     peer_addr,
@@ -1213,6 +1289,23 @@ where
             });
         }
 
+        // Graceful stop: no new connections, ask open sockets to close, give them
+        // a bounded time, then abort whatever is left (dropping the set aborts).
+        drop(listener);
+        eviction.abort();
+        shared.close_all_connections();
+        let drained = timeout(SHUTDOWN_GRACE, async {
+            while connections.join_next().await.is_some() {}
+        })
+        .await;
+        if drained.is_err() {
+            println!(
+                "Shutdown: {} connection(s) still open after {:?}, aborting",
+                connections.len(),
+                SHUTDOWN_GRACE
+            );
+        }
+        println!("Server stopped");
         Ok(())
     }
 }
@@ -1221,7 +1314,7 @@ where
 ///
 /// Without this, a quick restart fails with "Address already in use" while
 /// sockets from the previous process linger in `TIME_WAIT`. Returns a
-/// non-blocking async-std listener.
+/// non-blocking tokio listener (must be called inside the runtime).
 fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
 
@@ -1238,13 +1331,17 @@ fn bind_reusable(addr: SocketAddr) -> std::io::Result<TcpListener> {
 
     let std_listener: std::net::TcpListener = socket.into();
     std_listener.set_nonblocking(true)?;
-    Ok(TcpListener::from(std_listener))
+    TcpListener::from_std(std_listener)
 }
 
 /// Returned by `run()` when both [`ServerWithRoot::auth`] and
 /// [`ServerWithRoot::auth_with`] are configured: the two gates are exclusive, and
 /// silently keeping one would leave the application believing in the other.
 pub const AUTH_CONFLICT: &str = "rwire: both `.auth(user, password)` and `.auth_with(DelegatedAuth)` are configured; they are exclusive. Keep the form login (`auth`) or delegate to your identity provider (`auth_with`), not both.";
+
+/// How long [`ServerWithRoot::run_until`] waits for open connections to close
+/// before aborting them.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// Auth session cookie name.
 const AUTH_COOKIE: &str = "rwire_auth";
@@ -1440,10 +1537,10 @@ async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &s
     // response, or either side closing a WebSocket) ends the exchange. The inner scope drops both
     // copy futures — releasing their borrows on `stream` — before the final flush.
     {
-        let mut client_read = stream.clone();
-        let mut upstream_write = upstream.clone();
-        let to_upstream = futures::io::copy(&mut client_read, &mut upstream_write);
-        let to_client = futures::io::copy(&mut upstream, &mut stream);
+        let (mut client_read, mut client_write) = stream.split();
+        let (mut upstream_read, mut upstream_write) = upstream.split();
+        let to_upstream = tokio::io::copy(&mut client_read, &mut upstream_write);
+        let to_client = tokio::io::copy(&mut upstream_read, &mut client_write);
         futures::pin_mut!(to_upstream, to_client);
         let _ = futures::future::select(to_upstream, to_client).await;
     }
@@ -2543,7 +2640,7 @@ struct ConnContext<F> {
 }
 
 async fn handle_websocket<F>(
-    ws_stream: async_tungstenite::WebSocketStream<TcpStream>,
+    ws_stream: tokio_tungstenite::WebSocketStream<TcpStream>,
     peer_addr: SocketAddr,
     cx: ConnContext<F>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
@@ -2739,7 +2836,7 @@ where
             if Instant::now() >= due {
                 if auth.identify(head).await.is_none() {
                     println!("[{}] delegated auth: identity revoked, closing", peer_addr);
-                    let frame = async_tungstenite::tungstenite::protocol::CloseFrame {
+                    let frame = tokio_tungstenite::tungstenite::protocol::CloseFrame {
                         code: crate::delegated_auth::CLOSE_UNAUTHORIZED.into(),
                         reason: "unauthorized".into(),
                     };
@@ -2769,6 +2866,15 @@ where
                 Either::Right((Err(_), _)) => {
                     broadcast_open = false;
                     continue;
+                }
+                Either::Right((Ok(BroadcastMsg::Shutdown), _)) => {
+                    let frame = tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                        code:
+                            tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away,
+                        reason: "server shutting down".into(),
+                    };
+                    let _ = write.send(Message::Close(Some(frame))).await;
+                    break;
                 }
                 Either::Right((
                     Ok(BroadcastMsg::StateChanged {

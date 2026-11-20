@@ -15,7 +15,6 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::style_tokens::St;
 use rwire::theme::Theme;
@@ -48,7 +47,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "editor on http://127.0.0.1:9008 — {} entries under sample/",

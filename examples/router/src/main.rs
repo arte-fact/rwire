@@ -9,7 +9,6 @@
 
 use std::error::Error;
 
-use async_std::main;
 use rwire::capsule_gen::CapsuleConfig;
 use rwire::theme::Theme;
 use rwire::{
@@ -24,7 +23,7 @@ fn app_theme() -> Theme {
     Theme::dark().palette(palettes::nord())
 }
 
-#[main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     Server::bind("0.0.0.0:7779")?
         .root(shell)
