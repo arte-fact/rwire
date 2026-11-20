@@ -2145,6 +2145,14 @@ async fn handle_client<F>(
     }
 }
 
+/// What a routed view reads, from [`ConnectionState::view_state_keys`].
+struct ViewStates {
+    /// `(type, cache key)` of every shared/persisted state the view reads.
+    keys: Vec<(TypeId, String)>,
+    /// A default for every state type the view reads that the connection lacked.
+    defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
 /// Per-connection state container supporting multiple state types.
 struct ConnectionState {
     /// Unique connection ID for this connection.
@@ -2546,7 +2554,16 @@ impl ConnectionState {
                 .shared_cache
                 .read()
                 .map_err(|_| "shared cache lock poisoned")?;
-            let view_keys = self.view_state_keys(&cache_guard, &view);
+            let ViewStates {
+                keys: view_keys,
+                defaults: view_defaults,
+            } = self.view_state_keys(&cache_guard, &view);
+            // A nested region renders nothing without a state: seed the default of
+            // every type the view reads (memory state, and shared state nobody has
+            // published yet). `or_insert` keeps the state of a prior visit.
+            for (tid, state) in view_defaults {
+                self.states.entry(tid).or_insert(state);
+            }
             let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
                 self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
             for (tid, key) in
@@ -2589,7 +2606,8 @@ impl ConnectionState {
     }
 
     /// Every shared/persisted state `view` reads, as `(type, cache key)`, nested regions
-    /// included. Found like the connection's opening pass finds the page's regions:
+    /// included, and a default for each state type it reads that the connection
+    /// doesn't hold yet. Found like the connection's opening pass finds the page's regions:
     /// render the view, collect its regions, and repeat with the states found until no
     /// new type appears. Each pass renders with the cached copies found so far, so a
     /// region that only exists for the real data (not the empty default) counts too.
@@ -2597,7 +2615,7 @@ impl ConnectionState {
         &self,
         cache: &HashMap<String, Box<dyn Any + Send + Sync>>,
         view: &ElementBuilder,
-    ) -> Vec<(TypeId, String)> {
+    ) -> ViewStates {
         let mut defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
         let mut keys: Vec<(TypeId, String)> = Vec::new();
         loop {
@@ -2644,7 +2662,7 @@ impl ConnectionState {
                 }
             }
             if !grew {
-                return keys;
+                return ViewStates { keys, defaults };
             }
         }
     }

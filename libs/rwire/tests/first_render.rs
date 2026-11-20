@@ -51,12 +51,46 @@ fn frame(state: &Frame) -> ElementBuilder {
         .append([post()])
 }
 
+/// Per-connection state read only by a region nested in a shared region.
+#[derive(State, Default)]
+#[storage(memory)]
+struct Badge {
+    seen: bool,
+}
+
+#[renderer]
+fn badge(state: &Badge) -> ElementBuilder {
+    el(El::Span).text(if state.seen {
+        "badge: seen"
+    } else {
+        "badge: unread"
+    })
+}
+
+/// Shared state nobody has published yet: it renders its default.
+#[derive(State, Default)]
+#[storage(shared)]
+struct Drafts {
+    count: u32,
+}
+
+#[renderer]
+fn drafts(state: &Drafts) -> ElementBuilder {
+    el(El::P).text(&format!("drafts: {}", state.count))
+}
+
+#[renderer]
+fn badged_post(blog: &Blog) -> ElementBuilder {
+    el(El::Div).append([el(El::H2).text(&blog.title), badge(), drafts()])
+}
+
 fn router() -> Router {
     Router::new()
         .page("/", |_| el(El::P).text("home page"))
         .page("/about", |_| el(El::P).text("about page"))
         .page("/posts/:slug", |_| el(El::Section).append([post()]))
         .page("/framed", |_| el(El::Section).append([frame()]))
+        .page("/badged", |_| el(El::Section).append([badged_post()]))
 }
 
 /// The shell never reads `Blog` itself: only routed views do.
@@ -204,6 +238,20 @@ async fn a_shared_region_nested_in_a_routed_region_paints_the_shared_state() {
         blog.revision = 3;
     });
     expect_frame(&mut ws, "post: Hello rwire (rev 3)", None).await;
+}
+
+#[tokio::test]
+async fn regions_nested_in_a_routed_region_render_states_the_page_never_read() {
+    let _shared = start(19097, false, Gate::Open).await;
+    let mut ws = connect(19097).await;
+    expect_frame(&mut ws, "home page", None).await;
+    ws.send(route("/badged")).await.unwrap();
+    expect_frame(&mut ws, "badge: unread", None).await;
+
+    let mut ws = connect(19097).await;
+    expect_frame(&mut ws, "home page", None).await;
+    ws.send(route("/badged")).await.unwrap();
+    expect_frame(&mut ws, "drafts: 0", None).await;
 }
 
 /// `GET path` and the whole response (the server closes after it), minus the

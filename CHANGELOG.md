@@ -33,7 +33,9 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   state painted the state's empty default when its route was opened or
   navigated to, until the next broadcast. The route swap now finds every
   shared/persisted state the new view reads (nested regions included) and
-  renders the cached copy.
+  renders the cached copy. Regions nested in the new view whose state the
+  connection didn't hold yet (memory state, or shared state never published)
+  rendered nothing; they now render the state's default.
 - `ssr(true)` rendered the root once, at startup, at the default state and
   the default route: `/posts/x` served the `/` view with empty content. The
   static paint is now rendered per request, for the requested route, with
