@@ -123,9 +123,8 @@ impl Default for Cpu {
 }
 
 fn read_stat() -> Vec<CpuTimes> {
-    std::fs::read_to_string("/proc/stat")
-        .map(|s| parse_proc_stat(&s))
-        .unwrap_or_default()
+    // An unreadable file parses as empty: no CPUs.
+    parse_proc_stat(&std::fs::read_to_string("/proc/stat").unwrap_or_default())
 }
 
 /// hwmon chip names that report CPU package temperature.
@@ -169,8 +168,9 @@ pub fn read_cpu_temp() -> Option<f32> {
                 continue;
             };
             let label = std::fs::read_to_string(base.join(format!("temp{i}_label")))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             readings.push((label, millidegrees / 1000.0));
         }
     }
@@ -213,7 +213,7 @@ ctxt 67890
     #[test]
     fn ignores_non_cpu_lines() {
         let times = parse_proc_stat("intr 1\nctxt 2\ncpufreq 3\n");
-        assert!(times.is_empty());
+        assert_eq!(times, Vec::new());
     }
 
     #[test]
