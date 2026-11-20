@@ -1,0 +1,15 @@
+[package]
+name = "tokio-bridge"
+version = "0.1.0"
+edition = "2021"
+
+# tokio lives here only: rwire itself keeps its async-std runtime.
+[dependencies]
+rwire = { path = "../../libs/rwire" }
+async-std = "1.12"
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+
+[dev-dependencies]
+tungstenite = "0.21"
+async-channel = "2.3"

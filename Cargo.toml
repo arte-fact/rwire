@@ -21,6 +21,7 @@ members = [
     "examples/nested",
     "examples/router",
     "examples/async-action",
+    "examples/tokio-bridge",
 ]
 resolver = "2"
 

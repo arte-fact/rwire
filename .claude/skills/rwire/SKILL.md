@@ -81,6 +81,17 @@ appears in the design-system app automatically. Gate with
   opts out), identity is keyless `(session, handler_id, param)`, and a handler that returns
   without deferring never spins. Page-level error surfaces: `ActionErrors` (inline) /
   `ActionToasts` (toast). See `docs/async-action-design.md`.
+- **rwire inside a tokio application** (axum, an SSE client…): rwire keeps async-std. Give
+  it its own OS thread (`std::thread::spawn` + `async_std::task::block_on(server.run())`), take
+  `server.shared_state()` before `run()`, and cross with `tokio::sync` channels, which need no
+  reactor on either side. tokio → rwire: an async-std task on the rwire thread receives and calls
+  `update_shared_if` (return `None` when nothing changed: no broadcast). rwire → tokio: a handler
+  `ctx.defer()`s, then `Handle::spawn`s on the tokio `Handle` captured at startup; the task writes
+  back with `update_shared_changed` (sync, safe from any thread) and resolves. Traps: never
+  `block_on` on a tokio worker thread; never `tokio::spawn` / `tokio::time` from a handler or an
+  async-std task ("no reactor running") — go through the `Handle`. `run()` has no graceful
+  shutdown: racing it against a stop signal closes the listener, open WebSockets live on until
+  the process exits. Worked example + test: `examples/tokio-bridge`.
 - Lists: `ItemRef` + `iter_with_ref()` + `on_ref()` — no `data-*` index strings for identity.
   (Plain `.data(…)` payloads on buttons are fine for handler args.)
 - Navigate with `Link::route(…)`, never raw `<a href>` (that's a full reload).
