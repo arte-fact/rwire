@@ -38,9 +38,8 @@ fn first_number(s: &str) -> u64 {
 
 /// Read current memory usage from `/proc/meminfo`.
 pub fn read() -> Memory {
-    std::fs::read_to_string("/proc/meminfo")
-        .map(|s| parse_meminfo(&s))
-        .unwrap_or_default()
+    // An unreadable file parses as empty: zero total, zero used.
+    parse_meminfo(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default())
 }
 
 #[cfg(test)]

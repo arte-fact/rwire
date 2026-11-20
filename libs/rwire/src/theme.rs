@@ -607,8 +607,8 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     }
 
     // Mode-independent vars
-    for i in 0..12 {
-        vn(&mut css, "n", i + 1, &rp.accent[i]);
+    for (i, color) in rp.accent.iter().enumerate() {
+        vn(&mut css, "n", i + 1, color);
     }
     css_var(&mut css, "o", &rp.green[8]); // success
     css_var(&mut css, "p", &rp.amber[8]); // warning
