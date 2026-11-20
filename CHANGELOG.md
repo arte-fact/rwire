@@ -40,6 +40,14 @@ First public release. Highlights of what the framework ships with:
   typed style tokens with hover/breakpoint variants.
 - **Security**: CSPRNG sessions, admission control, WS frame limits, event
   rate limiting, Origin validation, sanitized attribute sink.
+- **Delegated authentication**: `ServerWithRoot::auth_with(DelegatedAuth)`
+  hands the page and WebSocket gate to an external identity provider — an
+  async validator over the request head returns an `Identity` (id + opaque
+  data), read in handlers with `EventContext::identity()`. Anonymous pages are
+  redirected to a configurable login URL with `next`, handshakes get `401`;
+  successes only are cached (bounded, 30 s default), and open sockets are
+  re-validated and closed once revoked. Exclusive with `auth()`: configuring
+  both fails at startup (`AUTH_CONFLICT`).
 - **Editor**: `rwire-editor` — `FileEditor` kit with optional vim mode
   (motions, operators, text objects, char-seek, registers, dot-repeat,
   status-bar search; lazy-loaded as a runtime extension, off by default).
