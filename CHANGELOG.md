@@ -51,6 +51,17 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `/path`, not `/`. A path no route matches is answered `404 Not Found`; the
   page still renders the router's not-found view.
 
+### Added: control over the static first paint
+
+- `CapsuleConfig::ssr_exclude(pattern)`: routes served without the paint, for
+  views whose content depends on the connection (`on_route`, identity, memory
+  or persisted state). The paint has neither, so it could show shared data
+  such a view hides.
+- `ssr(true)` is now **off behind `auth()` / `auth_with()`** unless
+  `CapsuleConfig::ssr_behind_auth(true)` allows it, since the paint does not
+  know the visitor's identity.
+- `capsule::serve_with_status`: `capsule::serve` with another status line.
+
 First public release. Highlights of what the framework ships with:
 
 - **Core**: server-owned state over a binary WebSocket protocol; ~16KB

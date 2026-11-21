@@ -11,8 +11,8 @@
 //! - navigating to it from another route;
 //! - with the shared region nested inside a memory-state region;
 //! - `GET /posts/x` with `ssr(true)` serves the requested route, not `/`
-//!   (also in the absolute form a proxy sends), and stays behind the auth
-//!   gate;
+//!   (also in the absolute form a proxy sends), stays behind the auth gate,
+//!   is off behind it unless allowed, and skips the excluded routes;
 //! - a path no route matches is a `404`.
 
 use std::sync::Arc;
@@ -119,13 +119,13 @@ enum Gate {
 
 /// Start a server on `port` whose `Blog` is published before it runs, and
 /// return its shared state once it accepts connections.
-async fn start(port: u16, ssr: bool, gate: Gate) -> Arc<SharedServerState> {
+async fn start(port: u16, capsule: Option<CapsuleConfig>, gate: Gate) -> Arc<SharedServerState> {
     let mut server = Server::bind(&format!("127.0.0.1:{port}"))
         .unwrap()
         .root(shell)
         .routes(router());
-    if ssr {
-        server = server.capsule_config(CapsuleConfig::new().ssr(true));
+    if let Some(config) = capsule {
+        server = server.capsule_config(config);
     }
     match gate {
         Gate::Open => {}
@@ -204,7 +204,7 @@ const POST: &str = "post: Hello rwire (rev 1)";
 
 #[tokio::test]
 async fn opening_a_route_directly_paints_the_shared_state() {
-    let shared = start(19091, false, Gate::Open).await;
+    let shared = start(19091, None, Gate::Open).await;
     let mut ws = connect(19091).await;
     // As the runtime does: report the path as soon as the socket opens. The
     // initial DOM is the route's view, with no `/` frame before it.
@@ -221,7 +221,7 @@ async fn opening_a_route_directly_paints_the_shared_state() {
 
 #[tokio::test]
 async fn navigating_to_a_route_paints_the_shared_state() {
-    let _shared = start(19092, false, Gate::Open).await;
+    let _shared = start(19092, None, Gate::Open).await;
     let mut ws = connect(19092).await;
     expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/about")).await.unwrap();
@@ -232,7 +232,7 @@ async fn navigating_to_a_route_paints_the_shared_state() {
 
 #[tokio::test]
 async fn a_shared_region_nested_in_a_routed_region_paints_the_shared_state() {
-    let shared = start(19093, false, Gate::Open).await;
+    let shared = start(19093, None, Gate::Open).await;
     let mut ws = connect(19093).await;
     expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/framed")).await.unwrap();
@@ -246,7 +246,7 @@ async fn a_shared_region_nested_in_a_routed_region_paints_the_shared_state() {
 
 #[tokio::test]
 async fn regions_nested_in_a_routed_region_render_states_the_page_never_read() {
-    let _shared = start(19097, false, Gate::Open).await;
+    let _shared = start(19097, None, Gate::Open).await;
     let mut ws = connect(19097).await;
     expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/badged")).await.unwrap();
@@ -287,7 +287,7 @@ async fn get_with(port: u16, path: &str, headers: &str) -> String {
 
 #[tokio::test]
 async fn ssr_renders_the_requested_route_with_the_shared_state() {
-    let shared = start(19094, true, Gate::Open).await;
+    let shared = start(19094, Some(ssr()), Gate::Open).await;
 
     let page = get(19094, "/posts/hello").await;
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
@@ -318,9 +318,47 @@ async fn ssr_renders_the_requested_route_with_the_shared_state() {
     assert!(!page.contains("home page"), "{page}");
 }
 
+fn ssr() -> CapsuleConfig {
+    CapsuleConfig::new().ssr(true)
+}
+
+/// The mount div of a page: the static paint, if any.
+fn mount(page: &str) -> &str {
+    let start = page.find("<div id=\"rw\">").expect("no mount div");
+    let rest = &page[start..];
+    &rest[..rest
+        .find("</div>")
+        .map_or(rest.len(), |end| end + "</div>".len())]
+}
+
+#[tokio::test]
+async fn ssr_skips_excluded_routes() {
+    let _shared = start(19098, Some(ssr().ssr_exclude("/posts/:slug")), Gate::Open).await;
+    let page = get(19098, "/posts/hello").await;
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    assert_eq!(mount(&page), "<div id=\"rw\"></div>", "{page}");
+
+    // The other routes keep their paint.
+    let page = get(19098, "/framed").await;
+    assert!(page.contains(POST), "{page}");
+}
+
+#[tokio::test]
+async fn ssr_is_off_behind_auth_unless_allowed() {
+    let _shared = start(19099, Some(ssr()), Gate::Delegated).await;
+    let page = get_with(
+        19099,
+        "/posts/hello",
+        &format!("Cookie: {COOKIE}=valid\r\n"),
+    )
+    .await;
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    assert_eq!(mount(&page), "<div id=\"rw\"></div>", "{page}");
+}
+
 #[tokio::test]
 async fn a_path_no_route_matches_is_a_404() {
-    let _shared = start(19100, true, Gate::Open).await;
+    let _shared = start(19100, Some(ssr()), Gate::Open).await;
     let page = get(19100, "/favicon.ico").await;
     assert!(page.starts_with("HTTP/1.1 404 Not Found"), "{page}");
     // The page still loads, with the router's not-found view.
@@ -332,7 +370,7 @@ async fn a_path_no_route_matches_is_a_404() {
 
 #[tokio::test]
 async fn ssr_stays_behind_the_auth_gate() {
-    let _shared = start(19095, true, Gate::Form).await;
+    let _shared = start(19095, Some(ssr().ssr_behind_auth(true)), Gate::Form).await;
     let page = get(19095, "/posts/hello").await;
     assert!(
         !page.contains("Hello rwire"),
@@ -343,7 +381,7 @@ async fn ssr_stays_behind_the_auth_gate() {
 
 #[tokio::test]
 async fn ssr_stays_behind_delegated_auth() {
-    let _shared = start(19096, true, Gate::Delegated).await;
+    let _shared = start(19096, Some(ssr().ssr_behind_auth(true)), Gate::Delegated).await;
     let page = get(19096, "/posts/hello").await;
     assert!(
         !page.contains("Hello rwire"),

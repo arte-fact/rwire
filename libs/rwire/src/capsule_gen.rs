@@ -222,6 +222,11 @@ pub struct CapsuleConfig {
     pub(crate) ssr: bool,
     /// The markup of the mount div (with `ssr`, the server's per-request slot).
     pub(crate) ssr_html: String,
+    /// Route patterns the static first paint skips (see [`Self::ssr_exclude`]).
+    pub(crate) ssr_exclude: Vec<String>,
+    /// Keep the static first paint behind `auth()` / `auth_with()` (see
+    /// [`Self::ssr_behind_auth`]).
+    pub(crate) ssr_behind_auth: bool,
     /// Registered font faces for the capsule.
     pub fonts: Vec<FontFace>,
     /// Optional PWA configuration (manifest, service worker, icons, head tags).
@@ -278,11 +283,41 @@ impl CapsuleConfig {
     /// Enable a static first paint: each page load ships the root tree
     /// rendered for the requested route (plus the CSS its classes need). Regions
     /// over `#[storage(shared)]` state show its current value; memory and
-    /// persisted state (per connection or session) show their default. The page
-    /// is served past the auth gate, like the live page. The live render
-    /// replaces it on the first WebSocket frame.
+    /// persisted state (per connection or session) show their default. The live
+    /// render replaces it on the first WebSocket frame.
+    ///
+    /// The paint is rendered without a connection: the app's `on_route` handler
+    /// does not run and there is no visitor identity. A view that hides shared
+    /// data behind connection state (a login flow in `on_route`, a role check)
+    /// would show that data in the paint: leave such routes out with
+    /// [`Self::ssr_exclude`]. For the same reason the paint is off behind
+    /// `auth()` / `auth_with()` unless [`Self::ssr_behind_auth`] allows it.
+    ///
+    /// With a PWA, the service worker's offline fallback is the `/` page cached at
+    /// install, so its paint shows the shared state of that time.
     pub fn ssr(mut self, ssr: bool) -> Self {
         self.ssr = ssr;
+        self
+    }
+
+    /// Leave the routes matching `pattern` (router syntax: `/admin`, `/users/:id`,
+    /// `/account/*`) out of the static first paint: they are served with an empty
+    /// mount and render live only. For views whose content depends on the
+    /// connection (`on_route`, identity, memory or persisted state).
+    pub fn ssr_exclude(mut self, pattern: impl Into<String>) -> Self {
+        self.ssr_exclude.push(pattern.into());
+        self
+    }
+
+    /// Render the static first paint behind `auth()` / `auth_with()` too.
+    ///
+    /// Off by default: the gate admits the visitor, but the paint is rendered
+    /// without their identity, so a view that shows shared data only to some
+    /// identities would show it to every authenticated visitor. Turn it on when
+    /// every authenticated visitor may see all the shared data the paint renders
+    /// (or exclude the other routes with [`Self::ssr_exclude`]).
+    pub fn ssr_behind_auth(mut self, allow: bool) -> Self {
+        self.ssr_behind_auth = allow;
         self
     }
 

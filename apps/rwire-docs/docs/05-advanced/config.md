@@ -158,9 +158,30 @@ Which state the paint shows:
   They belong to a connection or a session, which a plain `GET` doesn't have
   yet; the live render fills them in.
 
-The paint is rendered after the auth gate (`auth()` or `auth_with()`): a
-visitor who would get the login page instead of the app gets no static paint
-either, and so never sees the shared state.
+The paint is rendered without a connection: the app's `on_route` handler
+doesn't run, and there is no visitor identity. A view that hides shared data
+behind connection state (a login flow in `on_route`, a role check on memory
+state) would show that data in the paint. Leave such routes out; they are
+served with an empty mount and render live only:
+
+```rust
+CapsuleConfig::new()
+    .ssr(true)
+    .ssr_exclude("/account/*")
+    .ssr_exclude("/admin")
+```
+
+Behind an auth gate (`auth()` or `auth_with()`), the paint is **off** unless
+you allow it with `.ssr_behind_auth(true)`: the gate admits the visitor, but
+the paint doesn't know who they are, so it is only safe when every
+authenticated visitor may see all the shared data it renders. When it is on,
+it is rendered after the gate: a visitor who gets the login page instead of
+the app gets no static paint either.
+
+A path no route matches is answered `404 Not Found` (the page still loads and
+renders the router's not-found view). With a PWA, the service worker's
+offline fallback is the `/` page cached at install, so offline its paint
+shows the shared state of that time.
 
 ## Health Check Endpoints
 

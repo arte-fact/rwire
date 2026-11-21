@@ -1144,9 +1144,10 @@ where
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
         let assets = Arc::new(self.assets);
 
+        let gated = self.auth.is_some() || self.delegated.is_some();
         // Generate capsule - styled if config provided, basic otherwise.
         // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
-        let (capsule, pwa_assets) = if let Some(config) = capsule_config {
+        let (capsule, pwa_assets, ssr_exclude) = if let Some(config) = capsule_config {
             // If theme provider is set, override config theme with initial theme
             let config = if let Some(ref theme) = initial_theme {
                 config.theme(theme.clone())
@@ -1165,6 +1166,15 @@ where
             // the requested route and the current shared state. Leave a slot for
             // the markup and one for the utility CSS its classes reference (they'd
             // otherwise arrive lazily, after first paint).
+            // The paint has no visitor identity: behind an auth gate it is off
+            // unless the app allows it (`ssr_behind_auth`).
+            if config.ssr && gated && !config.ssr_behind_auth {
+                config.ssr = false;
+                println!(
+                    "SSR: off behind auth (the paint has no visitor identity); \
+                     allow it with CapsuleConfig::ssr_behind_auth(true)"
+                );
+            }
             if config.ssr {
                 config.ssr_html = SSR_HTML_SLOT.to_string();
             }
@@ -1184,13 +1194,13 @@ where
                 capsule.hash(&mut h);
                 Arc::new(p.freeze_served(&config.theme, h.finish()))
             });
-            (capsule, pwa_assets)
+            (capsule, pwa_assets, config.ssr_exclude)
         } else {
-            (capsule_gen::generate_capsule(), None)
+            (capsule_gen::generate_capsule(), None, Vec::new())
         };
 
         let capsule_size = capsule.len();
-        let capsule = Arc::new(Page::new(capsule));
+        let capsule = Arc::new(Page::new(capsule, &ssr_exclude));
         let composite_table = Arc::new(ctx.composite_table().clone());
 
         println!("Server listening on http://{}", self.addr);
@@ -1320,11 +1330,13 @@ enum Page {
         head: String,
         mid: String,
         tail: String,
+        /// Routes served without the paint ([`CapsuleConfig::ssr_exclude`]).
+        exclude: Vec<crate::router::RoutePattern>,
     },
 }
 
 impl Page {
-    fn new(capsule: String) -> Self {
+    fn new(capsule: String, exclude: &[String]) -> Self {
         let Some((head, rest)) = capsule.split_once(SSR_CSS_SLOT) else {
             return Page::Fixed(capsule);
         };
@@ -1335,6 +1347,10 @@ impl Page {
             head: head.to_string(),
             mid: mid.to_string(),
             tail: tail.to_string(),
+            exclude: exclude
+                .iter()
+                .map(|p| crate::router::RoutePattern::new(p))
+                .collect(),
         }
     }
 
@@ -1359,9 +1375,18 @@ impl Page {
         };
         let page = match self {
             Page::Fixed(capsule) => Cow::Borrowed(capsule.as_str()),
-            Page::Ssr { head, mid, tail } => {
-                let (html, css) = render_ssr(&root(), shared, path);
-                Cow::Owned([head.as_str(), &css, mid, &html, tail].concat())
+            Page::Ssr {
+                head,
+                mid,
+                tail,
+                exclude,
+            } => {
+                if exclude.iter().any(|p| p.matches(path).is_some()) {
+                    Cow::Owned([head.as_str(), mid, tail].concat())
+                } else {
+                    let (html, css) = render_ssr(&root(), shared, path);
+                    Cow::Owned([head.as_str(), &css, mid, &html, tail].concat())
+                }
             }
         };
         (status, page)
