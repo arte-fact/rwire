@@ -77,6 +77,8 @@ pub struct Pwa {
     theme_color: Option<String>,
     background_color: Option<String>,
     icons: Vec<PwaIcon>,
+    push: bool,
+    manifest_credentials: bool,
 }
 
 impl Pwa {
@@ -92,6 +94,8 @@ impl Pwa {
             theme_color: None,
             background_color: None,
             icons: Vec::new(),
+            push: false,
+            manifest_credentials: true,
         }
     }
 
@@ -152,9 +156,37 @@ impl Pwa {
         self
     }
 
+    /// Handle Web Push in the service worker (default off): a `push` event
+    /// shows a notification from its JSON payload (`title`, `body`, `url`,
+    /// optional `icon` and `tag`), and a click on it focuses the app's window
+    /// at that URL or opens one. Only same-origin URLs are followed; any
+    /// other falls back to the start URL. Subscribing and sending live in
+    /// the `rwire-push` crate; this is the browser half it relies on.
+    pub fn push_notifications(mut self, on: bool) -> Self {
+        self.push = on;
+        self
+    }
+
     /// Override the navigation scope (default `"/"`).
     pub fn scope(mut self, s: impl Into<Cow<'static, str>>) -> Self {
         self.scope = s.into();
+        self
+    }
+
+    /// Fetch the manifest with the page's credentials (cookies, HTTP auth):
+    /// `crossorigin="use-credentials"` on its `<link>`. **On by default.**
+    ///
+    /// Without it the browser requests the manifest *without* credentials, so
+    /// behind an HTTP auth in front of the app (a proxy's basic auth, an SSO
+    /// cookie) it gets a 401 and the app is not installable. The manifest is
+    /// served by the app itself, on the page's origin, so the credentials never
+    /// go anywhere else. rwire's own `auth()` / `auth_with()` serve the
+    /// manifest, the service worker and the icons before the gate, so they need
+    /// neither this nor a proxy exemption.
+    ///
+    /// Turn it off only to restore the previous markup.
+    pub fn manifest_credentials(mut self, on: bool) -> Self {
+        self.manifest_credentials = on;
         self
     }
 
@@ -190,10 +222,12 @@ impl Pwa {
     }
 
     /// The `<head>` fragment + SW-registration `<script>`, injected into the capsule
-    /// before it is hashed (this doesn't depend on the shell hash).
-    pub(crate) fn head(&self, theme: &Theme) -> String {
+    /// before it is hashed (this doesn't depend on the shell hash). `icon_link`
+    /// and `title`: whether to add `<link rel="icon">` and `<title>` (not when
+    /// the capsule has its own favicon or title).
+    pub(crate) fn head(&self, theme: &Theme, icon_link: bool, title: bool) -> String {
         let (theme_color, _) = self.colors(theme);
-        self.head_fragment(&theme_color, &self.effective_icons())
+        self.head_fragment(&theme_color, &self.effective_icons(), icon_link, title)
     }
 
     /// Freeze the served artifacts (manifest, service worker, icon bytes).
@@ -266,23 +300,64 @@ impl Pwa {
              addEventListener('fetch',e=>{{const r=e.request;if(r.method!=='GET')return;const u=new URL(r.url);\
              if(u.pathname==='/ready'||u.pathname==='/health'||u.pathname==='/metrics')return;\
              if(r.mode==='navigate'){{e.respondWith(fetch(r).catch(()=>caches.match('/')));return;}}\
-             if(SHELL.includes(u.pathname))e.respondWith(caches.match(r).then(c=>c||fetch(r)));}});\n"
+             if(SHELL.includes(u.pathname))e.respondWith(caches.match(r).then(c=>c||fetch(r)));}});\n{push}",
+            push = if self.push {
+                self.push_js(icons)
+            } else {
+                String::new()
+            },
+        )
+    }
+
+    /// The `push` and `notificationclick` handlers (see [`Pwa::push_notifications`]).
+    fn push_js(&self, icons: &[PwaIcon]) -> String {
+        let icon = icons.first().map(|i| i.path()).unwrap_or_default();
+        format!(
+            "const PN={name},PI={icon},PS={start};\n\
+             const same=u=>{{const h=s=>new URL(s,location.origin);try{{const x=h(u||PS);if(x.origin===location.origin)return x.href}}catch(_){{}}return h(PS).href}};\n\
+             addEventListener('push',e=>{{let d={{}};if(e.data){{try{{d=e.data.json()}}catch(_){{d={{body:e.data.text()}}}}}}\
+             e.waitUntil(registration.showNotification(d.title||PN,{{body:d.body||'',icon:d.icon||PI,tag:d.tag||undefined,data:{{url:same(d.url)}}}}));}});\n\
+             addEventListener('notificationclick',e=>{{e.notification.close();const u=same(e.notification.data&&e.notification.data.url);\
+             e.waitUntil(clients.matchAll({{type:'window',includeUncontrolled:true}}).then(cs=>{{for(const c of cs)if(c.url===u&&'focus'in c)return c.focus();return clients.openWindow(u)}}));}});\n",
+            name = json_str(&self.name),
+            icon = json_str(&icon),
+            start = json_str(&self.start_url),
         )
     }
 
     /// `<head>` fragment + the service-worker registration `<script>`.
-    fn head_fragment(&self, theme_color: &str, icons: &[PwaIcon]) -> String {
+    fn head_fragment(
+        &self,
+        theme_color: &str,
+        icons: &[PwaIcon],
+        icon_link: bool,
+        title: bool,
+    ) -> String {
         let first_icon = icons.first().map(|i| i.path()).unwrap_or_default();
+        let icon_link = if icon_link {
+            format!("<link rel=\"icon\" href=\"{first_icon}\">")
+        } else {
+            String::new()
+        };
+        let title = if title {
+            format!("<title>{}</title>", html_escape(&self.name))
+        } else {
+            String::new()
+        };
+        let crossorigin = if self.manifest_credentials {
+            " crossorigin=\"use-credentials\""
+        } else {
+            ""
+        };
         format!(
-            "<title>{name}</title>\
+            "{title}\
              <meta name=\"theme-color\" content=\"{theme_color}\">\
-             <link rel=\"manifest\" href=\"/manifest.webmanifest\">\
-             <link rel=\"icon\" href=\"{icon}\">\
+             <link rel=\"manifest\" href=\"/manifest.webmanifest\"{crossorigin}>\
+             {icon_link}\
              <link rel=\"apple-touch-icon\" href=\"{icon}\">\
              <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\
              <meta name=\"apple-mobile-web-app-title\" content=\"{short}\">\
              <script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js')</script>",
-            name = html_escape(&self.name),
             short = html_escape(self.short_name.as_deref().unwrap_or(&self.name)),
             icon = first_icon,
         )
@@ -381,9 +456,11 @@ mod tests {
 
     #[test]
     fn head_has_pwa_tags_and_registration() {
-        let h = sample().head(&Theme::dark());
+        let h = sample().head(&Theme::dark(), true, true);
         let h = &h;
-        assert!(h.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">"));
+        assert!(h.contains(
+            "<link rel=\"manifest\" href=\"/manifest.webmanifest\" crossorigin=\"use-credentials\">"
+        ));
         assert!(h.contains("<meta name=\"theme-color\""));
         assert!(h.contains("apple-touch-icon"));
         assert!(h.contains("serviceWorker"));
@@ -391,6 +468,89 @@ mod tests {
             h.contains("<title>My &quot;App&quot;</title>"),
             "title escaped: {h}"
         );
+    }
+
+    #[test]
+    fn push_handlers_follow_the_option() {
+        let off = assets().service_worker;
+        assert!(!off.contains("'push'"), "off by default: {off}");
+        assert!(!off.contains("notificationclick"));
+
+        let on = sample()
+            .push_notifications(true)
+            .freeze_served(&Theme::dark(), 12345)
+            .service_worker;
+        assert!(on.contains("addEventListener('push'"), "{on}");
+        assert!(on.contains("showNotification"));
+        assert!(on.contains("addEventListener('notificationclick'"));
+        assert!(on.contains("clients.openWindow"));
+        // The shell caching is untouched: the handlers are appended.
+        assert!(on.starts_with(off.as_str()));
+        // The app name is a JS string literal, escaped.
+        assert!(on.contains(r#"const PN="My \"App\"""#), "{on}");
+        // Off-origin URLs are not followed.
+        assert!(on.contains("x.origin===location.origin"));
+    }
+
+    /// The generated worker parses as JavaScript, with and without push
+    /// (needs node; skipped without it, like `wire_roundtrip`).
+    #[test]
+    fn service_worker_is_valid_javascript() {
+        if std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("node not found: skipping");
+            return;
+        }
+        for push in [false, true] {
+            let sw = sample()
+                .push_notifications(push)
+                .freeze_served(&Theme::dark(), 7)
+                .service_worker;
+            let path =
+                std::env::temp_dir().join(format!("rwire-sw-{}-{push}.js", std::process::id()));
+            std::fs::write(&path, &sw).unwrap();
+            let out = std::process::Command::new("node")
+                .arg("--check")
+                .arg(&path)
+                .output()
+                .unwrap();
+            std::fs::remove_file(&path).unwrap();
+            assert!(
+                out.status.success(),
+                "push={push}: {}\n{sw}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_credentials_can_be_turned_off() {
+        let h = sample()
+            .manifest_credentials(false)
+            .head(&Theme::dark(), true, true);
+        assert!(h.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">"));
+        assert!(!h.contains("crossorigin"), "{h}");
+        // The rest of the fragment, escaping included, is unchanged.
+        let on = sample().head(&Theme::dark(), true, true);
+        assert_eq!(h, on.replace(" crossorigin=\"use-credentials\"", ""));
+        assert!(h.contains("<title>My &quot;App&quot;</title>"), "{h}");
+    }
+
+    #[test]
+    fn manifest_credentials_keep_names_escaped() {
+        let h = Pwa::new("<b>A & \"B\"</b>")
+            .short_name("'s<")
+            .head(&Theme::dark(), true, true);
+        assert_eq!(h.matches("crossorigin=\"use-credentials\"").count(), 1);
+        assert!(
+            h.contains("<title>&lt;b&gt;A &amp; &quot;B&quot;&lt;/b&gt;</title>"),
+            "{h}"
+        );
+        assert!(!h.contains("<b>"), "{h}");
+        assert!(!h.contains("content=\"'s<\""), "{h}");
     }
 
     #[test]

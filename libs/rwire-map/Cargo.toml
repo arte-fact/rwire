@@ -9,4 +9,4 @@ keywords = ["web", "ui", "map", "svg"]
 categories = ["web-programming", "gui"]
 
 [dependencies]
-rwire = { path = "../rwire", version = "0.1.0" }
+rwire = { path = "../rwire", version = "0.1.0", default-features = false }
