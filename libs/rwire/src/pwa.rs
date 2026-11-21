@@ -77,6 +77,7 @@ pub struct Pwa {
     theme_color: Option<String>,
     background_color: Option<String>,
     icons: Vec<PwaIcon>,
+    manifest_credentials: bool,
 }
 
 impl Pwa {
@@ -92,6 +93,7 @@ impl Pwa {
             theme_color: None,
             background_color: None,
             icons: Vec::new(),
+            manifest_credentials: true,
         }
     }
 
@@ -155,6 +157,23 @@ impl Pwa {
     /// Override the navigation scope (default `"/"`).
     pub fn scope(mut self, s: impl Into<Cow<'static, str>>) -> Self {
         self.scope = s.into();
+        self
+    }
+
+    /// Fetch the manifest with the page's credentials (cookies, HTTP auth):
+    /// `crossorigin="use-credentials"` on its `<link>`. **On by default.**
+    ///
+    /// Without it the browser requests the manifest *without* credentials, so
+    /// behind an HTTP auth in front of the app (a proxy's basic auth, an SSO
+    /// cookie) it gets a 401 and the app is not installable. The manifest is
+    /// served by the app itself, on the page's origin, so the credentials never
+    /// go anywhere else. rwire's own `auth()` / `auth_with()` serve the
+    /// manifest, the service worker and the icons before the gate, so they need
+    /// neither this nor a proxy exemption.
+    ///
+    /// Turn it off only to restore the previous markup.
+    pub fn manifest_credentials(mut self, on: bool) -> Self {
+        self.manifest_credentials = on;
         self
     }
 
@@ -273,10 +292,15 @@ impl Pwa {
     /// `<head>` fragment + the service-worker registration `<script>`.
     fn head_fragment(&self, theme_color: &str, icons: &[PwaIcon]) -> String {
         let first_icon = icons.first().map(|i| i.path()).unwrap_or_default();
+        let crossorigin = if self.manifest_credentials {
+            " crossorigin=\"use-credentials\""
+        } else {
+            ""
+        };
         format!(
             "<title>{name}</title>\
              <meta name=\"theme-color\" content=\"{theme_color}\">\
-             <link rel=\"manifest\" href=\"/manifest.webmanifest\">\
+             <link rel=\"manifest\" href=\"/manifest.webmanifest\"{crossorigin}>\
              <link rel=\"icon\" href=\"{icon}\">\
              <link rel=\"apple-touch-icon\" href=\"{icon}\">\
              <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\
@@ -383,7 +407,9 @@ mod tests {
     fn head_has_pwa_tags_and_registration() {
         let h = sample().head(&Theme::dark());
         let h = &h;
-        assert!(h.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">"));
+        assert!(h.contains(
+            "<link rel=\"manifest\" href=\"/manifest.webmanifest\" crossorigin=\"use-credentials\">"
+        ));
         assert!(h.contains("<meta name=\"theme-color\""));
         assert!(h.contains("apple-touch-icon"));
         assert!(h.contains("serviceWorker"));
@@ -391,6 +417,31 @@ mod tests {
             h.contains("<title>My &quot;App&quot;</title>"),
             "title escaped: {h}"
         );
+    }
+
+    #[test]
+    fn manifest_credentials_can_be_turned_off() {
+        let h = sample().manifest_credentials(false).head(&Theme::dark());
+        assert!(h.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">"));
+        assert!(!h.contains("crossorigin"), "{h}");
+        // The rest of the fragment, escaping included, is unchanged.
+        let on = sample().head(&Theme::dark());
+        assert_eq!(h, on.replace(" crossorigin=\"use-credentials\"", ""));
+        assert!(h.contains("<title>My &quot;App&quot;</title>"), "{h}");
+    }
+
+    #[test]
+    fn manifest_credentials_keep_names_escaped() {
+        let h = Pwa::new("<b>A & \"B\"</b>")
+            .short_name("'s<")
+            .head(&Theme::dark());
+        assert_eq!(h.matches("crossorigin=\"use-credentials\"").count(), 1);
+        assert!(
+            h.contains("<title>&lt;b&gt;A &amp; &quot;B&quot;&lt;/b&gt;</title>"),
+            "{h}"
+        );
+        assert!(!h.contains("<b>"), "{h}");
+        assert!(!h.contains("content=\"'s<\""), "{h}");
     }
 
     #[test]
