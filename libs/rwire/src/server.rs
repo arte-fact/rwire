@@ -1702,16 +1702,41 @@ fn request_line(request: &str) -> (&str, &str) {
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
-/// The Prometheus export, with the registry's live connection count.
+/// The log line for a page request refused by the delegated gate: a refused
+/// credential, or an outage of the validator (it failed, timed out or no slot
+/// freed up in time), which says nothing about the credential.
+fn delegated_refusal_log(outage: bool) -> &'static str {
+    if outage {
+        "delegated auth: validator unavailable (outage or timeout), request sent to login"
+    } else {
+        "delegated auth: credential refused, sent to login"
+    }
+}
+
+/// Whether the request is for the Prometheus export: `GET` or `HEAD` of
+/// `/metrics`, with or without a query. `Some(true)` for `HEAD` (head only).
+fn metrics_request(request: &str) -> Option<bool> {
+    let (method, path) = request_line(request);
+    let bare = path.split('?').next().unwrap_or(path);
+    match (method, bare) {
+        ("GET", "/metrics") => Some(false),
+        ("HEAD", "/metrics") => Some(true),
+        _ => None,
+    }
+}
+
+/// The Prometheus export, with the registry's live connection count; only
+/// its head when `head_only`.
 async fn serve_metrics_endpoint(
     stream: TcpStream,
     registry: &ConnectionRegistry,
     metrics: &Metrics,
+    head_only: bool,
 ) -> std::io::Result<()> {
     metrics
         .active_connections
         .set(registry.total_connections() as u64);
-    crate::health::serve_metrics(stream, &metrics.to_prometheus()).await
+    crate::health::serve_metrics_response(stream, &metrics.to_prometheus(), head_only).await
 }
 
 /// Answer a `GET` / `HEAD` for a file of one of `dirs` that `eligible` accepts.
@@ -1979,20 +2004,30 @@ async fn handle_client<F>(
             }
             return;
         }
-        // `/metrics` is public without a gate, or when the config says so;
-        // otherwise it is served past the gate (below).
-        let metrics_public = config.public_metrics || (auth.is_none() && delegated.is_none());
-        if path == "/health" || path == "/ready" || (path == "/metrics" && metrics_public) {
+        if path == "/health" || path == "/ready" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             let max = config.max_connections;
             let result = match path {
                 "/health" => crate::health::serve_health(stream, &registry, max).await,
-                "/ready" => crate::health::serve_ready(stream, &registry, max).await,
-                _ => serve_metrics_endpoint(stream, &registry, &metrics).await,
+                _ => crate::health::serve_ready(stream, &registry, max).await,
             };
             if let Err(e) = result {
                 eprintln!("[{}] {} endpoint error: {}", peer_addr, path, e);
+            }
+            return;
+        }
+    }
+
+    // `/metrics` is public without a gate, or when the config says so;
+    // otherwise it is served past the gate (below), matched the same way.
+    let metrics_public = config.public_metrics || (auth.is_none() && delegated.is_none());
+    if metrics_public {
+        if let Some(head_only) = metrics_request(&peek_str) {
+            let mut drain = vec![0u8; n];
+            let _ = stream.read_exact(&mut drain).await;
+            if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics, head_only).await {
+                eprintln!("[{}] /metrics endpoint error: {}", peer_addr, e);
             }
             return;
         }
@@ -2148,9 +2183,9 @@ async fn handle_client<F>(
                 return;
             }
         }
-        match delegated.identify(&peek_str).await {
-            Some(found) => identity = Some(found),
-            None => {
+        match delegated.verdict(&peek_str).await {
+            crate::delegated_auth::Validation::Valid(found) => identity = Some(found),
+            failed => {
                 if capsule::is_websocket_upgrade(&peek_str) {
                     // As with the form gate, a stale tab's reconnects are expected:
                     // the client reloads after repeated rejects and lands on the login.
@@ -2161,19 +2196,21 @@ async fn handle_client<F>(
                     let target = delegated.login_redirect(path, host.as_deref());
                     let mut buf = vec![0u8; n];
                     let _ = stream.read_exact(&mut buf).await;
-                    // An anonymous visit is routine: not logged. A rejected cookie
-                    // is, at most once a minute (a flood of forged cookies must
-                    // not flood the log).
+                    // An anonymous visit is routine: not logged. A refused cookie
+                    // and an unreachable validator are, each at most once a
+                    // minute (a flood of forged cookies must not flood the log).
                     if delegated.has_credential(&peek_str) {
-                        static LAST_LOG: AtomicU64 = AtomicU64::new(0);
+                        static LAST_REFUSED: AtomicU64 = AtomicU64::new(0);
+                        static LAST_OUTAGE: AtomicU64 = AtomicU64::new(0);
+                        let outage =
+                            matches!(failed, crate::delegated_auth::Validation::Unavailable);
+                        let last = if outage { &LAST_OUTAGE } else { &LAST_REFUSED };
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map_or(0, |d| d.as_secs());
-                        if now >= LAST_LOG.load(Ordering::Relaxed) + 60 {
-                            LAST_LOG.store(now, Ordering::Relaxed);
-                            println!(
-                                "[{peer_addr}] delegated auth: credential refused, sent to login"
-                            );
+                        if now >= last.load(Ordering::Relaxed) + 60 {
+                            last.store(now, Ordering::Relaxed);
+                            println!("[{peer_addr}] {}", delegated_refusal_log(outage));
                         }
                     }
                     let _ = match target {
@@ -2187,10 +2224,10 @@ async fn handle_client<F>(
     }
 
     // `/metrics` behind a gate: the request got through it.
-    if peek_str.starts_with("GET ") && request_line(&peek_str).1 == "/metrics" {
+    if let Some(head_only) = metrics_request(&peek_str) {
         let mut drain = vec![0u8; n];
         let _ = stream.read_exact(&mut drain).await;
-        if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics).await {
+        if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics, head_only).await {
             eprintln!("[{}] /metrics endpoint error: {}", peer_addr, e);
         }
         return;
@@ -3278,7 +3315,7 @@ where
                 use crate::delegated_auth::{
                     Validation, CLOSE_HUB_UNAVAILABLE, CLOSE_UNAUTHORIZED,
                 };
-                let close = match auth.revalidate(head).await {
+                let close = match auth.verdict(head).await {
                     Validation::Valid(_) => {
                         confirmed_at = Instant::now();
                         outage_logged = false;
@@ -3566,7 +3603,10 @@ where
 
 #[cfg(test)]
 mod auth_tests {
-    use super::{request_body, request_line, rewrite_proxy_head, route_path, url_decode, AuthGate};
+    use super::{
+        delegated_refusal_log, metrics_request, request_body, request_line, rewrite_proxy_head,
+        route_path, url_decode, AuthGate,
+    };
 
     #[test]
     fn url_decode_handles_plus_and_percent() {
@@ -3607,6 +3647,31 @@ mod auth_tests {
         assert_eq!(route_path("http://host"), "/");
         assert_eq!(route_path("http://host?a=/b"), "/");
         assert_eq!(route_path(""), "");
+    }
+
+    #[test]
+    fn metrics_requests_match_like_the_public_route() {
+        assert_eq!(
+            metrics_request("GET /metrics HTTP/1.1\r\n\r\n"),
+            Some(false)
+        );
+        assert_eq!(
+            metrics_request("GET /metrics?x=1 HTTP/1.1\r\n\r\n"),
+            Some(false)
+        );
+        assert_eq!(
+            metrics_request("HEAD /metrics HTTP/1.1\r\n\r\n"),
+            Some(true)
+        );
+        assert_eq!(metrics_request("POST /metrics HTTP/1.1\r\n\r\n"), None);
+        assert_eq!(metrics_request("GET /metrics/x HTTP/1.1\r\n\r\n"), None);
+    }
+
+    #[test]
+    fn an_outage_is_not_logged_as_a_refused_credential() {
+        assert!(delegated_refusal_log(false).contains("credential refused"));
+        assert!(!delegated_refusal_log(true).contains("refused"));
+        assert!(delegated_refusal_log(true).contains("unavailable"));
     }
 
     #[test]

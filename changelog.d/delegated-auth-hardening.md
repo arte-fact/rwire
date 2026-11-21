@@ -3,6 +3,8 @@
 - **Bounded validations**: one validation per cookie at a time (concurrent
   requests share it), at most `max_concurrent_validations` (default 16) at
   once, each within `timeout` including the wait for a slot (fail closed).
+  A validation runs in its own task, so it ends and frees its slot even
+  when every request waiting on it is dropped.
   A WebSocket handshake over the admission caps is refused before its cookie
   is validated.
 - **Negative cache**: a rejected cookie is remembered for `negative_ttl`
@@ -19,7 +21,9 @@
   outage. `DelegatedAuth::new` keeps its contract: `None` is a revocation.
 - **`/metrics` is behind the auth gate** when `auth()` or `auth_with()` is
   set (public without a gate, as before); `ServerConfig::public_metrics(true)`
-  exposes it. `/health` and `/ready` stay public.
+  exposes it. `/health` and `/ready` stay public. Both routes answer `GET`
+  and `HEAD` of `/metrics`, with or without a query.
 - Re-validation keeps only the session cookie of the handshake; anonymous
-  visits are not logged and refused cookies at most once a minute; a
+  visits are not logged, refused cookies and validator outages are, each
+  at most once a minute and under its own message; a
   same-origin login URL is answered 401 instead of redirecting to itself.
