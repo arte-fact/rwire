@@ -165,6 +165,17 @@ Apply a named palette with `Theme::dark().palette(rwire_themes::palettes::nord()
 `rwire-themes` crate ships nord, indigo, catppuccin, dracula, solarized, gruvbox, tokyo_night,
 rose_pine, and one_dark.
 
+### .favicon(bytes, content_type)
+
+```rust
+CapsuleConfig::new().favicon(include_bytes!("../assets/icon.png"), "image/png")
+```
+
+Serves the icon at `/favicon.ico` (before any auth gate, like `.asset(..)`)
+and links it from the page's `<head>`. Without it, the browser's request for
+`/favicon.ico` gets a short 404. With a PWA, this icon is the page's
+`<link rel="icon">`; the PWA icons still serve the manifest and home screen.
+
 ### .font(FontFace)
 
 Adds a font to the capsule. Multiple fonts can be added by chaining `.font()` calls:

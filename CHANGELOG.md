@@ -62,6 +62,16 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
 
+### Changed: lighter HTTP answers for the capsule
+
+- **Short 404**: a path the app has no page for gets a one-line `404 Not
+  Found` instead of the 20–30 KB page. With the router, unless it declares a
+  not-found view (`Router::not_found`, then the page is served with 404 so it
+  renders); without one, an app with `on_route` still gets the page on every
+  path, and an app with neither only at `/`.
+- **`CapsuleConfig::favicon(bytes, content_type)`** serves `/favicon.ico`
+  and links it from the `<head>` (replacing the PWA's `<link rel="icon">`).
+
 ### Added: asset folders served from disk
 
 - `ServerWithRoot::asset_dir(prefix, dir)` serves a folder read on each

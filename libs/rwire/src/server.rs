@@ -741,7 +741,7 @@ struct ServedFiles {
 /// the PWA assets, so a browser can fetch it without a session.
 struct Asset {
     path: String,
-    content_type: &'static str,
+    content_type: Cow<'static, str>,
     body: Cow<'static, [u8]>,
     /// The `Cache-Control` directive it is served with.
     cache: &'static str,
@@ -853,7 +853,7 @@ where
     ) -> Self {
         self.assets.push(Asset {
             path: path.into(),
-            content_type,
+            content_type: Cow::Borrowed(content_type),
             body: body.into(),
             cache: ASSET_CACHE,
         });
@@ -871,7 +871,7 @@ where
     ) -> Self {
         self.assets.push(Asset {
             path: path.into(),
-            content_type,
+            content_type: Cow::Borrowed(content_type),
             body: body.into(),
             cache: ASSET_CACHE_FOREVER,
         });
@@ -1186,8 +1186,19 @@ where
         // Fold a builder-level base_path into the capsule config as the final step, so it wins
         // regardless of chain order and works with or without a prior `.capsule_config(...)`.
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
+        let mut files = self.assets;
+        // The capsule's favicon is served like an `asset()` (an explicit
+        // `.asset("/favicon.ico", ..)` registered earlier wins).
+        if let Some(icon) = capsule_config.as_ref().and_then(|c| c.favicon.clone()) {
+            files.push(Asset {
+                path: "/favicon.ico".to_string(),
+                content_type: Cow::Owned(icon.content_type),
+                body: icon.bytes,
+                cache: ASSET_CACHE,
+            });
+        }
         let assets = Arc::new(ServedFiles {
-            assets: self.assets,
+            assets: files,
             dirs: self.asset_dirs,
         });
 
@@ -1969,7 +1980,7 @@ async fn handle_client<F>(
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             if let Err(e) =
-                crate::health::serve_static_cached(stream, a.content_type, &a.body, a.cache).await
+                crate::health::serve_static_cached(stream, &a.content_type, &a.body, a.cache).await
             {
                 eprintln!("[{}] {} error: {}", peer_addr, bare, e);
             }

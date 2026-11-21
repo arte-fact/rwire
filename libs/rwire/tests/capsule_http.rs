@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use rwire::{el, handler, El, ElementBuilder, Server, State};
+use rwire::{el, handler, CapsuleConfig, El, ElementBuilder, Pwa, Server, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -92,4 +92,62 @@ async fn an_app_with_on_route_routes_every_path() {
     let r = text(&get(19182, "/inbox/42", "").await);
     assert!(r.starts_with("HTTP/1.1 200 OK"), "{r}");
     assert!(r.contains("<script>"));
+}
+
+const ICON: &[u8] = b"\x89PNG fake icon";
+
+/// The response body (after the blank line).
+fn body(raw: &[u8]) -> &[u8] {
+    let split = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("no head");
+    &raw[split + 4..]
+}
+
+/// `CapsuleConfig::favicon` serves `/favicon.ico` (before the auth gate,
+/// like the other fixed files) and links it, once, even with a PWA.
+#[tokio::test]
+async fn the_favicon_is_served_and_linked() {
+    tokio::spawn(async {
+        let _ = Server::bind("127.0.0.1:19184")
+            .unwrap()
+            .root(page)
+            .capsule_config(
+                CapsuleConfig::new()
+                    .favicon(ICON, "image/png")
+                    .pwa(Pwa::new("Office")),
+            )
+            .auth("admin", "secret")
+            .run()
+            .await;
+    });
+    wait_up(19184).await;
+    let r = get(19184, "/favicon.ico", "").await;
+    assert!(text(&r).starts_with("HTTP/1.1 200 OK"), "{}", text(&r));
+    assert!(text(&r).contains("Content-Type: image/png\r\n"));
+    assert_eq!(body(&r), ICON);
+
+    // The page (behind the login here, so read it from an open twin).
+    tokio::spawn(async {
+        let _ = Server::bind("127.0.0.1:19185")
+            .unwrap()
+            .root(page)
+            .capsule_config(
+                CapsuleConfig::new()
+                    .favicon(ICON, "image/png")
+                    .pwa(Pwa::new("Office")),
+            )
+            .run()
+            .await;
+    });
+    wait_up(19185).await;
+    let page = text(&get(19185, "/", "").await);
+    assert_eq!(page.matches("rel=\"icon\"").count(), 1, "{page}");
+    assert!(
+        page.contains("<link rel=\"icon\" href=\"/favicon.ico\" type=\"image/png\">"),
+        "{page}"
+    );
+    // The PWA keeps its home-screen icon.
+    assert!(page.contains("apple-touch-icon"));
 }
