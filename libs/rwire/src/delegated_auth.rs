@@ -164,6 +164,23 @@ pub const DEFAULT_CACHE_CAPACITY: usize = 1024;
 /// Default time a validation may take before it counts as a failure.
 pub const DEFAULT_VALIDATE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// A cache key: the SHA-256 of the credential, never the credential itself,
+/// so a memory dump or a stray `Debug` of the cache shows no token.
+type Key = [u8; 32];
+
+fn key(token: &str) -> Key {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token.as_bytes()).into()
+}
+
+/// Validations remembered for a while, keyed by [`Key`].
+struct Cache {
+    /// Successful validations.
+    valid: HashMap<Key, (Identity, Instant)>,
+    /// When expired entries were last swept.
+    swept: Instant,
+}
+
 /// Delegated authentication settings and cache. See the [module docs](self).
 pub struct DelegatedAuth {
     cookie: String,
@@ -172,8 +189,7 @@ pub struct DelegatedAuth {
     cache_ttl: Duration,
     cache_capacity: usize,
     timeout: Duration,
-    /// Successful validations only, keyed by cookie value.
-    cache: Mutex<HashMap<String, (Identity, Instant)>>,
+    cache: Mutex<Cache>,
 }
 
 impl DelegatedAuth {
@@ -194,7 +210,10 @@ impl DelegatedAuth {
             cache_ttl: DEFAULT_CACHE_TTL,
             cache_capacity: DEFAULT_CACHE_CAPACITY,
             timeout: DEFAULT_VALIDATE_TIMEOUT,
-            cache: Mutex::new(HashMap::new()),
+            cache: Mutex::new(Cache {
+                valid: HashMap::new(),
+                swept: Instant::now(),
+            }),
         }
     }
 
@@ -215,8 +234,8 @@ impl DelegatedAuth {
         self
     }
 
-    /// The most validations kept at once (default 1024). When full, expired
-    /// entries go first, then the oldest one.
+    /// The most validations kept at once (default 1024). Expired entries are
+    /// swept once per TTL; when the cache is still full, the oldest goes.
     pub fn cache_capacity(mut self, capacity: usize) -> Self {
         self.cache_capacity = capacity.max(1);
         self
@@ -237,8 +256,8 @@ impl DelegatedAuth {
     pub(crate) async fn identify(&self, head: &str) -> Option<Identity> {
         let request = AuthRequest::from_head(head);
         let token = request.cookie(&self.cookie).filter(|t| !t.is_empty())?;
-        let token = token.to_string();
-        if let Some(identity) = self.cached(&token) {
+        let key = key(token);
+        if let Some(identity) = self.cached(&key) {
             return Some(identity);
         }
         let validation = (self.validate)(request);
@@ -246,34 +265,47 @@ impl DelegatedAuth {
             .await
             .ok()
             .flatten()?;
-        self.remember(token, identity.clone());
+        self.remember(key, identity.clone());
         Some(identity)
     }
 
-    fn cached(&self, token: &str) -> Option<Identity> {
-        let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+    fn lock(&self) -> std::sync::MutexGuard<'_, Cache> {
+        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        // Lazy sweep, once per TTL: expired entries don't linger until the
+        // cache happens to fill up.
+        if cache.swept.elapsed() >= self.cache_ttl {
+            let ttl = self.cache_ttl;
+            cache.valid.retain(|_, (_, at)| at.elapsed() < ttl);
+            cache.swept = Instant::now();
+        }
         cache
-            .get(token)
+    }
+
+    fn cached(&self, key: &Key) -> Option<Identity> {
+        self.lock()
+            .valid
+            .get(key)
             .filter(|(_, at)| at.elapsed() < self.cache_ttl)
             .map(|(identity, _)| identity.clone())
     }
 
-    fn remember(&self, token: String, identity: Identity) {
-        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
-        if cache.len() >= self.cache_capacity && !cache.contains_key(&token) {
+    fn remember(&self, key: Key, identity: Identity) {
+        let mut cache = self.lock();
+        if cache.valid.len() >= self.cache_capacity && !cache.valid.contains_key(&key) {
             let ttl = self.cache_ttl;
-            cache.retain(|_, (_, at)| at.elapsed() < ttl);
-            if cache.len() >= self.cache_capacity {
+            cache.valid.retain(|_, (_, at)| at.elapsed() < ttl);
+            if cache.valid.len() >= self.cache_capacity {
                 let oldest = cache
+                    .valid
                     .iter()
                     .min_by_key(|(_, (_, at))| *at)
-                    .map(|(k, _)| k.clone());
+                    .map(|(k, _)| *k);
                 if let Some(oldest) = oldest {
-                    cache.remove(&oldest);
+                    cache.valid.remove(&oldest);
                 }
             }
         }
-        cache.insert(token, (identity, Instant::now()));
+        cache.valid.insert(key, (identity, Instant::now()));
     }
 
     #[cfg(test)]
@@ -281,7 +313,14 @@ impl DelegatedAuth {
         self.cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .valid
             .len()
+    }
+
+    #[cfg(test)]
+    fn cache_keys(&self) -> Vec<Key> {
+        let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        cache.valid.keys().copied().collect()
     }
 
     /// The redirect target for an anonymous page request to `path`, if a login
@@ -405,6 +444,55 @@ mod tests {
             assert!(auth.identify(&head(&format!("t{i}"))).await.is_some());
         }
         assert_eq!(auth.cache_len(), 3);
+    }
+
+    /// The cache holds SHA-256 digests, never the token; nothing of it shows
+    /// in `Debug` either.
+    #[tokio::test]
+    async fn cache_keys_are_hashes_of_the_token() {
+        let token = "s3cret-session-token";
+        let auth = DelegatedAuth::new("sid", |_req: AuthRequest| async {
+            Some(Identity::new("ada"))
+        });
+        assert!(auth.identify(&head(token)).await.is_some());
+        let keys = auth.cache_keys();
+        assert_eq!(keys, vec![key(token)]);
+        // SHA-256 of "abc" (FIPS 180-2 test vector).
+        assert_eq!(
+            key("abc"),
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad
+            ]
+        );
+        let bytes: Vec<u8> = keys.concat();
+        assert!(
+            !bytes.windows(token.len()).any(|w| w == token.as_bytes()),
+            "the token is stored in clear"
+        );
+        let printed = format!("{auth:?}");
+        assert!(!printed.contains(token), "{printed}");
+    }
+
+    /// Expired entries go on the next access after a TTL, not only when the
+    /// cache is full.
+    #[tokio::test]
+    async fn expired_entries_are_swept() {
+        let auth = DelegatedAuth::new("sid", |req: AuthRequest| {
+            let id = req.cookie("sid").unwrap_or("").to_string();
+            async move { Some(Identity::new(id)) }
+        })
+        .cache_ttl(Duration::from_millis(30));
+        for i in 0..5 {
+            assert!(auth.identify(&head(&format!("t{i}"))).await.is_some());
+        }
+        assert_eq!(auth.cache_len(), 5);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        // Any access sweeps; anonymous requests never touch the cache, so use
+        // one token: the four others are gone, the new one is cached.
+        assert!(auth.identify(&head("fresh")).await.is_some());
+        assert_eq!(auth.cache_len(), 1);
     }
 
     #[tokio::test]
