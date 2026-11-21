@@ -1186,6 +1186,13 @@ where
         // Fold a builder-level base_path into the capsule config as the final step, so it wins
         // regardless of chain order and works with or without a prior `.capsule_config(...)`.
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
+        // The URL prefix the app is mounted under, for paths sent back to the
+        // browser (the login redirect's `next`).
+        let base_path: Arc<str> = capsule_config
+            .as_ref()
+            .map(|c| c.base_path.as_str())
+            .unwrap_or("")
+            .into();
         let assets = Arc::new(ServedFiles {
             assets: self.assets,
             dirs: self.asset_dirs,
@@ -1320,6 +1327,7 @@ where
             let metrics = Arc::clone(&metrics);
             let pwa_assets = pwa_assets.clone();
             let assets = Arc::clone(&assets);
+            let base_path = Arc::clone(&base_path);
             connections.spawn(async move {
                 handle_client(
                     stream,
@@ -1337,6 +1345,7 @@ where
                     metrics,
                     pwa_assets,
                     assets,
+                    base_path,
                 )
                 .await;
             });
@@ -1934,6 +1943,7 @@ async fn handle_client<F>(
     metrics: Arc<Metrics>,
     pwa_assets: Option<Arc<crate::pwa::PwaAssets>>,
     assets: Arc<ServedFiles>,
+    base_path: Arc<str>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -2153,7 +2163,7 @@ async fn handle_client<F>(
                 } else {
                     let (_, path) = request_line(&peek_str);
                     let host = header_value(&peek_str, "host");
-                    let target = delegated.login_redirect(path, host.as_deref());
+                    let target = delegated.login_redirect(path, host.as_deref(), &base_path);
                     let mut buf = vec![0u8; n];
                     let _ = stream.read_exact(&mut buf).await;
                     // An anonymous visit is routine: not logged. A rejected cookie

@@ -87,6 +87,9 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
 - Re-validation keeps only the session cookie of the handshake; anonymous
   visits are not logged and refused cookies at most once a minute; a
   same-origin login URL is answered 401 instead of redirecting to itself.
+- Under a `base_path`, the login redirect's `next` carries the prefix
+  (`/rwire/s/x` → `next=%2Frwire%2Fs%2Fx`), and the loop guard compares the
+  login page with the full path.
 
 ### Added: asset folders served from disk
 

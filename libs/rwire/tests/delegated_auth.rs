@@ -596,3 +596,29 @@ fn status_codes_are_read_from_any_http_version() {
     assert_eq!(status_code("garbage"), None);
     assert_eq!(status_code(""), None);
 }
+
+/// Behind a proxy that strips `/rwire`, the login redirect's `next` carries
+/// the prefix, so the user comes back to the page they asked for.
+#[tokio::test]
+async fn the_login_next_includes_the_base_path() {
+    let hub = Hub::start(19173).await;
+    let auth = hub_auth(19173).login_url("/login?next=rwire");
+    tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:19076")
+            .unwrap()
+            .base_path("/rwire")
+            .root(app)
+            .auth_with(auth)
+            .run()
+            .await;
+    });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    // What the proxy forwards for `/rwire/s/office/x`.
+    let page = get(19076, "/s/office/x", None).await;
+    assert!(page.starts_with("HTTP/1.1 303"), "{page}");
+    assert!(
+        page.contains("Location: /login?next=rwire&next=%2Frwire%2Fs%2Foffice%2Fx\r\n"),
+        "{page}"
+    );
+    assert_eq!(hub.calls(), 0);
+}

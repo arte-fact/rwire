@@ -398,6 +398,10 @@ impl DelegatedAuth {
     /// (`/login`). In the latter case the login page itself is answered `401`
     /// instead of being redirected to itself.
     ///
+    /// When the app is mounted under a prefix (`base_path`, a proxy strips it),
+    /// `next` carries the prefix: a request for `/rwire/s/x` sends
+    /// `next=%2Frwire%2Fs%2Fx`, the path the browser must come back to.
+    ///
     /// Without a login URL, such requests get a plain `401`. WebSocket
     /// handshakes always get `401`.
     pub fn login_url(mut self, url: impl Into<String>) -> Self {
@@ -612,7 +616,19 @@ impl DelegatedAuth {
     /// URL is configured and is not the requested page itself: a login URL on
     /// this app's origin (a path, or an absolute URL whose host is `host`, the
     /// request's `Host`) that names `path` would redirect to itself forever.
-    pub(crate) fn login_redirect(&self, path: &str, host: Option<&str>) -> Option<String> {
+    ///
+    /// `base` is the URL prefix the app is mounted under (`/rwire`, or empty):
+    /// a proxy strips it before rwire sees `path`, so it is put back, both in
+    /// `next` (where the browser must return) and for the loop check (the
+    /// login page's path is a path on the origin, not on the app).
+    pub(crate) fn login_redirect(
+        &self,
+        path: &str,
+        host: Option<&str>,
+        base: &str,
+    ) -> Option<String> {
+        let path = format!("{base}{path}");
+        let path = path.as_str();
         let url = self.login_url.as_deref()?;
         let login_path = match url.split_once("://") {
             Some((_, rest)) => {
@@ -991,16 +1007,16 @@ mod tests {
     #[test]
     fn login_redirect_encodes_next() {
         let auth = counting(Arc::new(AtomicUsize::new(0)));
-        assert_eq!(auth.login_redirect("/", None), None);
+        assert_eq!(auth.login_redirect("/", None, ""), None);
         let auth = auth.login_url("https://hub.example/login");
         assert_eq!(
-            auth.login_redirect("/inbox?tab=2&x=a b", Some("app.example"))
+            auth.login_redirect("/inbox?tab=2&x=a b", Some("app.example"), "")
                 .as_deref(),
             Some("https://hub.example/login?next=%2Finbox%3Ftab%3D2%26x%3Da%20b")
         );
         let auth = counting(Arc::new(AtomicUsize::new(0))).login_url("/login?app=voice");
         assert_eq!(
-            auth.login_redirect("/", None).as_deref(),
+            auth.login_redirect("/", None, "").as_deref(),
             Some("/login?app=voice&next=%2F")
         );
     }
@@ -1009,21 +1025,44 @@ mod tests {
     #[test]
     fn login_redirect_never_loops_on_its_own_page() {
         let relative = counting(Arc::new(AtomicUsize::new(0))).login_url("/login?app=voice");
-        assert_eq!(relative.login_redirect("/login", None), None);
-        assert_eq!(relative.login_redirect("/login?next=%2F", None), None);
-        assert!(relative.login_redirect("/inbox", None).is_some());
+        assert_eq!(relative.login_redirect("/login", None, ""), None);
+        assert_eq!(relative.login_redirect("/login?next=%2F", None, ""), None);
+        assert!(relative.login_redirect("/inbox", None, "").is_some());
 
         let absolute =
             counting(Arc::new(AtomicUsize::new(0))).login_url("https://app.example/login");
-        assert_eq!(absolute.login_redirect("/login", Some("APP.example")), None);
+        assert_eq!(
+            absolute.login_redirect("/login", Some("APP.example"), ""),
+            None
+        );
         assert!(absolute
-            .login_redirect("/inbox", Some("app.example"))
+            .login_redirect("/inbox", Some("app.example"), "")
             .is_some());
         // Another origin's /login is not this app's page.
         assert!(absolute
-            .login_redirect("/login", Some("other.example"))
+            .login_redirect("/login", Some("other.example"), "")
             .is_some());
-        assert!(absolute.login_redirect("/login", None).is_some());
+        assert!(absolute.login_redirect("/login", None, "").is_some());
+    }
+
+    /// Under a base path, `next` is the path the browser asked for (prefix
+    /// included), and only the origin's own login page is not redirected.
+    #[test]
+    fn login_redirect_puts_the_base_path_back() {
+        let auth = counting(Arc::new(AtomicUsize::new(0))).login_url("/login?next=rwire");
+        assert_eq!(
+            auth.login_redirect("/s/office/x", None, "/rwire")
+                .as_deref(),
+            Some("/login?next=rwire&next=%2Frwire%2Fs%2Foffice%2Fx")
+        );
+        assert_eq!(
+            auth.login_redirect("/", None, "/rwire").as_deref(),
+            Some("/login?next=rwire&next=%2Frwire%2F")
+        );
+        // The app's own `/login` (`/rwire/login` on the origin) is not the
+        // login page: it is redirected; without the prefix it would loop.
+        assert!(auth.login_redirect("/login", None, "/rwire").is_some());
+        assert_eq!(auth.login_redirect("/login", None, ""), None);
     }
 
     /// The re-validation head keeps the session cookie, not the rest.
