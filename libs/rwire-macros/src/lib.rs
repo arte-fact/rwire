@@ -117,6 +117,14 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    // Persisted storage needs rwire's `persist` feature: a compile error
+    // (from rwire, which knows its features) rather than a silent fallback.
+    let persist_check = if storage_type.to_string().contains("Persisted") {
+        quote! { rwire::__persisted_storage_check! {} }
+    } else {
+        quote! {}
+    };
+
     // Generate SCHEMA constant for persisted types
     let schema_impl = if storage_type.to_string().contains("Persisted") && !table_name.is_empty() {
         let data_fields = match &input.data {
@@ -190,6 +198,8 @@ pub fn derive_state(input: TokenStream) -> TokenStream {
         #marker_trait_impl
 
         #schema_impl
+
+        #persist_check
 
         #field_consts_impl
     };
