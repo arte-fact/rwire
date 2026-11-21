@@ -1123,7 +1123,35 @@ where
             return Err(AUTH_CONFLICT.into());
         }
         let listener = bind_reusable(self.addr)?;
+        // Boxed: the serving future is large, keep `run()`'s own small.
+        Box::pin(self.serve_until(listener, shutdown)).await
+    }
 
+    /// Run the server on a listener the caller bound, instead of the address
+    /// given to [`Server::bind`] (which is then ignored). Binding port 0
+    /// yourself and reading `local_addr()` gives a free port, which is what
+    /// tests want:
+    ///
+    /// ```ignore
+    /// let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    /// let addr = listener.local_addr()?;
+    /// tokio::spawn(Server::bind("127.0.0.1:0")?.root(app).run_on(listener));
+    /// // `addr` accepts connections already: no sleep needed.
+    /// ```
+    pub async fn run_on(self, listener: std::net::TcpListener) -> Result<(), Box<dyn Error>> {
+        if self.auth.is_some() && self.delegated.is_some() {
+            return Err(AUTH_CONFLICT.into());
+        }
+        listener.set_nonblocking(true)?;
+        let listener = TcpListener::from_std(listener)?;
+        Box::pin(self.serve_until(listener, std::future::pending())).await
+    }
+
+    async fn serve_until(
+        self,
+        listener: TcpListener,
+        shutdown: impl std::future::Future<Output = ()> + Send,
+    ) -> Result<(), Box<dyn Error>> {
         // Use provided shared state or create new
         let shared = self
             .shared
@@ -1259,7 +1287,10 @@ where
         let capsule = Arc::new(Page::new(capsule, &ssr_exclude));
         let composite_table = Arc::new(ctx.composite_table().clone());
 
-        println!("Server listening on http://{}", self.addr);
+        println!(
+            "Server listening on http://{}",
+            listener.local_addr().unwrap_or(self.addr)
+        );
         println!("Capsule: {capsule_size} bytes");
 
         let root = Arc::new(self.root);

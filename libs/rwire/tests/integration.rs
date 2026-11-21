@@ -4,7 +4,6 @@ use rwire::{
     el, El, ElementBuilder, Ev, HandlerSpec, MemoryState, ProxyResolver, Server, ServerConfig,
     State, StorageType,
 };
-use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -91,19 +90,17 @@ fn build_simple() -> ElementBuilder {
 #[tokio::test]
 async fn test_server_accepts_http() {
     // Start server in background
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19001")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
-            .run()
+            .run_on(listener)
             .await;
     });
 
-    // Give server time to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
     // Connect and send HTTP request
-    let mut stream = TcpStream::connect("127.0.0.1:19001").await.unwrap();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
@@ -134,17 +131,16 @@ async fn test_server_accepts_http() {
 /// sent exactly when its opcode is.
 #[tokio::test]
 async fn test_capsule_ships_empty_name_maps() {
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19002")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
-            .run()
+            .run_on(listener)
             .await;
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let mut stream = TcpStream::connect("127.0.0.1:19002").await.unwrap();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
@@ -168,9 +164,10 @@ async fn test_capsule_ships_empty_name_maps() {
 
 /// A minimal upstream that echoes the request path it received, so a proxy test can assert the
 /// prefix was stripped. Responds `Connection: close` so the reader sees EOF.
-async fn spawn_echo_upstream(addr: &'static str) -> tokio::task::JoinHandle<()> {
-    let listener = TcpListener::bind(addr).await.unwrap();
-    tokio::spawn(async move {
+async fn spawn_echo_upstream() -> (tokio::task::JoinHandle<()>, u16) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
         loop {
             let Ok((mut sock, _)) = listener.accept().await else {
                 break;
@@ -192,22 +189,24 @@ async fn spawn_echo_upstream(addr: &'static str) -> tokio::task::JoinHandle<()> 
             let _ = sock.write_all(resp.as_bytes()).await;
             let _ = sock.flush().await;
         }
-    })
+    });
+    (task, port)
 }
 
 /// The reverse proxy forwards a matched path to the upstream with its prefix stripped, and leaves
 /// unmatched paths to the app itself — the same-origin preview mechanism (claw's P2 CD flow).
 #[tokio::test]
 async fn proxy_forwards_matched_paths_and_strips_prefix() {
-    let upstream = spawn_echo_upstream("127.0.0.1:19010").await;
-    let server = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19011")
+    let (upstream, upstream_port) = spawn_echo_upstream().await;
+    let (listener, addr) = free_listener();
+    let server = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
-            .config(ServerConfig::new().proxy(ProxyResolver::new(|path| {
+            .config(ServerConfig::new().proxy(ProxyResolver::new(move |path| {
                 if path.starts_with("/preview/x") {
                     Some(rwire::ProxyDecision::Forward {
-                        port: 19010,
+                        port: upstream_port,
                         prefix: "/preview/x".to_string(),
                     })
                 } else if path.starts_with("/preview/") {
@@ -218,13 +217,12 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
                     None
                 }
             })))
-            .run()
+            .run_on(listener)
             .await;
     });
-    tokio::time::sleep(Duration::from_millis(150)).await;
 
     // A proxied path reaches the upstream with `/preview/x` stripped off.
-    let mut proxied = TcpStream::connect("127.0.0.1:19011").await.unwrap();
+    let mut proxied = TcpStream::connect(addr).await.unwrap();
     proxied
         .write_all(b"GET /preview/x/dash?y=1 HTTP/1.1\r\nHost: h\r\n\r\n")
         .await
@@ -237,7 +235,7 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
 
     // A claimed path with no live upstream gets the human 503 page — never the app shell
     // (a stale preview link must not open a second copy of the app).
-    let mut gone = TcpStream::connect("127.0.0.1:19011").await.unwrap();
+    let mut gone = TcpStream::connect(addr).await.unwrap();
     gone.write_all(b"GET /preview/dead/whatever HTTP/1.1\r\nHost: h\r\n\r\n")
         .await
         .unwrap();
@@ -250,7 +248,7 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
     );
 
     // A non-matching path is served by the app itself, not proxied.
-    let mut direct = TcpStream::connect("127.0.0.1:19011").await.unwrap();
+    let mut direct = TcpStream::connect(addr).await.unwrap();
     direct
         .write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
         .await
@@ -271,17 +269,16 @@ async fn proxy_forwards_matched_paths_and_strips_prefix() {
 /// Test that counter app capsule has correct elements
 #[tokio::test]
 async fn test_counter_capsule() {
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19003")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_counter)
-            .run()
+            .run_on(listener)
             .await;
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let mut stream = TcpStream::connect("127.0.0.1:19003").await.unwrap();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
@@ -304,17 +301,16 @@ async fn test_counter_capsule() {
 /// Test WebSocket upgrade detection
 #[tokio::test]
 async fn test_websocket_upgrade() {
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19004")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
-            .run()
+            .run_on(listener)
             .await;
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let mut stream = TcpStream::connect("127.0.0.1:19004").await.unwrap();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
 
     // Send WebSocket upgrade request
     let request = "GET / HTTP/1.1\r\n\
@@ -350,21 +346,20 @@ Sec-WebSocket-Version: 13\r\n\r\n";
 /// Test multiple concurrent connections
 #[tokio::test]
 async fn test_concurrent_connections() {
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19005")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
-            .run()
+            .run_on(listener)
             .await;
     });
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Spawn multiple concurrent requests
     let handles: Vec<_> = (0..5)
         .map(|_| {
-            tokio::spawn(async {
-                let mut stream = TcpStream::connect("127.0.0.1:19005").await.unwrap();
+            tokio::spawn(async move {
+                let mut stream = TcpStream::connect(addr).await.unwrap();
                 stream
                     .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
                     .await
@@ -391,17 +386,16 @@ async fn test_concurrent_connections() {
 /// Test capsule content-length header
 #[tokio::test]
 async fn test_content_length() {
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19006")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
-            .run()
+            .run_on(listener)
             .await;
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let mut stream = TcpStream::connect("127.0.0.1:19006").await.unwrap();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
@@ -457,23 +451,23 @@ async fn test_content_length() {
 #[tokio::test]
 async fn test_websocket_origin_gate() {
     use rwire::ServerConfig;
-    let server_task = tokio::spawn(async {
-        let _ = Server::bind("127.0.0.1:19021")
+    let (listener, addr) = free_listener();
+    let server_task = tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:0")
             .unwrap()
             .root(build_simple)
             .config(ServerConfig::new().allow_origin("https://embed.example.com"))
-            .run()
+            .run_on(listener)
             .await;
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    async fn handshake(origin: Option<&str>) -> String {
-        let mut stream = TcpStream::connect("127.0.0.1:19021").await.unwrap();
+    async fn handshake(addr: std::net::SocketAddr, origin: Option<&str>) -> String {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
         let origin_line = origin
             .map(|o| format!("Origin: {o}\r\n"))
             .unwrap_or_default();
         let request = format!(
-            "GET / HTTP/1.1\r\nHost: 127.0.0.1:19021\r\n{origin_line}Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            "GET / HTTP/1.1\r\nHost: {addr}\r\n{origin_line}Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
         );
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut response = vec![0u8; 1024];
@@ -482,30 +476,38 @@ async fn test_websocket_origin_gate() {
     }
 
     // Cross-origin: refused before the upgrade.
-    let r = handshake(Some("http://evil.example")).await;
+    let r = handshake(addr, Some("http://evil.example")).await;
     assert!(r.contains("403 Forbidden"), "expected 403, got: {r}");
     assert!(r.contains("cross_origin"), "expected reason, got: {r}");
 
     // Same-origin: upgrades.
-    let r = handshake(Some("http://127.0.0.1:19021")).await;
+    let r = handshake(addr, Some(&format!("http://{addr}"))).await;
     assert!(
         r.contains("101 Switching Protocols"),
         "expected 101, got: {r}"
     );
 
     // Allowlisted extra origin: upgrades.
-    let r = handshake(Some("https://embed.example.com")).await;
+    let r = handshake(addr, Some("https://embed.example.com")).await;
     assert!(
         r.contains("101 Switching Protocols"),
         "expected 101, got: {r}"
     );
 
     // No Origin header (non-browser client): upgrades.
-    let r = handshake(None).await;
+    let r = handshake(addr, None).await;
     assert!(
         r.contains("101 Switching Protocols"),
         "expected 101, got: {r}"
     );
 
     server_task.abort();
+}
+
+/// A listener on a free port (port 0), and its address. The server takes it
+/// with `run_on`: connections queue from now on, so no startup sleep.
+fn free_listener() -> (std::net::TcpListener, std::net::SocketAddr) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    (listener, addr)
 }

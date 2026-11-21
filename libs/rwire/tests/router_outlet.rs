@@ -54,12 +54,13 @@ fn shell_with_nested_outlet() -> ElementBuilder {
 }
 
 /// `run()` must fail at once with the explicit startup error.
-async fn assert_refuses(port: u16, root: fn() -> ElementBuilder) {
-    let run = Server::bind(&format!("127.0.0.1:{port}"))
+async fn assert_refuses(root: fn() -> ElementBuilder) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let run = Server::bind("127.0.0.1:0")
         .unwrap()
         .root(root)
         .routes(router())
-        .run();
+        .run_on(listener);
     let result = tokio::time::timeout(Duration::from_secs(5), run)
         .await
         .expect("run() kept serving instead of refusing to start");
@@ -68,20 +69,20 @@ async fn assert_refuses(port: u16, root: fn() -> ElementBuilder) {
 }
 
 /// The server must start and serve the page.
-async fn assert_serves(port: u16, root: fn() -> ElementBuilder, with_router: bool) {
+async fn assert_serves(root: fn() -> ElementBuilder, with_router: bool) {
+    // A free port, already accepting: no fixed port, no startup sleep.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        let builder = Server::bind(&format!("127.0.0.1:{port}"))
-            .unwrap()
-            .root(root);
+        let builder = Server::bind("127.0.0.1:0").unwrap().root(root);
         let builder = if with_router {
             builder.routes(router())
         } else {
             builder
         };
-        builder.run().await.map_err(|e| e.to_string())
+        builder.run_on(listener).await.map_err(|e| e.to_string())
     });
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+    let mut stream = TcpStream::connect(addr)
         .await
         .expect("the server did not start");
     stream
@@ -101,25 +102,25 @@ async fn assert_serves(port: u16, root: fn() -> ElementBuilder, with_router: boo
 
 #[tokio::test]
 async fn router_without_outlet_refuses_to_start() {
-    assert_refuses(19041, shell_without_outlet).await;
+    assert_refuses(shell_without_outlet).await;
 }
 
 #[tokio::test]
 async fn a_current_route_reader_is_not_an_outlet() {
-    assert_refuses(19042, shell_with_only_a_route_reader).await;
+    assert_refuses(shell_with_only_a_route_reader).await;
 }
 
 #[tokio::test]
 async fn router_with_outlet_starts() {
-    assert_serves(19043, shell_with_outlet, true).await;
+    assert_serves(shell_with_outlet, true).await;
 }
 
 #[tokio::test]
 async fn an_outlet_inside_a_renderer_is_found() {
-    assert_serves(19044, shell_with_nested_outlet, true).await;
+    assert_serves(shell_with_nested_outlet, true).await;
 }
 
 #[tokio::test]
 async fn no_router_needs_no_outlet() {
-    assert_serves(19045, shell_without_outlet, false).await;
+    assert_serves(shell_without_outlet, false).await;
 }
