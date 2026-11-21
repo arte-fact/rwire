@@ -51,6 +51,17 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `/path`, not `/`. A path no route matches is answered `404 Not Found`; the
   page still renders the router's not-found view.
 
+### Changed: the PWA manifest is fetched with credentials
+
+- The manifest `<link>` now carries `crossorigin="use-credentials"` (new
+  `Pwa::manifest_credentials`, **on by default**). Without it the browser
+  fetches the manifest without cookies or HTTP auth: behind an auth in front
+  of the app (a proxy's basic auth) it got a 401 and the app was not
+  installable. The manifest is same-origin, so the credentials go nowhere
+  else; `manifest_credentials(false)` restores the previous markup. rwire's
+  own `auth()` / `auth_with()` still serve the manifest, the service worker and
+  the icons before the gate.
+
 ### Added: control over the static first paint
 
 - `CapsuleConfig::ssr_exclude(pattern)`: routes served without the paint, for
@@ -61,6 +72,22 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `CapsuleConfig::ssr_behind_auth(true)` allows it, since the paint does not
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
+
+### Changed: SQLite persistence is an optional feature
+
+- `rusqlite` is behind rwire's new **`persist`** cargo feature, **on by
+  default**: existing apps build as before. With `default-features = false`,
+  rwire pulls no SQLite, so an app can share its workspace with a crate that
+  links another `rusqlite` (only one `links = "sqlite3"` crate per build).
+- The feature gates `rwire::persist` (`SqliteStore`, `PersistRegistry`,
+  `PersistableType`, `PersistError`), `rwire::rusqlite`, `persist_task` and
+  `SharedServerState::{hydrate, persist_dirty, flush_all_dirty}`.
+- Without it, `#[storage(persisted)]` is a compile error that says so, never
+  a silent fallback to memory.
+- The companion crates (`rwire-components`, `-themes`, `-markdown`,
+  `-editor`, `-map`) depend on rwire without default features, so using them
+  doesn't turn `persist` back on.
+- CI also runs clippy on rwire without default features.
 
 ### Fixed: executable URLs in pre-rendered HTML and Markdown
 
