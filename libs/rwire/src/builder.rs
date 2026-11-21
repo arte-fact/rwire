@@ -62,11 +62,12 @@ use crate::style_tokens::StyleKey;
 /// Encode a `STYLE_DEF` opcode block carrying complete CSS rule strings.
 ///
 /// Format: `[STYLE_DEF, count_varint, (rule_len_varint, rule_utf8){count}]`.
-fn encode_style_def(rules: &[String]) -> BytesMut {
+fn encode_style_def(rules: &[(u32, String)]) -> BytesMut {
     let mut buf = BytesMut::new();
     buf.put_u8(STYLE_DEF);
     write_varint(&mut buf, rules.len() as u32);
-    for rule in rules {
+    for (order, rule) in rules {
+        write_varint(&mut buf, *order);
         write_varint(&mut buf, rule.len() as u32);
         buf.put_slice(rule.as_bytes());
     }
@@ -116,6 +117,81 @@ fn push_text_escaped(out: &mut String, value: &str) {
     }
 }
 
+/// Add `new` to an element's utility tokens, last one winning: the tokens
+/// whose properties `new` sets again, all of them, are dropped (see
+/// [`ElementBuilder::st`]). Returns the earlier tokens that keep part of
+/// `new`'s properties from it (partial overlap, higher code).
+fn merge_style_util(
+    utils: &mut Vec<u16>,
+    new: crate::style_tokens::St,
+) -> Vec<crate::style_tokens::St> {
+    use crate::style_tokens::St;
+    let code = new.as_u16();
+    let covers = new.longhands();
+    let mut loses_to = Vec::new();
+    utils.retain(|&old| {
+        if old == code {
+            return false;
+        }
+        let Ok(old_token) = St::try_from(old) else {
+            return true;
+        };
+        let props = old_token.longhands();
+        if props.is_empty() || covers.is_empty() {
+            return true;
+        }
+        if props.iter().all(|p| covers.contains(p)) {
+            return false;
+        }
+        // Partial overlap: the stylesheet gives the shared properties to the
+        // higher code. Only a later call that loses is worth a report.
+        if old > code && props.iter().any(|p| covers.contains(p)) {
+            loses_to.push(old_token);
+        }
+        true
+    });
+    utils.push(code);
+    loses_to
+}
+
+/// A later token that loses part of its properties to an earlier one (the
+/// earlier has the higher code, so its rule comes later in the stylesheet).
+/// Reported once per pair, in debug builds only.
+#[cfg(debug_assertions)]
+fn report_partial_override(old: crate::style_tokens::St, new: crate::style_tokens::St) {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<HashSet<(u16, u16)>>> = OnceLock::new();
+    let first = SEEN
+        .get_or_init(Default::default)
+        .lock()
+        .map(|mut seen| seen.insert((old.as_u16(), new.as_u16())))
+        .unwrap_or(false);
+    if first {
+        let shared: Vec<&str> = old
+            .longhands()
+            .iter()
+            .filter(|p| new.longhands().contains(p))
+            .copied()
+            .collect();
+        eprintln!(
+            "rwire: st([{new:?}]) loses {} to the earlier St::{old:?}: utility rules \
+             apply in token code order, not call order, and {old:?} sets them too. \
+             Use tokens that do not overlap.",
+            shared.join(", ")
+        );
+    }
+    PARTIAL_OVERRIDES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(not(debug_assertions))]
+fn report_partial_override(_old: crate::style_tokens::St, _new: crate::style_tokens::St) {}
+
+/// How many partial overrides debug builds have reported (tests).
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub static PARTIAL_OVERRIDES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 /// Build the `STYLE_DEF` prefix for class-referenced rules in `referenced` that
 /// this connection (`sent`) has not yet received, marking them sent.
 ///
@@ -124,12 +200,12 @@ fn push_text_escaped(out: &mut String, value: &str) {
 /// the initial DOM and every incremental update — see
 /// `docs/tree-shaking-redesign.md` (Phase 2).
 pub fn style_def_prefix(referenced: &BTreeSet<StyleKey>, sent: &mut HashSet<StyleKey>) -> BytesMut {
-    let mut new_rules: Vec<String> = Vec::new();
+    let mut new_rules: Vec<(u32, String)> = Vec::new();
     for &key in referenced {
         // `insert` returns true the first time this connection sees the key.
         if sent.insert(key) {
             if let Some(rule) = key.to_css_rule() {
-                new_rules.push(rule);
+                new_rules.push((key.sheet_order(), rule));
             }
         }
     }
@@ -1102,9 +1178,8 @@ impl ElementBuilder {
     ///
     /// el(El::Div).st([St::BgApp, St::FlexCenter])
     /// ```
-    pub fn style_util(mut self, util: crate::style_tokens::St) -> Self {
-        self.style_utils.push(util.as_u16());
-        self
+    pub fn style_util(self, util: crate::style_tokens::St) -> Self {
+        self.st([util])
     }
 
     /// Apply a binary-encoded style property+value pair.
@@ -1150,12 +1225,30 @@ impl ElementBuilder {
     ///     St::FlexCenter,
     /// ])
     /// ```
+    ///
+    /// **The last token wins.** A token replaces the earlier ones whose every
+    /// CSS property it sets again (shorthands expanded): `.st([DisplayFlex])`
+    /// then `.st([DisplayNone])` hides the element, `.st([PMd])` then
+    /// `.st([PLg])` keeps `PLg` only. The cascade could not decide it: utility
+    /// rules have equal specificity, and the stylesheet keeps them in token
+    /// code order, which has nothing to do with the order of the calls.
+    ///
+    /// A token that sets only *part* of an earlier token's properties
+    /// (`St::BorderNone` then `St::BorderB2Accent`) cannot replace it without
+    /// losing the rest, so both stay and the shared properties go to the
+    /// higher code. When that is the earlier token, the later call loses
+    /// (`St::FontInheritAll` then `St::TextXs`: `font:inherit` keeps the
+    /// inherited size). Debug builds report that case once per pair on
+    /// stderr; pick tokens that do not overlap.
     pub fn st<I>(mut self, utils: I) -> Self
     where
         I: IntoIterator<Item = crate::style_tokens::St>,
     {
-        self.style_utils
-            .extend(utils.into_iter().map(|u| u.as_u16()));
+        for u in utils {
+            for earlier in merge_style_util(&mut self.style_utils, u) {
+                report_partial_override(earlier, u);
+            }
+        }
         self
     }
 
@@ -3834,5 +3927,178 @@ mod client_action_update_tests {
         let empty = ClientActionIndices::default();
         let unknown = emit_toggle_update(Some(&empty));
         assert!(!unknown.contains(&BIND_TOGGLE));
+    }
+}
+
+#[cfg(test)]
+mod style_order_tests {
+    use super::*;
+    use crate::style_tokens::{St, StyleKey};
+
+    /// The element's tokens after a sequence of `.st()` calls.
+    fn after(calls: &[&[St]]) -> Vec<St> {
+        let mut b = el(El::Div);
+        for c in calls {
+            b = b.st(c.iter().copied());
+        }
+        b.get_style_utils()
+            .iter()
+            .map(|&c| St::try_from(c).unwrap())
+            .collect()
+    }
+
+    /// The earlier tokens a later `new` loses to, after `earlier`.
+    fn loses(earlier: &[St], new: St) -> Vec<St> {
+        let mut utils: Vec<u16> = earlier.iter().map(|s| s.as_u16()).collect();
+        merge_style_util(&mut utils, new)
+    }
+
+    #[test]
+    fn the_last_call_wins_within_a_property_group() {
+        // The reported case: display:none after display:flex hides.
+        assert_eq!(
+            after(&[&[St::DisplayFlex], &[St::DisplayNone]]),
+            [St::DisplayNone]
+        );
+        assert_eq!(
+            after(&[&[St::DisplayNone], &[St::DisplayFlex]]),
+            [St::DisplayFlex]
+        );
+        // Within one call too, and other tokens are kept in place.
+        assert_eq!(
+            after(&[&[St::BgApp, St::DisplayFlex, St::PMd, St::DisplayGrid]]),
+            [St::BgApp, St::PMd, St::DisplayGrid]
+        );
+        // Position, padding, background, radius, flex: a full override replaces.
+        assert_eq!(
+            after(&[&[St::PositionAbsolute], &[St::PositionRelative]]),
+            [St::PositionRelative]
+        );
+        assert_eq!(after(&[&[St::PLg], &[St::PMd]]), [St::PMd]);
+        assert_eq!(
+            after(&[&[St::BgShimmer], &[St::BgApp]]),
+            [St::BgShimmer, St::BgApp]
+        );
+        assert_eq!(
+            after(&[&[St::RoundedTLg], &[St::RoundedMd]]),
+            [St::RoundedMd]
+        );
+        assert_eq!(after(&[&[St::FlexGrow], &[St::Flex1]]), [St::Flex1]);
+        // A repeated token moves to the end, once.
+        assert_eq!(
+            after(&[&[St::PMd, St::BgApp], &[St::PMd]]),
+            [St::BgApp, St::PMd]
+        );
+    }
+
+    #[test]
+    fn shorthands_cover_their_longhands() {
+        // padding covers padding-inline; margin covers margin-inline; inset covers top.
+        assert_eq!(after(&[&[St::PxLg], &[St::PMd]]), [St::PMd]);
+        assert_eq!(after(&[&[St::MxAuto], &[St::MAuto]]), [St::MAuto]);
+        assert_eq!(after(&[&[St::Top0], &[St::Inset0]]), [St::Inset0]);
+        // position+inset covers each of them.
+        assert_eq!(
+            after(&[&[St::PositionRelative, St::Inset0], &[St::AbsoluteFill]]),
+            [St::AbsoluteFill]
+        );
+        // overflow covers overflow-x; border covers a side.
+        assert_eq!(
+            after(&[&[St::OverflowXAuto], &[St::OverflowHidden]]),
+            [St::OverflowHidden]
+        );
+        assert_eq!(
+            after(&[&[St::BorderB2Accent], &[St::BorderNone]]),
+            [St::BorderNone]
+        );
+    }
+
+    #[test]
+    fn a_partial_overlap_keeps_both_and_reports_only_a_losing_later_call() {
+        // Refinement whose code is higher: it wins on the shared side, no report.
+        assert_eq!(
+            after(&[&[St::BorderNone], &[St::BorderB2Accent]]),
+            [St::BorderNone, St::BorderB2Accent]
+        );
+        assert!(loses(&[St::BorderNone], St::BorderB2Accent).is_empty());
+        assert!(loses(&[St::PMd], St::PxLg).is_empty());
+        // Lower code: the earlier token's rule comes later in the sheet, the call loses.
+        assert_eq!(
+            loses(&[St::FontInheritAll], St::TextXs),
+            [St::FontInheritAll]
+        );
+        assert_eq!(loses(&[St::FlexCenter], St::DisplayGrid), [St::FlexCenter]);
+        // Overflow: overflow-x (0x84) after Truncate's overflow (0x7E) wins.
+        assert!(loses(&[St::Truncate], St::OverflowXAuto).is_empty());
+        assert_eq!(loses(&[St::OverflowXAuto], St::Truncate), Vec::<St>::new());
+        // Disjoint properties: nothing to say.
+        assert!(loses(&[St::DisplayFlex], St::BgApp).is_empty());
+    }
+
+    #[test]
+    fn hover_and_breakpoint_groups_are_untouched() {
+        let b = el(El::Div)
+            .st([St::BgApp])
+            .hover([St::BgSubtle])
+            .hover([St::BgMuted]);
+        assert_eq!(b.get_style_utils(), [St::BgApp.as_u16()]);
+        // style_util goes through the same merge.
+        let b = el(El::Div)
+            .style_util(St::DisplayFlex)
+            .style_util(St::DisplayNone);
+        assert_eq!(b.get_style_utils(), [St::DisplayNone.as_u16()]);
+    }
+
+    #[test]
+    fn longhands_of_the_main_groups() {
+        assert_eq!(St::DisplayNone.longhands(), ["display"]);
+        assert_eq!(St::PxLg.longhands(), ["padding-left", "padding-right"]);
+        assert_eq!(St::Inset0.longhands(), ["top", "right", "bottom", "left"]);
+        assert!(St::Truncate.longhands().contains(&"overflow-y"));
+        assert!(St::FontInheritAll.longhands().contains(&"font-size"));
+        assert!(St::BgApp.longhands().contains(&"background-color"));
+        assert!(St::BorderNone.longhands().contains(&"border-bottom-width"));
+        // A token with nested rules styles other boxes: no set, never merged.
+        assert!(St::SliderThumb.longhands().is_empty());
+        assert_eq!(
+            after(&[&[St::SliderThumb], &[St::BgApp]]),
+            [St::SliderThumb, St::BgApp]
+        );
+    }
+
+    #[test]
+    fn sheet_order_follows_key_order_and_fits_a_varint() {
+        use crate::style_tokens::UTIL_MAPPINGS;
+        let max = UTIL_MAPPINGS.iter().map(|&(c, _)| c).max().unwrap();
+        assert!(
+            max < 4096,
+            "token codes must stay below 4096 for sheet_order"
+        );
+        let mut keys: Vec<StyleKey> = Vec::new();
+        for &(c, _) in UTIL_MAPPINGS.iter().step_by(7) {
+            keys.push(StyleKey::Util(c));
+            keys.push(StyleKey::Pseudo(0, c));
+            keys.push(StyleKey::Pseudo(40, c));
+            keys.push(StyleKey::Breakpoint(1, c));
+            keys.push(StyleKey::Breakpoint(4, c));
+        }
+        keys.sort();
+        let orders: Vec<u32> = keys.iter().map(|k| k.sheet_order()).collect();
+        assert!(orders.windows(2).all(|w| w[0] < w[1]), "same order as Ord");
+        assert!(StyleKey::Breakpoint(255, max).sheet_order() <= 4_210_687);
+        assert!(
+            StyleKey::Pseudo(255, max).sheet_order() < StyleKey::Breakpoint(0, 0).sheet_order()
+        );
+    }
+
+    #[test]
+    fn style_def_carries_the_order() {
+        let mut referenced = BTreeSet::new();
+        referenced.insert(StyleKey::Util(St::DisplayNone.as_u16()));
+        let mut sent = HashSet::new();
+        let buf = style_def_prefix(&referenced, &mut sent);
+        // [STYLE_DEF, count=1, order=0, len, rule]
+        assert_eq!(&buf[..3], &[STYLE_DEF, 1, 0]);
+        assert_eq!(&buf[4..], b".u0{display:none}");
     }
 }

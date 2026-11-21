@@ -53,6 +53,7 @@ beforeEach(() => {
   st.w = { send: (m: Uint8Array) => sent.push(m), close: () => closed++, readyState: 1 } as any;
   st.pm = null;
   st.DS = null;
+  st.DO = [];
   resetSession();
   resetActions();
   resetLive();
@@ -261,16 +262,54 @@ test("COMPOSITE_TABLE registers ids; STYLE_COMPOSITE applies known and unknown",
   assert.ok(t.classList.contains("c9"), "unknown id still applies c-prefixed class");
 });
 
+/** A STYLE_DEF batch of (order, rule) entries. */
+function styleDef(entries: [number, string][]): number[] {
+  const sd = [0x87, ...vint(entries.length)];
+  for (const [k, rule] of entries) {
+    wv(sd, k);
+    const u = utf8(rule);
+    wv(sd, u.length);
+    sd.push(...u);
+  }
+  return sd;
+}
+
 test("STYLE_DEF inserts rules into the dedicated stylesheet", () => {
   const rule = ".u1{color:red}";
-  const sd = [0x87, ...vint(1)];
-  const u = utf8(rule);
-  wv(sd, u.length);
-  sd.push(...u);
-  run(sd);
+  run(styleDef([[1, rule]]));
   assert.ok(st.DS, "style element created");
   assert.deepEqual(st.DS!.sheet!.cssRules, [rule]);
   assert.equal(doc.head.children[0], st.DS as unknown as MockEl);
+});
+
+test("STYLE_DEF keeps the sheet in order whatever order the batches arrive in", () => {
+  // A later page meets lower codes and a base rule after its breakpoint rule:
+  // each lands where its order puts it, not at the end.
+  const bp = (1 << 21) + 1 * 4096 + 0x40;
+  run(styleDef([[0x343, ".u835{font:inherit}"], [bp, "@media(min-width:640px){.b1u64{x:1}}"]]));
+  run(styleDef([[0x74, ".u116{font-size:var(--T1)}"], [0x40, ".u64{x:0}"]]));
+  run(styleDef([[4096 + 2 * 4096 + 0x10, ".h2u16:hover{y:1}"]]));
+  assert.deepEqual(st.DS!.sheet!.cssRules, [
+    ".u64{x:0}",
+    ".u116{font-size:var(--T1)}",
+    ".u835{font:inherit}",
+    ".h2u16:hover{y:1}",
+    "@media(min-width:640px){.b1u64{x:1}}",
+  ]);
+});
+
+test("STYLE_DEF skips a rule the browser rejects without shifting the others", () => {
+  run(styleDef([[5, ".u5{a:1}"]]));
+  const sheet = st.DS!.sheet!;
+  const real = sheet.insertRule;
+  sheet.insertRule = (r: string, i: number) => {
+    if (r.includes("-moz-bogus")) throw new SyntaxError("rejected");
+    return real(r, i);
+  };
+  run(styleDef([[3, ".u3::-moz-bogus{b:1}"], [4, ".u4{c:1}"], [9, ".u9{d:1}"]]));
+  assert.deepEqual(sheet.cssRules, [".u4{c:1}", ".u5{a:1}", ".u9{d:1}"]);
+  run(styleDef([[6, ".u6{e:1}"]]));
+  assert.deepEqual(sheet.cssRules, [".u4{c:1}", ".u5{a:1}", ".u6{e:1}", ".u9{d:1}"]);
 });
 
 // --- tree ops + morph staging ---

@@ -146,7 +146,6 @@ impl Select {
             St::TransTheme,
             St::BorderWTheme,
             St::AppearanceNone,
-            St::FontInheritAll,
         ];
         if self.invalid {
             tokens.push(St::BorderRed8);

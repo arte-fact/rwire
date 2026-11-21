@@ -217,7 +217,7 @@ impl Slider {
 
         // Visual track with fill, vertically centered in the touch-sized control box.
         let track = el(El::Div)
-            .st([St::SliderTrack, St::PositionAbsolute, St::RoundedSm])
+            .st([St::SliderTrack, St::PositionAbsolute])
             .attr("style", "top:50%;left:0;right:0;transform:translateY(-50%)")
             .append([el(El::Div)
                 .st([St::SliderFill])
