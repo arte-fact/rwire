@@ -385,10 +385,21 @@ impl DelegatedAuth {
         }
     }
 
-    /// Where an anonymous page request is sent (`303`), with `next=<path>` appended
-    /// (percent-encoded, after `?` or `&`). The path is relative to this server:
-    /// a login page on another origin must resolve it against the app's own URL.
-    /// Without a login URL, anonymous page requests get a plain `401`.
+    /// Where a page request without a valid identity is sent, with a `303`.
+    ///
+    /// rwire appends `next=<path>` to it (after `?`, or `&` if the URL already
+    /// has a query), the requested path and query percent-encoded: for
+    /// `login_url("https://hub.example/login")`, a request to `/inbox?tab=2`
+    /// goes to `https://hub.example/login?next=%2Finbox%3Ftab%3D2`. `next` is a
+    /// path on *this* app, not a full URL: a login page on another origin sends
+    /// the user back to the app's own origin plus `next`.
+    ///
+    /// The URL may be absolute (another origin) or a path on this app
+    /// (`/login`). In the latter case the login page itself is answered `401`
+    /// instead of being redirected to itself.
+    ///
+    /// Without a login URL, such requests get a plain `401`. WebSocket
+    /// handshakes always get `401`.
     pub fn login_url(mut self, url: impl Into<String>) -> Self {
         self.login_url = Some(url.into());
         self
@@ -468,6 +479,30 @@ impl DelegatedAuth {
             Validation::Valid(identity) => Some(identity),
             Validation::Revoked | Validation::Unavailable => None,
         }
+    }
+
+    /// The part of a handshake kept for re-validating its WebSocket: the method,
+    /// the path and the session cookie only. Other cookies, `Authorization` and
+    /// the rest of the head are not kept for the socket's lifetime.
+    pub(crate) fn revalidation_head(&self, head: &str) -> String {
+        let request = AuthRequest::from_head(head);
+        let cookie = request
+            .cookie(&self.cookie)
+            .map(|token| format!("Cookie: {}={token}\r\n", self.cookie))
+            .unwrap_or_default();
+        format!(
+            "{} {} HTTP/1.1\r\n{cookie}\r\n",
+            request.method(),
+            request.path()
+        )
+    }
+
+    /// Whether the request whose head is `head` carries the session cookie
+    /// (an anonymous request is not a failed one).
+    pub(crate) fn has_credential(&self, head: &str) -> bool {
+        AuthRequest::from_head(head)
+            .cookie(&self.cookie)
+            .is_some_and(|t| !t.is_empty())
     }
 
     /// Re-validate an open WebSocket's credentials (`head` is its handshake):
@@ -574,9 +609,24 @@ impl DelegatedAuth {
     }
 
     /// The redirect target for an anonymous page request to `path`, if a login
-    /// URL is configured.
-    pub(crate) fn login_redirect(&self, path: &str) -> Option<String> {
+    /// URL is configured and is not the requested page itself: a login URL on
+    /// this app's origin (a path, or an absolute URL whose host is `host`, the
+    /// request's `Host`) that names `path` would redirect to itself forever.
+    pub(crate) fn login_redirect(&self, path: &str, host: Option<&str>) -> Option<String> {
         let url = self.login_url.as_deref()?;
+        let login_path = match url.split_once("://") {
+            Some((_, rest)) => {
+                let (authority, tail) =
+                    rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
+                let same_origin = host.is_some_and(|h| h.eq_ignore_ascii_case(authority));
+                same_origin.then_some(if tail.is_empty() { "/" } else { tail })
+            }
+            None => Some(url),
+        };
+        let bare = |p: &str| p.split(['?', '#']).next().unwrap_or("").to_string();
+        if login_path.is_some_and(|login| bare(login) == bare(path)) {
+            return None;
+        }
         let sep = if url.contains('?') { '&' } else { '?' };
         Some(format!("{url}{sep}next={}", percent_encode(path)))
     }
@@ -941,16 +991,51 @@ mod tests {
     #[test]
     fn login_redirect_encodes_next() {
         let auth = counting(Arc::new(AtomicUsize::new(0)));
-        assert_eq!(auth.login_redirect("/"), None);
+        assert_eq!(auth.login_redirect("/", None), None);
         let auth = auth.login_url("https://hub.example/login");
         assert_eq!(
-            auth.login_redirect("/inbox?tab=2&x=a b").as_deref(),
+            auth.login_redirect("/inbox?tab=2&x=a b", Some("app.example"))
+                .as_deref(),
             Some("https://hub.example/login?next=%2Finbox%3Ftab%3D2%26x%3Da%20b")
         );
         let auth = counting(Arc::new(AtomicUsize::new(0))).login_url("/login?app=voice");
         assert_eq!(
-            auth.login_redirect("/").as_deref(),
+            auth.login_redirect("/", None).as_deref(),
             Some("/login?app=voice&next=%2F")
         );
+    }
+
+    /// A login page on this app's origin is not redirected to itself.
+    #[test]
+    fn login_redirect_never_loops_on_its_own_page() {
+        let relative = counting(Arc::new(AtomicUsize::new(0))).login_url("/login?app=voice");
+        assert_eq!(relative.login_redirect("/login", None), None);
+        assert_eq!(relative.login_redirect("/login?next=%2F", None), None);
+        assert!(relative.login_redirect("/inbox", None).is_some());
+
+        let absolute =
+            counting(Arc::new(AtomicUsize::new(0))).login_url("https://app.example/login");
+        assert_eq!(absolute.login_redirect("/login", Some("APP.example")), None);
+        assert!(absolute
+            .login_redirect("/inbox", Some("app.example"))
+            .is_some());
+        // Another origin's /login is not this app's page.
+        assert!(absolute
+            .login_redirect("/login", Some("other.example"))
+            .is_some());
+        assert!(absolute.login_redirect("/login", None).is_some());
+    }
+
+    /// The re-validation head keeps the session cookie, not the rest.
+    #[test]
+    fn revalidation_keeps_only_the_session_cookie() {
+        let auth = counting(Arc::new(AtomicUsize::new(0)));
+        let head = "GET /ws HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer hub-secret\r\n\
+                    Cookie: tracking=abc; sid=good; theme=dark\r\nUser-Agent: test\r\n\r\n";
+        let kept = auth.revalidation_head(head);
+        assert_eq!(kept, "GET /ws HTTP/1.1\r\nCookie: sid=good\r\n\r\n");
+        let request = AuthRequest::from_head(&kept);
+        assert_eq!(request.cookie("sid"), Some("good"));
+        assert!(!kept.contains("hub-secret") && !kept.contains("tracking"));
     }
 }

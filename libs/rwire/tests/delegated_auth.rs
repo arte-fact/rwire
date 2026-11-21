@@ -106,7 +106,7 @@ fn hub_auth(hub_port: u16) -> DelegatedAuth {
             stream.write_all(ask.as_bytes()).await.ok()?;
             let mut answer = String::new();
             stream.read_to_string(&mut answer).await.ok()?;
-            if !answer.starts_with("HTTP/1.1 200") {
+            if status_code(&answer) != Some(200) {
                 return None;
             }
             let user = answer.split("\r\n\r\n").nth(1)?.to_string();
@@ -568,4 +568,31 @@ async fn metrics_are_public_without_a_gate() {
     let open = get(19074, "/metrics", None).await;
     assert!(open.starts_with("HTTP/1.1 200"), "{open}");
     assert!(open.contains("rwire_"), "{open}");
+}
+
+/// A login page served by the app itself, behind the gate, is not redirected
+/// to itself (no 303 loop); other pages still are.
+#[tokio::test]
+async fn a_same_origin_login_page_is_not_redirected_to_itself() {
+    let hub = Hub::start(19172).await;
+    start(19075, hub_auth(19172).login_url("/login")).await;
+    let login = get(19075, "/login?next=%2Finbox", None).await;
+    assert!(login.starts_with("HTTP/1.1 401"), "{login}");
+    let inbox = get(19075, "/inbox", None).await;
+    assert!(inbox.starts_with("HTTP/1.1 303"), "{inbox}");
+    assert!(
+        inbox.contains("Location: /login?next=%2Finbox\r\n"),
+        "{inbox}"
+    );
+    assert_eq!(hub.calls(), 0);
+}
+
+/// The hub client reads the status code, whatever the HTTP version.
+#[test]
+fn status_codes_are_read_from_any_http_version() {
+    assert_eq!(status_code("HTTP/1.1 200 OK\r\n\r\nada"), Some(200));
+    assert_eq!(status_code("HTTP/1.0 200 OK\r\n\r\nada"), Some(200));
+    assert_eq!(status_code("HTTP/2 401\r\n\r\n"), Some(401));
+    assert_eq!(status_code("garbage"), None);
+    assert_eq!(status_code(""), None);
 }

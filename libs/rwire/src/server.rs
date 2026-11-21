@@ -2152,10 +2152,25 @@ async fn handle_client<F>(
                     let _ = capsule::serve_unauthorized(stream).await;
                 } else {
                     let (_, path) = request_line(&peek_str);
-                    let target = delegated.login_redirect(path);
+                    let host = header_value(&peek_str, "host");
+                    let target = delegated.login_redirect(path, host.as_deref());
                     let mut buf = vec![0u8; n];
                     let _ = stream.read_exact(&mut buf).await;
-                    println!("[{peer_addr}] delegated auth: no identity, sent to login");
+                    // An anonymous visit is routine: not logged. A rejected cookie
+                    // is, at most once a minute (a flood of forged cookies must
+                    // not flood the log).
+                    if delegated.has_credential(&peek_str) {
+                        static LAST_LOG: AtomicU64 = AtomicU64::new(0);
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs());
+                        if now >= LAST_LOG.load(Ordering::Relaxed) + 60 {
+                            LAST_LOG.store(now, Ordering::Relaxed);
+                            println!(
+                                "[{peer_addr}] delegated auth: credential refused, sent to login"
+                            );
+                        }
+                    }
                     let _ = match target {
                         Some(location) => capsule::serve_redirect(stream, &location, None).await,
                         None => capsule::serve_unauthorized(stream).await,
@@ -2282,7 +2297,10 @@ async fn handle_client<F>(
                         composite_table,
                         metrics,
                         identity,
-                        revalidate: delegated.map(|d| (d, peek_str.clone().into_owned())),
+                        revalidate: delegated.map(|d| {
+                            let head = d.revalidation_head(&peek_str);
+                            (d, head)
+                        }),
                     },
                 )
                 .await
