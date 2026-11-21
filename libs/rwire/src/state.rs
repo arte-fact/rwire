@@ -297,6 +297,66 @@ pub struct EventContext {
     /// Present only there (route/synthetic/test contexts leave it `None`), so
     /// `defer()` can mark the action `Loading` and mint a `Resolver`.
     action: Option<ActionSlot>,
+    /// The connection's tasks, for [`EventContext::spawn`]. Present when the
+    /// context comes from a live connection (events, routes, `on_connect`).
+    tasks: Option<ConnectionTasks>,
+}
+
+/// The tokio tasks a connection started through [`EventContext::spawn`]:
+/// aborted when the connection closes, whatever the way (client gone,
+/// heartbeat, error, server shutdown).
+#[derive(Clone, Default)]
+pub(crate) struct ConnectionTasks(Arc<std::sync::Mutex<TaskSlot>>);
+
+#[derive(Default)]
+struct TaskSlot {
+    handles: Vec<tokio::task::AbortHandle>,
+    closed: bool,
+}
+
+impl ConnectionTasks {
+    fn lock(&self) -> std::sync::MutexGuard<'_, TaskSlot> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Spawn `fut` on the current tokio runtime, owned by the connection.
+    /// Refused (`false`, `fut` dropped unpolled) once the connection closed.
+    fn spawn<F>(&self, fut: F) -> bool
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let mut slot = self.lock();
+        if slot.closed {
+            return false;
+        }
+        // Forget the tasks that already ended, so a long connection that
+        // spawns often keeps a bounded list.
+        slot.handles.retain(|h| !h.is_finished());
+        slot.handles.push(tokio::spawn(fut).abort_handle());
+        true
+    }
+
+    /// Abort every task and refuse new ones.
+    pub(crate) fn close(&self) {
+        let handles = {
+            let mut slot = self.lock();
+            slot.closed = true;
+            std::mem::take(&mut slot.handles)
+        };
+        for h in handles {
+            h.abort();
+        }
+    }
+
+    /// How many tasks are still running (tests).
+    #[cfg(test)]
+    fn running(&self) -> usize {
+        self.lock()
+            .handles
+            .iter()
+            .filter(|h| !h.is_finished())
+            .count()
+    }
 }
 
 /// What `defer()` needs to drive the action lifecycle: the shared-state handle to
@@ -324,6 +384,7 @@ impl EventContext {
             identity: None,
             deferred: Cell::new(false),
             action: None,
+            tasks: None,
         }
     }
 
@@ -338,6 +399,7 @@ impl EventContext {
             identity: None,
             deferred: Cell::new(false),
             action: None,
+            tasks: None,
         }
     }
 
@@ -352,6 +414,7 @@ impl EventContext {
             identity: None,
             deferred: Cell::new(false),
             action: None,
+            tasks: None,
         }
     }
 
@@ -548,6 +611,46 @@ impl EventContext {
     pub fn with_action(mut self, shared: Arc<SharedServerState>, key: ActionKey) -> Self {
         self.action = Some(ActionSlot { shared, key });
         self
+    }
+
+    /// Attach the connection's task registry (done by the server at dispatch).
+    pub(crate) fn with_tasks(mut self, tasks: ConnectionTasks) -> Self {
+        self.tasks = Some(tasks);
+        self
+    }
+
+    /// Start a tokio task that lives as long as this connection: it is
+    /// aborted when the connection closes (the client leaves, the heartbeat
+    /// or re-validation fails, the server shuts down). The way to run
+    /// per-user background work: start it in an
+    /// [`on_connect`](crate::ServerWithRoot::on_connect) handler with what
+    /// `identity()` / `session_id()` say, and reach the UI from it through
+    /// the shared state (`SharedServerState::update_shared_if`).
+    ///
+    /// Returns `false`, dropping `fut` unpolled, when there is no live
+    /// connection to tie it to: a context built by hand (tests), or the
+    /// `on_disconnect` handler, which runs after the tasks were aborted.
+    ///
+    /// ```ignore
+    /// #[handler]
+    /// fn connected(me: &mut Me, ctx: &EventContext) {
+    ///     let Some(user) = ctx.identity().map(|i| i.id().to_string()) else { return };
+    ///     ctx.spawn(async move {
+    ///         loop {
+    ///             poll_inbox(&user).await;
+    ///             tokio::time::sleep(Duration::from_secs(5)).await;
+    ///         }
+    ///     });
+    /// }
+    /// ```
+    pub fn spawn<F>(&self, fut: F) -> bool
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        match &self.tasks {
+            Some(tasks) => tasks.spawn(fut),
+            None => false,
+        }
     }
 
     /// Hand this action's completion off to background work.
@@ -1200,5 +1303,52 @@ mod tests {
 
     fn test_handler(state: &mut TestState) {
         state.count += 1;
+    }
+
+    #[test]
+    fn spawn_without_a_connection_is_refused() {
+        let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let r = Arc::clone(&ran);
+        let spawned = EventContext::empty().spawn(async move {
+            r.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        assert!(!spawned);
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn close_aborts_the_tasks_and_refuses_new_ones() {
+        let tasks = ConnectionTasks::default();
+        let ctx = EventContext::empty().with_tasks(tasks.clone());
+        // A task that never ends by itself, and one that ends at once.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
+        assert!(ctx.spawn(async move {
+            let _keep = tx;
+            std::future::pending::<()>().await;
+        }));
+        assert!(ctx.spawn(async {}));
+        tokio::task::yield_now().await;
+        assert_eq!(tasks.running(), 1, "the short task is done");
+
+        tasks.close();
+        // The aborted task drops its sender: the channel closes.
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await;
+        assert_eq!(closed, Ok(None), "the long task was aborted");
+        assert!(!ctx.spawn(async {}), "closed: no new task");
+    }
+
+    #[tokio::test]
+    async fn finished_tasks_are_forgotten() {
+        let tasks = ConnectionTasks::default();
+        let ctx = EventContext::empty().with_tasks(tasks.clone());
+        for _ in 0..100 {
+            assert!(ctx.spawn(async {}));
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            tasks.lock().handles.len() <= 2,
+            "{}",
+            tasks.lock().handles.len()
+        );
     }
 }

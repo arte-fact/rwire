@@ -718,7 +718,7 @@ pub struct ServerWithRoot<F> {
     shared: Option<Arc<SharedServerState>>,
     capsule_config: Option<CapsuleConfig>,
     base_path: Option<String>,
-    route_handler: Option<HandlerFn>,
+    hooks: ConnHooks,
     router: Option<crate::router::Router>,
     theme_provider: Option<ThemeProvider>,
     auth: Option<AuthGate>,
@@ -808,7 +808,7 @@ impl ServerBuilder {
             shared: None,
             capsule_config: None,
             base_path: self.base_path,
-            route_handler: None,
+            hooks: ConnHooks::default(),
             router: None,
             theme_provider: None,
             auth: None,
@@ -1028,7 +1028,47 @@ where
     ///     .await
     /// ```
     pub fn on_route(mut self, handler: HandlerSpec) -> Self {
-        self.route_handler = handler.remote_handler;
+        self.hooks.route = handler.remote_handler;
+        self
+    }
+
+    /// Register a handler run once per WebSocket connection, when it opens:
+    /// after the connection's states are ready and before its first render,
+    /// so what it writes to state is in the first paint.
+    ///
+    /// Its context carries the connection's [`session_id`](EventContext::session_id)
+    /// and, under delegated authentication, its [`identity`](EventContext::identity)
+    /// (renderers have no context: copy what they show into state here). Start
+    /// per-connection background work with [`EventContext::spawn`]: the task
+    /// is aborted when the connection closes. A shared-state handler
+    /// broadcasts like any event (presence: "ada joined").
+    ///
+    /// ```ignore
+    /// #[handler]
+    /// fn connected(me: &mut Me, ctx: &EventContext) {
+    ///     me.user = ctx.identity().map(|i| i.id().to_string());
+    ///     if let Some(user) = me.user.clone() {
+    ///         ctx.spawn(watch_inbox(user, shared.clone()));
+    ///     }
+    /// }
+    ///
+    /// Server::bind(addr)?.root(root).on_connect(connected()).run().await
+    /// ```
+    pub fn on_connect(mut self, handler: HandlerSpec) -> Self {
+        self.hooks.connect = handler.remote_handler;
+        self
+    }
+
+    /// Register a handler run once per WebSocket connection, when it closes,
+    /// whatever the cause (the client left, heartbeat, re-validation, error,
+    /// server shutdown), if [`on_connect`](Self::on_connect)'s moment was
+    /// reached. The connection's [`EventContext::spawn`] tasks are aborted
+    /// just before it runs. Its context carries the session id and identity;
+    /// a shared-state handler broadcasts to the other connections ("ada
+    /// left"); memory state it writes is kept with the session for a
+    /// reconnect.
+    pub fn on_disconnect(mut self, handler: HandlerSpec) -> Self {
+        self.hooks.disconnect = handler.remote_handler;
         self
     }
 
@@ -1254,7 +1294,7 @@ where
         println!("Capsule: {capsule_size} bytes");
 
         let root = Arc::new(self.root);
-        let route_handler = self.route_handler.map(Arc::new);
+        let hooks = Arc::new(self.hooks);
         let initial_theme = initial_theme.map(Arc::new);
         let auth = Arc::new(self.auth);
         if auth.is_some() {
@@ -1310,7 +1350,7 @@ where
             let root = Arc::clone(&root);
             let capsule = Arc::clone(&capsule);
             let shared = Arc::clone(&shared);
-            let route_handler = route_handler.clone();
+            let hooks = Arc::clone(&hooks);
             let initial_theme = initial_theme.clone();
             let composite_table = Arc::clone(&composite_table);
             let auth = Arc::clone(&auth);
@@ -1327,7 +1367,7 @@ where
                     root,
                     capsule,
                     shared,
-                    route_handler,
+                    hooks,
                     initial_theme,
                     composite_table,
                     auth,
@@ -1912,7 +1952,7 @@ async fn handle_client<F>(
     root: Arc<F>,
     capsule: Arc<Page>,
     shared: Arc<SharedServerState>,
-    route_handler: Option<Arc<HandlerFn>>,
+    hooks: Arc<ConnHooks>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
     auth: Arc<Option<AuthGate>>,
@@ -2240,7 +2280,7 @@ async fn handle_client<F>(
                         root,
                         shared,
                         session_id,
-                        route_handler,
+                        hooks,
                         initial_theme,
                         composite_table,
                         metrics,
@@ -2352,6 +2392,8 @@ struct ConnectionState {
     last_event_refill: Instant,
     /// Who the connection belongs to, under delegated auth (set at the handshake).
     identity: Option<crate::delegated_auth::Identity>,
+    /// Tasks started with `EventContext::spawn`, aborted when the connection closes.
+    tasks: crate::state::ConnectionTasks,
 }
 
 impl ConnectionState {
@@ -2372,6 +2414,25 @@ impl ConnectionState {
             event_tokens: EVENT_BUCKET_CAPACITY,
             last_event_refill: Instant::now(),
             identity: None,
+            tasks: Default::default(),
+        }
+    }
+
+    /// A handler context from this connection: its session, identity and tasks.
+    fn context(&self, ctx: EventContext) -> EventContext {
+        ctx.with_session(self.session_id.clone())
+            .with_identity(self.identity.clone())
+            .with_tasks(self.tasks.clone())
+    }
+
+    /// Run a lifecycle handler (`on_connect` / `on_disconnect`) like an event:
+    /// shared state is written to the cache and broadcast, memory state stays
+    /// on the connection. Nothing is rendered here: `on_connect` runs before the
+    /// first render, `on_disconnect` after the last.
+    fn run_lifecycle(&mut self, shared: &SharedServerState, handler: &HandlerFn) {
+        let ctx = self.context(EventContext::empty());
+        if let Err(e) = self.dispatch_handler(shared, handler, &ctx) {
+            eprintln!("lifecycle handler failed: {e}");
         }
     }
 
@@ -2596,9 +2657,7 @@ impl ConnectionState {
             }
         }
         if let Some(handler) = route_handler {
-            let ctx = EventContext::from_text(path)
-                .with_session(self.session_id.clone())
-                .with_identity(self.identity.clone());
+            let ctx = self.context(EventContext::from_text(path));
             let state_type_id = handler.state_type_id();
             if crate::router::installed_router().is_some() {
                 // A router owns the route view + nav re-render (above). Run the app's
@@ -2952,13 +3011,33 @@ impl Drop for ConnectionGuard {
     }
 }
 
+/// Aborts a connection's tasks when dropped (every exit path, panics included).
+struct TasksGuard(crate::state::ConnectionTasks);
+
+impl Drop for TasksGuard {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
+/// The application's per-connection handlers.
+#[derive(Default)]
+struct ConnHooks {
+    /// `on_route`: every navigation.
+    route: Option<HandlerFn>,
+    /// `on_connect`: once, before the first render.
+    connect: Option<HandlerFn>,
+    /// `on_disconnect`: once, at close.
+    disconnect: Option<HandlerFn>,
+}
+
 /// Per-connection context for [`handle_websocket`]: the app root and shared state
 /// plus the resolved appearance/routing config, cloned per connection in `run()`.
 struct ConnContext<F> {
     root: Arc<F>,
     shared: Arc<SharedServerState>,
     session_id: SessionId,
-    route_handler: Option<Arc<HandlerFn>>,
+    hooks: Arc<ConnHooks>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
     composite_table: Arc<crate::style_groups::CompositeTable>,
     metrics: Arc<Metrics>,
@@ -2992,13 +3071,14 @@ where
         root,
         shared,
         session_id,
-        route_handler,
+        hooks,
         initial_theme,
         composite_table,
         metrics,
         identity,
         revalidate,
     } = cx;
+    let route_handler = hooks.route.as_ref();
     let (mut write, mut read) = ws_stream.split();
 
     // With the built-in router, wait briefly for the path the runtime reports as
@@ -3153,6 +3233,14 @@ where
         }
     }
 
+    // From here on, whatever ends the connection (the client leaves, an error,
+    // a panic), the tasks it spawned are aborted when this guard drops.
+    let _tasks = TasksGuard(conn_state.tasks.clone());
+    if let Some(handler) = &hooks.connect {
+        conn_state.run_lifecycle(&shared, handler);
+    }
+
+    let outcome: Result<(), Box<dyn Error + Send + Sync>> = async {
     // Now rebuild the DOM with all states available
     // Build a HashMap of all states for multi-state rendering
     // For persisted state, use shared cache; for memory state, use connection state
@@ -3334,11 +3422,12 @@ where
                                 event.handler_idx,
                                 event.param_bytes.clone(),
                             );
-                            let ctx =
-                                EventContext::new_with_params(event.payload, event.param_bytes)
-                                    .with_session(conn_state.session_id.clone())
-                                    .with_identity(conn_state.identity.clone())
-                                    .with_action(Arc::clone(&shared), action_key.clone());
+                            let ctx = conn_state
+                                .context(EventContext::new_with_params(
+                                    event.payload,
+                                    event.param_bytes,
+                                ))
+                                .with_action(Arc::clone(&shared), action_key.clone());
                             let state_type_id = handler.state_type_id();
 
                             // Execute the handler against its state (shared cache or memory)
@@ -3390,7 +3479,7 @@ where
                                 // would after a client-side navigation.
                                 for update in conn_state.apply_route(
                                     &shared,
-                                    route_handler.as_deref(),
+                                    route_handler,
                                     &nav.url,
                                 )? {
                                     write.send(Message::Binary(update.to_vec())).await?;
@@ -3433,7 +3522,7 @@ where
                     if route_handler.is_some() {
                         println!("[{}] Route: {}", peer_addr, path);
                     }
-                    for update in conn_state.apply_route(&shared, route_handler.as_deref(), path)? {
+                    for update in conn_state.apply_route(&shared, route_handler, path)? {
                         write.send(Message::Binary(update.to_vec())).await?;
                     }
                 } else {
@@ -3454,6 +3543,16 @@ where
             }
         }
     }
+        Ok(())
+    }
+    .await;
+
+    // Tasks first, so none races the disconnect handler's cleanup.
+    conn_state.tasks.close();
+    if let Some(handler) = &hooks.disconnect {
+        conn_state.run_lifecycle(&shared, handler);
+    }
+    outcome?;
 
     // Cache session state for potential reconnection
     let session_states = conn_state.take_states();

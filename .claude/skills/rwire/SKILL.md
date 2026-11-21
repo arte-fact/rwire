@@ -99,7 +99,7 @@ appears in the design-system app automatically. Gate with
   Successes only are cached (`cache_ttl`, default 30 s; bounded by `cache_capacity`); open
   sockets are re-validated every TTL and closed (code 4401) once revoked — the client then
   reloads onto the login. Handlers read `ctx.identity()`; renderers have no context, so copy what
-  they show into state from `on_route` (it runs on connect and sees the identity). Both gates
+  they show into state from an `on_connect` handler (below). Both gates
   at once → `run()` fails with `AUTH_CONFLICT`. The validator runs on rwire's tokio runtime, so
   it can call reqwest / a hub client directly. Never log the cookie.
 - **Runtime: tokio.** `#[tokio::main]` and `Server::…run().await`; inside an existing tokio app
@@ -109,6 +109,18 @@ appears in the design-system app automatically. Gate with
   thread for that. Background code reaches the UI through `server.shared_state()` taken before
   `run()` (`update_shared_if` broadcasts only real changes; sync, callable from any thread).
   `run_until(fut)` stops cleanly: listener closed, sockets closed with 1001, 5 s grace.
+- **Connection lifecycle.**
+  - `.on_connect(h)` runs a `#[handler]` once per WebSocket. It runs before the first render,
+    so what it writes is in the first paint.
+  - `.on_disconnect(h)` runs once at close, whatever the cause: the client left, heartbeat,
+    revocation, error, panic, or shutdown.
+  - Both see `ctx.identity()` and `ctx.session_id()`.
+  - Shared-state lifecycle handlers broadcast like events (presence: join / leave).
+  - **Per-user background work**: `ctx.spawn(fut)` in `on_connect` starts a tokio task tied to
+    the connection. It is aborted at close, before `on_disconnect` runs. Never spawn per-user
+    work from the `DelegatedAuth` validator.
+  - `spawn` works from any handler. It returns `false`, without running the future, when there
+    is no live connection (`on_disconnect`, or a hand-built context).
 
 ## 5. Traps a real app hit (each cost a debugging session)
 
