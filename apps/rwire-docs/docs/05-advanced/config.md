@@ -241,6 +241,20 @@ the app gets no static paint either.
 With a PWA, the service worker's offline fallback is the `/` page cached at
 install, so offline its paint shows the shared state of that time.
 
+## Compression
+
+Responses are gzipped for a client whose `Accept-Encoding` takes gzip, with
+`Vary: Accept-Encoding`:
+
+- the page: the fixed capsule is compressed once at startup (about 28 KB to
+  10 KB); with `ssr(true)` the per-request page is compressed as it is served
+  (well under a millisecond);
+- text files registered with `.asset(..)` (and the bundled extension
+  modules), compressed once at startup when it saves at least a tenth.
+
+Images, fonts, `asset_dir` folders (streamed, with byte ranges), the PWA files
+and the short 404 are sent as they are. Only gzip is offered.
+
 ## Unknown paths
 
 A path the app has no page for gets a **short `404 Not Found`** (a line of

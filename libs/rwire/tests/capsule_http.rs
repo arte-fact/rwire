@@ -173,3 +173,102 @@ async fn the_title_is_set_with_and_without_ssr() {
         }
     }
 }
+
+fn header(raw: &[u8], name: &str) -> Option<String> {
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
+    String::from_utf8_lossy(&raw[..split])
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let (n, v) = line.split_once(':')?;
+            n.trim()
+                .eq_ignore_ascii_case(name)
+                .then(|| v.trim().to_string())
+        })
+}
+
+fn gunzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(bytes)
+        .read_to_end(&mut out)
+        .expect("not gzip");
+    out
+}
+
+const GZIP: &str = "Accept-Encoding: gzip, deflate, br\r\n";
+
+/// The page, a text asset and the bundled extension module are gzipped for a
+/// client that takes gzip, with `Vary: Accept-Encoding`; the bytes are the
+/// same once decompressed. Images and the short 404 are sent as they are.
+#[tokio::test]
+async fn text_responses_are_gzipped_when_accepted() {
+    let script = "export function i(doc) { doc.title = 'x'; }\n".repeat(80);
+    let leaked: &'static str = Box::leak(script.clone().into_boxed_str());
+    tokio::spawn(async move {
+        let _ = Server::bind("127.0.0.1:19188")
+            .unwrap()
+            .root(page)
+            .capsule_config(CapsuleConfig::new().title("Office"))
+            .asset("/app.js", "text/javascript", leaked.as_bytes())
+            .asset("/logo.png", "image/png", &b"\x89PNG not compressed"[..])
+            .run()
+            .await;
+    });
+    wait_up(19188).await;
+
+    let plain = get(19188, "/", "").await;
+    let packed = get(19188, "/", GZIP).await;
+    assert_eq!(header(&plain, "content-encoding"), None);
+    assert_eq!(header(&plain, "vary").as_deref(), Some("Accept-Encoding"));
+    assert_eq!(header(&packed, "content-encoding").as_deref(), Some("gzip"));
+    assert_eq!(header(&packed, "vary").as_deref(), Some("Accept-Encoding"));
+    assert_eq!(gunzip(body(&packed)), body(&plain));
+    eprintln!(
+        "capsule: {} bytes plain, {} gzipped",
+        body(&plain).len(),
+        body(&packed).len()
+    );
+    assert!(body(&packed).len() * 2 < body(&plain).len());
+
+    let js = get(19188, "/app.js", GZIP).await;
+    assert_eq!(header(&js, "content-encoding").as_deref(), Some("gzip"));
+    assert_eq!(gunzip(body(&js)), script.as_bytes());
+    let js = get(19188, "/app.js", "Accept-Encoding: gzip;q=0\r\n").await;
+    assert_eq!(header(&js, "content-encoding"), None);
+    assert_eq!(body(&js), script.as_bytes());
+
+    let png = get(19188, "/logo.png", GZIP).await;
+    assert_eq!(header(&png, "content-encoding"), None);
+    assert_eq!(header(&png, "vary"), None);
+
+    let vim = get(19188, "/_rw/ext/vim.js", GZIP).await;
+    assert_eq!(header(&vim, "content-encoding").as_deref(), Some("gzip"));
+    let plain_vim = get(19188, "/_rw/ext/vim.js", "").await;
+    assert_eq!(gunzip(body(&vim)), body(&plain_vim));
+
+    let miss = get(19188, "/nope", GZIP).await;
+    assert_eq!(header(&miss, "content-encoding"), None);
+}
+
+/// The per-request `ssr(true)` page is gzipped as it is served.
+#[tokio::test]
+async fn the_ssr_page_is_gzipped_per_request() {
+    tokio::spawn(async {
+        let _ = Server::bind("127.0.0.1:19189")
+            .unwrap()
+            .root(page)
+            .capsule_config(CapsuleConfig::new().ssr(true))
+            .run()
+            .await;
+    });
+    wait_up(19189).await;
+    let packed = get(19189, "/", GZIP).await;
+    assert_eq!(header(&packed, "content-encoding").as_deref(), Some("gzip"));
+    let html = String::from_utf8(gunzip(body(&packed))).unwrap();
+    assert!(
+        html.contains("<div id=\"rw\"><p>the app page</p></div>"),
+        "{html}"
+    );
+    assert_eq!(html.as_bytes(), body(&get(19189, "/", "").await));
+}

@@ -74,6 +74,39 @@ pub async fn serve_with_status(
     Ok(())
 }
 
+/// Serve the page `body` with `status`, gzipped when `gzipped` (then with
+/// `Content-Encoding: gzip`); always with `Vary: Accept-Encoding`, since the
+/// server picks the encoding from the request. Sets the session cookie like
+/// [`serve`].
+pub(crate) async fn serve_page(
+    mut stream: TcpStream,
+    status: &str,
+    body: &[u8],
+    gzipped: bool,
+    session_id: Option<&SessionId>,
+    is_new_session: bool,
+    secure_cookie: bool,
+) -> std::io::Result<()> {
+    let mut headers = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
+         Connection: close\r\nCache-Control: no-cache\r\nVary: Accept-Encoding\r\n"
+    );
+    if gzipped {
+        headers.push_str("Content-Encoding: gzip\r\n");
+    }
+    if let Some(sid) = session_id.filter(|_| is_new_session) {
+        let cookie = sid.to_cookie(
+            Some(Duration::from_secs(COOKIE_MAX_AGE_SECS)),
+            secure_cookie,
+        );
+        headers.push_str(&format!("Set-Cookie: {cookie}\r\n"));
+    }
+    headers.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
+    stream.write_all(headers.as_bytes()).await?;
+    stream.write_all(body).await?;
+    stream.flush().await
+}
+
 /// Send a short `404 Not Found` (a few bytes of text, not the page): for a
 /// path the app has no page for (`/favicon.ico`, `/wp-login.php`).
 pub async fn serve_not_found(mut stream: TcpStream) -> std::io::Result<()> {

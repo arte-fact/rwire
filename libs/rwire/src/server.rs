@@ -745,6 +745,8 @@ struct Asset {
     body: Cow<'static, [u8]>,
     /// The `Cache-Control` directive it is served with.
     cache: &'static str,
+    /// `body` gzipped, for a text file where it pays (set at startup).
+    gzip: Option<Vec<u8>>,
 }
 
 /// How long a browser keeps an asset served as it is: an hour.
@@ -856,6 +858,7 @@ where
             content_type: Cow::Borrowed(content_type),
             body: body.into(),
             cache: ASSET_CACHE,
+            gzip: None,
         });
         self
     }
@@ -874,6 +877,7 @@ where
             content_type: Cow::Borrowed(content_type),
             body: body.into(),
             cache: ASSET_CACHE_FOREVER,
+            gzip: None,
         });
         self
     }
@@ -1195,7 +1199,12 @@ where
                 content_type: Cow::Owned(icon.content_type),
                 body: icon.bytes,
                 cache: ASSET_CACHE,
+                gzip: None,
             });
+        }
+        // Text files are gzipped once, here.
+        for file in &mut files {
+            file.gzip = crate::compress::gzip_if_worth_it(&file.content_type, &file.body);
         }
         let assets = Arc::new(ServedFiles {
             assets: files,
@@ -1382,7 +1391,8 @@ const SSR_CSS_SLOT: &str = "\u{1}rwire-ssr-css\u{1}";
 /// The page served for a `GET`: the capsule as generated at startup, or, with
 /// `ssr(true)`, the capsule around a static first paint rendered per request.
 enum Page {
-    Fixed(String),
+    /// The capsule, and the same gzipped once at startup.
+    Fixed { html: String, gzip: Vec<u8> },
     /// The capsule split at [`SSR_CSS_SLOT`] and [`SSR_HTML_SLOT`].
     Ssr {
         head: String,
@@ -1394,12 +1404,17 @@ enum Page {
 }
 
 impl Page {
+    fn fixed(html: String) -> Self {
+        let gzip = crate::compress::gzip(html.as_bytes());
+        Page::Fixed { html, gzip }
+    }
+
     fn new(capsule: String, exclude: &[String]) -> Self {
         let Some((head, rest)) = capsule.split_once(SSR_CSS_SLOT) else {
-            return Page::Fixed(capsule);
+            return Page::fixed(capsule);
         };
         let Some((mid, tail)) = rest.split_once(SSR_HTML_SLOT) else {
-            return Page::Fixed(capsule);
+            return Page::fixed(capsule);
         };
         Page::Ssr {
             head: head.to_string(),
@@ -1413,21 +1428,33 @@ impl Page {
     }
 
     /// The status line and page for a `GET` of `target` (the request-line
-    /// target), or `None` for a short `404` (see [`page_status`]).
+    /// target), or `None` for a short `404` (see [`page_status`]). The page is
+    /// gzipped when `gzip` (the client takes it): once at startup for the
+    /// fixed capsule, here for the per-request `ssr(true)` page.
     fn render<F>(
         &self,
         root: &F,
         shared: &SharedServerState,
         target: &str,
         routes_itself: bool,
-    ) -> Option<(&'static str, Cow<'_, str>)>
+        gzip: bool,
+    ) -> Option<(&'static str, Cow<'_, [u8]>)>
     where
         F: Fn() -> ElementBuilder,
     {
         let path = route_path(target);
         let status = page_status(path, routes_itself)?;
-        let page = match self {
-            Page::Fixed(capsule) => Cow::Borrowed(capsule.as_str()),
+        let page: Cow<'_, str> = match self {
+            Page::Fixed { html, gzip: packed } => {
+                return Some((
+                    status,
+                    if gzip {
+                        Cow::Borrowed(packed.as_slice())
+                    } else {
+                        Cow::Borrowed(html.as_bytes())
+                    },
+                ));
+            }
             Page::Ssr {
                 head,
                 mid,
@@ -1442,7 +1469,15 @@ impl Page {
                 }
             }
         };
-        Some((status, page))
+        let body = if gzip {
+            Cow::Owned(crate::compress::gzip(page.as_bytes()))
+        } else {
+            match page {
+                Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
+                Cow::Owned(text) => Cow::Owned(text.into_bytes()),
+            }
+        };
+        Some((status, body))
     }
 }
 
@@ -1919,14 +1954,27 @@ fn login_capsule_config(
 /// vendoring as the core runtime artifact; `npm run sync` is the write path.
 const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
 
-async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    stream.write_all(response.as_bytes()).await?;
-    stream.flush().await
+async fn serve_ext_module(
+    stream: TcpStream,
+    body: &'static str,
+    gzip: bool,
+) -> std::io::Result<()> {
+    // The bundled modules are gzipped once, on first request.
+    static PACKED: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    let bytes = if gzip {
+        PACKED.get_or_init(|| crate::compress::gzip(EXT_VIM_JS.as_bytes()))
+    } else {
+        body.as_bytes()
+    };
+    crate::health::serve_static_encoded(
+        stream,
+        "text/javascript; charset=utf-8",
+        bytes,
+        "no-cache",
+        gzip,
+        true,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1970,7 +2018,8 @@ async fn handle_client<F>(
         if bare == "/_rw/ext/vim.js" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
+            let gzip = crate::compress::accepts_gzip(&peek_str);
+            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS, gzip).await {
                 eprintln!("[{}] ext module error: {}", peer_addr, e);
             }
             return;
@@ -1979,9 +2028,19 @@ async fn handle_client<F>(
         if let Some(a) = assets.assets.iter().find(|a| a.path == bare) {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) =
-                crate::health::serve_static_cached(stream, &a.content_type, &a.body, a.cache).await
-            {
+            let packed = a
+                .gzip
+                .as_deref()
+                .filter(|_| crate::compress::accepts_gzip(&peek_str));
+            let sent = crate::health::serve_static_encoded(
+                stream,
+                &a.content_type,
+                packed.unwrap_or(&a.body),
+                a.cache,
+                packed.is_some(),
+                a.gzip.is_some(),
+            );
+            if let Err(e) = sent.await {
                 eprintln!("[{}] {} error: {}", peer_addr, bare, e);
             }
             return;
@@ -2312,16 +2371,22 @@ async fn handle_client<F>(
         // Rendered here, past the auth gates above: the static paint (and the shared
         // state in it) reaches exactly the visitors the live page would.
         let target = request_line(&peek_str).1;
-        let Some((status, page)) =
-            capsule.render(root.as_ref(), &shared, target, route_handler.is_some())
-        else {
+        let gzip = crate::compress::accepts_gzip(&peek_str);
+        let Some((status, page)) = capsule.render(
+            root.as_ref(),
+            &shared,
+            target,
+            route_handler.is_some(),
+            gzip,
+        ) else {
             let _ = capsule::serve_not_found(stream).await;
             return;
         };
-        if let Err(e) = capsule::serve_with_status(
+        if let Err(e) = capsule::serve_page(
             stream,
             status,
             &page,
+            gzip,
             Some(&session_id),
             is_new_session,
             secure_cookie,

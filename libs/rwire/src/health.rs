@@ -195,6 +195,42 @@ pub async fn serve_static(stream: TcpStream, content_type: &str, body: &[u8]) ->
 }
 
 /// Serve a static body with the `Cache-Control` directive given: a file
+/// [`serve_static_cached`] for a body that may be gzipped: `gzipped` adds
+/// `Content-Encoding: gzip`, `vary` adds `Vary: Accept-Encoding` (set it
+/// whenever the file has a gzipped variant, sent or not).
+pub(crate) async fn serve_static_encoded(
+    mut stream: TcpStream,
+    content_type: &str,
+    body: &[u8],
+    cache: &str,
+    gzipped: bool,
+    vary: bool,
+) -> io::Result<()> {
+    let header = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {content_type}\r\n\
+         Content-Length: {}\r\n\
+         Cache-Control: {cache}\r\n\
+         {}{}Connection: close\r\n\
+         \r\n",
+        body.len(),
+        if gzipped {
+            "Content-Encoding: gzip\r\n"
+        } else {
+            ""
+        },
+        if vary {
+            "Vary: Accept-Encoding\r\n"
+        } else {
+            ""
+        },
+    );
+    stream.write_all(header.as_bytes()).await?;
+    stream.write_all(body).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 /// whose path carries its content's hash can be kept for a year, immutable.
 pub async fn serve_static_cached(
     mut stream: TcpStream,

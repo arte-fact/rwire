@@ -73,6 +73,11 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   and links it from the `<head>` (replacing the PWA's `<link rel="icon">`).
 - **`CapsuleConfig::title(text)`**: the page's `<title>` (replacing the PWA
   name's). One title per app; no per-route title yet (documented).
+- **gzip**: the page (fixed capsule compressed once at startup, 27.6 KB →
+  9.8 KB; the `ssr(true)` page compressed per request, ~0.6 ms), text
+  `asset()`s and the bundled extension modules, for clients whose
+  `Accept-Encoding` takes gzip, with `Vary: Accept-Encoding`. New dependency:
+  `flate2` (pure-Rust backend).
 
 ### Added: asset folders served from disk
 
