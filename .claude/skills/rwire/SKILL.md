@@ -87,7 +87,8 @@ appears in the design-system app automatically. Gate with
 - One routing model per page tree: `on_route` **or** `routes` + `outlet()`. A `Router`
   needs an `outlet()` in the page tree (directly or inside a renderer's output): without
   one, `run()` refuses to start with `ROUTER_WITHOUT_OUTLET` instead of serving a page
-  whose navigation freezes.
+  whose navigation freezes. The check renders regions at their default state: an outlet
+  that only appears in another state (behind a login) needs `.outlet_guard(false)`.
 - Enter-to-submit on a textarea: set `data-enter-submit` (the runtime handles
   preventDefault + `requestSubmit`; Shift+Enter falls through to a newline). Don't bind
   keydown yourself — rwire `preventDefault`s bound keydowns, which blocks typing.

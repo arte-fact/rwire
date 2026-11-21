@@ -62,6 +62,15 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
 
+### Added: `outlet_guard(false)` for a conditional outlet
+
+- The router's startup check (`ROUTER_WITHOUT_OUTLET`) renders regions at their
+  default state, so an `outlet()` that only appears in another state (behind a
+  login) was refused. `ServerWithRoot::outlet_guard(false)` turns the check off;
+  the server then says at startup that no outlet was seen, and routes once the
+  outlet renders. The error message names the option and no longer points at an
+  internal tool path.
+
 ### Added: asset folders served from disk
 
 - `ServerWithRoot::asset_dir(prefix, dir)` serves a folder read on each

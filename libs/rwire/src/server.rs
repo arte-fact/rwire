@@ -720,6 +720,8 @@ pub struct ServerWithRoot<F> {
     base_path: Option<String>,
     route_handler: Option<HandlerFn>,
     router: Option<crate::router::Router>,
+    /// Refuse to start when `.routes(..)` has no `outlet()` to drive.
+    outlet_guard: bool,
     theme_provider: Option<ThemeProvider>,
     auth: Option<AuthGate>,
     delegated: Option<Arc<crate::delegated_auth::DelegatedAuth>>,
@@ -773,8 +775,8 @@ pub const ROUTER_WITHOUT_OUTLET: &str = "rwire: a Router is registered with `.ro
      region rendered with its default state), so navigation would have nothing to re-render \
      and the page would freeze. Put `rwire::outlet()` in the persistent shell where the \
      matched view should render, or drop `.routes(..)` and route with `on_route` instead \
-     (one routing model per page tree: see .claude/skills/rwire/SKILL.md, section 4, \
-     \"Reactivity + routing rules\").";
+     (one routing model per page tree). If the outlet only appears in some states (behind a \
+     login, say), turn this check off with `.outlet_guard(false)`.";
 
 impl ServerBuilder {
     /// Configure persist interval (default 100ms).
@@ -810,6 +812,7 @@ impl ServerBuilder {
             base_path: self.base_path,
             route_handler: None,
             router: None,
+            outlet_guard: true,
             theme_provider: None,
             auth: None,
             delegated: None,
@@ -1072,6 +1075,21 @@ where
         self
     }
 
+    /// Whether [`run`](Self::run) refuses to start a router with no `outlet()`
+    /// ([`ROUTER_WITHOUT_OUTLET`]). On by default.
+    ///
+    /// The check renders every synced region with its **default** state, so an
+    /// outlet that only appears in another state (behind a login, once a
+    /// setting is on) is not seen, and a correct app is refused. Turn the check
+    /// off for such an app: the server then starts, says at startup that no
+    /// outlet was seen, and navigation re-renders the outlet once it is in the
+    /// page. Until then, route changes update `CurrentRoute` without anything
+    /// to show them.
+    pub fn outlet_guard(mut self, on: bool) -> Self {
+        self.outlet_guard = on;
+        self
+    }
+
     /// Get the shared server state, creating it if needed.
     ///
     /// Call this before `run()` to get a reference to the shared state for
@@ -1128,7 +1146,13 @@ where
         // with no `outlet()` to drive would leave every navigation frozen: refuse to start.
         if let Some(router) = self.router {
             if !crate::router::has_outlet(&root_element) {
-                return Err(ROUTER_WITHOUT_OUTLET.into());
+                if self.outlet_guard {
+                    return Err(ROUTER_WITHOUT_OUTLET.into());
+                }
+                eprintln!(
+                    "rwire: no outlet() in the default-state page tree; starting anyway \
+                     (outlet_guard(false)): navigation shows once an outlet renders"
+                );
             }
             crate::router::install_router(std::sync::Arc::new(router));
         }
