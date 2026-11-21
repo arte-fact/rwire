@@ -725,6 +725,14 @@ pub struct ServerWithRoot<F> {
     delegated: Option<Arc<crate::delegated_auth::DelegatedAuth>>,
     config: ServerConfig,
     assets: Vec<Asset>,
+    asset_dirs: Vec<crate::asset_dir::AssetDir>,
+}
+
+/// The application's files: fixed ones ([`ServerWithRoot::asset`]) and
+/// folders read from disk ([`ServerWithRoot::asset_dir`]).
+struct ServedFiles {
+    assets: Vec<Asset>,
+    dirs: Vec<crate::asset_dir::AssetDir>,
 }
 
 /// A file the server serves as it is, at a path of the application's choosing:
@@ -807,6 +815,7 @@ impl ServerBuilder {
             delegated: None,
             config: ServerConfig::default(),
             assets: Vec::new(),
+            asset_dirs: Vec::new(),
         }
     }
 }
@@ -866,6 +875,41 @@ where
             body: body.into(),
             cache: ASSET_CACHE_FOREVER,
         });
+        self
+    }
+
+    /// Serve the files of the folder `dir` under the URL prefix `prefix`
+    /// (`"/media"`): `GET /media/2026/cover.png` reads `dir/2026/cover.png`
+    /// from disk on each request, so files added while the server runs are
+    /// served too.
+    ///
+    /// **Behind the auth gate.** With [`Self::auth`] or [`Self::auth_with`], a
+    /// request needs the same session as the page; without a gate the folder
+    /// is open. Use [`Self::public_asset_dir`] for a folder anyone may read.
+    ///
+    /// Only regular files inside `dir` are served: `..`, encoded or not,
+    /// hidden files (`.name`), symbolic links leading out of `dir` and
+    /// directory listings are refused with a `404`. The `Content-Type` comes
+    /// from an allowlist of media extensions (images, video, audio, fonts,
+    /// PDF, text), anything else is `application/octet-stream`, and responses
+    /// carry `nosniff` and a sandboxing CSP. Responses support `ETag` /
+    /// `Last-Modified` revalidation (`304`), `Cache-Control: no-cache`, a
+    /// single `Range` (video seeking) and `HEAD`, and stream the file.
+    ///
+    /// # Panics
+    ///
+    /// If `prefix` is empty or `/`: a folder can't take the whole site.
+    pub fn asset_dir(mut self, prefix: &str, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.asset_dirs
+            .push(crate::asset_dir::AssetDir::new(prefix, dir, false));
+        self
+    }
+
+    /// [`Self::asset_dir`] served before the auth gate, to every visitor: for
+    /// public media of a gated app (a logo on the login page, shared images).
+    pub fn public_asset_dir(mut self, prefix: &str, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.asset_dirs
+            .push(crate::asset_dir::AssetDir::new(prefix, dir, true));
         self
     }
 
@@ -1142,7 +1186,10 @@ where
         // Fold a builder-level base_path into the capsule config as the final step, so it wins
         // regardless of chain order and works with or without a prior `.capsule_config(...)`.
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
-        let assets = Arc::new(self.assets);
+        let assets = Arc::new(ServedFiles {
+            assets: self.assets,
+            dirs: self.asset_dirs,
+        });
 
         let gated = self.auth.is_some() || self.delegated.is_some();
         // Generate capsule - styled if config provided, basic otherwise.
@@ -1650,6 +1697,44 @@ fn request_line(request: &str) -> (&str, &str) {
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
+/// Answer a `GET` / `HEAD` for a file of one of `dirs` that `eligible` accepts.
+/// Returns whether the request was answered (the stream is then done).
+async fn serve_asset_dir(
+    stream: &mut TcpStream,
+    peeked: usize,
+    request: &str,
+    dirs: &[crate::asset_dir::AssetDir],
+    eligible: impl Fn(&crate::asset_dir::AssetDir) -> bool,
+) -> bool {
+    let (method, target) = request_line(request);
+    if method != "GET" && method != "HEAD" {
+        return false;
+    }
+    let path = target.split(['?', '#']).next().unwrap_or("");
+    let Some((dir, rest)) = dirs
+        .iter()
+        .filter(|d| eligible(d))
+        .find_map(|d| d.claims(path).map(|rest| (d, rest)))
+    else {
+        return false;
+    };
+    let mut drain = vec![0u8; peeked];
+    let _ = stream.read_exact(&mut drain).await;
+    if let Err(e) = crate::asset_dir::serve(
+        stream,
+        &dir.dir,
+        rest,
+        request,
+        method == "HEAD",
+        dir.public,
+    )
+    .await
+    {
+        eprintln!("asset folder {}: {e}", dir.prefix);
+    }
+    true
+}
+
 /// Proxy a matched request to a local upstream port (P2), streaming both directions until either
 /// side closes. `head` is the client's already-drained request head; its first line is rewritten to
 /// strip `prefix` so the upstream sees a root-relative path. A WebSocket upgrade needs no special
@@ -1836,7 +1921,7 @@ async fn handle_client<F>(
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     pwa_assets: Option<Arc<crate::pwa::PwaAssets>>,
-    assets: Arc<Vec<Asset>>,
+    assets: Arc<ServedFiles>,
 ) where
     F: Fn() -> ElementBuilder + Send + Sync + 'static,
 {
@@ -1867,7 +1952,7 @@ async fn handle_client<F>(
             return;
         }
         // The application's own files.
-        if let Some(a) = assets.iter().find(|a| a.path == bare) {
+        if let Some(a) = assets.assets.iter().find(|a| a.path == bare) {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             if let Err(e) =
@@ -1897,6 +1982,16 @@ async fn handle_client<F>(
             }
             return;
         }
+    }
+
+    // Asset folders: the public ones before the auth gates, the others after.
+    let gated = auth.is_some() || delegated.is_some();
+    if serve_asset_dir(&mut stream, n, &peek_str, &assets.dirs, |d| {
+        d.public || !gated
+    })
+    .await
+    {
+        return;
     }
 
     // PWA assets (manifest, service worker, icons): served before auth so the
@@ -2042,6 +2137,10 @@ async fn handle_client<F>(
                 return;
             }
         }
+    }
+
+    if serve_asset_dir(&mut stream, n, &peek_str, &assets.dirs, |d| !d.public).await {
+        return;
     }
 
     // Reverse-proxy gate (after auth, so previews inherit the gate): a matched path forwards to a

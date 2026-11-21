@@ -62,6 +62,21 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
 
+### Added: asset folders served from disk
+
+- `ServerWithRoot::asset_dir(prefix, dir)` serves a folder read on each
+  request, so files added while the server runs are served (media of a blog).
+  It is **behind `auth()` / `auth_with()`** when one is set;
+  `public_asset_dir(prefix, dir)` serves before the gate.
+- Refused with a 404: `..` in any encoding, hidden files, NUL and control
+  bytes, symbolic links leading out of the folder, directory listings.
+- `Content-Type` from an allowlist of media extensions, otherwise
+  `application/octet-stream`; `nosniff` and a sandboxing CSP on every
+  response.
+- `ETag` / `Last-Modified` with `304`, `Cache-Control: no-cache`, single
+  `Range` requests (`206` / `416`) and `HEAD`; files are streamed.
+- tokio's `fs` feature is now enabled.
+
 First public release. Highlights of what the framework ships with:
 
 - **Core**: server-owned state over a binary WebSocket protocol; ~16KB
