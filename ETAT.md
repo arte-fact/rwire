@@ -16,12 +16,12 @@ None.
 
 ## Waiting branches (no PR; rebased on main by merge)
 
-- `feat/components-styling` — component styling gaps 6, 7, 11, 12, 13 (each has a workaround in the front).
-- `feat/on-connect` — run `on_route`/first-message handling on connect.
-- `fix/login-next-base-path` — `next` redirect combined with `base_path`.
+- `feat/components-styling` — gaps 6, 7, 11, 12, 13: `Field::textarea` in `Form`, last `st()` call wins, `Composer` disabled state with its reason, `Button::title` and tooltips on disabled buttons, Nord dark contrast with a WCAG test. Each has a workaround in the front.
+- `feat/on-connect` — an `on_connect(ctx)` hook with `ctx.identity()`, to start a per-user task.
+- `fix/login-next-base-path` — the login `next` includes `base_path`; option to turn `/metrics` off.
 - `feat/outlet-guard-opt-out` — explicit opt-out for the router outlet guard.
-- `feat/review-minors` — minor review follow-ups.
-- `feat/markdown-frontmatter-extra` — extra Markdown frontmatter support.
+- `fix/review-minors` — minor follow-ups from an earlier review.
+- `feat/markdown-frontmatter-extra` — free extra fields in the Markdown front matter (asked by news).
 - `docs/multi-state-renderers` — design study for multi-state renderers.
 
 ## mcp-agents front gaps
@@ -32,11 +32,11 @@ From §5 of the rwire trial notes (MR !20):
 |---|---|---|
 | 1 | optional SQLite persistence (`persist` feature) | fixed in #12 |
 | 2 | multi-state renderers | design study `docs/multi-state-renderers` |
-| 3 | on-connect behavior | waiting branch `feat/on-connect` |
+| 3 | connection hook with the identity (`on_connect`) | waiting branch `feat/on-connect` |
 | 4, 5, 8 | short 404, favicon, capsule `<title>`/gzip | fixed in #16 |
-| 6, 7, 11, 12, 13 | component styling | waiting branch `feat/components-styling` |
+| 6, 7, 11, 12, 13 | textarea field, style order, disabled reasons, button tooltip, Nord dark contrast | waiting branch `feat/components-styling` |
 | 9 | delegated auth hardening, `/metrics` behind the gate | fixed in #15 |
-| 10 | `login` + `next` with `base_path` | waiting branch `fix/login-next-base-path` |
+| 10 | login `next` ignores `base_path` | waiting branch `fix/login-next-base-path` |
 
 ## Process
 
