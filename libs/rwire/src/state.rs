@@ -304,6 +304,9 @@ pub struct EventContext {
 struct ActionSlot {
     shared: Arc<SharedServerState>,
     key: ActionKey,
+    /// Shared with the resolvers `defer()` hands out, so a resolution made before the handler
+    /// returns is applied by `EventContext::settle_deferred` rather than overwritten by `Loading`.
+    settlement: crate::actions::SettlementCell,
 }
 
 /// A server-initiated client navigation requested from a handler.
@@ -546,7 +549,11 @@ impl EventContext {
     /// Attach the action this event drives (done by the server at dispatch), giving `defer()`
     /// the shared handle and key it needs to drive the lifecycle.
     pub fn with_action(mut self, shared: Arc<SharedServerState>, key: ActionKey) -> Self {
-        self.action = Some(ActionSlot { shared, key });
+        self.action = Some(ActionSlot {
+            shared,
+            key,
+            settlement: Default::default(),
+        });
         self
     }
 
@@ -568,9 +575,14 @@ impl EventContext {
             // Only claim the action + hand back a live resolver. Marking it `Loading` (and arming
             // the timeout) is done by the server *after* the handler returns — a `&mut SharedState`
             // handler runs holding the shared-cache write lock, and `set_action_loading` re-enters
-            // that lock, so setting it here would self-deadlock. The deferred work outlives the
-            // handler, so the post-handler `Loading` still lands before the resolver's `ok`/`err`.
-            Some(slot) => Resolver::new(Arc::clone(&slot.shared), slot.key.clone()),
+            // that lock, so setting it here would self-deadlock. A resolver used before then
+            // records its outcome in the slot's settlement, which the server applies instead of
+            // `Loading` (see `settle_deferred`).
+            Some(slot) => Resolver::new(
+                Arc::clone(&slot.shared),
+                slot.key.clone(),
+                Arc::clone(&slot.settlement),
+            ),
             None => Resolver::noop(),
         }
     }
@@ -578,6 +590,14 @@ impl EventContext {
     /// Whether the handler claimed this action for later (server-internal).
     pub(crate) fn was_deferred(&self) -> bool {
         self.deferred.get()
+    }
+
+    /// After a deferring handler returned (server-internal): apply a resolution made in it, or
+    /// mark the action `Loading` and arm the timeout backstop.
+    pub(crate) fn settle_deferred(&self) {
+        if let Some(slot) = &self.action {
+            crate::actions::settle_after_handler(&slot.settlement, &slot.shared, slot.key.clone());
+        }
     }
 
     /// The connection's session id — stable across reconnects for the cookie
