@@ -442,9 +442,10 @@ impl DelegatedAuth {
     }
 
     /// The most validations running at once (default 16), across all
-    /// credentials. Requests beyond it wait for a slot within
-    /// [`Self::timeout`], then fail closed: a flood of forged cookies can't
-    /// multiply calls to the validator.
+    /// credentials. Requests beyond it wait for a slot; one that waited more
+    /// than half of [`Self::timeout`] fails closed without calling the
+    /// validator (it could not finish in time): a flood of forged cookies
+    /// can't multiply calls to the validator.
     pub fn max_concurrent_validations(mut self, max: usize) -> Self {
         self.max_concurrent = max.max(1);
         self.state = State::new(self.max_concurrent);
@@ -478,8 +479,9 @@ impl DelegatedAuth {
 
     /// The identity of the request whose head is `head`, from the cache or the
     /// validator. Never logs the cookie.
+    #[cfg(test)]
     pub(crate) async fn identify(&self, head: &str) -> Option<Identity> {
-        match self.check(AuthRequest::from_head(head)).await {
+        match self.verdict(head).await {
             Validation::Valid(identity) => Some(identity),
             Validation::Revoked | Validation::Unavailable => None,
         }
@@ -509,9 +511,10 @@ impl DelegatedAuth {
             .is_some_and(|t| !t.is_empty())
     }
 
-    /// Re-validate an open WebSocket's credentials (`head` is its handshake):
-    /// the verdict, so the caller can tell a revocation from an outage.
-    pub(crate) async fn revalidate(&self, head: &str) -> Validation {
+    /// The verdict for the request whose head is `head` (a page request, or an
+    /// open WebSocket's handshake when re-validating it): the identity, or why
+    /// there is none, so the caller can tell a revocation from an outage.
+    pub(crate) async fn verdict(&self, head: &str) -> Validation {
         self.check(AuthRequest::from_head(head)).await
     }
 
@@ -549,19 +552,26 @@ impl DelegatedAuth {
     /// The one validation of `key`, shared by every request that asks while it
     /// runs: it takes a slot, asks the validator, remembers the answer and
     /// leaves the in-flight table.
+    ///
+    /// The validation runs in its own task, so it finishes (within
+    /// [`Self::timeout`]) even when every request waiting on it is dropped: a
+    /// client that disconnects can't leave the entry in the table holding its
+    /// slot forever.
     fn flight(&self, key: Key, request: AuthRequest, limits: Limits) -> Flight {
         use futures::FutureExt;
         let state = Arc::clone(&self.state);
         let validate = Arc::clone(&self.validate);
         let timeout = self.timeout;
-        async move {
+        let task = tokio::spawn(async move {
             let deadline = tokio::time::Instant::now() + timeout;
             let answer = tokio::time::timeout_at(deadline, async {
                 let _slot = state.permits.acquire().await.ok()?;
-                // A slot freed by a validation that just timed out wakes this
-                // waiter before its own deadline is checked: re-check it, or
-                // every waiter of a flood would call the validator in turn.
-                if tokio::time::Instant::now() >= deadline {
+                // A slot freed by a validation that just timed out wakes the
+                // waiters queued behind it, each with almost no time left: a
+                // validation started now could not finish, and every waiter of a
+                // flood would call the validator in turn. Only start one with at
+                // least half the timeout left.
+                if tokio::time::Instant::now() + timeout / 2 > deadline {
                     return None;
                 }
                 Some(validate(request).await)
@@ -582,9 +592,20 @@ impl DelegatedAuth {
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(&key);
             outcome
-        }
-        .boxed()
-        .shared()
+        });
+        // A task that panicked (in the validator) is an outage, not a verdict.
+        task.map(|joined| joined.unwrap_or(Validation::Unavailable))
+            .boxed()
+            .shared()
+    }
+
+    #[cfg(test)]
+    fn in_flight_len(&self) -> usize {
+        self.state
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     #[cfg(test)]
@@ -842,6 +863,55 @@ mod tests {
         );
     }
 
+    /// Every request waiting on a validation is dropped (clients gone): the
+    /// validation still ends at its timeout, leaves the in-flight table and
+    /// gives its slot back, and the next one runs.
+    #[tokio::test]
+    async fn abandoned_validations_free_their_slot() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let auth = DelegatedAuth::with_validation("sid", move |req: AuthRequest| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let hang = req.cookie("sid") != Some("good");
+            async move {
+                if hang {
+                    std::future::pending::<()>().await;
+                }
+                Validation::Valid(Identity::new("ada"))
+            }
+        })
+        .max_concurrent_validations(1)
+        .timeout(Duration::from_millis(100));
+        let hung = head("hung");
+        for _ in 0..3 {
+            let waiting = tokio::time::timeout(Duration::from_millis(10), auth.identify(&hung));
+            assert!(waiting.await.is_err(), "the waiter should be dropped first");
+        }
+        assert_eq!(
+            auth.in_flight_len(),
+            1,
+            "one shared validation for the cookie"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            auth.in_flight_len(),
+            0,
+            "the abandoned validation left the table"
+        );
+        assert_eq!(
+            auth.state.permits.available_permits(),
+            1,
+            "its slot is back"
+        );
+        assert_eq!(
+            auth.identify(&head("good"))
+                .await
+                .map(|id| id.id().to_owned()),
+            Some("ada".to_owned())
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
     /// `with_validation`: an unreachable authority is never remembered, a
     /// revocation is; `revalidate` reports which one it was.
     #[tokio::test]
@@ -859,14 +929,14 @@ mod tests {
         });
         for _ in 0..3 {
             assert!(matches!(
-                auth.revalidate(&head("down")).await,
+                auth.verdict(&head("down")).await,
                 Validation::Unavailable
             ));
         }
         assert_eq!(calls.load(Ordering::SeqCst), 3, "an outage is asked again");
         for _ in 0..3 {
             assert!(matches!(
-                auth.revalidate(&head("gone")).await,
+                auth.verdict(&head("gone")).await,
                 Validation::Revoked
             ));
         }
@@ -876,7 +946,7 @@ mod tests {
             "a revocation is remembered"
         );
         assert!(matches!(
-            auth.revalidate(&head("good")).await,
+            auth.verdict(&head("good")).await,
             Validation::Valid(_)
         ));
         assert!(auth.identify(&head("down")).await.is_none(), "fail closed");

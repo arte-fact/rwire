@@ -225,6 +225,19 @@ async fn get(port: u16, path: &str, cookie: Option<&str>) -> String {
     String::from_utf8_lossy(&head[..n]).into_owned()
 }
 
+/// The whole response to a `method` request, read until the server closes.
+async fn request(port: u16, method: &str, path: &str, cookie: Option<&str>) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let cookie = cookie
+        .map(|c| format!("Cookie: {COOKIE}={c}\r\n"))
+        .unwrap_or_default();
+    let request = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n{cookie}\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    let _ = stream.read_to_end(&mut response).await;
+    String::from_utf8_lossy(&response).into_owned()
+}
+
 async fn ws_handshake(port: u16, cookie: Option<&str>) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     let cookie = cookie
@@ -536,6 +549,17 @@ async fn metrics_stay_behind_the_gate_unless_made_public() {
     let session = get(19072, "/metrics", Some(TOKEN)).await;
     assert!(session.starts_with("HTTP/1.1 200"), "{session}");
     assert!(session.contains("rwire_"), "{session}");
+    // With a query or as `HEAD`, the same gate and the same export.
+    let query = get(19072, "/metrics?name=x", None).await;
+    assert!(query.starts_with("HTTP/1.1 303"), "{query}");
+    let query = get(19072, "/metrics?name=x", Some(TOKEN)).await;
+    assert!(query.contains("rwire_"), "{query}");
+    let head = request(19072, "HEAD", "/metrics", None).await;
+    assert!(head.starts_with("HTTP/1.1 303"), "{head}");
+    let head = request(19072, "HEAD", "/metrics", Some(TOKEN)).await;
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert!(head.contains("Content-Length: "), "{head}");
+    assert!(head.ends_with("\r\n\r\n"), "HEAD has no body: {head}");
     for probe in ["/health", "/ready"] {
         let open = get(19072, probe, None).await;
         assert!(open.starts_with("HTTP/1.1 200"), "{probe}: {open}");
@@ -550,6 +574,13 @@ async fn metrics_stay_behind_the_gate_unless_made_public() {
     let public = get(19073, "/metrics", None).await;
     assert!(public.starts_with("HTTP/1.1 200"), "{public}");
     assert!(public.contains("rwire_"), "{public}");
+    let public = get(19073, "/metrics?name=x", None).await;
+    assert!(public.contains("rwire_"), "{public}");
+    let head = request(19073, "HEAD", "/metrics", None).await;
+    assert!(
+        head.starts_with("HTTP/1.1 200") && head.ends_with("\r\n\r\n"),
+        "{head}"
+    );
     // The forged and the valid cookie were checked; the public endpoint asks nothing.
     assert_eq!(hub.calls(), 2);
 }

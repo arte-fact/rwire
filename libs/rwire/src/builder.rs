@@ -1036,6 +1036,10 @@ impl ElementBuilder {
         }
 
         for (key, value) in &self.attrs {
+            // Like the runtime: no `javascript:` (or other executable) URL.
+            if crate::url_safety::is_executable_attr(key, value) {
+                continue;
+            }
             out.push(' ');
             out.push_str(key);
             out.push_str("=\"");
@@ -1052,6 +1056,9 @@ impl ElementBuilder {
                     out.push('"');
                 }
                 TypedAttr::KeySym(at, value) => {
+                    if crate::url_safety::is_executable_attr(at.name(), value) {
+                        continue;
+                    }
                     out.push(' ');
                     out.push_str(at.name());
                     out.push_str("=\"");
