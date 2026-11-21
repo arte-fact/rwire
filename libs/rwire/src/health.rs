@@ -194,6 +194,42 @@ pub async fn serve_static(stream: TcpStream, content_type: &str, body: &[u8]) ->
     serve_static_cached(stream, content_type, body, "public, max-age=3600").await
 }
 
+/// [`serve_static_cached`] for a body that may be gzipped: `gzipped` adds
+/// `Content-Encoding: gzip`, `vary` adds `Vary: Accept-Encoding` (set it
+/// whenever the file has a gzipped variant, sent or not).
+pub(crate) async fn serve_static_encoded(
+    mut stream: TcpStream,
+    content_type: &str,
+    body: &[u8],
+    cache: &str,
+    gzipped: bool,
+    vary: bool,
+) -> io::Result<()> {
+    let header = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {content_type}\r\n\
+         Content-Length: {}\r\n\
+         Cache-Control: {cache}\r\n\
+         {}{}Connection: close\r\n\
+         \r\n",
+        body.len(),
+        if gzipped {
+            "Content-Encoding: gzip\r\n"
+        } else {
+            ""
+        },
+        if vary {
+            "Vary: Accept-Encoding\r\n"
+        } else {
+            ""
+        },
+    );
+    stream.write_all(header.as_bytes()).await?;
+    stream.write_all(body).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 /// Serve a static body with the `Cache-Control` directive given: a file
 /// whose path carries its content's hash can be kept for a year, immutable.
 pub async fn serve_static_cached(
@@ -220,7 +256,16 @@ pub async fn serve_static_cached(
 }
 
 /// Serve a Prometheus text-format metrics response (`GET /metrics`).
-pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> {
+pub async fn serve_metrics(stream: TcpStream, body: &str) -> io::Result<()> {
+    serve_metrics_response(stream, body, false).await
+}
+
+/// [`serve_metrics`], or only its head for a `HEAD` request (`head_only`).
+pub(crate) async fn serve_metrics_response(
+    mut stream: TcpStream,
+    body: &str,
+    head_only: bool,
+) -> io::Result<()> {
     let http_response = format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\
@@ -229,7 +274,7 @@ pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> 
          \r\n\
          {}",
         body.len(),
-        body
+        if head_only { "" } else { body }
     );
 
     stream.write_all(http_response.as_bytes()).await?;

@@ -222,10 +222,12 @@ impl Pwa {
     }
 
     /// The `<head>` fragment + SW-registration `<script>`, injected into the capsule
-    /// before it is hashed (this doesn't depend on the shell hash).
-    pub(crate) fn head(&self, theme: &Theme) -> String {
+    /// before it is hashed (this doesn't depend on the shell hash). `icon_link`
+    /// and `title`: whether to add `<link rel="icon">` and `<title>` (not when
+    /// the capsule has its own favicon or title).
+    pub(crate) fn head(&self, theme: &Theme, icon_link: bool, title: bool) -> String {
         let (theme_color, _) = self.colors(theme);
-        self.head_fragment(&theme_color, &self.effective_icons())
+        self.head_fragment(&theme_color, &self.effective_icons(), icon_link, title)
     }
 
     /// Freeze the served artifacts (manifest, service worker, icon bytes).
@@ -324,23 +326,38 @@ impl Pwa {
     }
 
     /// `<head>` fragment + the service-worker registration `<script>`.
-    fn head_fragment(&self, theme_color: &str, icons: &[PwaIcon]) -> String {
+    fn head_fragment(
+        &self,
+        theme_color: &str,
+        icons: &[PwaIcon],
+        icon_link: bool,
+        title: bool,
+    ) -> String {
         let first_icon = icons.first().map(|i| i.path()).unwrap_or_default();
+        let icon_link = if icon_link {
+            format!("<link rel=\"icon\" href=\"{first_icon}\">")
+        } else {
+            String::new()
+        };
+        let title = if title {
+            format!("<title>{}</title>", html_escape(&self.name))
+        } else {
+            String::new()
+        };
         let crossorigin = if self.manifest_credentials {
             " crossorigin=\"use-credentials\""
         } else {
             ""
         };
         format!(
-            "<title>{name}</title>\
+            "{title}\
              <meta name=\"theme-color\" content=\"{theme_color}\">\
              <link rel=\"manifest\" href=\"/manifest.webmanifest\"{crossorigin}>\
-             <link rel=\"icon\" href=\"{icon}\">\
+             {icon_link}\
              <link rel=\"apple-touch-icon\" href=\"{icon}\">\
              <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\
              <meta name=\"apple-mobile-web-app-title\" content=\"{short}\">\
              <script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js')</script>",
-            name = html_escape(&self.name),
             short = html_escape(self.short_name.as_deref().unwrap_or(&self.name)),
             icon = first_icon,
         )
@@ -439,7 +456,7 @@ mod tests {
 
     #[test]
     fn head_has_pwa_tags_and_registration() {
-        let h = sample().head(&Theme::dark());
+        let h = sample().head(&Theme::dark(), true, true);
         let h = &h;
         assert!(h.contains(
             "<link rel=\"manifest\" href=\"/manifest.webmanifest\" crossorigin=\"use-credentials\">"
@@ -511,11 +528,13 @@ mod tests {
 
     #[test]
     fn manifest_credentials_can_be_turned_off() {
-        let h = sample().manifest_credentials(false).head(&Theme::dark());
+        let h = sample()
+            .manifest_credentials(false)
+            .head(&Theme::dark(), true, true);
         assert!(h.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">"));
         assert!(!h.contains("crossorigin"), "{h}");
         // The rest of the fragment, escaping included, is unchanged.
-        let on = sample().head(&Theme::dark());
+        let on = sample().head(&Theme::dark(), true, true);
         assert_eq!(h, on.replace(" crossorigin=\"use-credentials\"", ""));
         assert!(h.contains("<title>My &quot;App&quot;</title>"), "{h}");
     }
@@ -524,7 +543,7 @@ mod tests {
     fn manifest_credentials_keep_names_escaped() {
         let h = Pwa::new("<b>A & \"B\"</b>")
             .short_name("'s<")
-            .head(&Theme::dark());
+            .head(&Theme::dark(), true, true);
         assert_eq!(h.matches("crossorigin=\"use-credentials\"").count(), 1);
         assert!(
             h.contains("<title>&lt;b&gt;A &amp; &quot;B&quot;&lt;/b&gt;</title>"),

@@ -60,6 +60,7 @@ pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
 pub mod capsule_gen;
+mod compress;
 pub mod config;
 pub mod delegated_auth;
 pub mod form;
@@ -108,7 +109,7 @@ pub use server::{
 };
 
 // Delegated authentication exports
-pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity};
+pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity, Validation};
 pub use server::{AUTH_CONFLICT, SHUTDOWN_GRACE};
 
 // Store exports
