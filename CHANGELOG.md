@@ -88,6 +88,22 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
 
+### Changed: SQLite persistence is an optional feature
+
+- `rusqlite` is behind rwire's new **`persist`** cargo feature, **on by
+  default**: existing apps build as before. With `default-features = false`,
+  rwire pulls no SQLite, so an app can share its workspace with a crate that
+  links another `rusqlite` (only one `links = "sqlite3"` crate per build).
+- The feature gates `rwire::persist` (`SqliteStore`, `PersistRegistry`,
+  `PersistableType`, `PersistError`), `rwire::rusqlite`, `persist_task` and
+  `SharedServerState::{hydrate, persist_dirty, flush_all_dirty}`.
+- Without it, `#[storage(persisted)]` is a compile error that says so, never
+  a silent fallback to memory.
+- The companion crates (`rwire-components`, `-themes`, `-markdown`,
+  `-editor`, `-map`) depend on rwire without default features, so using them
+  doesn't turn `persist` back on.
+- CI also runs clippy on rwire without default features.
+
 ### Added: asset folders served from disk
 
 - `ServerWithRoot::asset_dir(prefix, dir)` serves a folder read on each
