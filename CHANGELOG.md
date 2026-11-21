@@ -8,6 +8,32 @@ never see a compatibility matrix — recompiling is the whole migration.
 
 ## 0.1.0 — unreleased (crates not yet published to crates.io)
 
+### Added: Web Push (`rwire-push` crate)
+
+Standard Web Push (VAPID, RFC 8030, 8291 and 8292), with no third-party
+service, in a new crate so that apps without push pay nothing for it:
+
+- `Pwa::push_notifications(true)` adds `push` and `notificationclick`
+  handlers to the generated service worker: a push shows a notification from
+  its JSON payload (`title`, `body`, `url`, `icon`, `tag`), and a click
+  focuses or opens the app at that URL (same origin only). Off by default:
+  the service worker of an app that does not opt in is unchanged.
+- `rwire-push` provides the browser side, the `push` runtime extension
+  (`.serve_push()`, `push_subscribe` / `push_unsubscribe` on any element,
+  `report_input` + `Push::handle_report`). The extension asks for the
+  permission inside the click, as iOS requires, and reports the
+  subscription over the WebSocket.
+- On the server side, `rwire-push` provides `VapidKey` (generated, loaded
+  from a file or the environment), the subscriptions (memory plus an atomic
+  0600 JSON file) and `Push::send_push`. Messages are encrypted in
+  `aes128gcm` and carry an ES256 VAPID JWT. Subscriptions answered 404 or 410
+  are purged.
+- Subscription endpoints are limited to the browsers' push services
+  (`KNOWN_PUSH_HOSTS`, https), plus origins added with
+  `allow_endpoint_origin`. A client cannot make the server POST into its
+  own network.
+- Example: `examples/push`.
+
 ### Breaking: rwire runs on tokio
 
 async-std is discontinued; rwire now runs on **tokio** (and tokio-tungstenite
@@ -89,22 +115,24 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   doesn't turn `persist` back on.
 - CI also runs clippy on rwire without default features.
 
-### Changed: lighter HTTP answers for the capsule
+### Fixed: executable URLs in pre-rendered HTML and Markdown
 
-- **Short 404**: a path the app has no page for gets a one-line `404 Not
-  Found` instead of the 20–30 KB page. With the router, unless it declares a
-  not-found view (`Router::not_found`, then the page is served with 404 so it
-  renders); without one, an app with `on_route` still gets the page on every
-  path, and an app with neither only at `/`.
-- **`CapsuleConfig::favicon(bytes, content_type)`** serves `/favicon.ico`
-  and links it from the `<head>` (replacing the PWA's `<link rel="icon">`).
-- **`CapsuleConfig::title(text)`**: the page's `<title>` (replacing the PWA
-  name's). One title per app; no per-route title yet (documented).
-- **gzip**: the page (fixed capsule compressed once at startup, 27.6 KB →
-  9.8 KB; the `ssr(true)` page compressed per request, ~0.6 ms), text
-  `asset()`s and the bundled extension modules, for clients whose
-  `Accept-Encoding` takes gzip, with `Vary: Accept-Encoding`. New dependency:
-  `flate2` (pure-Rust backend).
+- **Markdown** (`rwire-markdown`): links, images, reference links and
+  autolinks copied `dest_url` as it was, so `[x](javascript:alert(1))` became
+  a live `href`. Links now keep relative URLs, `http:`, `https:`, `mailto:` and
+  `tel:` only; any other scheme loses its `href` (the text stays). Images also
+  take raster `data:image/{png,jpeg,gif,webp,avif}`; others are dropped (their
+  alt text stays).
+- **Pre-rendered HTML** (`to_static_html`, the `ssr(true)` paint): `href`,
+  `src`, `xlink:href`, `action` and `formaction` with a `javascript:`,
+  `vbscript:` or `data:` URL (non-SVG images in `src` excepted) are left out,
+  as the runtime does over the WebSocket. Until now the paint escaped them but
+  kept them, executable before the socket connected.
+- **Runtime**: the attribute sanitizer refuses `vbscript:` and `data:` (same
+  exception) besides `javascript:`. Size budget +40 B gzipped.
+- One normalization for all of them, `rwire::url_safety`: character
+  references, percent-encoding (repeatedly), whitespace and controls anywhere,
+  case.
 
 ### Added: asset folders served from disk
 
