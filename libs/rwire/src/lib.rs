@@ -67,6 +67,7 @@ pub mod health;
 pub mod icons;
 pub mod item_ref;
 pub mod metrics;
+#[cfg(feature = "persist")]
 pub mod persist;
 pub mod protocol;
 pub mod pwa;
@@ -98,9 +99,11 @@ pub use state::{
 pub use protocol::{ClientEvent, DecodeError, El, Ev, OpcodeBuffer};
 
 // Server exports
+#[cfg(feature = "persist")]
+pub use server::persist_task;
 pub use server::{
-    persist_task, session_eviction_task, BroadcastMsg, Server, ServerBuilder, ServerWithRoot,
-    SharedServerState, ROUTER_WITHOUT_OUTLET,
+    session_eviction_task, BroadcastMsg, Server, ServerBuilder, ServerWithRoot, SharedServerState,
+    ROUTER_WITHOUT_OUTLET,
 };
 
 // Delegated authentication exports
@@ -111,10 +114,36 @@ pub use server::{AUTH_CONFLICT, SHUTDOWN_GRACE};
 pub use store::{JsonFileStore, MemoryStore, StateStore, StoreError};
 
 // Persist exports
+#[cfg(feature = "persist")]
 pub use persist::{PersistError, PersistRegistry, PersistableType, SqliteStore};
 
 // Re-export rusqlite for use in load_fn/save_fn implementations
+#[cfg(feature = "persist")]
 pub use rusqlite;
+
+/// Emitted by `#[derive(State)]` for `#[storage(persisted)]`: nothing with the
+/// `persist` feature.
+#[cfg(feature = "persist")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __persisted_storage_check {
+    () => {};
+}
+
+/// Emitted by `#[derive(State)]` for `#[storage(persisted)]`: without the
+/// `persist` feature, a compile error rather than a silent fallback to memory.
+#[cfg(not(feature = "persist"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __persisted_storage_check {
+    () => {
+        ::core::compile_error!(
+            "`#[storage(persisted)]` needs rwire's `persist` feature (SQLite persistence), \
+             which is disabled: enable it (`rwire = { features = [\"persist\"] }`, it is a \
+             default feature) or use `#[storage(memory)]` / `#[storage(shared)]`"
+        );
+    };
+}
 
 // Config exports
 pub use config::{ProxyDecision, ProxyResolver, ServerConfig};
