@@ -438,9 +438,10 @@ impl DelegatedAuth {
     }
 
     /// The most validations running at once (default 16), across all
-    /// credentials. Requests beyond it wait for a slot within
-    /// [`Self::timeout`], then fail closed: a flood of forged cookies can't
-    /// multiply calls to the validator.
+    /// credentials. Requests beyond it wait for a slot; one that waited more
+    /// than half of [`Self::timeout`] fails closed without calling the
+    /// validator (it could not finish in time): a flood of forged cookies
+    /// can't multiply calls to the validator.
     pub fn max_concurrent_validations(mut self, max: usize) -> Self {
         self.max_concurrent = max.max(1);
         self.state = State::new(self.max_concurrent);
@@ -554,10 +555,12 @@ impl DelegatedAuth {
             let deadline = tokio::time::Instant::now() + timeout;
             let answer = tokio::time::timeout_at(deadline, async {
                 let _slot = state.permits.acquire().await.ok()?;
-                // A slot freed by a validation that just timed out wakes this
-                // waiter before its own deadline is checked: re-check it, or
-                // every waiter of a flood would call the validator in turn.
-                if tokio::time::Instant::now() >= deadline {
+                // A slot freed by a validation that just timed out wakes the
+                // waiters queued behind it, each with almost no time left: a
+                // validation started now could not finish, and every waiter of a
+                // flood would call the validator in turn. Only start one with at
+                // least half the timeout left.
+                if tokio::time::Instant::now() + timeout / 2 > deadline {
                     return None;
                 }
                 Some(validate(request).await)
