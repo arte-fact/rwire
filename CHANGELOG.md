@@ -8,6 +8,32 @@ never see a compatibility matrix — recompiling is the whole migration.
 
 ## 0.1.0 — unreleased (crates not yet published to crates.io)
 
+### Added: Web Push (`rwire-push` crate)
+
+Standard Web Push (VAPID, RFC 8030, 8291 and 8292), with no third-party
+service, in a new crate so that apps without push pay nothing for it:
+
+- `Pwa::push_notifications(true)` adds `push` and `notificationclick`
+  handlers to the generated service worker: a push shows a notification from
+  its JSON payload (`title`, `body`, `url`, `icon`, `tag`), and a click
+  focuses or opens the app at that URL (same origin only). Off by default:
+  the service worker of an app that does not opt in is unchanged.
+- `rwire-push` provides the browser side, the `push` runtime extension
+  (`.serve_push()`, `push_subscribe` / `push_unsubscribe` on any element,
+  `report_input` + `Push::handle_report`). The extension asks for the
+  permission inside the click, as iOS requires, and reports the
+  subscription over the WebSocket.
+- On the server side, `rwire-push` provides `VapidKey` (generated, loaded
+  from a file or the environment), the subscriptions (memory plus an atomic
+  0600 JSON file) and `Push::send_push`. Messages are encrypted in
+  `aes128gcm` and carry an ES256 VAPID JWT. Subscriptions answered 404 or 410
+  are purged.
+- Subscription endpoints are limited to the browsers' push services
+  (`KNOWN_PUSH_HOSTS`, https), plus origins added with
+  `allow_endpoint_origin`. A client cannot make the server POST into its
+  own network.
+- Example: `examples/push`.
+
 ### Breaking: rwire runs on tokio
 
 async-std is discontinued; rwire now runs on **tokio** (and tokio-tungstenite
@@ -89,31 +115,24 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   doesn't turn `persist` back on.
 - CI also runs clippy on rwire without default features.
 
-### Changed: delegated auth hardening
+### Fixed: executable URLs in pre-rendered HTML and Markdown
 
-- **Bounded validations**: one validation per cookie at a time (concurrent
-  requests share it), at most `max_concurrent_validations` (default 16) at
-  once, each within `timeout` including the wait for a slot (fail closed).
-  A WebSocket handshake over the admission caps is refused before its cookie
-  is validated.
-- **Negative cache**: a rejected cookie is remembered for `negative_ttl`
-  (default 5 s; `Duration::ZERO` turns it off) instead of re-asking the
-  validator on every request. Timeouts and outages are never remembered, and
-  a rejection never replaces a success.
-- **Cache keys** are the SHA-256 of the cookie, never the cookie; expired
-  entries are swept once per TTL (new dependency: `sha2`).
-- **Outages vs revocations**: `Validation { Valid, Revoked, Unavailable }`
-  and `DelegatedAuth::with_validation`. An open WebSocket closes with 4401
-  on a revocation only; while the validator is unreachable it stays up for
-  `outage_grace` (default **5 min**) from its last confirmation, then closes
-  with 1013 (`CLOSE_HUB_UNAVAILABLE`). New requests stay refused during an
-  outage. `DelegatedAuth::new` keeps its contract: `None` is a revocation.
-- **`/metrics` is behind the auth gate** when `auth()` or `auth_with()` is
-  set (public without a gate, as before); `ServerConfig::public_metrics(true)`
-  exposes it. `/health` and `/ready` stay public.
-- Re-validation keeps only the session cookie of the handshake; anonymous
-  visits are not logged and refused cookies at most once a minute; a
-  same-origin login URL is answered 401 instead of redirecting to itself.
+- **Markdown** (`rwire-markdown`): links, images, reference links and
+  autolinks copied `dest_url` as it was, so `[x](javascript:alert(1))` became
+  a live `href`. Links now keep relative URLs, `http:`, `https:`, `mailto:` and
+  `tel:` only; any other scheme loses its `href` (the text stays). Images also
+  take raster `data:image/{png,jpeg,gif,webp,avif}`; others are dropped (their
+  alt text stays).
+- **Pre-rendered HTML** (`to_static_html`, the `ssr(true)` paint): `href`,
+  `src`, `xlink:href`, `action` and `formaction` with a `javascript:`,
+  `vbscript:` or `data:` URL (non-SVG images in `src` excepted) are left out,
+  as the runtime does over the WebSocket. Until now the paint escaped them but
+  kept them, executable before the socket connected.
+- **Runtime**: the attribute sanitizer refuses `vbscript:` and `data:` (same
+  exception) besides `javascript:`. Size budget +40 B gzipped.
+- One normalization for all of them, `rwire::url_safety`: character
+  references, percent-encoding (repeatedly), whitespace and controls anywhere,
+  case.
 
 ### Added: asset folders served from disk
 

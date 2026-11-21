@@ -134,3 +134,39 @@ fn synced_regions_render_default_state_and_collect_styles() {
         "styles inside the synced region are collected"
     );
 }
+
+/// Like the runtime, the static HTML drops URL attributes that would run code,
+/// whether set as a raw attribute or a typed one; other URLs and attributes stay.
+#[test]
+fn executable_urls_are_dropped() {
+    let html = el(El::Div)
+        .append([
+            el(El::A)
+                .at_str(At::Href, "JaVa\tScRiPt:alert(1)")
+                .text("a"),
+            el(El::A)
+                .attr("href", "javascript&colon;alert(1)")
+                .text("b"),
+            el(El::Img).attr("src", "data:image/svg+xml,<svg onload=alert(1)>"),
+            el(El::Form).attr("action", "vbscript:x"),
+            el(El::Button).attr("formaction", "javascript:x"),
+            el(El::A)
+                .at_str(At::Href, "magnet:?xt=urn:btih:x")
+                .text("c"),
+            el(El::Img).attr("src", "data:image/png;base64,AA"),
+            el(El::Img).attr("src", "data:image;base64,BB"),
+            el(El::A).attr("title", "javascript: the good parts"),
+        ])
+        .to_static_html();
+    assert!(!html.contains("script:alert"), "{html}");
+    assert!(!html.contains("svg"), "{html}");
+    assert!(!html.contains("vbscript"), "{html}");
+    assert!(!html.contains("formaction"), "{html}");
+    assert!(html.contains("href=\"magnet:?xt=urn:btih:x\""), "{html}");
+    assert!(html.contains("src=\"data:image/png;base64,AA\""), "{html}");
+    assert!(html.contains("src=\"data:image;base64,BB\""), "{html}");
+    assert!(
+        html.contains("title=\"javascript: the good parts\""),
+        "{html}"
+    );
+}
