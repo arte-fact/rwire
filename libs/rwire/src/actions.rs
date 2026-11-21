@@ -19,7 +19,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use crate::builder::{ElementBuilder, SyncedRenderer};
@@ -140,21 +140,81 @@ impl Actions {
     }
 }
 
+/// Where a deferred action stands relative to its handler: the server marks it `Loading` only
+/// after the handler returns (a `&mut SharedState` handler holds the shared-cache lock that
+/// marking re-enters), so a resolution made before that is kept here and applied instead.
+#[derive(Debug, Default)]
+pub(crate) enum Settlement {
+    /// The handler is still running; nothing resolved yet.
+    #[default]
+    Pending,
+    /// Resolved before the handler returned: `None` success, `Some(message)` failure.
+    Early(Option<String>),
+    /// The handler returned; resolutions go straight to the registry.
+    Armed,
+}
+
+/// Shared by an action's [`Resolver`]s and the server for one dispatch.
+pub(crate) type SettlementCell = Arc<Mutex<Settlement>>;
+
+/// After the handler returned: apply a resolution made in it, or mark the action `Loading` and
+/// arm the timeout backstop. Holding the cell while marking means a resolver racing on another
+/// thread waits and lands after `Loading`, never under it.
+pub(crate) fn settle_after_handler(
+    cell: &SettlementCell,
+    shared: &Arc<SharedServerState>,
+    key: ActionKey,
+) {
+    let mut settlement = cell.lock().unwrap_or_else(PoisonError::into_inner);
+    match std::mem::replace(&mut *settlement, Settlement::Armed) {
+        Settlement::Early(error) => {
+            // No spinner: success clears any entry a previous run left, failure shows now.
+            if error.is_some() || shared.action_phase(&key).is_some() {
+                shared.resolve_action(key, error);
+            }
+        }
+        Settlement::Pending | Settlement::Armed => {
+            shared.set_action_loading(key.clone());
+            crate::server::spawn_action_timeout(Arc::clone(shared), key);
+        }
+    }
+}
+
 /// A handle to resolve a deferred action later, from a background thread or task.
 ///
 /// Obtained from [`EventContext::defer`](crate::EventContext::defer). `Send + 'static`, so it moves
 /// freely into `std::thread::spawn` or an async task. A `Resolver` that is dropped without being
 /// resolved leaves the action `Loading` until the timeout backstop fails it.
+///
+/// It may also be resolved before the handler returns (inline, or by work the handler waited
+/// for): the action then settles as soon as the handler returns, without a loading phase.
 pub struct Resolver {
     // `None` when produced by a context with no action slot (synthetic/route/test dispatch); its
     // methods then no-op rather than panic.
-    inner: Option<(Arc<SharedServerState>, ActionKey)>,
+    inner: Option<(Arc<SharedServerState>, ActionKey, SettlementCell)>,
 }
 
 impl Resolver {
-    pub(crate) fn new(shared: Arc<SharedServerState>, key: ActionKey) -> Self {
+    pub(crate) fn new(
+        shared: Arc<SharedServerState>,
+        key: ActionKey,
+        cell: SettlementCell,
+    ) -> Self {
         Self {
-            inner: Some((shared, key)),
+            inner: Some((shared, key, cell)),
+        }
+    }
+
+    fn resolve(self, error: Option<String>) {
+        let Some((shared, key, cell)) = self.inner else {
+            return;
+        };
+        let mut settlement = cell.lock().unwrap_or_else(PoisonError::into_inner);
+        match *settlement {
+            // Still inside the handler (which may hold the shared-cache lock): keep it for
+            // `settle_after_handler`, touching no shared state here.
+            Settlement::Pending | Settlement::Early(_) => *settlement = Settlement::Early(error),
+            Settlement::Armed => shared.resolve_action(key, error),
         }
     }
 
@@ -164,16 +224,12 @@ impl Resolver {
 
     /// Mark the action successful: remove it, so the reflecting control returns to idle.
     pub fn ok(self) {
-        if let Some((shared, key)) = self.inner {
-            shared.resolve_action(key, None);
-        }
+        self.resolve(None);
     }
 
     /// Mark the action failed: `message` surfaces on the control (and any error slot).
     pub fn err(self, message: impl Into<String>) {
-        if let Some((shared, key)) = self.inner {
-            shared.resolve_action(key, Some(message.into()));
-        }
+        self.resolve(Some(message.into()));
     }
 }
 
@@ -326,6 +382,64 @@ pub fn reflect_action_errors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A context for `key`'s action, as the server builds it at dispatch.
+    fn dispatch(shared: &Arc<SharedServerState>, key: &ActionKey) -> crate::EventContext {
+        crate::EventContext::new_with_params(Vec::new(), Vec::new())
+            .with_action(Arc::clone(shared), key.clone())
+    }
+
+    #[tokio::test]
+    async fn a_resolution_inside_the_handler_is_applied_when_it_returns() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let ok = ActionKey::new("s".into(), 1, Vec::new());
+        let ctx = dispatch(&shared, &ok);
+        ctx.defer().ok();
+        assert_eq!(
+            shared.action_phase(&ok),
+            None,
+            "nothing touched in the handler"
+        );
+        ctx.settle_deferred();
+        assert_eq!(shared.action_phase(&ok), None, "success: idle, no spinner");
+
+        let failed = ActionKey::new("s".into(), 2, Vec::new());
+        let ctx = dispatch(&shared, &failed);
+        ctx.defer().err("nope");
+        ctx.settle_deferred();
+        assert_eq!(
+            shared.action_phase(&failed),
+            Some(Phase::Errored("nope".into()))
+        );
+
+        // A success in the handler also clears an error a previous run left.
+        let ctx = dispatch(&shared, &failed);
+        ctx.defer().ok();
+        ctx.settle_deferred();
+        assert_eq!(shared.action_phase(&failed), None);
+    }
+
+    #[tokio::test]
+    async fn a_resolution_after_the_handler_follows_loading() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let key = ActionKey::new("s".into(), 3, Vec::new());
+        let ctx = dispatch(&shared, &key);
+        let resolver = ctx.defer();
+        ctx.settle_deferred();
+        assert_eq!(shared.action_phase(&key), Some(Phase::Loading));
+        resolver.err("later");
+        assert_eq!(
+            shared.action_phase(&key),
+            Some(Phase::Errored("later".into()))
+        );
+
+        // Never resolved: stays `Loading` for the backstop.
+        let key = ActionKey::new("s".into(), 4, Vec::new());
+        let ctx = dispatch(&shared, &key);
+        drop(ctx.defer());
+        ctx.settle_deferred();
+        assert_eq!(shared.action_phase(&key), Some(Phase::Loading));
+    }
 
     fn key(session: &str, handler_id: u32, param: &[u8]) -> ActionKey {
         ActionKey::new(session.to_string(), handler_id, param.to_vec())

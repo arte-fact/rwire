@@ -696,7 +696,8 @@ pub async fn session_eviction_task(shared: Arc<SharedServerState>, ttl: Duration
 
 /// Backstop for a deferred action: after [`crate::actions::LOADING_TIMEOUT`], fail it if it is
 /// still `Loading`, so a worker that crashed or forgot to resolve can't leave a control spinning
-/// forever. Spawned by `EventContext::defer`; it exits as soon as it fires.
+/// forever. Armed when a deferring handler returns without having resolved its action; it exits
+/// as soon as it fires.
 pub(crate) fn spawn_action_timeout(shared: Arc<SharedServerState>, key: ActionKey) {
     tokio::spawn(async move {
         tokio::time::sleep(crate::actions::LOADING_TIMEOUT).await;
@@ -3589,12 +3590,13 @@ where
                             // any shared-state write lock it held. A deferred handler is marked
                             // `Loading` here (NOT inside `defer()`, which runs while a `&mut
                             // SharedState` handler still holds the shared-cache lock that
-                            // `set_action_loading` re-enters — an in-handler set self-deadlocks). A
-                            // handler that did NOT defer clears any entry a prior deferred run left, so
-                            // a stale spinner or error can't outlive a completed immediate click.
+                            // `set_action_loading` re-enters — an in-handler set self-deadlocks),
+                            // unless it was already resolved in the handler: that outcome is applied
+                            // instead. A handler that did NOT defer clears any entry a prior deferred
+                            // run left, so a stale spinner or error can't outlive a completed
+                            // immediate click.
                             if ctx.was_deferred() {
-                                shared.set_action_loading(action_key.clone());
-                                spawn_action_timeout(Arc::clone(&shared), action_key);
+                                ctx.settle_deferred();
                             } else if shared.action_phase(&action_key).is_some() {
                                 shared.resolve_action(action_key, None);
                             }
