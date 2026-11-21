@@ -388,6 +388,7 @@ impl SharedServerState {
     ///
     /// This loads all persisted state from the database into memory.
     /// Should be called at server startup before accepting connections.
+    #[cfg(feature = "persist")]
     pub fn hydrate(
         &self,
         store: &crate::persist::SqliteStore,
@@ -526,6 +527,7 @@ impl SharedServerState {
     ///
     /// This is called by the background persist task and during graceful shutdown.
     /// Returns the number of keys successfully persisted.
+    #[cfg(feature = "persist")]
     pub fn persist_dirty(
         &self,
         store: &crate::persist::SqliteStore,
@@ -570,6 +572,7 @@ impl SharedServerState {
     }
 
     /// Persist a single state to the database.
+    #[cfg(feature = "persist")]
     fn persist_single_state(
         &self,
         conn: &rusqlite::Connection,
@@ -613,6 +616,7 @@ impl SharedServerState {
     /// before the server exits. It will retry failed keys up to max_attempts times.
     ///
     /// Returns the total number of keys successfully persisted.
+    #[cfg(feature = "persist")]
     pub fn flush_all_dirty(
         &self,
         store: &crate::persist::SqliteStore,
@@ -658,6 +662,7 @@ impl SharedServerState {
 /// This task runs in a loop, sleeping for the configured interval between
 /// persistence cycles. Dirty keys are drained and persisted in a single
 /// transaction for efficiency.
+#[cfg(feature = "persist")]
 pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist::SqliteStore) {
     loop {
         // Wait for persist interval
@@ -3897,6 +3902,7 @@ mod tests {
         assert_eq!(rx.len(), 2);
     }
 
+    #[cfg(feature = "persist")]
     #[test]
     fn test_persist_dirty_with_registered_type() {
         use crate::persist::{PersistableType, SqliteStore};
@@ -3961,6 +3967,7 @@ mod tests {
         assert_eq!(value, 42);
     }
 
+    #[cfg(feature = "persist")]
     #[test]
     fn test_persist_dirty_empty() {
         use crate::persist::SqliteStore;
@@ -4089,6 +4096,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "persist")]
     #[test]
     fn test_flush_all_dirty() {
         use crate::persist::{PersistableType, SqliteStore};
