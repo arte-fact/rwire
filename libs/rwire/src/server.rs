@@ -659,12 +659,21 @@ impl SharedServerState {
 /// persistence cycles. Dirty keys are drained and persisted in a single
 /// transaction for efficiency.
 pub async fn persist_task(shared: Arc<SharedServerState>, store: crate::persist::SqliteStore) {
+    let store = Arc::new(store);
     loop {
         // Wait for persist interval
         tokio::time::sleep(shared.persist_interval).await;
 
-        // Persist dirty state
-        match shared.persist_dirty(&store) {
+        // Persist dirty state. SQLite is blocking I/O: run it on the blocking
+        // pool, not on a runtime worker that also drives connections.
+        let (shared_ref, store_ref) = (Arc::clone(&shared), Arc::clone(&store));
+        let persisted =
+            tokio::task::spawn_blocking(move || shared_ref.persist_dirty(&store_ref)).await;
+        let Ok(persisted) = persisted else {
+            eprintln!("Persist task error: the persist job panicked");
+            continue;
+        };
+        match persisted {
             Ok(count) if count > 0 => {
                 // Optionally log: println!("Persisted {} keys", count);
             }
@@ -3895,6 +3904,69 @@ mod tests {
         shared.broadcast("key", TypeId::of::<i32>(), ChangeSet::all(), 0);
 
         assert_eq!(rx.len(), 2);
+    }
+
+    /// `persist_task` saves on the blocking pool, not on the runtime thread
+    /// that drives connections (here the test's current-thread runtime).
+    #[tokio::test]
+    async fn persist_task_saves_off_the_runtime_thread() {
+        use crate::persist::{PersistableType, SqliteStore};
+        use std::sync::Mutex;
+        use std::thread::ThreadId;
+
+        static SAVED_ON: Mutex<Option<ThreadId>> = Mutex::new(None);
+
+        let store = SqliteStore::memory().unwrap();
+        store.register(PersistableType {
+            table_name: "ticks",
+            schema: &[
+                "CREATE TABLE IF NOT EXISTS ticks (id TEXT PRIMARY KEY, value INTEGER NOT NULL)",
+            ],
+            type_id: TypeId::of::<u8>(),
+            key_field: "id",
+            load_fn: |_, _| Ok(None),
+            save_fn: |conn, key, state| {
+                *SAVED_ON.lock().unwrap() = Some(std::thread::current().id());
+                let value = state
+                    .downcast_ref::<u8>()
+                    .ok_or(crate::persist::PersistError::TypeMismatch)?;
+                conn.execute(
+                    "INSERT INTO ticks (id, value) VALUES (?1, ?2)",
+                    rusqlite::params![key, value],
+                )?;
+                Ok(())
+            },
+            default_fn: || Box::new(0u8),
+        });
+        store.ensure_schema().unwrap();
+        let conn = store.connection();
+
+        let shared = SharedServerState::new(Duration::from_millis(10));
+        shared.insert_state("ticks:t1".to_string(), Box::new(7u8));
+        shared.mark_dirty("ticks:t1");
+        let task = tokio::spawn(persist_task(Arc::clone(&shared), store));
+        for _ in 0..200 {
+            if !shared.has_dirty() && SAVED_ON.lock().unwrap().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        task.abort();
+
+        let saved_on = SAVED_ON.lock().unwrap().expect("never saved");
+        assert_ne!(
+            saved_on,
+            std::thread::current().id(),
+            "saved on the runtime thread"
+        );
+        let value: u8 = conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT value FROM ticks WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(value, 7);
     }
 
     #[test]
