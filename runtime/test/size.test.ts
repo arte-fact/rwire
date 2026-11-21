@@ -14,8 +14,11 @@ import { gzipSync } from "node:zlib";
 // (LIVE_SOURCE / LIVE_BIND), not a page feature an extension could add later.
 // +500B raw / +200B gzip (2026-09-29): the tap's busy state and EVENT_ACK counting — it must
 // run synchronously in the dispatcher on a page's first tap, so it cannot be lazy.
+// +40B gzip (2026-11-21): the attribute sanitizer refuses `vbscript:` and `data:` URLs
+// (images in `src` excepted) besides `javascript:`; it runs inside setAttribute, so it
+// cannot be lazy.
 const MAX_RAW = 20_500;
-const MAX_GZIP = 7_700;
+const MAX_GZIP = 7_740;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;
