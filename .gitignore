@@ -26,3 +26,6 @@ logs/security/
 apps/llama-modnitor/.env
 apps/llama-modnitor/profiles/
 apps/llama-modnitor/output.log
+
+# examples/push runtime data (VAPID private key, subscriptions)
+push-data/

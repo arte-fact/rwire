@@ -77,6 +77,7 @@ pub struct Pwa {
     theme_color: Option<String>,
     background_color: Option<String>,
     icons: Vec<PwaIcon>,
+    push: bool,
 }
 
 impl Pwa {
@@ -92,6 +93,7 @@ impl Pwa {
             theme_color: None,
             background_color: None,
             icons: Vec::new(),
+            push: false,
         }
     }
 
@@ -149,6 +151,17 @@ impl Pwa {
     /// Override the launch URL (default `"/"`).
     pub fn start_url(mut self, s: impl Into<Cow<'static, str>>) -> Self {
         self.start_url = s.into();
+        self
+    }
+
+    /// Handle Web Push in the service worker (default off): a `push` event
+    /// shows a notification from its JSON payload (`title`, `body`, `url`,
+    /// optional `icon` and `tag`), and a click on it focuses the app's window
+    /// at that URL or opens one. Only same-origin URLs are followed; any
+    /// other falls back to the start URL. Subscribing and sending live in
+    /// the `rwire-push` crate; this is the browser half it relies on.
+    pub fn push_notifications(mut self, on: bool) -> Self {
+        self.push = on;
         self
     }
 
@@ -266,7 +279,28 @@ impl Pwa {
              addEventListener('fetch',e=>{{const r=e.request;if(r.method!=='GET')return;const u=new URL(r.url);\
              if(u.pathname==='/ready'||u.pathname==='/health'||u.pathname==='/metrics')return;\
              if(r.mode==='navigate'){{e.respondWith(fetch(r).catch(()=>caches.match('/')));return;}}\
-             if(SHELL.includes(u.pathname))e.respondWith(caches.match(r).then(c=>c||fetch(r)));}});\n"
+             if(SHELL.includes(u.pathname))e.respondWith(caches.match(r).then(c=>c||fetch(r)));}});\n{push}",
+            push = if self.push {
+                self.push_js(icons)
+            } else {
+                String::new()
+            },
+        )
+    }
+
+    /// The `push` and `notificationclick` handlers (see [`Pwa::push_notifications`]).
+    fn push_js(&self, icons: &[PwaIcon]) -> String {
+        let icon = icons.first().map(|i| i.path()).unwrap_or_default();
+        format!(
+            "const PN={name},PI={icon},PS={start};\n\
+             const same=u=>{{const h=s=>new URL(s,location.origin);try{{const x=h(u||PS);if(x.origin===location.origin)return x.href}}catch(_){{}}return h(PS).href}};\n\
+             addEventListener('push',e=>{{let d={{}};if(e.data){{try{{d=e.data.json()}}catch(_){{d={{body:e.data.text()}}}}}}\
+             e.waitUntil(registration.showNotification(d.title||PN,{{body:d.body||'',icon:d.icon||PI,tag:d.tag||undefined,data:{{url:same(d.url)}}}}));}});\n\
+             addEventListener('notificationclick',e=>{{e.notification.close();const u=same(e.notification.data&&e.notification.data.url);\
+             e.waitUntil(clients.matchAll({{type:'window',includeUncontrolled:true}}).then(cs=>{{for(const c of cs)if(c.url===u&&'focus'in c)return c.focus();return clients.openWindow(u)}}));}});\n",
+            name = json_str(&self.name),
+            icon = json_str(&icon),
+            start = json_str(&self.start_url),
         )
     }
 
@@ -391,6 +425,62 @@ mod tests {
             h.contains("<title>My &quot;App&quot;</title>"),
             "title escaped: {h}"
         );
+    }
+
+    #[test]
+    fn push_handlers_follow_the_option() {
+        let off = assets().service_worker;
+        assert!(!off.contains("'push'"), "off by default: {off}");
+        assert!(!off.contains("notificationclick"));
+
+        let on = sample()
+            .push_notifications(true)
+            .freeze_served(&Theme::dark(), 12345)
+            .service_worker;
+        assert!(on.contains("addEventListener('push'"), "{on}");
+        assert!(on.contains("showNotification"));
+        assert!(on.contains("addEventListener('notificationclick'"));
+        assert!(on.contains("clients.openWindow"));
+        // The shell caching is untouched: the handlers are appended.
+        assert!(on.starts_with(off.as_str()));
+        // The app name is a JS string literal, escaped.
+        assert!(on.contains(r#"const PN="My \"App\"""#), "{on}");
+        // Off-origin URLs are not followed.
+        assert!(on.contains("x.origin===location.origin"));
+    }
+
+    /// The generated worker parses as JavaScript, with and without push
+    /// (needs node; skipped without it, like `wire_roundtrip`).
+    #[test]
+    fn service_worker_is_valid_javascript() {
+        if std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("node not found: skipping");
+            return;
+        }
+        for push in [false, true] {
+            let sw = sample()
+                .push_notifications(push)
+                .freeze_served(&Theme::dark(), 7)
+                .service_worker;
+            let path =
+                std::env::temp_dir().join(format!("rwire-sw-{}-{push}.js", std::process::id()));
+            std::fs::write(&path, &sw).unwrap();
+            let out = std::process::Command::new("node")
+                .arg("--check")
+                .arg(&path)
+                .output()
+                .unwrap();
+            std::fs::remove_file(&path).unwrap();
+            assert!(
+                out.status.success(),
+                "push={push}: {}\n{sw}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
     }
 
     #[test]
