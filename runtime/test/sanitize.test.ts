@@ -31,6 +31,45 @@ test("javascript: URLs refused in URL attrs, incl. control-char obfuscation", ()
   }
 });
 
+test("vbscript: and data: URLs refused in URL attrs", () => {
+  for (const n of ["href", "src", "xlink:href", "formaction", "action"]) {
+    for (const v of [
+      "vbscript:msgbox(1)",
+      " VBScript:x",
+      "data:text/html,<script>alert(1)</script>",
+      "DATA:text/html;base64,PHNjcmlwdD4=",
+      "data:image/svg+xml,<svg onload=alert(1)>",
+    ]) {
+      const e = el();
+      sa(e as any, n, v);
+      assert.equal(e.getAttribute(n), null, `${n}=${v}`);
+    }
+  }
+});
+
+test("raster data: images allowed in src only", () => {
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  const e = el();
+  sa(e as any, "src", png);
+  assert.equal(e.getAttribute("src"), png);
+  sa(e as any, "src", "data:image/JPEG,xx");
+  assert.equal(e.getAttribute("src"), "data:image/JPEG,xx");
+  // rwire-editor's previews carry no subtype.
+  sa(e as any, "src", "data:image;base64,AAAA");
+  assert.equal(e.getAttribute("src"), "data:image;base64,AAAA");
+  const a = el();
+  sa(a as any, "href", png);
+  assert.equal(a.getAttribute("href"), null);
+});
+
+test("the app's own schemes pass through", () => {
+  for (const v of ["magnet:?xt=urn:btih:x", "mailto:a@b.c", "tel:+331", "/rel", "#top"]) {
+    const e = el();
+    sa(e as any, "href", v);
+    assert.equal(e.getAttribute("href"), v);
+  }
+});
+
 test("javascript: text is fine in non-URL attrs", () => {
   const e = el();
   sa(e as any, "title", "javascript: the good parts");
