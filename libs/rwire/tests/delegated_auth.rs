@@ -522,3 +522,50 @@ async fn an_outage_longer_than_the_grace_closes_with_1013() {
         Some(CloseCode::from(CLOSE_HUB_UNAVAILABLE))
     );
 }
+
+/// `/metrics` needs the session behind a gate; `/health` and `/ready` don't.
+#[tokio::test]
+async fn metrics_stay_behind_the_gate_unless_made_public() {
+    let hub = Hub::start(19171).await;
+    start(19072, hub_auth(19171)).await;
+    let anonymous = get(19072, "/metrics", None).await;
+    assert!(anonymous.starts_with("HTTP/1.1 303"), "{anonymous}");
+    assert!(!anonymous.contains("rwire_"), "{anonymous}");
+    let forged = get(19072, "/metrics", Some("forged")).await;
+    assert!(!forged.contains("rwire_"), "{forged}");
+    let session = get(19072, "/metrics", Some(TOKEN)).await;
+    assert!(session.starts_with("HTTP/1.1 200"), "{session}");
+    assert!(session.contains("rwire_"), "{session}");
+    for probe in ["/health", "/ready"] {
+        let open = get(19072, probe, None).await;
+        assert!(open.starts_with("HTTP/1.1 200"), "{probe}: {open}");
+    }
+
+    start_with(
+        19073,
+        hub_auth(19171),
+        ServerConfig::new().public_metrics(true),
+    )
+    .await;
+    let public = get(19073, "/metrics", None).await;
+    assert!(public.starts_with("HTTP/1.1 200"), "{public}");
+    assert!(public.contains("rwire_"), "{public}");
+    // The forged and the valid cookie were checked; the public endpoint asks nothing.
+    assert_eq!(hub.calls(), 2);
+}
+
+/// Without a gate, `/metrics` stays public, as before.
+#[tokio::test]
+async fn metrics_are_public_without_a_gate() {
+    tokio::spawn(async {
+        let _ = Server::bind("127.0.0.1:19074")
+            .unwrap()
+            .root(app)
+            .run()
+            .await;
+    });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let open = get(19074, "/metrics", None).await;
+    assert!(open.starts_with("HTTP/1.1 200"), "{open}");
+    assert!(open.contains("rwire_"), "{open}");
+}

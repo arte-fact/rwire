@@ -1697,6 +1697,18 @@ fn request_line(request: &str) -> (&str, &str) {
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
+/// The Prometheus export, with the registry's live connection count.
+async fn serve_metrics_endpoint(
+    stream: TcpStream,
+    registry: &ConnectionRegistry,
+    metrics: &Metrics,
+) -> std::io::Result<()> {
+    metrics
+        .active_connections
+        .set(registry.total_connections() as u64);
+    crate::health::serve_metrics(stream, &metrics.to_prometheus()).await
+}
+
 /// Answer a `GET` / `HEAD` for a file of one of `dirs` that `eligible` accepts.
 /// Returns whether the request was answered (the stream is then done).
 async fn serve_asset_dir(
@@ -1962,20 +1974,17 @@ async fn handle_client<F>(
             }
             return;
         }
-        if path == "/health" || path == "/ready" || path == "/metrics" {
+        // `/metrics` is public without a gate, or when the config says so;
+        // otherwise it is served past the gate (below).
+        let metrics_public = config.public_metrics || (auth.is_none() && delegated.is_none());
+        if path == "/health" || path == "/ready" || (path == "/metrics" && metrics_public) {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             let max = config.max_connections;
             let result = match path {
                 "/health" => crate::health::serve_health(stream, &registry, max).await,
                 "/ready" => crate::health::serve_ready(stream, &registry, max).await,
-                _ => {
-                    // Reflect the registry's live count into the gauge, then export.
-                    metrics
-                        .active_connections
-                        .set(registry.total_connections() as u64);
-                    crate::health::serve_metrics(stream, &metrics.to_prometheus()).await
-                }
+                _ => serve_metrics_endpoint(stream, &registry, &metrics).await,
             };
             if let Err(e) = result {
                 eprintln!("[{}] {} endpoint error: {}", peer_addr, path, e);
@@ -2155,6 +2164,16 @@ async fn handle_client<F>(
                 return;
             }
         }
+    }
+
+    // `/metrics` behind a gate: the request got through it.
+    if peek_str.starts_with("GET ") && request_line(&peek_str).1 == "/metrics" {
+        let mut drain = vec![0u8; n];
+        let _ = stream.read_exact(&mut drain).await;
+        if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics).await {
+            eprintln!("[{}] /metrics endpoint error: {}", peer_addr, e);
+        }
+        return;
     }
 
     if serve_asset_dir(&mut stream, n, &peek_str, &assets.dirs, |d| !d.public).await {
