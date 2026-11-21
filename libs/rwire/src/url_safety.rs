@@ -7,8 +7,10 @@
 //!
 //! - **Untrusted content** (Markdown): an allowlist, [`is_allowed_link`] and
 //!   [`is_allowed_image`]. Relative URLs (a path, `?query`, `#anchor`),
-//!   `http:`, `https:`, `mailto:` and `tel:`; images also take raster
+//!   `http:`, `https:` and `mailto:`; images also take raster
 //!   `data:image/*` (a PNG can't run script). Everything else is dropped.
+//!   [`is_remote`] tells an image another origin would serve (rwire-markdown
+//!   doesn't load those by default).
 //! - **Attributes the application writes** (`href`, `src`, `xlink:href`,
 //!   `action`, `formaction`, in pre-rendered HTML): a denylist of the schemes
 //!   that run code, [`is_executable_attr`]: `javascript:`, `vbscript:`, and
@@ -33,8 +35,23 @@ pub fn scheme(url: &str) -> Option<String> {
 pub fn is_allowed_link(url: &str) -> bool {
     match scheme(url) {
         None => true,
-        Some(s) => matches!(s.as_str(), "http" | "https" | "mailto" | "tel"),
+        Some(s) => matches!(s.as_str(), "http" | "https" | "mailto"),
     }
+}
+
+/// Whether `url` points at another origin: an absolute `http:` / `https:`
+/// URL, or a protocol-relative one (`//host/…`; browsers read a backslash
+/// like `/` there). A relative path, an anchor or a `data:` URL is not remote.
+pub fn is_remote(url: &str) -> bool {
+    if matches!(scheme(url).as_deref(), Some("http" | "https")) {
+        return true;
+    }
+    let normalized = normalize(url);
+    let mut head = normalized.chars();
+    matches!(
+        (head.next(), head.next()),
+        (Some('/' | '\\'), Some('/' | '\\'))
+    )
 }
 
 /// Whether a Markdown image may keep `url` as its `src`: a link URL, or a
@@ -224,7 +241,6 @@ mod tests {
             "https://example.com/a?b=c#d",
             "HTTP://example.com",
             "mailto:me@example.com",
-            "tel:+33123456789",
             "/search?q=a:b",
             "./file:name",
         ] {
@@ -237,8 +253,38 @@ mod tests {
             "file:///etc/passwd",
             "magnet:?xt=urn:btih:x",
             "foo:bar",
+            "tel:+33123456789",
+            "sms:+33123456789",
         ] {
             assert!(!is_allowed_link(bad), "{bad:?} allowed");
+        }
+    }
+
+    #[test]
+    fn remote_urls_are_told_apart() {
+        for remote in [
+            "https://x.example/a.png",
+            "HTTP://x.example",
+            "//x.example/a.png",
+            " //x.example/a.png",
+            "\\\\x.example/a.png",
+            "/\\x.example/a.png",
+            "%2F%2Fx.example/a.png",
+            "h&#116;tps://x.example/a.png",
+        ] {
+            assert!(is_remote(remote), "{remote:?} not seen as remote");
+        }
+        for local in [
+            "/img/a.png",
+            "img/a.png",
+            "./a.png",
+            "../a.png",
+            "#top",
+            "?a=//b",
+            "data:image/png;base64,AAAA",
+            "",
+        ] {
+            assert!(!is_remote(local), "{local:?} seen as remote");
         }
     }
 
