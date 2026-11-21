@@ -516,6 +516,10 @@ struct AutoToggle {
 /// Builder for constructing DOM elements with a fluent API.
 #[derive(Clone)]
 pub struct ElementBuilder {
+    /// Set on a wrapper that has no box of its own (`display:contents`), such
+    /// as an action reflector: attributes or styles set on it would land on no
+    /// visible element, so debug builds panic instead (see [`Self::boxless`]).
+    boxless: Option<&'static str>,
     el_type: El,
     text: Option<String>,
     class: Option<String>,
@@ -644,6 +648,7 @@ impl ElementBuilder {
             children: Vec::new(),
             synced: None,
             exts: Vec::new(),
+            boxless: None,
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
@@ -740,6 +745,7 @@ impl ElementBuilder {
             children: Vec::new(),
             synced: Some(synced),
             exts: Vec::new(),
+            boxless: None,
             style_utils: Vec::new(),
             style_props: Vec::new(),
             pseudo_groups: Vec::new(),
@@ -755,19 +761,49 @@ impl ElementBuilder {
         }
     }
 
+    /// Mark this builder as a wrapper with no box of its own (`what` names
+    /// it, for the message). Setting an attribute, a class, a style or text on
+    /// it afterwards would change nothing the user sees: the classic case is
+    /// `Button::…().on_click(h).attr("title", …)`, where the title lands on the
+    /// action-reflection wrapper instead of the button. Debug builds panic at
+    /// the offending call; release builds keep ignoring it.
+    pub fn boxless(mut self, what: &'static str) -> Self {
+        self.boxless = Some(what);
+        self
+    }
+
+    /// Panic (debug builds) when `method` is called on a [boxless](Self::boxless) wrapper.
+    #[track_caller]
+    fn guard(&self, method: &str) {
+        #[cfg(debug_assertions)]
+        if let Some(what) = self.boxless {
+            panic!(
+                "rwire: `.{method}()` on {what}, which has no box: it would never reach the \
+                 visible element. Set it on the component before building it."
+            );
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = method;
+    }
+
     /// Set the text content of this element.
+    #[track_caller]
     pub fn text(mut self, s: &str) -> Self {
+        self.guard("text");
         self.text = Some(s.to_string());
         self
     }
 
     /// Set the CSS class of this element.
+    #[track_caller]
     pub fn class(mut self, s: &str) -> Self {
+        self.guard("class");
         self.class = Some(s.to_string());
         self
     }
 
     /// Set the `id` attribute on this element.
+    #[track_caller]
     pub fn id(self, id: &str) -> Self {
         self.attr("id", id)
     }
@@ -788,7 +824,6 @@ impl ElementBuilder {
             })
     }
 
-    /// Set an attribute on this element.
     /// Declare that this element needs the named lazy runtime extension
     /// (e.g. `"vim"`). The server hints it via MOD_DEF; the runtime imports
     /// `/_rw/ext/{name}.js` once per page. Idempotent client-side, so the
@@ -798,7 +833,10 @@ impl ElementBuilder {
         self
     }
 
+    /// Set an attribute on this element.
+    #[track_caller]
     pub fn attr(mut self, key: &str, value: &str) -> Self {
+        self.guard("attr");
         self.attrs.push((key.to_string(), value.to_string()));
         self
     }
@@ -816,6 +854,7 @@ impl ElementBuilder {
     ///     .data("id", &item.id.to_string())
     ///     .on(Ev::Click, delete_item())
     /// ```
+    #[track_caller]
     pub fn data(self, key: &str, value: &str) -> Self {
         self.attr(&format!("data-{}", key), value)
     }
@@ -833,7 +872,9 @@ impl ElementBuilder {
     /// el(El::Button).at(At::Type, Av::Button)
     /// el(El::Input).at(At::Type, Av::Email)
     /// ```
+    #[track_caller]
     pub fn at(mut self, key: At, value: Av) -> Self {
+        self.guard("at");
         self.typed_attrs.push(TypedAttr::Enum(key, value));
         self
     }
@@ -850,7 +891,9 @@ impl ElementBuilder {
     /// el(El::Button).bool_attr(At::Disabled)
     /// el(El::Input).bool_attr(At::Required)
     /// ```
+    #[track_caller]
     pub fn bool_attr(mut self, key: At) -> Self {
+        self.guard("bool_attr");
         self.typed_attrs.push(TypedAttr::Bool(key));
         self
     }
@@ -868,7 +911,9 @@ impl ElementBuilder {
     /// el(El::Button).at_str(At::AriaLabel, "Close dialog")
     /// el(El::Path).at_str(At::D, "M6 9l6 6 6-6")
     /// ```
+    #[track_caller]
     pub fn at_str(mut self, key: At, value: &str) -> Self {
+        self.guard("at_str");
         self.typed_attrs
             .push(TypedAttr::KeySym(key, value.to_string()));
         self
@@ -879,7 +924,9 @@ impl ElementBuilder {
     /// A second `.style(...)` augments the first rather than replacing it, so a
     /// selection ring layered onto a card that already set `flex`/`background`
     /// keeps both (later declarations win per CSS property).
+    #[track_caller]
     pub fn style(mut self, style: crate::style::Style) -> Self {
+        self.guard("style");
         let css = style.to_css();
         if css.is_empty() {
             return self;
@@ -1150,10 +1197,12 @@ impl ElementBuilder {
     ///     St::FlexCenter,
     /// ])
     /// ```
+    #[track_caller]
     pub fn st<I>(mut self, utils: I) -> Self
     where
         I: IntoIterator<Item = crate::style_tokens::St>,
     {
+        self.guard("st");
         self.style_utils
             .extend(utils.into_iter().map(|u| u.as_u16()));
         self
@@ -1173,10 +1222,12 @@ impl ElementBuilder {
     ///     .hover([St::BgAccentHover])
     ///     .focus_visible([St::OutlineAccent, St::OutlineOffset2])
     /// ```
+    #[track_caller]
     pub fn pseudo<I>(mut self, pc: crate::style_tokens::Pc, tokens: I) -> Self
     where
         I: IntoIterator<Item = crate::style_tokens::St>,
     {
+        self.guard("pseudo");
         let st_codes: Vec<u16> = tokens.into_iter().map(|s| s.as_u16()).collect();
         if !st_codes.is_empty() {
             self.pseudo_groups.push((pc.as_u8(), st_codes));
@@ -1185,6 +1236,7 @@ impl ElementBuilder {
     }
 
     /// Apply hover styles.
+    #[track_caller]
     pub fn hover<I: IntoIterator<Item = crate::style_tokens::St>>(self, tokens: I) -> Self {
         self.pseudo(crate::style_tokens::Pc::Hover, tokens)
     }
