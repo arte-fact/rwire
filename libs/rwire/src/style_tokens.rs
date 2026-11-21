@@ -239,9 +239,9 @@ define_token_enum! {
         TextHigh = 0xC9 => "color:var(--l)",
         TextMuted = 0xCA => "color:var(--j)",
         TextOnAccent = 0xCB => "color:var(--m)",
-        TextSuccess = 0xCC => "color:var(--o)",
-        TextWarning = 0xCD => "color:var(--p)",
-        TextError = 0xCE => "color:var(--q)",
+        TextSuccess = 0xCC => "color:var(--o3)",
+        TextWarning = 0xCD => "color:var(--p3)",
+        TextError = 0xCE => "color:var(--q3)",
         TextAccent = 0xCF => "color:var(--n11)",
 
         // Border - Semantic (0xD0-0xD7)
@@ -734,7 +734,7 @@ define_token_enum! {
 
         // Sidebar/TOC navigation (0x2D0-0x2D3)
         TextXsMuted = 0x2D0 => "font-size:var(--T1);color:var(--j)",
-        BgAccentSubtle = 0x2D1 => "background:var(--n3)",
+        BgAccentSubtle = 0x2D1 => "background:var(--n0)",
         TextAccent12 = 0x2D2 => "color:var(--n12)",
         PlMdIndent = 0x2D3 => "padding-left:var(--S6)",
 

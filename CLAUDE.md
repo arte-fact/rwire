@@ -320,6 +320,10 @@ CSS uses short variable names for minimal wire size. Semantic variables are defi
 | `--n1`..`--n12` | accent scale | resolved from palette |
 | `--r`/`--s` | surface bg/hover | |
 | `--v`/`--w` | primary bg/hover | |
+| `--o`/`--p`/`--q` | success/warning/error fill | brand step of the scale |
+| `--o3`/`--p3`/`--q3` | success/warning/error **text** | computed: ≥ 4.5:1 on app and subtle bg |
+| `--M`,`--N`,`--O`,`--P`,`--I`,`--y` + `--M1`…`--z` | subtle bg + its text | computed in `subtle_pairs` (theme.rs) |
+| `--n0` | accent-subtle bg (selected row) | computed: text-default/high read on it |
 
 Two font hooks: `--Qft` is the body face (the base CSS reads it on `body`; a `ThemeStyle`'s
 `q_css` sets it, `flat()` makes it mono) and `--Qfd` the display face read by `St::FontDisplay`
