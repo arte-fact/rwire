@@ -361,8 +361,9 @@ async fn a_path_no_route_matches_is_a_404() {
     let _shared = start(19100, Some(ssr()), Gate::Open).await;
     let page = get(19100, "/favicon.ico").await;
     assert!(page.starts_with("HTTP/1.1 404 Not Found"), "{page}");
-    // The page still loads, with the router's not-found view.
-    assert!(page.contains("the shell"), "{page}");
+    // The router declares no not-found view: a short 404, not the page.
+    assert!(!page.contains("the shell"), "{page}");
+    assert!(page.len() < 300, "{} bytes:\n{page}", page.len());
 
     let page = get(19100, "/about").await;
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");

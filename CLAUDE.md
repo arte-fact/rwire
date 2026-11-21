@@ -457,7 +457,8 @@ Don't refactor:
   then fix consumers using compiler errors as guidance — and run the claw-rwire
   smoke-check from "Before Committing" so it doesn't rot silently.
 - Versioning: 0.x semver discipline once published — breaking changes bump the
-  minor and get a CHANGELOG.md entry; the wire protocol is explicitly unstable
+  minor and get a changelog entry, written as a fragment in `changelog.d/`
+  (one file per PR, never `CHANGELOG.md` directly); the wire protocol is explicitly unstable
   (no compat matrix: the runtime ships from the same binary).
 
 ### Test Coverage

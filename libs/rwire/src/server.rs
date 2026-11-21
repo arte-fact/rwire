@@ -746,10 +746,12 @@ struct ServedFiles {
 /// the PWA assets, so a browser can fetch it without a session.
 struct Asset {
     path: String,
-    content_type: &'static str,
+    content_type: Cow<'static, str>,
     body: Cow<'static, [u8]>,
     /// The `Cache-Control` directive it is served with.
     cache: &'static str,
+    /// `body` gzipped, for a text file where it pays (set at startup).
+    gzip: Option<Vec<u8>>,
 }
 
 /// How long a browser keeps an asset served as it is: an hour.
@@ -858,9 +860,10 @@ where
     ) -> Self {
         self.assets.push(Asset {
             path: path.into(),
-            content_type,
+            content_type: Cow::Borrowed(content_type),
             body: body.into(),
             cache: ASSET_CACHE,
+            gzip: None,
         });
         self
     }
@@ -876,9 +879,10 @@ where
     ) -> Self {
         self.assets.push(Asset {
             path: path.into(),
-            content_type,
+            content_type: Cow::Borrowed(content_type),
             body: body.into(),
             cache: ASSET_CACHE_FOREVER,
+            gzip: None,
         });
         self
     }
@@ -1231,8 +1235,24 @@ where
         // Fold a builder-level base_path into the capsule config as the final step, so it wins
         // regardless of chain order and works with or without a prior `.capsule_config(...)`.
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
+        let mut files = self.assets;
+        // The capsule's favicon is served like an `asset()` (an explicit
+        // `.asset("/favicon.ico", ..)` registered earlier wins).
+        if let Some(icon) = capsule_config.as_ref().and_then(|c| c.favicon.clone()) {
+            files.push(Asset {
+                path: "/favicon.ico".to_string(),
+                content_type: Cow::Owned(icon.content_type),
+                body: icon.bytes,
+                cache: ASSET_CACHE,
+                gzip: None,
+            });
+        }
+        // Text files are gzipped once, here.
+        for file in &mut files {
+            file.gzip = crate::compress::gzip_if_worth_it(&file.content_type, &file.body);
+        }
         let assets = Arc::new(ServedFiles {
-            assets: self.assets,
+            assets: files,
             dirs: self.asset_dirs,
         });
 
@@ -1416,7 +1436,9 @@ const SSR_CSS_SLOT: &str = "\u{1}rwire-ssr-css\u{1}";
 /// The page served for a `GET`: the capsule as generated at startup, or, with
 /// `ssr(true)`, the capsule around a static first paint rendered per request.
 enum Page {
-    Fixed(String),
+    /// The capsule, and the same gzipped once at startup (`None` if the
+    /// encoder failed: the capsule is then always sent as it is).
+    Fixed { html: String, gzip: Option<Vec<u8>> },
     /// The capsule split at [`SSR_CSS_SLOT`] and [`SSR_HTML_SLOT`].
     Ssr {
         head: String,
@@ -1428,12 +1450,17 @@ enum Page {
 }
 
 impl Page {
+    fn fixed(html: String) -> Self {
+        let gzip = crate::compress::gzip(html.as_bytes());
+        Page::Fixed { html, gzip }
+    }
+
     fn new(capsule: String, exclude: &[String]) -> Self {
         let Some((head, rest)) = capsule.split_once(SSR_CSS_SLOT) else {
-            return Page::Fixed(capsule);
+            return Page::fixed(capsule);
         };
         let Some((mid, tail)) = rest.split_once(SSR_HTML_SLOT) else {
-            return Page::Fixed(capsule);
+            return Page::fixed(capsule);
         };
         Page::Ssr {
             head: head.to_string(),
@@ -1446,27 +1473,31 @@ impl Page {
         }
     }
 
-    /// The status line and page for a `GET` of `target` (the request-line target).
-    ///
-    /// `404 Not Found` when the built-in router has no route for the path: the
-    /// page still loads and renders the router's not-found view, but crawlers and
-    /// probes (`/favicon.ico`, `/wp-login.php`) see the miss.
+    /// The status line and page for a `GET` of `target` (the request-line
+    /// target), and whether the page is gzipped, or `None` for a short `404`
+    /// (see [`page_status`]). The page is gzipped when `gzip` (the client
+    /// takes it): once at startup for the fixed capsule, here for the
+    /// per-request `ssr(true)` page; if the encoder fails it goes as it is.
     fn render<F>(
         &self,
         root: &F,
         shared: &SharedServerState,
         target: &str,
-    ) -> (&'static str, Cow<'_, str>)
+        routes_itself: bool,
+        gzip: bool,
+    ) -> Option<(&'static str, Cow<'_, [u8]>, bool)>
     where
         F: Fn() -> ElementBuilder,
     {
         let path = route_path(target);
-        let status = match crate::router::installed_router() {
-            Some(router) if router.match_path(path).is_none() => "404 Not Found",
-            _ => "200 OK",
-        };
-        let page = match self {
-            Page::Fixed(capsule) => Cow::Borrowed(capsule.as_str()),
+        let status = page_status(path, routes_itself)?;
+        let page: Cow<'_, str> = match self {
+            Page::Fixed { html, gzip: packed } => {
+                return Some(match packed {
+                    Some(packed) if gzip => (status, Cow::Borrowed(packed.as_slice()), true),
+                    _ => (status, Cow::Borrowed(html.as_bytes()), false),
+                });
+            }
             Page::Ssr {
                 head,
                 mid,
@@ -1481,7 +1512,35 @@ impl Page {
                 }
             }
         };
-        (status, page)
+        if let Some(packed) = gzip
+            .then(|| crate::compress::gzip(page.as_bytes()))
+            .flatten()
+        {
+            return Some((status, Cow::Owned(packed), true));
+        }
+        let body = match page {
+            Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
+            Cow::Owned(text) => Cow::Owned(text.into_bytes()),
+        };
+        Some((status, body, false))
+    }
+}
+
+/// The status of the page for `path`, or `None` when the app has no page
+/// there and a short `404` (not the page) answers.
+///
+/// - With the built-in router: `200` for a path a route matches. Otherwise
+///   `404` with the page when the app declared a not-found view
+///   (`Router::not_found`), so it renders, and the short `404` when not.
+/// - Without it, an app with `on_route` (`routes_itself`) routes every path
+///   itself: `200` everywhere. An app with neither has one page, at `/`.
+fn page_status(path: &str, routes_itself: bool) -> Option<&'static str> {
+    match crate::router::installed_router() {
+        Some(router) if router.match_path(path).is_some() => Some("200 OK"),
+        Some(router) if router.has_not_found() => Some("404 Not Found"),
+        Some(_) => None,
+        None if routes_itself || path == "/" => Some("200 OK"),
+        None => None,
     }
 }
 
@@ -1742,6 +1801,43 @@ fn request_line(request: &str) -> (&str, &str) {
     (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
+/// The log line for a page request refused by the delegated gate: a refused
+/// credential, or an outage of the validator (it failed, timed out or no slot
+/// freed up in time), which says nothing about the credential.
+fn delegated_refusal_log(outage: bool) -> &'static str {
+    if outage {
+        "delegated auth: validator unavailable (outage or timeout), request sent to login"
+    } else {
+        "delegated auth: credential refused, sent to login"
+    }
+}
+
+/// Whether the request is for the Prometheus export: `GET` or `HEAD` of
+/// `/metrics`, with or without a query. `Some(true)` for `HEAD` (head only).
+fn metrics_request(request: &str) -> Option<bool> {
+    let (method, path) = request_line(request);
+    let bare = path.split('?').next().unwrap_or(path);
+    match (method, bare) {
+        ("GET", "/metrics") => Some(false),
+        ("HEAD", "/metrics") => Some(true),
+        _ => None,
+    }
+}
+
+/// The Prometheus export, with the registry's live connection count; only
+/// its head when `head_only`.
+async fn serve_metrics_endpoint(
+    stream: TcpStream,
+    registry: &ConnectionRegistry,
+    metrics: &Metrics,
+    head_only: bool,
+) -> std::io::Result<()> {
+    metrics
+        .active_connections
+        .set(registry.total_connections() as u64);
+    crate::health::serve_metrics_response(stream, &metrics.to_prometheus(), head_only).await
+}
+
 /// Answer a `GET` / `HEAD` for a file of one of `dirs` that `eligible` accepts.
 /// Returns whether the request was answered (the stream is then done).
 async fn serve_asset_dir(
@@ -1940,14 +2036,25 @@ fn login_capsule_config(
 /// vendoring as the core runtime artifact; `npm run sync` is the write path.
 const EXT_VIM_JS: &str = include_str!("../assets/ext/vim.min.js");
 
-async fn serve_ext_module(mut stream: TcpStream, body: &'static str) -> std::io::Result<()> {
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    stream.write_all(response.as_bytes()).await?;
-    stream.flush().await
+async fn serve_ext_module(
+    stream: TcpStream,
+    body: &'static str,
+    gzip: bool,
+) -> std::io::Result<()> {
+    // The bundled modules are gzipped once, on first request.
+    static PACKED: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
+    let packed = gzip
+        .then(|| PACKED.get_or_init(|| crate::compress::gzip(EXT_VIM_JS.as_bytes())))
+        .and_then(Option::as_deref);
+    crate::health::serve_static_encoded(
+        stream,
+        "text/javascript; charset=utf-8",
+        packed.unwrap_or(body.as_bytes()),
+        "no-cache",
+        packed.is_some(),
+        true,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1991,7 +2098,8 @@ async fn handle_client<F>(
         if bare == "/_rw/ext/vim.js" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS).await {
+            let gzip = crate::compress::accepts_gzip(&peek_str);
+            if let Err(e) = serve_ext_module(stream, EXT_VIM_JS, gzip).await {
                 eprintln!("[{}] ext module error: {}", peer_addr, e);
             }
             return;
@@ -2000,30 +2108,47 @@ async fn handle_client<F>(
         if let Some(a) = assets.assets.iter().find(|a| a.path == bare) {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
-            if let Err(e) =
-                crate::health::serve_static_cached(stream, a.content_type, &a.body, a.cache).await
-            {
+            let packed = a
+                .gzip
+                .as_deref()
+                .filter(|_| crate::compress::accepts_gzip(&peek_str));
+            let sent = crate::health::serve_static_encoded(
+                stream,
+                &a.content_type,
+                packed.unwrap_or(&a.body),
+                a.cache,
+                packed.is_some(),
+                a.gzip.is_some(),
+            );
+            if let Err(e) = sent.await {
                 eprintln!("[{}] {} error: {}", peer_addr, bare, e);
             }
             return;
         }
-        if path == "/health" || path == "/ready" || path == "/metrics" {
+        if path == "/health" || path == "/ready" {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
             let max = config.max_connections;
             let result = match path {
                 "/health" => crate::health::serve_health(stream, &registry, max).await,
-                "/ready" => crate::health::serve_ready(stream, &registry, max).await,
-                _ => {
-                    // Reflect the registry's live count into the gauge, then export.
-                    metrics
-                        .active_connections
-                        .set(registry.total_connections() as u64);
-                    crate::health::serve_metrics(stream, &metrics.to_prometheus()).await
-                }
+                _ => crate::health::serve_ready(stream, &registry, max).await,
             };
             if let Err(e) = result {
                 eprintln!("[{}] {} endpoint error: {}", peer_addr, path, e);
+            }
+            return;
+        }
+    }
+
+    // `/metrics` is public without a gate, or when the config says so;
+    // otherwise it is served past the gate (below), matched the same way.
+    let metrics_public = config.public_metrics || (auth.is_none() && delegated.is_none());
+    if metrics_public {
+        if let Some(head_only) = metrics_request(&peek_str) {
+            let mut drain = vec![0u8; n];
+            let _ = stream.read_exact(&mut drain).await;
+            if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics, head_only).await {
+                eprintln!("[{}] /metrics endpoint error: {}", peer_addr, e);
             }
             return;
         }
@@ -2161,19 +2286,54 @@ async fn handle_client<F>(
     // login URL and a handshake gets 401. The cookie is never logged.
     let mut identity = None;
     if let Some(delegated) = delegated.as_ref() {
-        match delegated.identify(&peek_str).await {
-            Some(found) => identity = Some(found),
-            None => {
+        // A handshake the admission caps would refuse is refused before its
+        // credential costs a validation (the caps are checked again, and the
+        // connection registered, after the gate).
+        if capsule::is_websocket_upgrade(&peek_str) {
+            if let Err(reason) = registry.check_admission(
+                peer_addr.ip(),
+                config.max_connections,
+                config.max_connections_per_ip,
+            ) {
+                let why = match reason {
+                    AdmissionError::AtCapacity => "at_capacity",
+                    AdmissionError::TooManyFromIp => "too_many_from_ip",
+                };
+                metrics.connections_rejected.inc();
+                let _ = crate::health::serve_unavailable(stream, why).await;
+                return;
+            }
+        }
+        match delegated.verdict(&peek_str).await {
+            crate::delegated_auth::Validation::Valid(found) => identity = Some(found),
+            failed => {
                 if capsule::is_websocket_upgrade(&peek_str) {
                     // As with the form gate, a stale tab's reconnects are expected:
                     // the client reloads after repeated rejects and lands on the login.
                     let _ = capsule::serve_unauthorized(stream).await;
                 } else {
                     let (_, path) = request_line(&peek_str);
-                    let target = delegated.login_redirect(path);
+                    let host = header_value(&peek_str, "host");
+                    let target = delegated.login_redirect(path, host.as_deref());
                     let mut buf = vec![0u8; n];
                     let _ = stream.read_exact(&mut buf).await;
-                    println!("[{peer_addr}] delegated auth: no identity, sent to login");
+                    // An anonymous visit is routine: not logged. A refused cookie
+                    // and an unreachable validator are, each at most once a
+                    // minute (a flood of forged cookies must not flood the log).
+                    if delegated.has_credential(&peek_str) {
+                        static LAST_REFUSED: AtomicU64 = AtomicU64::new(0);
+                        static LAST_OUTAGE: AtomicU64 = AtomicU64::new(0);
+                        let outage =
+                            matches!(failed, crate::delegated_auth::Validation::Unavailable);
+                        let last = if outage { &LAST_OUTAGE } else { &LAST_REFUSED };
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs());
+                        if now >= last.load(Ordering::Relaxed) + 60 {
+                            last.store(now, Ordering::Relaxed);
+                            println!("[{peer_addr}] {}", delegated_refusal_log(outage));
+                        }
+                    }
                     let _ = match target {
                         Some(location) => capsule::serve_redirect(stream, &location, None).await,
                         None => capsule::serve_unauthorized(stream).await,
@@ -2182,6 +2342,16 @@ async fn handle_client<F>(
                 return;
             }
         }
+    }
+
+    // `/metrics` behind a gate: the request got through it.
+    if let Some(head_only) = metrics_request(&peek_str) {
+        let mut drain = vec![0u8; n];
+        let _ = stream.read_exact(&mut drain).await;
+        if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics, head_only).await {
+            eprintln!("[{}] /metrics endpoint error: {}", peer_addr, e);
+        }
+        return;
     }
 
     if serve_asset_dir(&mut stream, n, &peek_str, &assets.dirs, |d| !d.public).await {
@@ -2290,7 +2460,10 @@ async fn handle_client<F>(
                         composite_table,
                         metrics,
                         identity,
-                        revalidate: delegated.map(|d| (d, peek_str.clone().into_owned())),
+                        revalidate: delegated.map(|d| {
+                            let head = d.revalidation_head(&peek_str);
+                            (d, head)
+                        }),
                     },
                 )
                 .await
@@ -2332,11 +2505,22 @@ async fn handle_client<F>(
         let secure_cookie = config.secure_cookies || forwarded_https(&peek_str);
         // Rendered here, past the auth gates above: the static paint (and the shared
         // state in it) reaches exactly the visitors the live page would.
-        let (status, page) = capsule.render(root.as_ref(), &shared, request_line(&peek_str).1);
-        if let Err(e) = capsule::serve_with_status(
+        let target = request_line(&peek_str).1;
+        let Some((status, page, gzip)) = capsule.render(
+            root.as_ref(),
+            &shared,
+            target,
+            hooks.route.is_some(),
+            crate::compress::accepts_gzip(&peek_str),
+        ) else {
+            let _ = capsule::serve_not_found(stream).await;
+            return;
+        };
+        if let Err(e) = capsule::serve_page(
             stream,
             status,
             &page,
+            gzip,
             Some(&session_id),
             is_new_session,
             secure_cookie,
@@ -3273,6 +3457,11 @@ where
     let mut quiet_since = Instant::now();
     let revalidate_every = revalidate.as_ref().map(|(auth, _)| auth.revalidate_every());
     let mut next_revalidation = revalidate_every.map(|every| Instant::now() + every);
+    // Delegated auth: when the identity was last confirmed (an outage is
+    // tolerated for the grace period from here), and whether the current
+    // outage was already logged.
+    let mut confirmed_at = Instant::now();
+    let mut outage_logged = false;
     // Stop racing the broadcast channel if it ever closes (avoids busy-looping
     // on a permanently-ready Err). It stays open for the connection's lifetime.
     let mut broadcast_open = true;
@@ -3296,15 +3485,50 @@ where
 
         // Delegated auth: re-validate the handshake's credentials once per cache
         // TTL (so the validator is asked at most that often per credential). A
-        // revoked identity closes the socket; the client's reconnect is then
-        // refused with 401 and, after its retries, it reloads onto the login page.
+        // revoked identity closes the socket (4401); the client's reconnect is
+        // then refused with 401 and, after its retries, it reloads onto the
+        // login page. An unreachable validator is not a revocation: the socket
+        // stays up for the outage grace from its last confirmation, then closes
+        // with 1013 (try again later).
         if let (Some((auth, head)), Some(due)) = (revalidate.as_ref(), next_revalidation) {
             if Instant::now() >= due {
-                if auth.identify(head).await.is_none() {
-                    println!("[{}] delegated auth: identity revoked, closing", peer_addr);
+                use crate::delegated_auth::{
+                    Validation, CLOSE_HUB_UNAVAILABLE, CLOSE_UNAUTHORIZED,
+                };
+                let close = match auth.verdict(head).await {
+                    Validation::Valid(_) => {
+                        confirmed_at = Instant::now();
+                        outage_logged = false;
+                        None
+                    }
+                    Validation::Revoked => {
+                        println!("[{}] delegated auth: identity revoked, closing", peer_addr);
+                        Some((CLOSE_UNAUTHORIZED, "unauthorized"))
+                    }
+                    Validation::Unavailable
+                        if confirmed_at.elapsed() >= auth.outage_grace_period() =>
+                    {
+                        println!(
+                            "[{}] delegated auth: validator unreachable past the grace period, closing",
+                            peer_addr
+                        );
+                        Some((CLOSE_HUB_UNAVAILABLE, "identity provider unavailable"))
+                    }
+                    Validation::Unavailable => {
+                        if !outage_logged {
+                            outage_logged = true;
+                            println!(
+                                "[{}] delegated auth: validator unreachable, keeping the socket open",
+                                peer_addr
+                            );
+                        }
+                        None
+                    }
+                };
+                if let Some((code, reason)) = close {
                     let frame = tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                        code: crate::delegated_auth::CLOSE_UNAUTHORIZED.into(),
-                        reason: "unauthorized".into(),
+                        code: code.into(),
+                        reason: reason.into(),
                     };
                     let _ = write.send(Message::Close(Some(frame))).await;
                     break;
@@ -3570,7 +3794,10 @@ where
 
 #[cfg(test)]
 mod auth_tests {
-    use super::{request_body, request_line, rewrite_proxy_head, route_path, url_decode, AuthGate};
+    use super::{
+        delegated_refusal_log, metrics_request, request_body, request_line, rewrite_proxy_head,
+        route_path, url_decode, AuthGate,
+    };
 
     #[test]
     fn url_decode_handles_plus_and_percent() {
@@ -3614,6 +3841,31 @@ mod auth_tests {
     }
 
     #[test]
+    fn metrics_requests_match_like_the_public_route() {
+        assert_eq!(
+            metrics_request("GET /metrics HTTP/1.1\r\n\r\n"),
+            Some(false)
+        );
+        assert_eq!(
+            metrics_request("GET /metrics?x=1 HTTP/1.1\r\n\r\n"),
+            Some(false)
+        );
+        assert_eq!(
+            metrics_request("HEAD /metrics HTTP/1.1\r\n\r\n"),
+            Some(true)
+        );
+        assert_eq!(metrics_request("POST /metrics HTTP/1.1\r\n\r\n"), None);
+        assert_eq!(metrics_request("GET /metrics/x HTTP/1.1\r\n\r\n"), None);
+    }
+
+    #[test]
+    fn an_outage_is_not_logged_as_a_refused_credential() {
+        assert!(delegated_refusal_log(false).contains("credential refused"));
+        assert!(!delegated_refusal_log(true).contains("refused"));
+        assert!(delegated_refusal_log(true).contains("unavailable"));
+    }
+
+    #[test]
     fn request_line_and_body_parse() {
         let req = "POST /login HTTP/1.1\r\nHost: x\r\n\r\nusername=a&password=b";
         assert_eq!(request_line(req), ("POST", "/login"));
@@ -3647,6 +3899,26 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A capsule whose gzip failed at startup is sent as it is, flagged as
+    /// such, even to a client that takes gzip; with gzip, the packed one is.
+    #[test]
+    fn a_page_without_its_gzip_goes_uncompressed() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let root = || ElementBuilder::new(crate::El::Div);
+        let plain = Page::Fixed {
+            html: "<p>x</p>".into(),
+            gzip: None,
+        };
+        let (status, body, gzipped) = plain.render(&root, &shared, "/", true, true).unwrap();
+        assert_eq!(status, "200 OK");
+        assert_eq!(&*body, b"<p>x</p>");
+        assert!(!gzipped);
+        let packed = Page::fixed("<p>x</p>".into());
+        let (_, body, gzipped) = packed.render(&root, &shared, "/", true, true).unwrap();
+        assert!(gzipped);
+        assert_eq!(&body[..2], &[0x1f, 0x8b], "gzip magic");
+    }
 
     #[test]
     fn action_loading_then_success_clears_to_idle() {
