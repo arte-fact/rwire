@@ -1338,34 +1338,64 @@ impl Page {
         }
     }
 
-    /// The page for a `GET` of `target` (path and query, as on the request line).
-    fn render<F>(&self, root: &F, shared: &SharedServerState, target: &str) -> Cow<'_, str>
+    /// The status line and page for a `GET` of `target` (the request-line target).
+    ///
+    /// `404 Not Found` when the built-in router has no route for the path: the
+    /// page still loads and renders the router's not-found view, but crawlers and
+    /// probes (`/favicon.ico`, `/wp-login.php`) see the miss.
+    fn render<F>(
+        &self,
+        root: &F,
+        shared: &SharedServerState,
+        target: &str,
+    ) -> (&'static str, Cow<'_, str>)
     where
         F: Fn() -> ElementBuilder,
     {
-        match self {
-            Page::Fixed(capsule) => Cow::Borrowed(capsule),
+        let path = route_path(target);
+        let status = match crate::router::installed_router() {
+            Some(router) if router.match_path(path).is_none() => "404 Not Found",
+            _ => "200 OK",
+        };
+        let page = match self {
+            Page::Fixed(capsule) => Cow::Borrowed(capsule.as_str()),
             Page::Ssr { head, mid, tail } => {
-                let (html, css) = render_ssr(&root(), shared, target);
+                let (html, css) = render_ssr(&root(), shared, path);
                 Cow::Owned([head.as_str(), &css, mid, &html, tail].concat())
             }
-        }
+        };
+        (status, page)
     }
 }
 
-/// The static first paint of `root` at `target` and the CSS its classes need.
+/// The route path of a request target, without query or fragment. Takes the
+/// origin form (`/posts/x?ref=feed`) and the absolute form some proxies send
+/// (`http://host/posts/x`).
+fn route_path(target: &str) -> &str {
+    let target = match target.split_once("://") {
+        Some((scheme, rest)) if !scheme.contains(['/', '?', '#']) => {
+            // The authority ends at the path, the query or the fragment.
+            match rest.find(['/', '?', '#']) {
+                Some(i) if rest[i..].starts_with('/') => &rest[i..],
+                _ => "/",
+            }
+        }
+        _ => target,
+    };
+    target.split(['?', '#']).next().unwrap_or("")
+}
+
+/// The static first paint of `root` at `path` and the CSS its classes need.
 ///
-/// The router's outlet renders the requested route (the query and fragment are
-/// not part of it). Regions over `#[storage(shared)]` state render the current
-/// shared copy: it is the same for every visitor of the page. Memory and
-/// persisted state belong to a connection or a session, which a plain `GET`
-/// does not have yet, so their regions render the state's default; the live
-/// render replaces the paint on the first WebSocket frame.
+/// The router's outlet renders `path`. Regions over `#[storage(shared)]` state
+/// render the current shared copy: it is the same for every visitor of the page.
+/// Memory and persisted state belong to a connection or a session, which a
+/// plain `GET` does not have yet, so their regions render the state's default;
+/// the live render replaces the paint on the first WebSocket frame.
 ///
 /// One pass over the tree, under the shared cache's read lock; the CSS rules
 /// are formatted after it is released.
-fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, target: &str) -> (String, String) {
-    let path = target.split(['?', '#']).next().unwrap_or("");
+fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, path: &str) -> (String, String) {
     let mut route = crate::router::CurrentRoute::default();
     if path.starts_with('/') {
         route.set_path(path);
@@ -2133,9 +2163,10 @@ async fn handle_client<F>(
         let secure_cookie = config.secure_cookies || forwarded_https(&peek_str);
         // Rendered here, past the auth gates above: the static paint (and the shared
         // state in it) reaches exactly the visitors the live page would.
-        let page = capsule.render(root.as_ref(), &shared, request_line(&peek_str).1);
-        if let Err(e) = capsule::serve(
+        let (status, page) = capsule.render(root.as_ref(), &shared, request_line(&peek_str).1);
+        if let Err(e) = capsule::serve_with_status(
             stream,
+            status,
             &page,
             Some(&session_id),
             is_new_session,
@@ -3311,7 +3342,7 @@ where
 
 #[cfg(test)]
 mod auth_tests {
-    use super::{request_body, request_line, rewrite_proxy_head, url_decode, AuthGate};
+    use super::{request_body, request_line, rewrite_proxy_head, route_path, url_decode, AuthGate};
 
     #[test]
     fn url_decode_handles_plus_and_percent() {
@@ -3340,6 +3371,18 @@ mod auth_tests {
         let got = String::from_utf8(rewrite_proxy_head(ws, "/preview/ws-abc")).unwrap();
         assert!(got.starts_with("GET / HTTP/1.1"));
         assert!(got.contains("Upgrade: websocket"));
+    }
+
+    #[test]
+    fn route_path_of_origin_and_absolute_targets() {
+        assert_eq!(route_path("/posts/x"), "/posts/x");
+        assert_eq!(route_path("/posts/x?ref=feed#top"), "/posts/x");
+        assert_eq!(route_path("/go?to=http://elsewhere/x"), "/go");
+        assert_eq!(route_path("http://host/posts/x"), "/posts/x");
+        assert_eq!(route_path("https://host:8443/posts/x?y=/z"), "/posts/x");
+        assert_eq!(route_path("http://host"), "/");
+        assert_eq!(route_path("http://host?a=/b"), "/");
+        assert_eq!(route_path(""), "");
     }
 
     #[test]

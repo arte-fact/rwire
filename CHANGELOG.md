@@ -47,6 +47,9 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   was rendered before the client's `R<path>`. With the built-in router, a new
   connection now waits briefly (at most 500 ms) for that message and renders
   the reported route in its initial DOM.
+- `GET http://host/path` (the absolute form some proxies send) is routed as
+  `/path`, not `/`. A path no route matches is answered `404 Not Found`; the
+  page still renders the router's not-found view.
 
 First public release. Highlights of what the framework ships with:
 

@@ -10,8 +10,10 @@
 //!   first frame is the route's view, never `/`'s;
 //! - navigating to it from another route;
 //! - with the shared region nested inside a memory-state region;
-//! - `GET /posts/x` with `ssr(true)` serves the requested route, not `/`,
-//!   and stays behind the auth gate.
+//! - `GET /posts/x` with `ssr(true)` serves the requested route, not `/`
+//!   (also in the absolute form a proxy sends), and stays behind the auth
+//!   gate;
+//! - a path no route matches is a `404`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -308,6 +310,24 @@ async fn ssr_renders_the_requested_route_with_the_shared_state() {
     let page = get(19094, "/").await;
     assert!(page.contains("home page"), "{page}");
     assert!(!page.contains("post:"), "{page}");
+
+    // The absolute form a proxy may send names the same route.
+    let page = get(19094, "http://localhost/posts/hello?ref=feed").await;
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    assert!(page.contains("post: Hello rwire"), "{page}");
+    assert!(!page.contains("home page"), "{page}");
+}
+
+#[tokio::test]
+async fn a_path_no_route_matches_is_a_404() {
+    let _shared = start(19100, true, Gate::Open).await;
+    let page = get(19100, "/favicon.ico").await;
+    assert!(page.starts_with("HTTP/1.1 404 Not Found"), "{page}");
+    // The page still loads, with the router's not-found view.
+    assert!(page.contains("the shell"), "{page}");
+
+    let page = get(19100, "/about").await;
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
 }
 
 #[tokio::test]
