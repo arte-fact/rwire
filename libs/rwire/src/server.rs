@@ -1302,13 +1302,22 @@ where
                 use futures::future::{select, Either};
                 let accept = std::pin::pin!(listener.accept());
                 match select(accept, shutdown.as_mut()).await {
-                    Either::Left((Ok(accepted), _)) => Some(accepted),
-                    // The listener failed (as before: stop serving) or shutdown fired.
-                    Either::Left((Err(_), _)) | Either::Right(_) => None,
+                    Either::Left((Ok(accepted), _)) => Ok(accepted),
+                    Either::Left((Err(e), _)) => Err(Some(e)),
+                    Either::Right(_) => Err(None),
                 }
             };
-            let Some((stream, peer_addr)) = accepted else {
-                break;
+            let (stream, peer_addr) = match accepted {
+                Ok(accepted) => accepted,
+                // A failed accept is about one connection (aborted before it was
+                // taken) or a passing shortage (out of file descriptors): log it,
+                // let the shortage pass, keep serving.
+                Err(Some(e)) => {
+                    eprintln!("accept failed: {e}; still serving");
+                    tokio::time::sleep(ACCEPT_RETRY).await;
+                    continue;
+                }
+                Err(None) => break,
             };
             // An event's answer is two small frames (the DOM update, then EVENT_ACK).
             // With Nagle on, the second waits for the client's ACK of the first,
@@ -1507,6 +1516,10 @@ fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, path: &str) -> 
     }
     (html, css)
 }
+
+/// The pause after a failed `accept()` before trying again: long enough for a
+/// shortage of file descriptors to ease, short enough to go unnoticed.
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 /// Bind a TCP listener with `SO_REUSEADDR` set.
 ///
