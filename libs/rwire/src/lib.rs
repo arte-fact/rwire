@@ -60,6 +60,7 @@ pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
 pub mod capsule_gen;
+mod compress;
 pub mod config;
 pub mod delegated_auth;
 pub mod form;

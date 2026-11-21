@@ -6,6 +6,8 @@
 //! `MAP_DEF` the first time a connection references the code — the name-map analogue of
 //! the lazy CSS delivery (`STYLE_DEF`) used for utility/pseudo/breakpoint rules.
 
+use std::borrow::Cow;
+
 use crate::theme::Theme;
 
 /// The runtime JavaScript — the built artifact from `runtime/` (TypeScript
@@ -209,6 +211,22 @@ impl FontFace {
     }
 }
 
+/// The icon of [`CapsuleConfig::favicon`].
+#[derive(Clone)]
+pub(crate) struct Favicon {
+    pub(crate) bytes: Cow<'static, [u8]>,
+    pub(crate) content_type: String,
+}
+
+impl std::fmt::Debug for Favicon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Favicon")
+            .field("bytes", &self.bytes.len())
+            .field("content_type", &self.content_type)
+            .finish()
+    }
+}
+
 /// Configuration for capsule generation with styling.
 #[derive(Clone, Debug, Default)]
 pub struct CapsuleConfig {
@@ -231,6 +249,10 @@ pub struct CapsuleConfig {
     pub fonts: Vec<FontFace>,
     /// Optional PWA configuration (manifest, service worker, icons, head tags).
     pub(crate) pwa: Option<crate::pwa::Pwa>,
+    /// The icon served at `/favicon.ico` (see [`Self::favicon`]).
+    pub(crate) favicon: Option<Favicon>,
+    /// The page's `<title>` (see [`Self::title`]).
+    pub(crate) title: Option<String>,
     /// `<html lang>`: the page language (also the locale of grouped live values).
     pub(crate) lang: Option<String>,
     /// URL prefix this app is mounted under (e.g. `/preview/<id>`), or empty for the root. When
@@ -335,6 +357,36 @@ impl CapsuleConfig {
     /// ```
     pub fn pwa(mut self, pwa: crate::pwa::Pwa) -> Self {
         self.pwa = Some(pwa);
+        self
+    }
+
+    /// The page's `<title>`, shown in the browser tab and history. With a PWA,
+    /// it replaces the title the PWA's name would give.
+    ///
+    /// One title for the whole app: it does not follow client-side
+    /// navigation between routes (that would need the runtime to set
+    /// `document.title` on every route change), so it is not set per route,
+    /// not even in the `ssr(true)` paint, which would then disagree with the
+    /// live page after the first navigation.
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Serve `bytes` at `/favicon.ico` with `content_type` (`"image/x-icon"`,
+    /// `"image/png"`, `"image/svg+xml"`…) and link it from the page's `<head>`.
+    /// Without it, browsers still ask for `/favicon.ico` and get a short 404.
+    /// With a PWA, this icon replaces the PWA's in the `<link rel="icon">`; the
+    /// PWA icons still serve the manifest and the home screen.
+    pub fn favicon(
+        mut self,
+        bytes: impl Into<Cow<'static, [u8]>>,
+        content_type: impl Into<String>,
+    ) -> Self {
+        self.favicon = Some(Favicon {
+            bytes: bytes.into(),
+            content_type: content_type.into(),
+        });
         self
     }
 
@@ -488,11 +540,35 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
         config
             .pwa
             .as_ref()
-            .map(|p| p.head(&config.theme))
+            .map(|p| {
+                p.head(
+                    &config.theme,
+                    config.favicon.is_none(),
+                    config.title.is_none(),
+                )
+            })
             .unwrap_or_default()
     } else {
         String::new()
     };
+    // Under a base path too: the proxy strips the prefix, the server answers
+    // `/favicon.ico`.
+    let favicon_link = config
+        .favicon
+        .as_ref()
+        .map(|icon| {
+            format!(
+                "<link rel=\"icon\" href=\"{}/favicon.ico\" type=\"{}\">",
+                attr_escape(&config.base_path),
+                attr_escape(&icon.content_type)
+            )
+        })
+        .unwrap_or_default();
+    let title = config
+        .title
+        .as_deref()
+        .map(|t| format!("<title>{}</title>", attr_escape(t)))
+        .unwrap_or_default();
 
     let lang = config
         .lang
@@ -504,7 +580,7 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
     let rwv = ext_version();
 
     format!(
-        r#"<!DOCTYPE html><html{lang}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{pwa_head}
+        r#"<!DOCTYPE html><html{lang}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{title}{favicon_link}{pwa_head}
 <style>{css}</style></head><body>
 <div id="rw">{ssr_html}</div>
 <script>
@@ -514,6 +590,15 @@ const RWV='{rwv}';
 </script>
 </body></html>"#
     )
+}
+
+/// Escape a value for a double-quoted HTML attribute.
+fn attr_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The `const BASE=…` line the client runtime reads to prefix its WebSocket URL and history while
@@ -529,6 +614,44 @@ fn base_path_js(base_path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_title_is_escaped_and_replaces_the_pwa_one() {
+        let html = generate_styled_capsule(&CapsuleConfig::new().title("Inbox <3 & co"), "");
+        assert!(
+            html.contains("<title>Inbox &lt;3 &amp; co</title>"),
+            "{html}"
+        );
+
+        let config = CapsuleConfig::new()
+            .title("Office")
+            .pwa(crate::pwa::Pwa::new("Office PWA"));
+        let html = generate_styled_capsule(&config, "");
+        assert_eq!(html.matches("<title>").count(), 1, "{html}");
+        assert!(html.contains("<title>Office</title>"));
+
+        let pwa_only = CapsuleConfig::new().pwa(crate::pwa::Pwa::new("Office PWA"));
+        let html = generate_styled_capsule(&pwa_only, "");
+        assert!(html.contains("<title>Office PWA</title>"));
+        assert!(!generate_styled_capsule(&CapsuleConfig::new(), "").contains("<title>"));
+    }
+
+    #[test]
+    fn the_favicon_link_follows_the_base_path_and_is_escaped() {
+        let config = CapsuleConfig::new()
+            .favicon(&b"x"[..], "image/svg+xml\"><script>")
+            .base_path("/preview/7");
+        let html = generate_styled_capsule(&config, "");
+        assert!(
+            html.contains(
+                "<link rel=\"icon\" href=\"/preview/7/favicon.ico\" \
+                 type=\"image/svg+xml&quot;&gt;&lt;script&gt;\">"
+            ),
+            "{html}"
+        );
+        let without = generate_styled_capsule(&CapsuleConfig::new(), "");
+        assert!(!without.contains("rel=\"icon\""));
+    }
+
     #[test]
     fn a_google_face_imports_its_italics_on_request() {
         let upright = FontFace::google("EB Garamond", &[400, 600]).to_css();

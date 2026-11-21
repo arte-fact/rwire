@@ -165,6 +165,30 @@ Apply a named palette with `Theme::dark().palette(rwire_themes::palettes::nord()
 `rwire-themes` crate ships nord, indigo, catppuccin, dracula, solarized, gruvbox, tokyo_night,
 rose_pine, and one_dark.
 
+### .title(text)
+
+```rust
+CapsuleConfig::new().title("Office — agents")
+```
+
+The page's `<title>` (escaped), in the `ssr(true)` paint too; with a PWA it
+replaces the title taken from the PWA name. One title for the whole app: it
+doesn't change with client-side navigation (that would need the runtime to set
+`document.title` on each route change), so there is no per-route title, not
+even in the SSR paint, which would then disagree with the page after the first
+navigation.
+
+### .favicon(bytes, content_type)
+
+```rust
+CapsuleConfig::new().favicon(include_bytes!("../assets/icon.png"), "image/png")
+```
+
+Serves the icon at `/favicon.ico` (before any auth gate, like `.asset(..)`)
+and links it from the page's `<head>`. Without it, the browser's request for
+`/favicon.ico` gets a short 404. With a PWA, this icon is the page's
+`<link rel="icon">`; the PWA icons still serve the manifest and home screen.
+
 ### .font(FontFace)
 
 Adds a font to the capsule. Multiple fonts can be added by chaining `.font()` calls:
@@ -214,10 +238,34 @@ authenticated visitor may see all the shared data it renders. When it is on,
 it is rendered after the gate: a visitor who gets the login page instead of
 the app gets no static paint either.
 
-A path no route matches is answered `404 Not Found` (the page still loads and
-renders the router's not-found view). With a PWA, the service worker's
-offline fallback is the `/` page cached at install, so offline its paint
-shows the shared state of that time.
+With a PWA, the service worker's offline fallback is the `/` page cached at
+install, so offline its paint shows the shared state of that time.
+
+## Compression
+
+Responses are gzipped for a client whose `Accept-Encoding` takes gzip, with
+`Vary: Accept-Encoding`:
+
+- the page: the fixed capsule is compressed once at startup (about 28 KB to
+  10 KB); with `ssr(true)` the per-request page is compressed as it is served
+  (well under a millisecond);
+- text files registered with `.asset(..)` (and the bundled extension
+  modules), compressed once at startup when it saves at least a tenth.
+
+Images, fonts, `asset_dir` folders (streamed, with byte ranges), the PWA files
+and the short 404 are sent as they are. Only gzip is offered.
+
+## Unknown paths
+
+A path the app has no page for gets a **short `404 Not Found`** (a line of
+text, not the 20–30 KB page): `/favicon.ico`, `/robots.txt`, probes.
+
+- With `.routes(router)`: a path no route matches gets the short 404, unless
+  the router declares a not-found view (`Router::not_found`); then the page is
+  served with status 404 so the view renders.
+- Without a router, an app with `.on_route(..)` routes every path itself: the
+  page is served everywhere, as before.
+- An app with neither has one page, at `/`; any other path gets the short 404.
 
 ### PWA behind an auth
 
