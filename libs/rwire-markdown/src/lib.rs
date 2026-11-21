@@ -26,7 +26,7 @@ mod site;
 mod toc;
 
 pub use code::{highlight_code, highlight_lines};
-pub use frontmatter::Frontmatter;
+pub use frontmatter::{parse_frontmatter, Frontmatter, FrontmatterValue};
 pub use markdown::Markdown;
 pub use parser::{parse_markdown, parse_markdown_with, ParseResult, TocEntry};
 pub use prose::{Prose, ProseSize};

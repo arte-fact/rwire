@@ -62,6 +62,15 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
 
+### Added: free frontmatter keys in rwire-markdown
+
+- Keys other than `title`, `description`, `order` and `component` are kept
+  in `Frontmatter::extra` (`BTreeMap<String, FrontmatterValue>`), as text or
+  as a list: inline `[a, "b, c"]` or one `- item` per line. Read them with
+  `Frontmatter::get` / `Frontmatter::list`, or per page with
+  `DocSite::extra(path)`. `parse_frontmatter` and `FrontmatterValue` are now
+  exported. The four known fields parse exactly as before.
+
 ### Added: asset folders served from disk
 
 - `ServerWithRoot::asset_dir(prefix, dir)` serves a folder read on each
