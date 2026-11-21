@@ -1064,7 +1064,169 @@ define_token_enum! {
     }
 }
 
+/// The longhand properties a CSS property sets: a shorthand expands to the
+/// longhands it resets (`padding` → the four sides), a longhand is itself.
+/// Logical pairs map to their physical sides (`padding-inline` → left and
+/// right): whatever the writing direction, the pair covers both.
+fn longhands_of(prop: &'static str, out: &mut Vec<&'static str>) {
+    const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
+    let expanded: &[&'static str] = match prop {
+        "padding" => &[
+            "padding-top",
+            "padding-right",
+            "padding-bottom",
+            "padding-left",
+        ],
+        "padding-inline" => &["padding-left", "padding-right"],
+        "padding-block" => &["padding-top", "padding-bottom"],
+        "margin" => &["margin-top", "margin-right", "margin-bottom", "margin-left"],
+        "margin-inline" => &["margin-left", "margin-right"],
+        "margin-block" => &["margin-top", "margin-bottom"],
+        "inset" => &SIDES,
+        "gap" => &["row-gap", "column-gap"],
+        "overflow" => &["overflow-x", "overflow-y"],
+        "flex" => &["flex-grow", "flex-shrink", "flex-basis"],
+        "flex-flow" => &["flex-direction", "flex-wrap"],
+        "place-items" => &["align-items", "justify-items"],
+        "place-content" => &["align-content", "justify-content"],
+        "place-self" => &["align-self", "justify-self"],
+        "grid-column" => &["grid-column-start", "grid-column-end"],
+        "grid-row" => &["grid-row-start", "grid-row-end"],
+        "border-radius" => &[
+            "border-top-left-radius",
+            "border-top-right-radius",
+            "border-bottom-right-radius",
+            "border-bottom-left-radius",
+        ],
+        "border" => &["border-top", "border-right", "border-bottom", "border-left"],
+        "border-width" => &[
+            "border-top-width",
+            "border-right-width",
+            "border-bottom-width",
+            "border-left-width",
+        ],
+        "border-style" => &[
+            "border-top-style",
+            "border-right-style",
+            "border-bottom-style",
+            "border-left-style",
+        ],
+        "border-color" => &[
+            "border-top-color",
+            "border-right-color",
+            "border-bottom-color",
+            "border-left-color",
+        ],
+        "border-top" => &["border-top-width", "border-top-style", "border-top-color"],
+        "border-right" => &[
+            "border-right-width",
+            "border-right-style",
+            "border-right-color",
+        ],
+        "border-bottom" => &[
+            "border-bottom-width",
+            "border-bottom-style",
+            "border-bottom-color",
+        ],
+        "border-left" => &[
+            "border-left-width",
+            "border-left-style",
+            "border-left-color",
+        ],
+        "outline" => &["outline-width", "outline-style", "outline-color"],
+        "background" => &[
+            "background-color",
+            "background-image",
+            "background-position",
+            "background-size",
+            "background-repeat",
+            "background-attachment",
+            "background-origin",
+            "background-clip",
+        ],
+        "text-decoration" => &[
+            "text-decoration-line",
+            "text-decoration-color",
+            "text-decoration-style",
+            "text-decoration-thickness",
+        ],
+        "list-style" => &["list-style-type", "list-style-position", "list-style-image"],
+        "font" => &[
+            "font-style",
+            "font-variant",
+            "font-weight",
+            "font-stretch",
+            "font-size",
+            "line-height",
+            "font-family",
+        ],
+        "font-variant" => &[
+            "font-variant-numeric",
+            "font-variant-caps",
+            "font-variant-ligatures",
+        ],
+        "animation" => &[
+            "animation-name",
+            "animation-duration",
+            "animation-timing-function",
+            "animation-delay",
+            "animation-iteration-count",
+            "animation-direction",
+            "animation-fill-mode",
+            "animation-play-state",
+        ],
+        "transition" => &[
+            "transition-property",
+            "transition-duration",
+            "transition-timing-function",
+            "transition-delay",
+        ],
+        _ => {
+            if !out.contains(&prop) {
+                out.push(prop);
+            }
+            return;
+        }
+    };
+    for p in expanded {
+        longhands_of(p, out);
+    }
+}
+
+/// The longhands a token's declarations set on its own element. A token
+/// carrying a nested rule (`&::…{…}`, `& > * + *{…}`) styles other boxes as
+/// well: it gets no set, so it is never treated as overriding or overridden.
+fn token_longhands(css: &'static str) -> Vec<&'static str> {
+    if css.contains('{') {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for decl in css.split(';') {
+        if let Some((prop, _)) = decl.split_once(':') {
+            longhands_of(prop.trim(), &mut out);
+        }
+    }
+    out
+}
+
 impl St {
+    /// The longhand CSS properties this token sets (shorthands expanded),
+    /// computed once per token. Empty for a token with nested rules.
+    pub fn longhands(self) -> &'static [&'static str] {
+        static TABLE: std::sync::OnceLock<std::collections::HashMap<u16, Vec<&'static str>>> =
+            std::sync::OnceLock::new();
+        TABLE
+            .get_or_init(|| {
+                UTIL_MAPPINGS
+                    .iter()
+                    .map(|&(code, css)| (code, token_longhands(css)))
+                    .collect()
+            })
+            .get(&self.as_u16())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// Check if this token fits in a single byte.
     pub fn is_single_byte(self) -> bool {
         (self as u16) <= 0xFF
@@ -1509,6 +1671,26 @@ pub enum StyleKey {
 }
 
 impl StyleKey {
+    /// Where this key's rule sits in the page's stylesheet, as a number the
+    /// runtime inserts by (`STYLE_DEF` carries it): utilities by code, then
+    /// pseudo-class rules, then responsive ones by breakpoint, whatever order
+    /// a connection meets them in. So when two rules of equal specificity
+    /// set the same property, the one with the higher code wins on every
+    /// page, and a breakpoint rule always comes after the base rules.
+    /// The same order as the derived `Ord`.
+    ///
+    /// It fits the wire's varint (at most 4 210 687): token codes stay below
+    /// 4096 (checked by a test), pseudo-classes start at 4096 and responsive
+    /// rules at 2^21.
+    pub fn sheet_order(self) -> u32 {
+        const SPAN: u32 = 1 << 12;
+        match self {
+            StyleKey::Util(st) => st as u32,
+            StyleKey::Pseudo(pc, st) => SPAN + (pc as u32) * SPAN + st as u32,
+            StyleKey::Breakpoint(bp, st) => (1 << 21) + (bp as u32) * SPAN + st as u32,
+        }
+    }
+
     /// Render this key as a complete CSS rule (selector + declaration), matching
     /// the bulk generators (`generate_utility_css`/`generate_pseudo_css`/
     /// `generate_breakpoint_css`). Returns `None` if the token has no declaration.

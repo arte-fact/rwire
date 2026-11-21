@@ -233,8 +233,6 @@ impl Button {
             St::CursorPointer,
             St::TransTheme,
             St::TextSm,
-            // Inherit the page font rather than the UA button default.
-            St::FontInheritAll,
         ];
 
         match self.intent {

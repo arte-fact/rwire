@@ -155,9 +155,16 @@ Example: `examples/push`.
   exactly what `ChatScroll` encodes; use it.
 - **Width collapse**: a width-spanning child of a flex-*centered* parent needs `St::WFull`
   or it shrinks to content (~0 for empty divs).
-- **Class order ≠ specificity**: `u`-token classes apply in *stylesheet* (token-index) order,
-  not `.st()` call order — you cannot "override" one token with a later conflicting one.
-  Pick the right token instead of stacking.
+- **Stacking tokens**:
+  - A later `.st()` token **replaces** the earlier ones whose every property it sets again:
+    `.st([DisplayFlex])` then `.st([DisplayNone])` hides the element.
+  - A *partial* overlap keeps both, and the shared properties go to the higher token code. The
+    stylesheet is kept in code order on every page.
+    - `BorderNone` then `BorderB2Accent`: works.
+    - `FontInheritAll` then `TextXs`: the size is lost. A debug build prints
+      `rwire: st([TextXs]) loses font-size…` once per pair.
+  - Pick non-overlapping tokens.
+  - Don't put `FontInheritAll` on form controls: the base reset already applies it.
 - **Shared-state renderers inside memory-state renderers** don't receive the shared cache —
   keep shared (`App`) renderers nested under shared parents.
 - **`#[derive(State)]` field ceiling is 64** per struct — split view models out (re-export

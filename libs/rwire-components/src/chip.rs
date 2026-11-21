@@ -58,7 +58,6 @@ impl Chip {
     /// Compute the style tokens for the current state.
     pub fn compute_tokens(&self) -> Vec<St> {
         let mut tokens = vec![
-            St::FontInheritAll,
             St::TextXs,
             St::PxSm,
             St::PyXs,

@@ -261,7 +261,6 @@ impl Field {
                 St::RoundedMd,
                 St::TextHigh,
                 St::TextSm,
-                St::FontInheritAll,
             ])
             .focus([St::BorderAccent]);
 
@@ -463,7 +462,6 @@ fn submit_button(text: &str, class: Option<&str>, phase: SubmitPhase) -> Element
         St::CursorPointer,
         St::FontMedium,
         St::TextSm,
-        St::FontInheritAll,
     ]);
     if let Some(class) = class {
         btn = btn.class(class);
