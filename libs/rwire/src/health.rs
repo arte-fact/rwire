@@ -220,7 +220,16 @@ pub async fn serve_static_cached(
 }
 
 /// Serve a Prometheus text-format metrics response (`GET /metrics`).
-pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> {
+pub async fn serve_metrics(stream: TcpStream, body: &str) -> io::Result<()> {
+    serve_metrics_response(stream, body, false).await
+}
+
+/// [`serve_metrics`], or only its head for a `HEAD` request (`head_only`).
+pub(crate) async fn serve_metrics_response(
+    mut stream: TcpStream,
+    body: &str,
+    head_only: bool,
+) -> io::Result<()> {
     let http_response = format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\
@@ -229,7 +238,7 @@ pub async fn serve_metrics(mut stream: TcpStream, body: &str) -> io::Result<()> 
          \r\n\
          {}",
         body.len(),
-        body
+        if head_only { "" } else { body }
     );
 
     stream.write_all(http_response.as_bytes()).await?;

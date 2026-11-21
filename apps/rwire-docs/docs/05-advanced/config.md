@@ -245,8 +245,18 @@ rwire provides built-in HTTP health check endpoints:
 |----------|---------|
 | `/health` | Liveness check -- returns 200 if the server process is running |
 | `/ready` | Readiness check -- returns 200 when the server can accept connections |
+| `/metrics` | Prometheus text: connections, events, errors |
 
 These are served over the same port as the WebSocket connection and are useful for load balancer and Kubernetes health probes.
+
+`/health` and `/ready` are always public. `/metrics` is public when the app has
+no auth gate; behind `auth()` or `auth_with()` it needs the same session as the
+page. For a scraper that can't log in, expose it explicitly (preferably only on
+a private network):
+
+```rust
+.config(ServerConfig::new().public_metrics(true))
+```
 
 ## Session Management
 

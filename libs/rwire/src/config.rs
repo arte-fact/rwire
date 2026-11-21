@@ -85,6 +85,12 @@ pub struct ServerConfig {
     /// Reverse-proxy resolver, consulted for every authenticated request (after the auth gate, so
     /// proxied upstreams inherit it). `None` (default) disables proxying.
     pub proxy: Option<ProxyResolver>,
+
+    /// Serve `/metrics` before the auth gate even when one is set. Default:
+    /// false, so with `auth()` / `auth_with()` the metrics need the same
+    /// session as the page (without a gate they are public). `/health` and
+    /// `/ready` are always public.
+    pub public_metrics: bool,
 }
 
 impl Default for ServerConfig {
@@ -97,6 +103,7 @@ impl Default for ServerConfig {
             allowed_origins: Vec::new(),
             secure_cookies: false,
             proxy: None,
+            public_metrics: false,
         }
     }
 }
@@ -110,6 +117,14 @@ impl ServerConfig {
     /// Set the maximum total concurrent connections.
     pub fn max_connections(mut self, limit: usize) -> Self {
         self.max_connections = limit;
+        self
+    }
+
+    /// Serve `/metrics` to anyone even behind `auth()` / `auth_with()` (for a
+    /// scraper that can't log in). Off by default: behind a gate the metrics
+    /// need a session. Prefer exposing them only on a private network.
+    pub fn public_metrics(mut self, public: bool) -> Self {
+        self.public_metrics = public;
         self
     }
 
