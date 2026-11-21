@@ -47,6 +47,7 @@ Theme::dark()
 | a chat / log scroll area | `ChatScroll::new(inner)` — see the trap in §5 |
 | an avatar with initials | `Avatar::new().name("Ada Lovelace")` — derives "AL" |
 | form fields | `Input::text()/email()/number()`, `Textarea`, `Select`, `Checkbox`, `Switch` — they take `name/placeholder/autocomplete/spellcheck/rows` as methods |
+| a plain server-handled form | `rwire::form::Form` + `Field::text/email/password/number/textarea/submit`. `.required()/.min_length()/.max_length()/.pattern()` become native constraints; `Field::textarea` carries a stable id (`field-<name>`), so typed text survives re-renders |
 | empty screens | `EmptyState::new().title(…).description(…).action(…)` |
 | overlays | `Modal`, `Drawer` (position, backdrop, on_close) |
 

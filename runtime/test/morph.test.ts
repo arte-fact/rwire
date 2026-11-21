@@ -328,3 +328,51 @@ test("me carries live bindings and the source registration onto the reused node"
   assert.equal(lv[2], a, "the node is the source of the new channel");
   assert.equal(a.__lc, 2);
 });
+
+test("a textarea's typed value survives a re-render that drops a field before it (stable id)", () => {
+  // What Form renders: <textarea id="field-…" name="…"> per Field::textarea.
+  const area = (name: string) => {
+    const t = doc.createElement("textarea");
+    t.id = "field-" + name;
+    t.setAttribute("name", name);
+    return t;
+  };
+  const live = div();
+  const summary = area("summary"),
+    body = area("body");
+  live.appendChild(summary);
+  live.appendChild(body);
+  summary.value = "typed in summary";
+  body.value = "typed in body";
+
+  // The server stops rendering "summary": only "body" is left.
+  const shadow = div();
+  shadow.appendChild(area("body"));
+  mk(live as any, shadow as any);
+
+  assert.equal(live.children.length, 1);
+  assert.equal(live.children[0], body, "the body node is reused by id");
+  assert.equal((live.children[0] as MockEl).value, "typed in body", "its value is kept");
+});
+
+test("without ids the same re-render pours one field's text into another (why Field::textarea has one)", () => {
+  const area = (name: string) => {
+    const t = doc.createElement("textarea");
+    t.setAttribute("name", name);
+    return t;
+  };
+  const live = div();
+  const summary = area("summary");
+  live.appendChild(summary);
+  live.appendChild(area("body"));
+  summary.value = "typed in summary";
+
+  const shadow = div();
+  shadow.appendChild(area("body"));
+  mk(live as any, shadow as any);
+
+  // Positional matching reused the first textarea for "body".
+  assert.equal(live.children[0], summary);
+  assert.equal(live.children[0].getAttribute("name"), "body");
+  assert.equal((live.children[0] as MockEl).value, "typed in summary");
+});

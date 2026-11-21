@@ -65,7 +65,7 @@ impl ValidationRule {
     }
 }
 
-/// Input field type.
+/// Field type: an `<input type=…>`, or a multi-line `<textarea>`.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum FieldType {
     #[default]
@@ -85,6 +85,8 @@ pub enum FieldType {
     DateTime,
     Color,
     Range,
+    /// A `<textarea>` (multi-line text), not an `<input>`.
+    Textarea,
 }
 
 impl FieldType {
@@ -107,6 +109,7 @@ impl FieldType {
             FieldType::DateTime => "datetime-local",
             FieldType::Color => "color",
             FieldType::Range => "range",
+            FieldType::Textarea => "textarea",
         }
     }
 }
@@ -122,6 +125,8 @@ pub struct Field {
     validation_rules: Vec<ValidationRule>,
     class: Option<String>,
     is_submit: bool,
+    id: Option<String>,
+    rows: Option<u32>,
 }
 
 impl Field {
@@ -155,6 +160,20 @@ impl Field {
         Self::new(name, FieldType::Checkbox)
     }
 
+    /// Create a multi-line text field (`<textarea>`). Submitted with the form
+    /// under `name`, like any field.
+    ///
+    /// It gets a stable `id` (`field-<name>` unless [`Field::id`] says
+    /// otherwise): a re-render matches the live element by that id, so what the
+    /// user typed stays in it, even when fields before it appear or disappear.
+    /// To empty it after a submit, give it a new id (e.g. with a counter).
+    ///
+    /// Validation: `required`, `min_length` and `max_length` become the native
+    /// constraints; a pattern does not apply to a textarea.
+    pub fn textarea(name: &str) -> Self {
+        Self::new(name, FieldType::Textarea)
+    }
+
     /// Create a submit button.
     pub fn submit(text: &str) -> Self {
         Self {
@@ -166,6 +185,8 @@ impl Field {
             validation_rules: Vec::new(),
             class: None,
             is_submit: true,
+            id: None,
+            rows: None,
         }
     }
 
@@ -180,6 +201,8 @@ impl Field {
             validation_rules: Vec::new(),
             class: None,
             is_submit: false,
+            id: None,
+            rows: None,
         }
     }
 
@@ -238,6 +261,46 @@ impl Field {
         self
     }
 
+    /// Set the element's `id`. A stable id keeps the live element (and what
+    /// the user typed in it) across re-renders.
+    pub fn id(mut self, id: &str) -> Self {
+        self.id = Some(id.to_string());
+        self
+    }
+
+    /// Visible lines of a textarea (default 4). Ignored on other fields.
+    pub fn rows(mut self, rows: u32) -> Self {
+        self.rows = Some(rows);
+        self
+    }
+
+    /// The native constraint attributes of the validation rules that HTML
+    /// knows for this kind of control (the browser checks them on submit).
+    fn constraints(&self) -> Vec<(&'static str, String)> {
+        let textarea = matches!(self.field_type, FieldType::Textarea);
+        let numeric = matches!(
+            self.field_type,
+            FieldType::Number
+                | FieldType::Range
+                | FieldType::Date
+                | FieldType::Time
+                | FieldType::DateTime
+        );
+        let mut out = Vec::new();
+        for rule in &self.validation_rules {
+            match rule {
+                ValidationRule::Required => out.push(("required", String::new())),
+                ValidationRule::MinLength(n) => out.push(("minlength", n.to_string())),
+                ValidationRule::MaxLength(n) => out.push(("maxlength", n.to_string())),
+                ValidationRule::Pattern(p) if !textarea => out.push(("pattern", p.clone())),
+                ValidationRule::Min(n) if numeric => out.push(("min", n.to_string())),
+                ValidationRule::Max(n) if numeric => out.push(("max", n.to_string())),
+                _ => {}
+            }
+        }
+        out
+    }
+
     /// Build the field into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         use crate::builder::el;
@@ -247,43 +310,60 @@ impl Field {
             return submit_button(&text, self.class.as_deref(), SubmitPhase::Idle);
         }
 
-        let mut input = el(El::Input)
-            .attr("type", self.field_type.as_str())
-            .attr("name", &self.name)
-            // Sensible themed defaults so a form looks at home in the app without per-field
-            // styling; `.class()` still layers on top as an escape hatch.
-            .st([
-                St::WFull,
-                St::PySm,
-                St::PxMd,
-                St::BgApp,
-                St::BorderDefault,
-                St::RoundedMd,
-                St::TextHigh,
-                St::TextSm,
-                St::FontInheritAll,
-            ])
-            .focus([St::BorderAccent]);
+        let constraints = self.constraints();
+        let mut input = if matches!(self.field_type, FieldType::Textarea) {
+            let id = self
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("field-{}", self.name));
+            let rows = self.rows.unwrap_or(4).to_string();
+            let mut area = el(El::Textarea)
+                .attr("name", &self.name)
+                .attr("id", &id)
+                .attr("rows", &rows)
+                .st([St::ResizeY]);
+            // A textarea's initial value is its text, not a `value` attribute.
+            if let Some(value) = &self.default_value {
+                area = area.text(value);
+            }
+            area
+        } else {
+            let mut input = el(El::Input)
+                .attr("type", self.field_type.as_str())
+                .attr("name", &self.name);
+            if let Some(id) = &self.id {
+                input = input.attr("id", id);
+            }
+            if let Some(value) = &self.default_value {
+                input = input.attr("value", value);
+            }
+            input
+        }
+        // Sensible themed defaults so a form looks at home in the app without per-field
+        // styling; `.class()` still layers on top as an escape hatch.
+        .st([
+            St::WFull,
+            St::PySm,
+            St::PxMd,
+            St::BgApp,
+            St::BorderDefault,
+            St::RoundedMd,
+            St::TextHigh,
+            St::TextSm,
+            St::FontInheritAll,
+        ])
+        .focus([St::BorderAccent]);
 
         if let Some(placeholder) = self.placeholder {
             input = input.attr("placeholder", &placeholder);
-        }
-
-        if let Some(value) = self.default_value {
-            input = input.attr("value", &value);
         }
 
         if let Some(class) = self.class {
             input = input.class(&class);
         }
 
-        // Add required attribute if present
-        if self
-            .validation_rules
-            .iter()
-            .any(|r| matches!(r, ValidationRule::Required))
-        {
-            input = input.attr("required", "");
+        for (name, value) in &constraints {
+            input = input.attr(name, value);
         }
 
         // Wrap with label if provided
@@ -564,5 +644,111 @@ mod tests {
 
         assert_eq!(form.class, Some("login-form".to_string()));
         assert_eq!(form.fields.len(), 3);
+    }
+    #[test]
+    fn textarea_renders_a_named_textarea_with_a_stable_id() {
+        let html = Field::textarea("bio")
+            .placeholder("About you")
+            .value("Hello <world>")
+            .build()
+            .to_static_html();
+        assert!(html.starts_with("<textarea"), "{html}");
+        assert!(html.contains("name=\"bio\""), "{html}");
+        assert!(html.contains("id=\"field-bio\""), "{html}");
+        assert!(html.contains("rows=\"4\""), "{html}");
+        assert!(html.contains("placeholder=\"About you\""), "{html}");
+        // The initial value is the text, escaped; no `type`, no `value` attribute.
+        assert!(html.contains(">Hello &lt;world&gt;</textarea>"), "{html}");
+        assert!(!html.contains("type="), "{html}");
+        assert!(!html.contains("value="), "{html}");
+        // The same field renders the same id every time: the morph keys on it.
+        assert_eq!(
+            html,
+            Field::textarea("bio")
+                .placeholder("About you")
+                .value("Hello <world>")
+                .build()
+                .to_static_html()
+        );
+    }
+
+    #[test]
+    fn textarea_id_and_rows_can_be_set() {
+        let html = Field::textarea("note")
+            .id("note-3")
+            .rows(8)
+            .build()
+            .to_static_html();
+        assert!(html.contains("id=\"note-3\""), "{html}");
+        assert!(html.contains("rows=\"8\""), "{html}");
+        assert!(!html.contains("field-note"), "{html}");
+    }
+
+    #[test]
+    fn textarea_validation_becomes_native_constraints() {
+        let html = Field::textarea("bio")
+            .required()
+            .min_length(10)
+            .max_length(500)
+            .pattern("[a-z]+")
+            .build()
+            .to_static_html();
+        assert!(html.contains("required"), "{html}");
+        assert!(html.contains("minlength=\"10\""), "{html}");
+        assert!(html.contains("maxlength=\"500\""), "{html}");
+        assert!(
+            !html.contains("pattern="),
+            "no pattern on a textarea: {html}"
+        );
+    }
+
+    #[test]
+    fn input_validation_rules_reach_the_markup() {
+        let html = Field::password("pass")
+            .min_length(8)
+            .max_length(100)
+            .pattern("[A-Za-z0-9]+")
+            .build()
+            .to_static_html();
+        assert!(html.contains("minlength=\"8\""), "{html}");
+        assert!(html.contains("maxlength=\"100\""), "{html}");
+        assert!(html.contains("pattern=\"[A-Za-z0-9]+\""), "{html}");
+        let html = Field::number("age")
+            .validate(ValidationRule::Min(0.0))
+            .validate(ValidationRule::Max(130.0))
+            .build()
+            .to_static_html();
+        assert!(html.contains("min=\"0\""), "{html}");
+        assert!(html.contains("max=\"130\""), "{html}");
+        // Min/max mean nothing on a text input: not emitted.
+        let html = Field::text("x")
+            .validate(ValidationRule::Min(1.0))
+            .build()
+            .to_static_html();
+        assert!(!html.contains("min="), "{html}");
+        // Inputs get an id only when asked (unchanged default).
+        assert!(!html.contains("id="), "{html}");
+        assert!(Field::text("x")
+            .id("x-1")
+            .build()
+            .to_static_html()
+            .contains("id=\"x-1\""));
+    }
+
+    #[test]
+    fn a_form_submits_its_textarea_with_a_label() {
+        let html = Form::new()
+            .fields([
+                Field::text("title").label("Title"),
+                Field::textarea("body").label("Body").required(),
+                Field::submit("Post"),
+            ])
+            .build()
+            .to_static_html();
+        let label = html.find("<span").unwrap();
+        let area = html.find("<textarea").unwrap();
+        assert!(label < area, "{html}");
+        assert!(html.contains("name=\"body\""), "{html}");
+        assert!(html.contains("<button"), "{html}");
     }
 }
