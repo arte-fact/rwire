@@ -8,21 +8,31 @@ never see a compatibility matrix — recompiling is the whole migration.
 
 ## 0.1.0 — unreleased (crates not yet published to crates.io)
 
-### Added: connection lifecycle (`on_connect`, `on_disconnect`, `ctx.spawn`)
+### Added: Web Push (`rwire-push` crate)
 
-- `ServerWithRoot::on_connect(handler)` runs a `#[handler]` once per WebSocket
-  connection, after its states are ready and before its first render: what it
-  writes is in the first paint. Its `EventContext` carries the session id and,
-  under delegated authentication, the identity. Until now an app reached these
-  through `on_route` or the `DelegatedAuth` validator.
-- `ServerWithRoot::on_disconnect(handler)` runs once at close, whatever the
-  cause: the client left, heartbeat, re-validation, an error, a panicking
-  handler, or `run_until`'s shutdown. On shared state it broadcasts like an
-  event (presence).
-- `EventContext::spawn(fut)` starts a tokio task owned by the connection. The
-  task is aborted when the connection closes, before `on_disconnect` runs. It
-  returns `false` and drops the future when no live connection owns the
-  context (`on_disconnect`, or a hand-built context).
+Standard Web Push (VAPID, RFC 8030, 8291 and 8292), with no third-party
+service, in a new crate so that apps without push pay nothing for it:
+
+- `Pwa::push_notifications(true)` adds `push` and `notificationclick`
+  handlers to the generated service worker: a push shows a notification from
+  its JSON payload (`title`, `body`, `url`, `icon`, `tag`), and a click
+  focuses or opens the app at that URL (same origin only). Off by default:
+  the service worker of an app that does not opt in is unchanged.
+- `rwire-push` provides the browser side, the `push` runtime extension
+  (`.serve_push()`, `push_subscribe` / `push_unsubscribe` on any element,
+  `report_input` + `Push::handle_report`). The extension asks for the
+  permission inside the click, as iOS requires, and reports the
+  subscription over the WebSocket.
+- On the server side, `rwire-push` provides `VapidKey` (generated, loaded
+  from a file or the environment), the subscriptions (memory plus an atomic
+  0600 JSON file) and `Push::send_push`. Messages are encrypted in
+  `aes128gcm` and carry an ES256 VAPID JWT. Subscriptions answered 404 or 410
+  are purged.
+- Subscription endpoints are limited to the browsers' push services
+  (`KNOWN_PUSH_HOSTS`, https), plus origins added with
+  `allow_endpoint_origin`. A client cannot make the server POST into its
+  own network.
+- Example: `examples/push`.
 
 ### Breaking: rwire runs on tokio
 
@@ -67,6 +77,17 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `/path`, not `/`. A path no route matches is answered `404 Not Found`; the
   page still renders the router's not-found view.
 
+### Changed: the PWA manifest is fetched with credentials
+
+- The manifest `<link>` now carries `crossorigin="use-credentials"` (new
+  `Pwa::manifest_credentials`, **on by default**). Without it the browser
+  fetches the manifest without cookies or HTTP auth: behind an auth in front
+  of the app (a proxy's basic auth) it got a 401 and the app was not
+  installable. The manifest is same-origin, so the credentials go nowhere
+  else; `manifest_credentials(false)` restores the previous markup. rwire's
+  own `auth()` / `auth_with()` still serve the manifest, the service worker and
+  the icons before the gate.
+
 ### Added: control over the static first paint
 
 - `CapsuleConfig::ssr_exclude(pattern)`: routes served without the paint, for
@@ -93,6 +114,25 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `-editor`, `-map`) depend on rwire without default features, so using them
   doesn't turn `persist` back on.
 - CI also runs clippy on rwire without default features.
+
+### Fixed: executable URLs in pre-rendered HTML and Markdown
+
+- **Markdown** (`rwire-markdown`): links, images, reference links and
+  autolinks copied `dest_url` as it was, so `[x](javascript:alert(1))` became
+  a live `href`. Links now keep relative URLs, `http:`, `https:`, `mailto:` and
+  `tel:` only; any other scheme loses its `href` (the text stays). Images also
+  take raster `data:image/{png,jpeg,gif,webp,avif}`; others are dropped (their
+  alt text stays).
+- **Pre-rendered HTML** (`to_static_html`, the `ssr(true)` paint): `href`,
+  `src`, `xlink:href`, `action` and `formaction` with a `javascript:`,
+  `vbscript:` or `data:` URL (non-SVG images in `src` excepted) are left out,
+  as the runtime does over the WebSocket. Until now the paint escaped them but
+  kept them, executable before the socket connected.
+- **Runtime**: the attribute sanitizer refuses `vbscript:` and `data:` (same
+  exception) besides `javascript:`. Size budget +40 B gzipped.
+- One normalization for all of them, `rwire::url_safety`: character
+  references, percent-encoding (repeatedly), whitespace and controls anywhere,
+  case.
 
 ### Added: asset folders served from disk
 

@@ -1,0 +1,26 @@
+[package]
+name = "rwire-push"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+description = "Standard Web Push for rwire: VAPID keys, subscriptions, aes128gcm payload encryption (RFC 8030, 8291, 8292)"
+keywords = ["web", "push", "notifications", "vapid", "webpush"]
+categories = ["web-programming"]
+
+[dependencies]
+rwire = { path = "../rwire", version = "0.1.0", default-features = false }
+aes-gcm = "0.10"
+base64 = "0.22"
+futures = "0.3"
+hkdf = "0.12"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt", "fs", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }

@@ -219,6 +219,24 @@ renders the router's not-found view). With a PWA, the service worker's
 offline fallback is the `/` page cached at install, so offline its paint
 shows the shared state of that time.
 
+### PWA behind an auth
+
+The manifest `<link>` carries `crossorigin="use-credentials"` (on by default,
+`Pwa::manifest_credentials(false)` turns it off): the browser sends the page's
+cookies and HTTP auth when it fetches the manifest. Without it, an app behind
+an auth in front of it (a reverse proxy's basic auth, an SSO cookie) gets a
+401 on the manifest and can't be installed. The manifest is served by the app
+on the page's origin, so the credentials go nowhere else.
+
+The service worker needs nothing more: its pre-cache and its fetches are
+same-origin requests, which carry credentials already. With rwire's own
+`auth()` / `auth_with()`, the manifest, `/sw.js` and the icons (`/pwa/*`) are
+served before the gate (they hold the app's name and icons, no user data), so
+the gate never blocks installation. Behind a proxy auth, whether every
+browser sends credentials when it downloads the manifest's icons is not
+verified: if installation still fails, exempt `/pwa/*` at the proxy (icons
+only, no user data).
+
 ## Health Check Endpoints
 
 rwire provides built-in HTTP health check endpoints:

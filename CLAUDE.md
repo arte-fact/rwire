@@ -62,6 +62,7 @@ rwire/
 │   ├── rwire-components/    # UI component library (55 components)
 │   ├── rwire-markdown/      # Markdown rendering for docs
 │   ├── rwire-map/           # A pannable, zoomable SVG map: its runtime extension + builder helpers
+│   ├── rwire-push/          # Web Push: VAPID, subscriptions, aes128gcm send + the `push` runtime extension
 │   └── rwire-themes/        # Predefined styles and palettes
 ├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
@@ -74,6 +75,7 @@ rwire/
     ├── chat/                # Multi-tab chatroom: shared state + Chat family (E2E: runtime/e2e/chat.mjs)
     ├── editor/              # File explorer + editor: FsSnapshot sandbox, dirty diff, gated save (E2E: runtime/e2e/editor.mjs)
     ├── counter/             # Simple counter app
+    ├── push/                # Web Push: subscribe button, test send (rwire-push)
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef dynamic binding
     └── fine-grained/        # Fine-grained reactivity demo
