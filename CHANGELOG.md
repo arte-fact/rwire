@@ -73,6 +73,9 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `SharedServerState::{hydrate, persist_dirty, flush_all_dirty}`.
 - Without it, `#[storage(persisted)]` is a compile error that says so, never
   a silent fallback to memory.
+- The companion crates (`rwire-components`, `-themes`, `-markdown`,
+  `-editor`, `-map`) depend on rwire without default features, so using them
+  doesn't turn `persist` back on.
 - CI also runs clippy on rwire without default features.
 
 ### Added: asset folders served from disk
