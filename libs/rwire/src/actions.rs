@@ -266,6 +266,7 @@ pub fn reflect_action(
     // layout-transparent — the rendered phase participates in the parent layout as if unwrapped.
     // This is what lets an ordinary `Button` become action-aware without shifting anything.
     .st([St::DisplayContents])
+    .boxless("an action-reflection wrapper (`Button::on_click`, `Button::submit`, a reflected send button)")
 }
 
 /// A [`SyncedRenderer`] over every current error message — the engine behind a page-level error
@@ -392,5 +393,59 @@ mod tests {
     fn noop_resolver_does_not_panic() {
         Resolver::noop().ok();
         Resolver::noop().err("ignored");
+    }
+
+    fn wrapper() -> ElementBuilder {
+        use crate::builder::el;
+        use crate::protocol::El;
+        reflect_action(
+            1,
+            Vec::new(),
+            || el(El::Button),
+            || el(El::Button),
+            |_| el(El::Button),
+        )
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn setters_on_the_reflection_wrapper_panic_with_the_method_name() {
+        use crate::attr_tokens::At;
+        type Setter = Box<dyn Fn(ElementBuilder) -> ElementBuilder>;
+        let cases: Vec<(&str, Setter)> = vec![
+            ("attr", Box::new(|b| b.attr("title", "x"))),
+            ("attr", Box::new(|b| b.data("id", "1"))),
+            ("at_str", Box::new(|b| b.at_str(At::Title, "x"))),
+            ("bool_attr", Box::new(|b| b.bool_attr(At::Disabled))),
+            ("class", Box::new(|b| b.class("c"))),
+            ("text", Box::new(|b| b.text("t"))),
+            ("st", Box::new(|b| b.st([St::BgApp]))),
+            ("pseudo", Box::new(|b| b.hover([St::BgApp]))),
+        ];
+        for (method, f) in cases {
+            let Err(err) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(wrapper())))
+            else {
+                panic!("`.{method}()` on the wrapper did not panic");
+            };
+            let msg = err.downcast_ref::<String>().cloned().unwrap_or_default();
+            assert!(msg.contains(&format!("`.{method}()`")), "{msg}");
+            assert!(msg.contains("action-reflection wrapper"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn events_and_ordinary_elements_are_not_guarded() {
+        use crate::builder::el;
+        use crate::protocol::El;
+        #[derive(Default)]
+        struct S;
+        impl crate::state::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        // Binding on the wrapper still works (events bubble through display:contents).
+        let _ = wrapper().on(
+            crate::protocol::Ev::Click,
+            crate::state::HandlerSpec::memory::<S>(noop),
+        );
+        let _ = el(El::Div).attr("title", "x").st([St::BgApp]).text("ok");
     }
 }

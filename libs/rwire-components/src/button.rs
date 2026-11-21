@@ -21,8 +21,17 @@
 //!     .size(ButtonSize::Sm)
 //!     .text("More options")
 //!     .disabled(true)
+//!     .title("Read-only preview")
 //!     .build()
 //! ```
+//!
+//! # Attributes go on the `Button`, not on what `on_click` returns
+//!
+//! `on_click` / `submit` wrap the button in an action-reflection region that has
+//! no box (`display:contents`). Set `title`, `data`, `aria_label`, `class`,
+//! `hover` or any other attribute (`attr`) on the `Button` **before** it: chained
+//! after, they would land on the wrapper and never show. Debug builds panic at
+//! such a call.
 
 use crate::tooltip::Tooltip;
 use rwire::attr_tokens::{At, Av};
@@ -68,6 +77,9 @@ pub struct Button {
     icon: Option<Icon>,
     text: Option<Cow<'static, str>>,
     aria_label: Option<Cow<'static, str>>,
+    title: Option<Cow<'static, str>>,
+    /// Other attributes for the button element (see [`Button::attr`]).
+    attrs: Vec<(String, String)>,
     disabled: bool,
     loading: bool,
     full_width: bool,
@@ -206,6 +218,21 @@ impl Button {
         self
     }
 
+    /// The native tooltip (`title`). It shows on a disabled button too, so it
+    /// is the place to say why the button is disabled.
+    pub fn title(mut self, title: impl Into<Cow<'static, str>>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Any other attribute, set on the button element itself (unlike an
+    /// `ElementBuilder::attr` chained after `on_click`, which would land on
+    /// the action-reflection wrapper).
+    pub fn attr(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.attrs.push((key.into(), value.into()));
+        self
+    }
+
     // ========================================================================
     // Token computation
     // ========================================================================
@@ -276,21 +303,23 @@ impl Button {
     fn apply_pseudo(&self, mut builder: ElementBuilder) -> ElementBuilder {
         builder = builder.focus_visible([St::RingTheme]);
 
-        builder = match self.intent {
-            ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
-            ButtonIntent::Secondary => builder.hover([St::BgSecondaryHover, St::BorderEmphasis]),
-            ButtonIntent::Ghost => builder.hover([St::BgHover]),
-            ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
-            ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
+        // A disabled button keeps its pointer events, so its tooltip shows (the
+        // `disabled` attribute already blocks the click); it gets no hover
+        // treatment instead.
+        builder = if self.disabled {
+            builder.disabled_style([St::Opacity50, St::CursorNotAllowed])
+        } else {
+            match self.intent {
+                ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
+                ButtonIntent::Secondary => {
+                    builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
+                }
+                ButtonIntent::Ghost => builder.hover([St::BgHover]),
+                ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
+                ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
+            }
         };
 
-        if self.disabled {
-            builder = builder.disabled_style([
-                St::Opacity50,
-                St::CursorNotAllowed,
-                St::PointerEventsNone,
-            ]);
-        }
         if self.loading {
             builder = builder.after([
                 St::ContentEmpty,
@@ -344,7 +373,7 @@ impl Button {
             tokens.push(St::AspectSquare);
         }
         let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
-        if !self.hover_extra.is_empty() {
+        if !self.hover_extra.is_empty() && !self.disabled {
             builder = builder.hover(self.hover_extra.clone());
         }
         for (key, value) in &self.data {
@@ -374,6 +403,12 @@ impl Button {
 
         if let Some(label) = self.aria_label {
             builder = builder.at_str(At::AriaLabel, &label);
+        }
+        if let Some(title) = self.title {
+            builder = builder.at_str(At::Title, &title);
+        }
+        for (key, value) in &self.attrs {
+            builder = builder.attr(key, value);
         }
         if self.disabled {
             builder = builder.bool_attr(At::Disabled);
@@ -547,6 +582,60 @@ mod tests {
         let groups = btn.get_pseudo_groups();
         // Should have disabled_style group
         assert!(groups.iter().any(|(pc, _)| *pc == 0x04)); // Pc::Disabled
+    }
+
+    #[test]
+    fn a_disabled_button_keeps_its_tooltip_and_loses_its_hover() {
+        let btn = Button::primary("Merge")
+            .disabled(true)
+            .title("Read-only preview")
+            .build();
+        let html = btn.to_static_html();
+        assert!(html.contains("title=\"Read-only preview\""), "{html}");
+        assert!(html.contains("disabled"), "{html}");
+        let groups = btn.get_pseudo_groups();
+        let disabled = groups.iter().find(|(pc, _)| *pc == 0x04).unwrap();
+        // The tooltip needs pointer events: no pointer-events:none any more.
+        assert!(!disabled.1.contains(&St::PointerEventsNone.as_u16()));
+        assert!(disabled.1.contains(&St::CursorNotAllowed.as_u16()));
+        assert!(
+            !groups.iter().any(|(pc, _)| *pc == 0x00),
+            "no hover look on a disabled button"
+        );
+        // An enabled button still hovers.
+        let live = Button::primary("Merge").build();
+        assert!(live.get_pseudo_groups().iter().any(|(pc, _)| *pc == 0x00));
+    }
+
+    #[test]
+    fn title_and_attrs_reach_the_button_through_on_click() {
+        #[derive(Default)]
+        struct S;
+        impl rwire::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        let spec = HandlerSpec::memory::<S>(noop);
+        let html = Button::primary("Merge")
+            .title("Merge the branch")
+            .attr("data-testid", "merge")
+            .on_click(spec)
+            .to_static_html();
+        // The reflection wrapper renders the idle button inside it.
+        let button = &html[html.find("<button").unwrap()..];
+        assert!(button.contains("title=\"Merge the branch\""), "{html}");
+        assert!(button.contains("data-testid=\"merge\""), "{html}");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "which has no box")]
+    fn an_attribute_chained_after_on_click_fails_loudly() {
+        #[derive(Default)]
+        struct S;
+        impl rwire::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        let _ = Button::primary("Merge")
+            .on_click(HandlerSpec::memory::<S>(noop))
+            .attr("title", "lost on the wrapper");
     }
 
     #[test]

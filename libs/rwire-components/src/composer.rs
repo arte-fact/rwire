@@ -25,6 +25,10 @@
 //!     .on_submit(send_message())
 //!     .build()
 //! ```
+//!
+//! A composer that cannot send (a read-only preview) says why up front:
+//! `.disabled("Read-only preview: you cannot reply here")` disables the field and the send
+//! button, shows the reason in the empty field and as both tooltips, and binds no submit.
 
 use crate::tooltip::Tooltip;
 use crate::{Spinner, SpinnerSize};
@@ -48,6 +52,8 @@ pub struct Composer {
     /// When set, the send button skips action reflection. Inverted so the derived `Default`
     /// (false) keeps reflection **on** — like [`crate::Button`].
     reflect_off: bool,
+    /// Why the composer cannot send, when it cannot (see [`Composer::disabled`]).
+    disabled: Option<Cow<'static, str>>,
 }
 
 impl Composer {
@@ -121,6 +127,14 @@ impl Composer {
         self
     }
 
+    /// Disable the whole composer, saying why: the field and the send button are disabled,
+    /// the reason shows in the empty field (its placeholder, so it is read before any click)
+    /// and as the tooltip of both, and no submit or draft handler is bound.
+    pub fn disabled(mut self, reason: impl Into<Cow<'static, str>>) -> Self {
+        self.disabled = Some(reason.into());
+        self
+    }
+
     pub fn compact(mut self, compact: bool) -> Self {
         self.compact = compact;
         self
@@ -155,11 +169,18 @@ impl Composer {
                 rwire::style::Style::new()
                     .set("max-height", self.max_height.as_deref().unwrap_or("40vh")),
             );
-        if let Some(h) = self.on_draft.clone() {
-            field = field.on_debounced(Ev::Input, h, 400);
-        }
         if let Some(ref id) = self.id {
             field = field.id(id.as_ref());
+        }
+        if let Some(reason) = &self.disabled {
+            return field
+                .bool_attr(At::Disabled)
+                .at_str(At::Placeholder, reason.as_ref())
+                .at_str(At::Title, reason.as_ref())
+                .st([St::CursorNotAllowed]);
+        }
+        if let Some(h) = self.on_draft.clone() {
+            field = field.on_debounced(Ev::Input, h, 400);
         }
         if let Some(ref placeholder) = self.placeholder {
             field = field.at_str(At::Placeholder, placeholder.as_ref());
@@ -169,6 +190,9 @@ impl Composer {
 
     fn send_button(&self) -> ElementBuilder {
         let label = self.send_label.as_deref().unwrap_or("Send").to_owned();
+        if let Some(reason) = &self.disabled {
+            return send_button_el(&label, SendPhase::Disabled).at_str(At::Title, reason.as_ref());
+        }
         match &self.on_submit {
             // Reflect the submit action on the send button — same contract as `Button`.
             Some(spec) if !self.reflect_off => {
@@ -194,7 +218,7 @@ impl Composer {
     /// Build the composer into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         let mut form = el(El::Form);
-        if let Some(handler) = self.on_submit.clone() {
+        if let Some(handler) = self.on_submit.clone().filter(|_| self.disabled.is_none()) {
             form = form.on(Ev::Submit, handler);
         }
         for (name, value) in &self.hidden_fields {
@@ -224,6 +248,8 @@ impl Composer {
             .append(
                 self.hint
                     .as_deref()
+                    // The keyboard hint means nothing on a composer that cannot send.
+                    .filter(|_| self.disabled.is_none())
                     .map(|hint| el(El::Span).text(hint))
                     .into_iter()
                     .collect::<Vec<_>>(),
@@ -249,11 +275,13 @@ impl Composer {
     }
 }
 
-/// The send button's reflected phases.
+/// The send button's phases: the three reflected ones, and disabled.
 enum SendPhase {
     Idle,
     Loading,
     Errored,
+    /// Cannot send: dimmed, `disabled`, keeps pointer events so its tooltip shows.
+    Disabled,
 }
 
 /// Render the send button in one phase. Constant footprint across all three: `Loading` swaps the
@@ -268,8 +296,11 @@ fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
         St::PxMd,
         St::PySm,
         St::RoundedMd,
-        St::CursorPointer,
     ];
+    tokens.push(match phase {
+        SendPhase::Disabled => St::CursorNotAllowed,
+        _ => St::CursorPointer,
+    });
     match phase {
         SendPhase::Idle => tokens.extend([St::BgAccent, St::TextOnAccent]),
         SendPhase::Loading => tokens.extend([
@@ -279,6 +310,7 @@ fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
             St::PointerEventsNone,
         ]),
         SendPhase::Errored => tokens.extend([St::BgDestructive, St::TextOnDestructive]),
+        SendPhase::Disabled => tokens.extend([St::BgAccent, St::TextOnAccent, St::Opacity50]),
     }
     let trailing = match phase {
         SendPhase::Loading => Spinner::new().size(SpinnerSize::Sm).build(),
@@ -291,6 +323,63 @@ fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
         .append([el(El::Span).text(label), trailing]);
     match phase {
         SendPhase::Idle => button.hover([St::BgAccentHover]),
+        SendPhase::Disabled => button.bool_attr(At::Disabled),
         _ => button,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rwire::MemoryState;
+
+    #[derive(Default)]
+    struct S;
+    impl MemoryState for S {}
+    fn send(_: &mut S) {}
+
+    #[test]
+    fn a_disabled_composer_says_why_and_cannot_send() {
+        for compact in [false, true] {
+            let reason = "Read-only preview: you cannot reply here";
+            let composer = Composer::new()
+                .placeholder("Message…")
+                .hint("⏎ send")
+                .on_submit(HandlerSpec::memory::<S>(send))
+                .on_draft(HandlerSpec::memory::<S>(send))
+                .compact(compact)
+                .disabled(reason)
+                .build();
+            assert!(composer.events().is_empty(), "no submit bound");
+            let html = composer.to_static_html();
+            let field = &html[html.find("<textarea").unwrap()..];
+            let field = &field[..field.find('>').unwrap()];
+            // The reason is in the empty field (read before any click) and its tooltip.
+            assert!(
+                field.contains(&format!("placeholder=\"{reason}\"")),
+                "{html}"
+            );
+            assert!(field.contains(&format!("title=\"{reason}\"")), "{html}");
+            assert!(field.contains("disabled"), "{html}");
+            assert!(
+                !html.contains("Message…"),
+                "the reason replaces the placeholder"
+            );
+            assert!(!html.contains("⏎ send"), "no keyboard hint");
+            let button = &html[html.find("<button").unwrap()..];
+            let button = &button[..button.find('>').unwrap()];
+            assert!(button.contains("disabled"), "{html}");
+            assert!(button.contains(&format!("title=\"{reason}\"")), "{html}");
+        }
+    }
+
+    #[test]
+    fn an_enabled_composer_binds_its_submit() {
+        let composer = Composer::new()
+            .on_submit(HandlerSpec::memory::<S>(send))
+            .build();
+        assert_eq!(composer.events().len(), 1);
+        let html = composer.to_static_html();
+        assert!(!html.contains(" disabled"), "{html}");
     }
 }

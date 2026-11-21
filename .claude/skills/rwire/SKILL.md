@@ -40,10 +40,11 @@ Theme::dark()
 |---|---|
 | a button of any kind | `Button::{primary,secondary,ghost,outline,destructive}(…)` — sizes `Xs` (24px dense chrome) to `Lg`; you get the focus-visible ring, hover/disabled/loading states, icon handling free |
 | an icon-only button | `Button::icon_only(icon, "Aria label")` — squares itself, carries the aria-label |
+| a disabled button that says why | `Button::…().disabled(true).title("why")`. The tooltip shows on the disabled button. Set `title`/`data`/`aria_label`/`class`/`hover`/`attr` on the `Button` **before** `on_click`: chained after, they land on the box-less reflection wrapper, and debug builds panic there |
 | a status chip / label | `Badge::new().intent(…)` + `.shape(BadgeShape::Square)` + `.fill(BadgeFill::Outline)` for the sharp outlined look |
 | a selectable filter / tab / view toggle | `Chip::new(label).active(bool).on_click(h)` — chain `.data(…)` for the payload |
 | a presence / activity dot | `StatusDot::new().intent(…).pulse(bool).label("running")` |
-| a chat input bar | `Composer::new().id(key).placeholder(…).on_submit(h)` — Enter submits, Shift+Enter newline; `.compact(true)` for inline bars |
+| a chat input bar | `Composer::new().id(key).placeholder(…).on_submit(h)` — Enter submits, Shift+Enter newline; `.compact(true)` for inline bars; `.disabled(reason)` for a read-only view (field + send disabled, the reason shown in the field and as tooltip) |
 | a chat / log scroll area | `ChatScroll::new(inner)` — see the trap in §5 |
 | an avatar with initials | `Avatar::new().name("Ada Lovelace")` — derives "AL" |
 | form fields | `Input::text()/email()/number()`, `Textarea`, `Select`, `Checkbox`, `Switch` — they take `name/placeholder/autocomplete/spellcheck/rows` as methods |
