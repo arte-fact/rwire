@@ -62,6 +62,25 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   know the visitor's identity.
 - `capsule::serve_with_status`: `capsule::serve` with another status line.
 
+### Fixed: executable URLs in pre-rendered HTML and Markdown
+
+- **Markdown** (`rwire-markdown`): links, images, reference links and
+  autolinks copied `dest_url` as it was, so `[x](javascript:alert(1))` became
+  a live `href`. Links now keep relative URLs, `http:`, `https:`, `mailto:` and
+  `tel:` only; any other scheme loses its `href` (the text stays). Images also
+  take raster `data:image/{png,jpeg,gif,webp,avif}`; others are dropped (their
+  alt text stays).
+- **Pre-rendered HTML** (`to_static_html`, the `ssr(true)` paint): `href`,
+  `src`, `xlink:href`, `action` and `formaction` with a `javascript:`,
+  `vbscript:` or `data:` URL (non-SVG images in `src` excepted) are left out,
+  as the runtime does over the WebSocket. Until now the paint escaped them but
+  kept them, executable before the socket connected.
+- **Runtime**: the attribute sanitizer refuses `vbscript:` and `data:` (same
+  exception) besides `javascript:`. Size budget +40 B gzipped.
+- One normalization for all of them, `rwire::url_safety`: character
+  references, percent-encoding (repeatedly), whitespace and controls anywhere,
+  case.
+
 ### Added: asset folders served from disk
 
 - `ServerWithRoot::asset_dir(prefix, dir)` serves a folder read on each
