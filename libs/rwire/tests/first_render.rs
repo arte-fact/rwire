@@ -6,7 +6,8 @@
 //! that view, live over the WebSocket or static with `ssr(true)`, must show the
 //! data, not the state's empty default:
 //!
-//! - opening the route directly (the client reports its path on open);
+//! - opening the route directly (the client reports its path on open): the
+//!   first frame is the route's view, never `/`'s;
 //! - navigating to it from another route;
 //! - with the shared region nested inside a memory-state region;
 //! - `GET /posts/x` with `ssr(true)` serves the requested route, not `/`,
@@ -164,13 +165,13 @@ async fn connect(port: u16) -> Ws {
     ws
 }
 
-/// Read frames until one contains `needle`. Fails on `forbidden` (a frame
-/// that painted the view from the empty default) or after 5 s.
-async fn expect_frame(ws: &mut Ws, needle: &str, forbidden: Option<&str>) {
+/// Read frames until one contains `needle`. Fails on any of `forbidden` (a
+/// frame that painted the empty default, or the wrong view) or after 5 s.
+async fn expect_frame(ws: &mut Ws, needle: &str, forbidden: &[&str]) {
     let found = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(Ok(message)) = ws.next().await {
             if let Message::Binary(data) = message {
-                if let Some(bad) = forbidden {
+                for bad in forbidden {
                     assert!(
                         !contains(&data, bad),
                         "a frame painted {bad:?} before {needle:?}"
@@ -203,55 +204,56 @@ const POST: &str = "post: Hello rwire (rev 1)";
 async fn opening_a_route_directly_paints_the_shared_state() {
     let shared = start(19091, false, Gate::Open).await;
     let mut ws = connect(19091).await;
-    expect_frame(&mut ws, "home page", None).await;
+    // As the runtime does: report the path as soon as the socket opens. The
+    // initial DOM is the route's view, with no `/` frame before it.
     ws.send(route("/posts/hello")).await.unwrap();
-    expect_frame(&mut ws, POST, Some(EMPTY_POST)).await;
+    expect_frame(&mut ws, POST, &[EMPTY_POST, "home page"]).await;
 
     // And the view is subscribed: a later publish reaches it.
     shared.update_shared_changed::<Blog>(ChangeSet::all(), |blog| {
         blog.title = "Second post".to_string();
         blog.revision = 2;
     });
-    expect_frame(&mut ws, "post: Second post (rev 2)", None).await;
+    expect_frame(&mut ws, "post: Second post (rev 2)", &[]).await;
 }
 
 #[tokio::test]
 async fn navigating_to_a_route_paints_the_shared_state() {
     let _shared = start(19092, false, Gate::Open).await;
     let mut ws = connect(19092).await;
-    expect_frame(&mut ws, "home page", None).await;
+    expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/about")).await.unwrap();
-    expect_frame(&mut ws, "about page", None).await;
+    expect_frame(&mut ws, "about page", &[]).await;
     ws.send(route("/posts/hello")).await.unwrap();
-    expect_frame(&mut ws, POST, Some(EMPTY_POST)).await;
+    expect_frame(&mut ws, POST, &[EMPTY_POST]).await;
 }
 
 #[tokio::test]
 async fn a_shared_region_nested_in_a_routed_region_paints_the_shared_state() {
     let shared = start(19093, false, Gate::Open).await;
     let mut ws = connect(19093).await;
-    expect_frame(&mut ws, "home page", None).await;
+    expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/framed")).await.unwrap();
-    expect_frame(&mut ws, POST, Some(EMPTY_POST)).await;
+    expect_frame(&mut ws, POST, &[EMPTY_POST]).await;
 
     shared.update_shared_changed::<Blog>(ChangeSet::all(), |blog| {
         blog.revision = 3;
     });
-    expect_frame(&mut ws, "post: Hello rwire (rev 3)", None).await;
+    expect_frame(&mut ws, "post: Hello rwire (rev 3)", &[]).await;
 }
 
 #[tokio::test]
 async fn regions_nested_in_a_routed_region_render_states_the_page_never_read() {
     let _shared = start(19097, false, Gate::Open).await;
     let mut ws = connect(19097).await;
-    expect_frame(&mut ws, "home page", None).await;
+    expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/badged")).await.unwrap();
-    expect_frame(&mut ws, "badge: unread", None).await;
+    expect_frame(&mut ws, "badge: unread", &[]).await;
 
     let mut ws = connect(19097).await;
-    expect_frame(&mut ws, "home page", None).await;
+    expect_frame(&mut ws, "home page", &[]).await;
     ws.send(route("/badged")).await.unwrap();
-    expect_frame(&mut ws, "drafts: 0", None).await;
+    expect_frame(&mut ws, "drafts: 0", &[]).await;
 }
 
 /// `GET path` and the whole response (the server closes after it), minus the

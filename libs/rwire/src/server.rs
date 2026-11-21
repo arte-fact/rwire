@@ -2813,6 +2813,18 @@ struct ConnContext<F> {
     revalidate: Option<(Arc<crate::delegated_auth::DelegatedAuth>, String)>,
 }
 
+/// How long a new connection waits for the runtime's `R<path>` before
+/// rendering `/` (the runtime sends it on open, so it normally arrives within a
+/// round trip; a client that never sends it only delays its first frame).
+const FIRST_ROUTE_WAIT: Duration = Duration::from_millis(500);
+
+/// The built-in router's state at `path`.
+fn route_at(path: &str) -> crate::router::CurrentRoute {
+    let mut route = crate::router::CurrentRoute::default();
+    route.set_path(path);
+    route
+}
+
 async fn handle_websocket<F>(
     ws_stream: tokio_tungstenite::WebSocketStream<TcpStream>,
     peer_addr: SocketAddr,
@@ -2833,6 +2845,24 @@ where
         revalidate,
     } = cx;
     let (mut write, mut read) = ws_stream.split();
+
+    // With the built-in router, wait briefly for the path the runtime reports as
+    // soon as the socket opens (`R<path>`), so the initial DOM already renders the
+    // requested route. Rendering `/` first and swapping on that message would
+    // flash the `/` view on every deep link (and replace an SSR paint of the
+    // right route with it). The message is still handled below, like any other:
+    // the route swap is a no-op by then, and `on_route` runs.
+    let mut early = None;
+    let mut initial_path = None;
+    if crate::router::installed_router().is_some() {
+        if let Ok(Some(item)) = timeout(FIRST_ROUTE_WAIT, read.next()).await {
+            if let Ok(Message::Text(text)) = &item {
+                initial_path = text.strip_prefix('R').map(str::to_string);
+            }
+            early = Some(item);
+        }
+    }
+    let mut read = futures::stream::iter(early).chain(read);
 
     // Allocate connection ID and register broadcast channel. The receiver is
     // consumed in the main loop so background state changes (and cross-tab
@@ -2871,6 +2901,13 @@ where
     // (and the handlers they bind) are discovered too; iterate until no new state
     // type appears.
     let mut discovered: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+    if let Some(path) = &initial_path {
+        // Discover the requested route's view, not `/`'s.
+        discovered.insert(
+            TypeId::of::<crate::router::CurrentRoute>(),
+            Box::new(route_at(path)),
+        );
+    }
     loop {
         let mut ctx = BuildContext::new();
         if discovered.is_empty() {
@@ -2904,12 +2941,12 @@ where
             .insert(TypeId::of::<Theme>(), Box::new(theme.as_ref().clone()));
     }
 
-    // Seed the built-in CurrentRoute so the outlet renders the initial path ("/");
-    // the client's on-connect R<path> corrects it for deep-links.
+    // Seed the built-in CurrentRoute so the outlet renders the path the client
+    // reported, or `/` if it didn't in time (its R<path> then swaps the view).
     if crate::router::installed_router().is_some() {
         conn_state.states.insert(
             TypeId::of::<crate::router::CurrentRoute>(),
-            Box::new(crate::router::CurrentRoute::default()),
+            Box::new(route_at(initial_path.as_deref().unwrap_or("/"))),
         );
     }
 
@@ -2920,6 +2957,13 @@ where
         conn_state.initialize_missing_states();
     } else {
         conn_state.initialize_all_states();
+    }
+    // A restored session's route is the page it left; the reported path wins.
+    if let Some(path) = &initial_path {
+        conn_state.states.insert(
+            TypeId::of::<crate::router::CurrentRoute>(),
+            Box::new(route_at(path)),
+        );
     }
 
     // Subscribe to every shared/persisted state this connection renders or

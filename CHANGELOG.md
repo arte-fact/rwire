@@ -41,7 +41,12 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   static paint is now rendered per request, for the requested route, with
   the current shared state; memory and persisted state render their default
   (they belong to a connection or a session). It is rendered past the auth
-  gate, like the live page.
+  gate, like the live page, in one pass that also collects its CSS.
+- A deep link painted the `/` view for a moment before the requested route
+  (and, with `ssr(true)`, replaced the right paint with it): the initial DOM
+  was rendered before the client's `R<path>`. With the built-in router, a new
+  connection now waits briefly (at most 500 ms) for that message and renders
+  the reported route in its initial DOM.
 
 First public release. Highlights of what the framework ships with:
 
