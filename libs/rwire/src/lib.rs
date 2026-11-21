@@ -104,7 +104,7 @@ pub use server::{
 };
 
 // Delegated authentication exports
-pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity};
+pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity, Validation};
 pub use server::{AUTH_CONFLICT, SHUTDOWN_GRACE};
 
 // Store exports

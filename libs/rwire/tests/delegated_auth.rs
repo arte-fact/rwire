@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use rwire::delegated_auth::CLOSE_UNAUTHORIZED;
+use rwire::delegated_auth::{CLOSE_HUB_UNAVAILABLE, CLOSE_UNAUTHORIZED};
 use rwire::{
     el, handler, renderer, AuthRequest, DelegatedAuth, El, ElementBuilder, Ev, Identity, Server,
-    ServerConfig, State, AUTH_CONFLICT,
+    ServerConfig, State, Validation, AUTH_CONFLICT,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -26,11 +26,13 @@ const LOGIN: &str = "https://hub.example/login";
 
 // ── Fake hub ────────────────────────────────────────────────────────────────
 
-/// Valid tokens and a count of `/admin/session` calls.
+/// Valid tokens and a count of `/admin/session` calls. While `down`, the hub
+/// drops every connection without answering.
 #[derive(Clone, Default)]
 struct Hub {
     valid: Arc<Mutex<HashSet<String>>>,
     calls: Arc<AtomicUsize>,
+    down: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Hub {
@@ -45,6 +47,9 @@ impl Hub {
                 tokio::spawn(async move {
                     let head = read_head(&mut stream).await;
                     hub.calls.fetch_add(1, Ordering::SeqCst);
+                    if hub.down.load(Ordering::SeqCst) {
+                        return;
+                    }
                     let token = head
                         .lines()
                         .find_map(|l| l.strip_prefix("Authorization: Bearer "))
@@ -68,6 +73,10 @@ impl Hub {
 
     fn revoke(&self, token: &str) {
         self.valid.lock().unwrap().remove(token);
+    }
+
+    fn set_down(&self, down: bool) {
+        self.down.store(down, Ordering::SeqCst);
     }
 }
 
@@ -105,6 +114,48 @@ fn hub_auth(hub_port: u16) -> DelegatedAuth {
         }
     })
     .login_url(LOGIN)
+}
+
+/// The same hub client, telling a revocation (401/403) from an outage (no
+/// connection, no answer, 5xx).
+fn hub_validation(hub_port: u16) -> DelegatedAuth {
+    DelegatedAuth::with_validation(COOKIE, move |req: AuthRequest| {
+        let token = req.cookie(COOKIE).map(str::to_string);
+        async move {
+            let Some(token) = token else {
+                return Validation::Revoked;
+            };
+            let Ok(mut stream) = TcpStream::connect(("127.0.0.1", hub_port)).await else {
+                return Validation::Unavailable;
+            };
+            let ask = format!(
+                "GET /admin/session HTTP/1.1\r\nHost: hub\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+            );
+            let mut answer = String::new();
+            if stream.write_all(ask.as_bytes()).await.is_err()
+                || stream.read_to_string(&mut answer).await.is_err()
+            {
+                return Validation::Unavailable;
+            }
+            match status_code(&answer) {
+                Some(200) => match answer.split("\r\n\r\n").nth(1) {
+                    Some(user) => Validation::Valid(Identity::new(user).with_data(token)),
+                    None => Validation::Unavailable,
+                },
+                Some(401 | 403) => Validation::Revoked,
+                _ => Validation::Unavailable,
+            }
+        }
+    })
+    .login_url(LOGIN)
+}
+
+/// The status code of an HTTP response, whatever its version.
+fn status_code(response: &str) -> Option<u16> {
+    let line = response.lines().next()?;
+    let mut parts = line.split(' ');
+    parts.next().filter(|v| v.starts_with("HTTP/"))?;
+    parts.next()?.parse().ok()
 }
 
 // ── App ─────────────────────────────────────────────────────────────────────
@@ -400,4 +451,74 @@ async fn a_handshake_over_the_caps_never_reaches_the_hub() {
         assert!(response.starts_with("HTTP/1.1 503"), "{response}");
     }
     assert_eq!(hub.calls(), 0);
+}
+
+/// Wait for the socket's close frame (or `None` if it stays open `for_`).
+async fn close_code(ws: &mut Ws, for_: Duration) -> Option<CloseCode> {
+    tokio::time::timeout(for_, async {
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Close(Some(frame))) => return Some(frame.code),
+                Ok(Message::Close(None)) | Err(_) => return Some(CloseCode::Abnormal),
+                _ => {}
+            }
+        }
+        Some(CloseCode::Abnormal)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// A hub outage is not a revocation: the open socket stays up through it,
+/// new connections are refused meanwhile, and once the hub is back a
+/// revocation closes the socket with 4401.
+#[tokio::test]
+async fn an_open_websocket_survives_a_hub_outage_but_not_a_revocation() {
+    let hub = Hub::start(19169).await;
+    let auth = hub_validation(19169)
+        .cache_ttl(Duration::from_millis(100))
+        .outage_grace(Duration::from_secs(30));
+    start(19069, auth).await;
+    let mut ws = ws_connect(19069, TOKEN).await;
+    wait_for(&mut ws, "who: not asked").await;
+
+    hub.set_down(true);
+    let before = hub.calls();
+    assert_eq!(close_code(&mut ws, Duration::from_millis(700)).await, None);
+    assert!(
+        hub.calls() >= before + 3,
+        "the socket was re-validated during the outage"
+    );
+    let refused = ws_handshake(19069, Some("another-token")).await;
+    assert!(
+        refused.starts_with("HTTP/1.1 401"),
+        "fail closed: {refused}"
+    );
+
+    hub.set_down(false);
+    assert_eq!(close_code(&mut ws, Duration::from_millis(300)).await, None);
+    hub.revoke(TOKEN);
+    assert_eq!(
+        close_code(&mut ws, Duration::from_secs(5)).await,
+        Some(CloseCode::from(CLOSE_UNAUTHORIZED))
+    );
+}
+
+/// Past the grace period, an outage closes the socket with 1013.
+#[tokio::test]
+async fn an_outage_longer_than_the_grace_closes_with_1013() {
+    let hub = Hub::start(19170).await;
+    let auth = hub_validation(19170)
+        .cache_ttl(Duration::from_millis(100))
+        .outage_grace(Duration::from_millis(500));
+    start(19070, auth).await;
+    let mut ws = ws_connect(19070, TOKEN).await;
+    wait_for(&mut ws, "who: not asked").await;
+    hub.set_down(true);
+    assert_eq!(close_code(&mut ws, Duration::from_millis(300)).await, None);
+    assert_eq!(
+        close_code(&mut ws, Duration::from_secs(5)).await,
+        Some(CloseCode::from(CLOSE_HUB_UNAVAILABLE))
+    );
 }

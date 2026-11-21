@@ -12,7 +12,10 @@
 //! - otherwise redirects a page request to [`DelegatedAuth::login_url`] (with
 //!   `?next=<path>`) and refuses a WebSocket handshake with `401`;
 //! - re-validates open WebSockets every [`DelegatedAuth::cache_ttl`], closing one
-//!   whose identity is gone (close code [`CLOSE_UNAUTHORIZED`]).
+//!   whose identity is revoked (close code [`CLOSE_UNAUTHORIZED`]). When the
+//!   validator can't be reached ([`Validation::Unavailable`]), an open socket
+//!   stays up for [`DelegatedAuth::outage_grace`], then closes with
+//!   [`CLOSE_HUB_UNAVAILABLE`]; new requests are refused meanwhile (fail closed).
 //!
 //! The validator is a plain `Future + Send` polled on rwire's tokio runtime, so
 //! it can use tokio-based clients (reqwest, a hub SDK) directly. It runs once
@@ -30,6 +33,10 @@ use std::time::{Duration, Instant};
 /// WebSocket close code sent when a re-validation finds the identity revoked
 /// (the 4000–4999 range is reserved for applications; 4401 mirrors HTTP 401).
 pub const CLOSE_UNAUTHORIZED: u16 = 4401;
+
+/// WebSocket close code sent when the validator stayed unreachable for longer
+/// than [`DelegatedAuth::outage_grace`]: 1013, "try again later".
+pub const CLOSE_HUB_UNAVAILABLE: u16 = 1013;
 
 /// Who a connection belongs to, as established by the validator.
 ///
@@ -154,7 +161,28 @@ impl fmt::Debug for AuthRequest {
     }
 }
 
-type ValidateFuture = Pin<Box<dyn Future<Output = Option<Identity>> + Send>>;
+/// A validator's verdict, for [`DelegatedAuth::with_validation`].
+#[derive(Clone, Debug)]
+pub enum Validation {
+    /// The credential belongs to this identity.
+    Valid(Identity),
+    /// The authority answered no: unknown, expired or revoked credential. An
+    /// open WebSocket closes with [`CLOSE_UNAUTHORIZED`].
+    Revoked,
+    /// The authority could not be asked (network error, timeout, 5xx): the
+    /// credential is neither confirmed nor revoked. New requests are refused;
+    /// an open WebSocket gets [`DelegatedAuth::outage_grace`].
+    Unavailable,
+}
+
+/// `Some` is valid, `None` is revoked: the [`DelegatedAuth::new`] contract.
+impl From<Option<Identity>> for Validation {
+    fn from(identity: Option<Identity>) -> Self {
+        identity.map_or(Validation::Revoked, Validation::Valid)
+    }
+}
+
+type ValidateFuture = Pin<Box<dyn Future<Output = Validation> + Send>>;
 type ValidateFn = dyn Fn(AuthRequest) -> ValidateFuture + Send + Sync;
 
 /// Default lifetime of a cached successful validation.
@@ -167,6 +195,8 @@ pub const DEFAULT_VALIDATE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_NEGATIVE_TTL: Duration = Duration::from_secs(5);
 /// Default bound on validations running at once.
 pub const DEFAULT_MAX_CONCURRENT_VALIDATIONS: usize = 16;
+/// Default time an open WebSocket survives an unreachable validator.
+pub const DEFAULT_OUTAGE_GRACE: Duration = Duration::from_secs(300);
 
 /// A cache key: the SHA-256 of the credential, never the credential itself,
 /// so a memory dump or a stray `Debug` of the cache shows no token.
@@ -175,16 +205,6 @@ type Key = [u8; 32];
 fn key(token: &str) -> Key {
     use sha2::{Digest, Sha256};
     Sha256::digest(token.as_bytes()).into()
-}
-
-/// What a validation concluded.
-#[derive(Clone, Debug)]
-enum Validation {
-    Valid(Identity),
-    /// The validator said no.
-    Rejected,
-    /// No answer in time (or no permit to ask in time).
-    Unavailable,
 }
 
 /// Validations remembered for a while, keyed by [`Key`].
@@ -258,7 +278,7 @@ impl Cache {
             }
         }
         match self.rejected.get(key) {
-            Some(at) if at.elapsed() < limits.negative_ttl => Some(Validation::Rejected),
+            Some(at) if at.elapsed() < limits.negative_ttl => Some(Validation::Revoked),
             _ => None,
         }
     }
@@ -275,7 +295,7 @@ impl Cache {
                     |(_, at)| *at,
                 );
             }
-            Validation::Rejected if !limits.negative_ttl.is_zero() => {
+            Validation::Revoked if !limits.negative_ttl.is_zero() => {
                 // A rejection never overrides a success still in the cache.
                 self.valid.remove(&key);
                 insert_bounded(
@@ -286,7 +306,7 @@ impl Cache {
                     |at| *at,
                 );
             }
-            Validation::Rejected | Validation::Unavailable => {}
+            Validation::Revoked | Validation::Unavailable => {}
         }
     }
 }
@@ -317,6 +337,7 @@ pub struct DelegatedAuth {
     timeout: Duration,
     negative_ttl: Duration,
     max_concurrent: usize,
+    outage_grace: Duration,
     state: Arc<State>,
 }
 
@@ -326,10 +347,29 @@ impl DelegatedAuth {
     /// `validate` receives the whole request head (cookies, `Authorization`,
     /// forwarded headers…) and returns the [`Identity`] or `None`. A request
     /// without the cookie is anonymous: it never reaches the validator.
+    ///
+    /// `None` counts as a revocation, so a validator that returns `None` when
+    /// the authority is down closes open WebSockets at the next check. Use
+    /// [`Self::with_validation`] to tell the two apart.
     pub fn new<V, Fut>(cookie: impl Into<String>, validate: V) -> Self
     where
         V: Fn(AuthRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Option<Identity>> + Send + 'static,
+    {
+        use futures::FutureExt;
+        Self::with_validation(cookie, move |request| {
+            validate(request).map(Validation::from)
+        })
+    }
+
+    /// Like [`Self::new`], with a validator that tells a revoked credential
+    /// ([`Validation::Revoked`]) from an authority it couldn't reach
+    /// ([`Validation::Unavailable`]): an open WebSocket then survives an outage
+    /// for [`Self::outage_grace`] instead of closing at the next check.
+    pub fn with_validation<V, Fut>(cookie: impl Into<String>, validate: V) -> Self
+    where
+        V: Fn(AuthRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Validation> + Send + 'static,
     {
         Self {
             cookie: cookie.into(),
@@ -340,6 +380,7 @@ impl DelegatedAuth {
             timeout: DEFAULT_VALIDATE_TIMEOUT,
             negative_ttl: DEFAULT_NEGATIVE_TTL,
             max_concurrent: DEFAULT_MAX_CONCURRENT_VALIDATIONS,
+            outage_grace: DEFAULT_OUTAGE_GRACE,
             state: State::new(DEFAULT_MAX_CONCURRENT_VALIDATIONS),
         }
     }
@@ -395,6 +436,19 @@ impl DelegatedAuth {
         self
     }
 
+    /// How long an open WebSocket stays up while the validator can't be reached
+    /// (default 5 min), counted from its last confirmed validation. Past it, the
+    /// socket closes with [`CLOSE_HUB_UNAVAILABLE`]. A revocation closes it at
+    /// once whatever this is; new requests are refused during an outage.
+    pub fn outage_grace(mut self, grace: Duration) -> Self {
+        self.outage_grace = grace;
+        self
+    }
+
+    pub(crate) fn outage_grace_period(&self) -> Duration {
+        self.outage_grace
+    }
+
     pub(crate) fn revalidate_every(&self) -> Duration {
         self.cache_ttl.max(Duration::from_millis(100))
     }
@@ -412,13 +466,19 @@ impl DelegatedAuth {
     pub(crate) async fn identify(&self, head: &str) -> Option<Identity> {
         match self.check(AuthRequest::from_head(head)).await {
             Validation::Valid(identity) => Some(identity),
-            Validation::Rejected | Validation::Unavailable => None,
+            Validation::Revoked | Validation::Unavailable => None,
         }
+    }
+
+    /// Re-validate an open WebSocket's credentials (`head` is its handshake):
+    /// the verdict, so the caller can tell a revocation from an outage.
+    pub(crate) async fn revalidate(&self, head: &str) -> Validation {
+        self.check(AuthRequest::from_head(head)).await
     }
 
     async fn check(&self, request: AuthRequest) -> Validation {
         let Some(token) = request.cookie(&self.cookie).filter(|t| !t.is_empty()) else {
-            return Validation::Rejected;
+            return Validation::Revoked;
         };
         let key = key(token);
         let limits = self.limits();
@@ -469,8 +529,7 @@ impl DelegatedAuth {
             })
             .await;
             let outcome = match answer {
-                Ok(Some(Some(identity))) => Validation::Valid(identity),
-                Ok(Some(None)) => Validation::Rejected,
+                Ok(Some(verdict)) => verdict,
                 Ok(None) | Err(_) => Validation::Unavailable,
             };
             state
@@ -715,6 +774,55 @@ mod tests {
             "{} calls",
             calls.load(Ordering::SeqCst)
         );
+    }
+
+    /// `with_validation`: an unreachable authority is never remembered, a
+    /// revocation is; `revalidate` reports which one it was.
+    #[tokio::test]
+    async fn unavailable_is_not_a_revocation() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let auth = DelegatedAuth::with_validation("sid", move |req: AuthRequest| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let verdict = match req.cookie("sid") {
+                Some("good") => Validation::Valid(Identity::new("ada")),
+                Some("down") => Validation::Unavailable,
+                _ => Validation::Revoked,
+            };
+            async move { verdict }
+        });
+        for _ in 0..3 {
+            assert!(matches!(
+                auth.revalidate(&head("down")).await,
+                Validation::Unavailable
+            ));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "an outage is asked again");
+        for _ in 0..3 {
+            assert!(matches!(
+                auth.revalidate(&head("gone")).await,
+                Validation::Revoked
+            ));
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            4,
+            "a revocation is remembered"
+        );
+        assert!(matches!(
+            auth.revalidate(&head("good")).await,
+            Validation::Valid(_)
+        ));
+        assert!(auth.identify(&head("down")).await.is_none(), "fail closed");
+    }
+
+    #[test]
+    fn option_validators_keep_their_meaning() {
+        assert!(matches!(Validation::from(None), Validation::Revoked));
+        assert!(matches!(
+            Validation::from(Some(Identity::new("ada"))),
+            Validation::Valid(i) if i.id() == "ada"
+        ));
     }
 
     /// A timeout is not a rejection: the next request asks again.

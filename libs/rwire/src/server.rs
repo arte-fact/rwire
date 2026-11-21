@@ -3198,6 +3198,11 @@ where
     let mut quiet_since = Instant::now();
     let revalidate_every = revalidate.as_ref().map(|(auth, _)| auth.revalidate_every());
     let mut next_revalidation = revalidate_every.map(|every| Instant::now() + every);
+    // Delegated auth: when the identity was last confirmed (an outage is
+    // tolerated for the grace period from here), and whether the current
+    // outage was already logged.
+    let mut confirmed_at = Instant::now();
+    let mut outage_logged = false;
     // Stop racing the broadcast channel if it ever closes (avoids busy-looping
     // on a permanently-ready Err). It stays open for the connection's lifetime.
     let mut broadcast_open = true;
@@ -3221,15 +3226,50 @@ where
 
         // Delegated auth: re-validate the handshake's credentials once per cache
         // TTL (so the validator is asked at most that often per credential). A
-        // revoked identity closes the socket; the client's reconnect is then
-        // refused with 401 and, after its retries, it reloads onto the login page.
+        // revoked identity closes the socket (4401); the client's reconnect is
+        // then refused with 401 and, after its retries, it reloads onto the
+        // login page. An unreachable validator is not a revocation: the socket
+        // stays up for the outage grace from its last confirmation, then closes
+        // with 1013 (try again later).
         if let (Some((auth, head)), Some(due)) = (revalidate.as_ref(), next_revalidation) {
             if Instant::now() >= due {
-                if auth.identify(head).await.is_none() {
-                    println!("[{}] delegated auth: identity revoked, closing", peer_addr);
+                use crate::delegated_auth::{
+                    Validation, CLOSE_HUB_UNAVAILABLE, CLOSE_UNAUTHORIZED,
+                };
+                let close = match auth.revalidate(head).await {
+                    Validation::Valid(_) => {
+                        confirmed_at = Instant::now();
+                        outage_logged = false;
+                        None
+                    }
+                    Validation::Revoked => {
+                        println!("[{}] delegated auth: identity revoked, closing", peer_addr);
+                        Some((CLOSE_UNAUTHORIZED, "unauthorized"))
+                    }
+                    Validation::Unavailable
+                        if confirmed_at.elapsed() >= auth.outage_grace_period() =>
+                    {
+                        println!(
+                            "[{}] delegated auth: validator unreachable past the grace period, closing",
+                            peer_addr
+                        );
+                        Some((CLOSE_HUB_UNAVAILABLE, "identity provider unavailable"))
+                    }
+                    Validation::Unavailable => {
+                        if !outage_logged {
+                            outage_logged = true;
+                            println!(
+                                "[{}] delegated auth: validator unreachable, keeping the socket open",
+                                peer_addr
+                            );
+                        }
+                        None
+                    }
+                };
+                if let Some((code, reason)) = close {
                     let frame = tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                        code: crate::delegated_auth::CLOSE_UNAUTHORIZED.into(),
-                        reason: "unauthorized".into(),
+                        code: code.into(),
+                        reason: reason.into(),
                     };
                     let _ = write.send(Message::Close(Some(frame))).await;
                     break;
