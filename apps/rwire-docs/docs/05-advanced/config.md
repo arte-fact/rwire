@@ -89,6 +89,42 @@ Same-origin comparison normalizes default ports (80/443) and is
 case-insensitive; behind a reverse proxy it compares against the forwarded
 `Host`, which matches the page origin in a standard same-origin deployment.
 
+### .asset_dir(prefix, dir)
+
+Serves a folder from disk, read on each request, so files added while the
+server runs (the images of a new article) are served without a restart:
+
+```rust
+Server::bind("0.0.0.0:9000")?
+    .root(root)
+    .asset_dir("/media", "data/media")         // behind the auth gate
+    .public_asset_dir("/brand", "data/brand")  // to every visitor
+```
+
+`GET /media/2026/cover.png` reads `data/media/2026/cover.png`.
+
+- **Auth.** With `auth()` or `auth_with()`, an `asset_dir` needs the same
+  session as the page; without a gate it is open. `public_asset_dir` is served
+  before the gate, to everyone. (Fixed files from `.asset(..)` are always
+  served before the gate.)
+- **What is refused (404).** `..` in any encoding (`%2e%2e`, double-encoded
+  `%252e`, encoded slashes), hidden files (`.env`), NUL and control bytes,
+  symbolic links that lead out of the folder, and directories: there is no
+  listing. A link that stays inside the folder is followed.
+- **Content-Type.** From an allowlist of media extensions (images, video,
+  audio, fonts, PDF, plain text, subtitles); anything else, including `.html`,
+  `.js` and `.css`, is `application/octet-stream`. Every response carries
+  `X-Content-Type-Options: nosniff` and a sandboxing
+  `Content-Security-Policy`, so an SVG or HTML file opened directly runs no
+  script.
+- **HTTP.** `ETag` and `Last-Modified`, answered with `304`;
+  `Cache-Control: no-cache` (kept, but revalidated: the file may change);
+  a single `Range` (`206`, or `416`), so videos can seek; `HEAD`. Bodies are
+  streamed from the file, never read whole into memory.
+- **Limit.** Between the containment check and the open, a writer of the
+  folder could swap a file for a symbolic link: whoever can write the folder
+  is trusted.
+
 ## Capsule Configuration
 
 ```rust

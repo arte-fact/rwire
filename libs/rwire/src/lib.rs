@@ -55,6 +55,7 @@ mod token_macro;
 
 pub mod action;
 pub mod actions;
+mod asset_dir;
 pub mod attr_tokens;
 pub mod builder;
 pub mod capsule;
