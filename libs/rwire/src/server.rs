@@ -1401,25 +1401,20 @@ impl Page {
         }
     }
 
-    /// The status line and page for a `GET` of `target` (the request-line target).
-    ///
-    /// `404 Not Found` when the built-in router has no route for the path: the
-    /// page still loads and renders the router's not-found view, but crawlers and
-    /// probes (`/favicon.ico`, `/wp-login.php`) see the miss.
+    /// The status line and page for a `GET` of `target` (the request-line
+    /// target), or `None` for a short `404` (see [`page_status`]).
     fn render<F>(
         &self,
         root: &F,
         shared: &SharedServerState,
         target: &str,
-    ) -> (&'static str, Cow<'_, str>)
+        routes_itself: bool,
+    ) -> Option<(&'static str, Cow<'_, str>)>
     where
         F: Fn() -> ElementBuilder,
     {
         let path = route_path(target);
-        let status = match crate::router::installed_router() {
-            Some(router) if router.match_path(path).is_none() => "404 Not Found",
-            _ => "200 OK",
-        };
+        let status = page_status(path, routes_itself)?;
         let page = match self {
             Page::Fixed(capsule) => Cow::Borrowed(capsule.as_str()),
             Page::Ssr {
@@ -1436,7 +1431,25 @@ impl Page {
                 }
             }
         };
-        (status, page)
+        Some((status, page))
+    }
+}
+
+/// The status of the page for `path`, or `None` when the app has no page
+/// there and a short `404` (not the page) answers.
+///
+/// - With the built-in router: `200` for a path a route matches. Otherwise
+///   `404` with the page when the app declared a not-found view
+///   (`Router::not_found`), so it renders, and the short `404` when not.
+/// - Without it, an app with `on_route` (`routes_itself`) routes every path
+///   itself: `200` everywhere. An app with neither has one page, at `/`.
+fn page_status(path: &str, routes_itself: bool) -> Option<&'static str> {
+    match crate::router::installed_router() {
+        Some(router) if router.match_path(path).is_some() => Some("200 OK"),
+        Some(router) if router.has_not_found() => Some("404 Not Found"),
+        Some(_) => None,
+        None if routes_itself || path == "/" => Some("200 OK"),
+        None => None,
     }
 }
 
@@ -2287,7 +2300,13 @@ async fn handle_client<F>(
         let secure_cookie = config.secure_cookies || forwarded_https(&peek_str);
         // Rendered here, past the auth gates above: the static paint (and the shared
         // state in it) reaches exactly the visitors the live page would.
-        let (status, page) = capsule.render(root.as_ref(), &shared, request_line(&peek_str).1);
+        let target = request_line(&peek_str).1;
+        let Some((status, page)) =
+            capsule.render(root.as_ref(), &shared, target, route_handler.is_some())
+        else {
+            let _ = capsule::serve_not_found(stream).await;
+            return;
+        };
         if let Err(e) = capsule::serve_with_status(
             stream,
             status,

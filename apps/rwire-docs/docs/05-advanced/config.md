@@ -214,10 +214,20 @@ authenticated visitor may see all the shared data it renders. When it is on,
 it is rendered after the gate: a visitor who gets the login page instead of
 the app gets no static paint either.
 
-A path no route matches is answered `404 Not Found` (the page still loads and
-renders the router's not-found view). With a PWA, the service worker's
-offline fallback is the `/` page cached at install, so offline its paint
-shows the shared state of that time.
+With a PWA, the service worker's offline fallback is the `/` page cached at
+install, so offline its paint shows the shared state of that time.
+
+## Unknown paths
+
+A path the app has no page for gets a **short `404 Not Found`** (a line of
+text, not the 20–30 KB page): `/favicon.ico`, `/robots.txt`, probes.
+
+- With `.routes(router)`: a path no route matches gets the short 404, unless
+  the router declares a not-found view (`Router::not_found`); then the page is
+  served with status 404 so the view renders.
+- Without a router, an app with `.on_route(..)` routes every path itself: the
+  page is served everywhere, as before.
+- An app with neither has one page, at `/`; any other path gets the short 404.
 
 ## Health Check Endpoints
 

@@ -74,6 +74,20 @@ pub async fn serve_with_status(
     Ok(())
 }
 
+/// Send a short `404 Not Found` (a few bytes of text, not the page): for a
+/// path the app has no page for (`/favicon.ico`, `/wp-login.php`).
+pub async fn serve_not_found(mut stream: TcpStream) -> std::io::Result<()> {
+    let body = "Not found\n";
+    let response = format!(
+        "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\n\
+         Content-Length: {}\r\nX-Content-Type-Options: nosniff\r\n\
+         Cache-Control: no-cache\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
 /// Send a `401 Unauthorized` (used to reject an unauthenticated WebSocket
 /// upgrade — the browser can't show a form there, so it just fails and the page
 /// reload lands on the login screen).
