@@ -8,6 +8,32 @@ never see a compatibility matrix — recompiling is the whole migration.
 
 ## 0.1.0 — unreleased (crates not yet published to crates.io)
 
+### Added: Web Push (`rwire-push` crate)
+
+Standard Web Push (VAPID, RFC 8030, 8291 and 8292), with no third-party
+service, in a new crate so that apps without push pay nothing for it:
+
+- `Pwa::push_notifications(true)` adds `push` and `notificationclick`
+  handlers to the generated service worker: a push shows a notification from
+  its JSON payload (`title`, `body`, `url`, `icon`, `tag`), and a click
+  focuses or opens the app at that URL (same origin only). Off by default:
+  the service worker of an app that does not opt in is unchanged.
+- `rwire-push` provides the browser side, the `push` runtime extension
+  (`.serve_push()`, `push_subscribe` / `push_unsubscribe` on any element,
+  `report_input` + `Push::handle_report`). The extension asks for the
+  permission inside the click, as iOS requires, and reports the
+  subscription over the WebSocket.
+- On the server side, `rwire-push` provides `VapidKey` (generated, loaded
+  from a file or the environment), the subscriptions (memory plus an atomic
+  0600 JSON file) and `Push::send_push`. Messages are encrypted in
+  `aes128gcm` and carry an ES256 VAPID JWT. Subscriptions answered 404 or 410
+  are purged.
+- Subscription endpoints are limited to the browsers' push services
+  (`KNOWN_PUSH_HOSTS`, https), plus origins added with
+  `allow_endpoint_origin`. A client cannot make the server POST into its
+  own network.
+- Example: `examples/push`.
+
 ### Breaking: rwire runs on tokio
 
 async-std is discontinued; rwire now runs on **tokio** (and tokio-tungstenite
