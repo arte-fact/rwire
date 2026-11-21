@@ -251,6 +251,8 @@ pub struct CapsuleConfig {
     pub(crate) pwa: Option<crate::pwa::Pwa>,
     /// The icon served at `/favicon.ico` (see [`Self::favicon`]).
     pub(crate) favicon: Option<Favicon>,
+    /// The page's `<title>` (see [`Self::title`]).
+    pub(crate) title: Option<String>,
     /// `<html lang>`: the page language (also the locale of grouped live values).
     pub(crate) lang: Option<String>,
     /// URL prefix this app is mounted under (e.g. `/preview/<id>`), or empty for the root. When
@@ -355,6 +357,19 @@ impl CapsuleConfig {
     /// ```
     pub fn pwa(mut self, pwa: crate::pwa::Pwa) -> Self {
         self.pwa = Some(pwa);
+        self
+    }
+
+    /// The page's `<title>`, shown in the browser tab and history. With a PWA,
+    /// it replaces the title the PWA's name would give.
+    ///
+    /// One title for the whole app: it does not follow client-side
+    /// navigation between routes (that would need the runtime to set
+    /// `document.title` on every route change), so it is not set per route,
+    /// not even in the `ssr(true)` paint, which would then disagree with the
+    /// live page after the first navigation.
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
         self
     }
 
@@ -525,7 +540,13 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
         config
             .pwa
             .as_ref()
-            .map(|p| p.head(&config.theme, config.favicon.is_none()))
+            .map(|p| {
+                p.head(
+                    &config.theme,
+                    config.favicon.is_none(),
+                    config.title.is_none(),
+                )
+            })
             .unwrap_or_default()
     } else {
         String::new()
@@ -543,6 +564,11 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
             )
         })
         .unwrap_or_default();
+    let title = config
+        .title
+        .as_deref()
+        .map(|t| format!("<title>{}</title>", attr_escape(t)))
+        .unwrap_or_default();
 
     let lang = config
         .lang
@@ -554,7 +580,7 @@ pub fn generate_styled_capsule(config: &CapsuleConfig, css: &str) -> String {
     let rwv = ext_version();
 
     format!(
-        r#"<!DOCTYPE html><html{lang}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{favicon_link}{pwa_head}
+        r#"<!DOCTYPE html><html{lang}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{title}{favicon_link}{pwa_head}
 <style>{css}</style></head><body>
 <div id="rw">{ssr_html}</div>
 <script>
@@ -588,6 +614,27 @@ fn base_path_js(base_path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_title_is_escaped_and_replaces_the_pwa_one() {
+        let html = generate_styled_capsule(&CapsuleConfig::new().title("Inbox <3 & co"), "");
+        assert!(
+            html.contains("<title>Inbox &lt;3 &amp; co</title>"),
+            "{html}"
+        );
+
+        let config = CapsuleConfig::new()
+            .title("Office")
+            .pwa(crate::pwa::Pwa::new("Office PWA"));
+        let html = generate_styled_capsule(&config, "");
+        assert_eq!(html.matches("<title>").count(), 1, "{html}");
+        assert!(html.contains("<title>Office</title>"));
+
+        let pwa_only = CapsuleConfig::new().pwa(crate::pwa::Pwa::new("Office PWA"));
+        let html = generate_styled_capsule(&pwa_only, "");
+        assert!(html.contains("<title>Office PWA</title>"));
+        assert!(!generate_styled_capsule(&CapsuleConfig::new(), "").contains("<title>"));
+    }
+
     #[test]
     fn the_favicon_link_follows_the_base_path_and_is_escaped() {
         let config = CapsuleConfig::new()

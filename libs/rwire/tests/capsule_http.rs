@@ -151,3 +151,25 @@ async fn the_favicon_is_served_and_linked() {
     // The PWA keeps its home-screen icon.
     assert!(page.contains("apple-touch-icon"));
 }
+
+/// `CapsuleConfig::title` is the page's one `<title>`, in the SSR paint too.
+#[tokio::test]
+async fn the_title_is_set_with_and_without_ssr() {
+    for (port, ssr) in [(19186, false), (19187, true)] {
+        tokio::spawn(async move {
+            let _ = Server::bind(&format!("127.0.0.1:{port}"))
+                .unwrap()
+                .root(page)
+                .capsule_config(CapsuleConfig::new().title("Office — agents").ssr(ssr))
+                .run()
+                .await;
+        });
+        wait_up(port).await;
+        let page = text(&get(port, "/", "").await);
+        assert_eq!(page.matches("<title>").count(), 1, "{page}");
+        assert!(page.contains("<title>Office — agents</title>"), "{page}");
+        if ssr {
+            assert!(page.contains("the app page"), "no SSR paint");
+        }
+    }
+}

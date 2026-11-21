@@ -165,6 +165,19 @@ Apply a named palette with `Theme::dark().palette(rwire_themes::palettes::nord()
 `rwire-themes` crate ships nord, indigo, catppuccin, dracula, solarized, gruvbox, tokyo_night,
 rose_pine, and one_dark.
 
+### .title(text)
+
+```rust
+CapsuleConfig::new().title("Office — agents")
+```
+
+The page's `<title>` (escaped), in the `ssr(true)` paint too; with a PWA it
+replaces the title taken from the PWA name. One title for the whole app: it
+doesn't change with client-side navigation (that would need the runtime to set
+`document.title` on each route change), so there is no per-route title, not
+even in the SSR paint, which would then disagree with the page after the first
+navigation.
+
 ### .favicon(bytes, content_type)
 
 ```rust

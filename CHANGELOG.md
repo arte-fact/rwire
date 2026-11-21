@@ -71,6 +71,8 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   path, and an app with neither only at `/`.
 - **`CapsuleConfig::favicon(bytes, content_type)`** serves `/favicon.ico`
   and links it from the `<head>` (replacing the PWA's `<link rel="icon">`).
+- **`CapsuleConfig::title(text)`**: the page's `<title>` (replacing the PWA
+  name's). One title per app; no per-route title yet (documented).
 
 ### Added: asset folders served from disk
 
