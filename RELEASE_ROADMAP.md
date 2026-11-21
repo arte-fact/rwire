@@ -296,7 +296,8 @@ with the release track — nothing in it blocks 0.1.
   WebSocket frame. Live-verified on the counter example: `curl` with no JS
   returns real content (">0<"), and the live E2E still passes (the swap
   works). Known limitation, documented: every path serves the root's static
-  paint — per-route SSR is future work.
+  paint — per-route SSR is future work. (Since lifted: the paint is rendered
+  per request, for the requested route, with the current shared state.)
 - **Problem:** First render requires WS connect; crawlers and no-JS see a blank page.
   Weak for content sites — ironically including the rwire docs site itself.
 - **Fix direction:** server renders initial HTML into the capsule (the builder tree is

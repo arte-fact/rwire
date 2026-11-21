@@ -145,12 +145,43 @@ CapsuleConfig::new()
 .capsule_config(CapsuleConfig::new().ssr(true))
 ```
 
-With `ssr(true)`, the capsule ships the root tree rendered at its **default
-state** (synced regions included), plus exactly the utility CSS those classes
-need — so crawlers and no-JS clients see real content, and humans get a paint
-before the WebSocket connects. The live render replaces it on the first
-frame. Current limitation: every path serves the root's static paint (routed
-views render after connect).
+With `ssr(true)`, every page load ships the root tree rendered for the
+**requested route** (the router's `outlet()` renders the matched view), plus
+exactly the utility CSS those classes need — so crawlers and no-JS clients see
+real content, and humans get a paint before the WebSocket connects. The live
+render replaces it on the first frame.
+
+Which state the paint shows:
+
+- `#[storage(shared)]` state: its **current** value, the same for every visitor.
+- `#[storage(memory)]` and `#[storage(persisted)]` state: the **default**.
+  They belong to a connection or a session, which a plain `GET` doesn't have
+  yet; the live render fills them in.
+
+The paint is rendered without a connection: the app's `on_route` handler
+doesn't run, and there is no visitor identity. A view that hides shared data
+behind connection state (a login flow in `on_route`, a role check on memory
+state) would show that data in the paint. Leave such routes out; they are
+served with an empty mount and render live only:
+
+```rust
+CapsuleConfig::new()
+    .ssr(true)
+    .ssr_exclude("/account/*")
+    .ssr_exclude("/admin")
+```
+
+Behind an auth gate (`auth()` or `auth_with()`), the paint is **off** unless
+you allow it with `.ssr_behind_auth(true)`: the gate admits the visitor, but
+the paint doesn't know who they are, so it is only safe when every
+authenticated visitor may see all the shared data it renders. When it is on,
+it is rendered after the gate: a visitor who gets the login page instead of
+the app gets no static paint either.
+
+A path no route matches is answered `404 Not Found` (the page still loads and
+renders the router's not-found view). With a PWA, the service worker's
+offline fallback is the `/` page cached at install, so offline its paint
+shows the shared state of that time.
 
 ## Health Check Endpoints
 

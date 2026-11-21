@@ -27,6 +27,41 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   frames; with Nagle the second waited for the client's delayed ACK, so every
   click round trip cost ~40 ms on any runtime.
 
+### Fixed: first render of routed views and the static first paint
+
+- A region inside the router's `outlet()` that reads `#[storage(shared)]`
+  state painted the state's empty default when its route was opened or
+  navigated to, until the next broadcast. The route swap now finds every
+  shared/persisted state the new view reads (nested regions included) and
+  renders the cached copy. Regions nested in the new view whose state the
+  connection didn't hold yet (memory state, or shared state never published)
+  rendered nothing; they now render the state's default.
+- `ssr(true)` rendered the root once, at startup, at the default state and
+  the default route: `/posts/x` served the `/` view with empty content. The
+  static paint is now rendered per request, for the requested route, with
+  the current shared state; memory and persisted state render their default
+  (they belong to a connection or a session). It is rendered past the auth
+  gate, like the live page, in one pass that also collects its CSS.
+- A deep link painted the `/` view for a moment before the requested route
+  (and, with `ssr(true)`, replaced the right paint with it): the initial DOM
+  was rendered before the client's `R<path>`. With the built-in router, a new
+  connection now waits briefly (at most 500 ms) for that message and renders
+  the reported route in its initial DOM.
+- `GET http://host/path` (the absolute form some proxies send) is routed as
+  `/path`, not `/`. A path no route matches is answered `404 Not Found`; the
+  page still renders the router's not-found view.
+
+### Added: control over the static first paint
+
+- `CapsuleConfig::ssr_exclude(pattern)`: routes served without the paint, for
+  views whose content depends on the connection (`on_route`, identity, memory
+  or persisted state). The paint has neither, so it could show shared data
+  such a view hides.
+- `ssr(true)` is now **off behind `auth()` / `auth_with()`** unless
+  `CapsuleConfig::ssr_behind_auth(true)` allows it, since the paint does not
+  know the visitor's identity.
+- `capsule::serve_with_status`: `capsule::serve` with another status line.
+
 First public release. Highlights of what the framework ships with:
 
 - **Core**: server-owned state over a binary WebSocket protocol; ~16KB

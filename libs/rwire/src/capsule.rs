@@ -20,14 +20,35 @@ use crate::{el, At, Av, El, ElementBuilder, St, Style};
 ///
 /// If `session_id` is provided and `is_new_session` is true, sets a session cookie.
 pub async fn serve(
+    stream: TcpStream,
+    capsule: &str,
+    session_id: Option<&SessionId>,
+    is_new_session: bool,
+    secure_cookie: bool,
+) -> std::io::Result<()> {
+    serve_with_status(
+        stream,
+        "200 OK",
+        capsule,
+        session_id,
+        is_new_session,
+        secure_cookie,
+    )
+    .await
+}
+
+/// [`serve`] with another status line (e.g. `"404 Not Found"` for a path no
+/// route matches: the page still loads and renders the router's not-found view).
+pub async fn serve_with_status(
     mut stream: TcpStream,
+    status: &str,
     capsule: &str,
     session_id: Option<&SessionId>,
     is_new_session: bool,
     secure_cookie: bool,
 ) -> std::io::Result<()> {
     // Build HTTP response headers
-    let mut headers = String::from("HTTP/1.1 200 OK\r\n");
+    let mut headers = format!("HTTP/1.1 {status}\r\n");
     headers.push_str("Content-Type: text/html; charset=utf-8\r\n");
     headers.push_str("Connection: close\r\n");
     headers.push_str("Cache-Control: no-cache\r\n");

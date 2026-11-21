@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
     build_synced_update_with_known_symbols, extract_renderers, BuildContext, ClientActionIndices,
-    ElementBuilder, SyncedElement,
+    ElementBuilder, SyncedElement, SyncedRenderer,
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
@@ -1144,9 +1144,10 @@ where
         let capsule_config = apply_base_path(self.capsule_config, self.base_path);
         let assets = Arc::new(self.assets);
 
+        let gated = self.auth.is_some() || self.delegated.is_some();
         // Generate capsule - styled if config provided, basic otherwise.
         // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
-        let (capsule, pwa_assets) = if let Some(config) = capsule_config {
+        let (capsule, pwa_assets, ssr_exclude) = if let Some(config) = capsule_config {
             // If theme provider is set, override config theme with initial theme
             let config = if let Some(ref theme) = initial_theme {
                 config.theme(theme.clone())
@@ -1161,23 +1162,28 @@ where
             let composite_css = ctx.composite_table().generate_css();
             let mut config = config.with_composite_css(composite_css);
 
-            // Static first paint (SSR): render the root at default state into
-            // the capsule, and inline exactly the utility CSS its classes
-            // reference (they'd otherwise arrive lazily, after first paint).
-            let mut ssr_css = String::new();
+            // Static first paint (SSR): rendered per request (see `Page::Ssr`), for
+            // the requested route and the current shared state. Leave a slot for
+            // the markup and one for the utility CSS its classes reference (they'd
+            // otherwise arrive lazily, after first paint).
+            // The paint has no visitor identity: behind an auth gate it is off
+            // unless the app allows it (`ssr_behind_auth`).
+            if config.ssr && gated && !config.ssr_behind_auth {
+                config.ssr = false;
+                println!(
+                    "SSR: off behind auth (the paint has no visitor identity); \
+                     allow it with CapsuleConfig::ssr_behind_auth(true)"
+                );
+            }
             if config.ssr {
-                config.ssr_html = root_element.to_static_html();
-                for key in root_element.static_style_rules() {
-                    if let Some(rule) = key.to_css_rule() {
-                        ssr_css.push_str(&rule);
-                        ssr_css.push('\n');
-                    }
-                }
+                config.ssr_html = SSR_HTML_SLOT.to_string();
             }
 
             // Generate CSS and embed in capsule HTML <style> tag.
             let mut css = capsule_gen::generate_capsule_css(&config);
-            css.push_str(&ssr_css);
+            if config.ssr {
+                css.push_str(SSR_CSS_SLOT);
+            }
             let capsule = capsule_gen::generate_styled_capsule(&config, &css);
 
             // PWA: version the service-worker cache by the capsule's hash so a new
@@ -1188,13 +1194,13 @@ where
                 capsule.hash(&mut h);
                 Arc::new(p.freeze_served(&config.theme, h.finish()))
             });
-            (capsule, pwa_assets)
+            (capsule, pwa_assets, config.ssr_exclude)
         } else {
-            (capsule_gen::generate_capsule(), None)
+            (capsule_gen::generate_capsule(), None, Vec::new())
         };
 
         let capsule_size = capsule.len();
-        let capsule = Arc::new(capsule);
+        let capsule = Arc::new(Page::new(capsule, &ssr_exclude));
         let composite_table = Arc::new(ctx.composite_table().clone());
 
         println!("Server listening on http://{}", self.addr);
@@ -1308,6 +1314,142 @@ where
         println!("Server stopped");
         Ok(())
     }
+}
+
+/// Where the per-request static first paint goes in an `ssr(true)` capsule.
+const SSR_HTML_SLOT: &str = "\u{1}rwire-ssr-html\u{1}";
+/// Where the CSS of that paint goes, inside the capsule's `<style>`.
+const SSR_CSS_SLOT: &str = "\u{1}rwire-ssr-css\u{1}";
+
+/// The page served for a `GET`: the capsule as generated at startup, or, with
+/// `ssr(true)`, the capsule around a static first paint rendered per request.
+enum Page {
+    Fixed(String),
+    /// The capsule split at [`SSR_CSS_SLOT`] and [`SSR_HTML_SLOT`].
+    Ssr {
+        head: String,
+        mid: String,
+        tail: String,
+        /// Routes served without the paint ([`CapsuleConfig::ssr_exclude`]).
+        exclude: Vec<crate::router::RoutePattern>,
+    },
+}
+
+impl Page {
+    fn new(capsule: String, exclude: &[String]) -> Self {
+        let Some((head, rest)) = capsule.split_once(SSR_CSS_SLOT) else {
+            return Page::Fixed(capsule);
+        };
+        let Some((mid, tail)) = rest.split_once(SSR_HTML_SLOT) else {
+            return Page::Fixed(capsule);
+        };
+        Page::Ssr {
+            head: head.to_string(),
+            mid: mid.to_string(),
+            tail: tail.to_string(),
+            exclude: exclude
+                .iter()
+                .map(|p| crate::router::RoutePattern::new(p))
+                .collect(),
+        }
+    }
+
+    /// The status line and page for a `GET` of `target` (the request-line target).
+    ///
+    /// `404 Not Found` when the built-in router has no route for the path: the
+    /// page still loads and renders the router's not-found view, but crawlers and
+    /// probes (`/favicon.ico`, `/wp-login.php`) see the miss.
+    fn render<F>(
+        &self,
+        root: &F,
+        shared: &SharedServerState,
+        target: &str,
+    ) -> (&'static str, Cow<'_, str>)
+    where
+        F: Fn() -> ElementBuilder,
+    {
+        let path = route_path(target);
+        let status = match crate::router::installed_router() {
+            Some(router) if router.match_path(path).is_none() => "404 Not Found",
+            _ => "200 OK",
+        };
+        let page = match self {
+            Page::Fixed(capsule) => Cow::Borrowed(capsule.as_str()),
+            Page::Ssr {
+                head,
+                mid,
+                tail,
+                exclude,
+            } => {
+                if exclude.iter().any(|p| p.matches(path).is_some()) {
+                    Cow::Owned([head.as_str(), mid, tail].concat())
+                } else {
+                    let (html, css) = render_ssr(&root(), shared, path);
+                    Cow::Owned([head.as_str(), &css, mid, &html, tail].concat())
+                }
+            }
+        };
+        (status, page)
+    }
+}
+
+/// The route path of a request target, without query or fragment. Takes the
+/// origin form (`/posts/x?ref=feed`) and the absolute form some proxies send
+/// (`http://host/posts/x`).
+fn route_path(target: &str) -> &str {
+    let target = match target.split_once("://") {
+        Some((scheme, rest)) if !scheme.contains(['/', '?', '#']) => {
+            // The authority ends at the path, the query or the fragment.
+            match rest.find(['/', '?', '#']) {
+                Some(i) if rest[i..].starts_with('/') => &rest[i..],
+                _ => "/",
+            }
+        }
+        _ => target,
+    };
+    target.split(['?', '#']).next().unwrap_or("")
+}
+
+/// The static first paint of `root` at `path` and the CSS its classes need.
+///
+/// The router's outlet renders `path`. Regions over `#[storage(shared)]` state
+/// render the current shared copy: it is the same for every visitor of the page.
+/// Memory and persisted state belong to a connection or a session, which a
+/// plain `GET` does not have yet, so their regions render the state's default;
+/// the live render replaces the paint on the first WebSocket frame.
+///
+/// One pass over the tree, under the shared cache's read lock; the CSS rules
+/// are formatted after it is released.
+fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, path: &str) -> (String, String) {
+    let mut route = crate::router::CurrentRoute::default();
+    if path.starts_with('/') {
+        route.set_path(path);
+    }
+    let (html, keys) = {
+        let cache = shared
+            .shared_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let state_for = |renderer: &dyn SyncedRenderer| -> Option<&dyn Any> {
+            if renderer.state_type_id() == TypeId::of::<crate::router::CurrentRoute>() {
+                return Some(&route);
+            }
+            if renderer.storage_type() != StorageType::Shared {
+                return None;
+            }
+            let key = shared_cache_key(StorageType::Shared, renderer.table_name(), "")?;
+            cache.get(&key).map(|state| state.as_ref() as &dyn Any)
+        };
+        root.to_static_html_and_styles(&state_for)
+    };
+    let mut css = String::new();
+    for key in keys {
+        if let Some(rule) = key.to_css_rule() {
+            css.push_str(&rule);
+            css.push('\n');
+        }
+    }
+    (html, css)
 }
 
 /// Bind a TCP listener with `SO_REUSEADDR` set.
@@ -1683,7 +1825,7 @@ async fn handle_client<F>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     root: Arc<F>,
-    capsule: Arc<String>,
+    capsule: Arc<Page>,
     shared: Arc<SharedServerState>,
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
@@ -2044,9 +2186,13 @@ async fn handle_client<F>(
         // HTTPS (auto-detected from the proxy's X-Forwarded-Proto), or when the
         // config forces it on. Off for plain-HTTP dev so the cookie isn't dropped.
         let secure_cookie = config.secure_cookies || forwarded_https(&peek_str);
-        if let Err(e) = capsule::serve(
+        // Rendered here, past the auth gates above: the static paint (and the shared
+        // state in it) reaches exactly the visitors the live page would.
+        let (status, page) = capsule.render(root.as_ref(), &shared, request_line(&peek_str).1);
+        if let Err(e) = capsule::serve_with_status(
             stream,
-            &capsule,
+            status,
+            &page,
             Some(&session_id),
             is_new_session,
             secure_cookie,
@@ -2058,6 +2204,14 @@ async fn handle_client<F>(
     } else {
         eprintln!("[{}] Unknown request type", peer_addr);
     }
+}
+
+/// What a routed view reads, from [`ConnectionState::view_state_keys`].
+struct ViewStates {
+    /// `(type, cache key)` of every shared/persisted state the view reads.
+    keys: Vec<(TypeId, String)>,
+    /// A default for every state type the view reads that the connection lacked.
+    defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 /// Per-connection state container supporting multiple state types.
@@ -2452,17 +2606,31 @@ impl ConnectionState {
         let mut discovered: Vec<crate::builder::SyncedElement> = Vec::new();
         let mut rerendered: Vec<u32> = Vec::new();
         let update = {
-            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
-                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
             // `states` only holds defaults for shared state; the authoritative copy is
             // in the shared cache. Override before rendering so the swapped-in view
-            // doesn't paint from empty defaults.
+            // doesn't paint from empty defaults. The page's known regions are not
+            // enough: the new view's regions (nested ones included) are registered
+            // only after this render, so look them up in the view itself.
             let cache_guard = shared
                 .shared_cache
                 .read()
                 .map_err(|_| "shared cache lock poisoned")?;
+            let ViewStates {
+                keys: view_keys,
+                defaults: view_defaults,
+            } = self.view_state_keys(&cache_guard, &view);
+            // A nested region renders nothing without a state: seed the default of
+            // every type the view reads (memory state, and shared state nobody has
+            // published yet). `or_insert` keeps the state of a prior visit.
+            for (tid, state) in view_defaults {
+                self.states.entry(tid).or_insert(state);
+            }
+            let mut states_map: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
             for (tid, key) in
                 shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
+                    .into_iter()
+                    .chain(view_keys)
             {
                 if let Some(state) = cache_guard.get(&key) {
                     states_map.insert(tid, state.as_ref());
@@ -2496,6 +2664,68 @@ impl ConnectionState {
             }
         }
         Ok(update)
+    }
+
+    /// Every shared/persisted state `view` reads, as `(type, cache key)`, nested regions
+    /// included, and a default for each state type it reads that the connection
+    /// doesn't hold yet. Found like the connection's opening pass finds the page's regions:
+    /// render the view, collect its regions, and repeat with the states found until no
+    /// new type appears. Each pass renders with the cached copies found so far, so a
+    /// region that only exists for the real data (not the empty default) counts too.
+    fn view_state_keys(
+        &self,
+        cache: &HashMap<String, Box<dyn Any + Send + Sync>>,
+        view: &ElementBuilder,
+    ) -> ViewStates {
+        let mut defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+        let mut keys: Vec<(TypeId, String)> = Vec::new();
+        loop {
+            let (new_types, found) = {
+                let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> =
+                    self.states.iter().map(|(k, v)| (*k, v.as_ref())).collect();
+                for (tid, state) in &defaults {
+                    states.entry(*tid).or_insert(state.as_ref());
+                }
+                for (tid, key) in &keys {
+                    if let Some(state) = cache.get(key) {
+                        states.insert(*tid, state.as_ref());
+                    }
+                }
+                let mut ctx = BuildContext::new();
+                if states.is_empty() {
+                    let placeholder: () = ();
+                    ctx.collect_symbols(view, &placeholder);
+                    ctx.emit(view, &placeholder);
+                } else {
+                    ctx.collect_symbols_multi(view, &states);
+                    ctx.emit_multi(view);
+                }
+                let synced = ctx.take_synced_elements();
+                let found = shared_persisted_keys(ctx.handlers(), &synced, &self.session_id);
+                let new_types: Vec<(TypeId, Box<dyn Any + Send + Sync>)> = synced
+                    .iter()
+                    .filter(|se| !states.contains_key(&se.state_type_id))
+                    .map(|se| (se.state_type_id, se.create_default_state()))
+                    .collect();
+                (new_types, found)
+            };
+            let mut grew = false;
+            for (tid, state) in new_types {
+                if let std::collections::hash_map::Entry::Vacant(slot) = defaults.entry(tid) {
+                    slot.insert(state);
+                    grew = true;
+                }
+            }
+            for key in found {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                    grew = true;
+                }
+            }
+            if !grew {
+                return ViewStates { keys, defaults };
+            }
+        }
     }
 
     /// Render the full initial DOM for this connection: render every region with the
@@ -2639,6 +2869,18 @@ struct ConnContext<F> {
     revalidate: Option<(Arc<crate::delegated_auth::DelegatedAuth>, String)>,
 }
 
+/// How long a new connection waits for the runtime's `R<path>` before
+/// rendering `/` (the runtime sends it on open, so it normally arrives within a
+/// round trip; a client that never sends it only delays its first frame).
+const FIRST_ROUTE_WAIT: Duration = Duration::from_millis(500);
+
+/// The built-in router's state at `path`.
+fn route_at(path: &str) -> crate::router::CurrentRoute {
+    let mut route = crate::router::CurrentRoute::default();
+    route.set_path(path);
+    route
+}
+
 async fn handle_websocket<F>(
     ws_stream: tokio_tungstenite::WebSocketStream<TcpStream>,
     peer_addr: SocketAddr,
@@ -2659,6 +2901,24 @@ where
         revalidate,
     } = cx;
     let (mut write, mut read) = ws_stream.split();
+
+    // With the built-in router, wait briefly for the path the runtime reports as
+    // soon as the socket opens (`R<path>`), so the initial DOM already renders the
+    // requested route. Rendering `/` first and swapping on that message would
+    // flash the `/` view on every deep link (and replace an SSR paint of the
+    // right route with it). The message is still handled below, like any other:
+    // the route swap is a no-op by then, and `on_route` runs.
+    let mut early = None;
+    let mut initial_path = None;
+    if crate::router::installed_router().is_some() {
+        if let Ok(Some(item)) = timeout(FIRST_ROUTE_WAIT, read.next()).await {
+            if let Ok(Message::Text(text)) = &item {
+                initial_path = text.strip_prefix('R').map(str::to_string);
+            }
+            early = Some(item);
+        }
+    }
+    let mut read = futures::stream::iter(early).chain(read);
 
     // Allocate connection ID and register broadcast channel. The receiver is
     // consumed in the main loop so background state changes (and cross-tab
@@ -2697,6 +2957,13 @@ where
     // (and the handlers they bind) are discovered too; iterate until no new state
     // type appears.
     let mut discovered: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+    if let Some(path) = &initial_path {
+        // Discover the requested route's view, not `/`'s.
+        discovered.insert(
+            TypeId::of::<crate::router::CurrentRoute>(),
+            Box::new(route_at(path)),
+        );
+    }
     loop {
         let mut ctx = BuildContext::new();
         if discovered.is_empty() {
@@ -2730,12 +2997,12 @@ where
             .insert(TypeId::of::<Theme>(), Box::new(theme.as_ref().clone()));
     }
 
-    // Seed the built-in CurrentRoute so the outlet renders the initial path ("/");
-    // the client's on-connect R<path> corrects it for deep-links.
+    // Seed the built-in CurrentRoute so the outlet renders the path the client
+    // reported, or `/` if it didn't in time (its R<path> then swaps the view).
     if crate::router::installed_router().is_some() {
         conn_state.states.insert(
             TypeId::of::<crate::router::CurrentRoute>(),
-            Box::new(crate::router::CurrentRoute::default()),
+            Box::new(route_at(initial_path.as_deref().unwrap_or("/"))),
         );
     }
 
@@ -2746,6 +3013,13 @@ where
         conn_state.initialize_missing_states();
     } else {
         conn_state.initialize_all_states();
+    }
+    // A restored session's route is the page it left; the reported path wins.
+    if let Some(path) = &initial_path {
+        conn_state.states.insert(
+            TypeId::of::<crate::router::CurrentRoute>(),
+            Box::new(route_at(path)),
+        );
     }
 
     // Subscribe to every shared/persisted state this connection renders or
@@ -3093,7 +3367,7 @@ where
 
 #[cfg(test)]
 mod auth_tests {
-    use super::{request_body, request_line, rewrite_proxy_head, url_decode, AuthGate};
+    use super::{request_body, request_line, rewrite_proxy_head, route_path, url_decode, AuthGate};
 
     #[test]
     fn url_decode_handles_plus_and_percent() {
@@ -3122,6 +3396,18 @@ mod auth_tests {
         let got = String::from_utf8(rewrite_proxy_head(ws, "/preview/ws-abc")).unwrap();
         assert!(got.starts_with("GET / HTTP/1.1"));
         assert!(got.contains("Upgrade: websocket"));
+    }
+
+    #[test]
+    fn route_path_of_origin_and_absolute_targets() {
+        assert_eq!(route_path("/posts/x"), "/posts/x");
+        assert_eq!(route_path("/posts/x?ref=feed#top"), "/posts/x");
+        assert_eq!(route_path("/go?to=http://elsewhere/x"), "/go");
+        assert_eq!(route_path("http://host/posts/x"), "/posts/x");
+        assert_eq!(route_path("https://host:8443/posts/x?y=/z"), "/posts/x");
+        assert_eq!(route_path("http://host"), "/");
+        assert_eq!(route_path("http://host?a=/b"), "/");
+        assert_eq!(route_path(""), "");
     }
 
     #[test]
