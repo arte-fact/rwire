@@ -12,12 +12,12 @@ use std::io::Write;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
-/// `bytes` gzipped (default level).
-pub(crate) fn gzip(bytes: &[u8]) -> Vec<u8> {
+/// `bytes` gzipped (default level), or `None` if the encoder failed: the
+/// caller then sends the body as it is, never an empty one.
+pub(crate) fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::with_capacity(bytes.len() / 3), Compression::default());
-    // Writing to a Vec can't fail.
-    let _ = encoder.write_all(bytes);
-    encoder.finish().unwrap_or_default()
+    encoder.write_all(bytes).ok()?;
+    encoder.finish().ok()
 }
 
 /// `bytes` gzipped if the type is text and it saves at least a tenth.
@@ -25,7 +25,7 @@ pub(crate) fn gzip_if_worth_it(content_type: &str, bytes: &[u8]) -> Option<Vec<u
     if !is_compressible(content_type) || bytes.len() < 512 {
         return None;
     }
-    let gz = gzip(bytes);
+    let gz = gzip(bytes)?;
     (gz.len() * 10 < bytes.len() * 9).then_some(gz)
 }
 
@@ -46,8 +46,10 @@ pub(crate) fn is_compressible(content_type: &str) -> bool {
         )
 }
 
-/// Whether the request's `Accept-Encoding` takes gzip (`gzip`, `x-gzip` or
-/// `*`, with a non-zero `q`).
+/// Whether the request's `Accept-Encoding` takes gzip: `gzip` or `x-gzip`
+/// with a non-zero `q`, or else `*` with a non-zero `q`. A coding named
+/// explicitly wins over `*`, so `gzip;q=0, *` refuses gzip (RFC 9110,
+/// 12.5.3).
 pub(crate) fn accepts_gzip(request: &str) -> bool {
     let Some(value) = request
         .lines()
@@ -62,7 +64,8 @@ pub(crate) fn accepts_gzip(request: &str) -> bool {
     else {
         return false;
     };
-    value.split(',').any(|item| {
+    let (mut named, mut any) = (None::<bool>, None::<bool>);
+    for item in value.split(',') {
         let mut parts = item.split(';');
         let coding = parts.next().unwrap_or("").trim().to_ascii_lowercase();
         let q = parts
@@ -70,8 +73,13 @@ pub(crate) fn accepts_gzip(request: &str) -> bool {
             .filter_map(|q| q.trim().parse::<f32>().ok())
             .next()
             .unwrap_or(1.0);
-        q > 0.0 && matches!(coding.as_str(), "gzip" | "x-gzip" | "*")
-    })
+        match coding.as_str() {
+            "gzip" | "x-gzip" => *named.get_or_insert(false) |= q > 0.0,
+            "*" => *any.get_or_insert(false) |= q > 0.0,
+            _ => {}
+        }
+    }
+    named.or(any).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -92,10 +100,22 @@ mod tests {
             "*",
             "x-gzip",
             "GZIP",
+            "br;q=0, *",
+            "*;q=0, gzip",
         ] {
             assert!(accepts_gzip(&head(yes)), "{yes}");
         }
-        for no in ["identity", "br", "gzip;q=0", "deflate, gzip;q=0.0", ""] {
+        for no in [
+            "identity",
+            "br",
+            "gzip;q=0",
+            "deflate, gzip;q=0.0",
+            "",
+            // A coding named explicitly wins over `*`, in either order.
+            "gzip;q=0, *",
+            "*, gzip;q=0",
+            "*;q=0",
+        ] {
             assert!(!accepts_gzip(&head(no)), "{no}");
         }
         assert!(!accepts_gzip("GET / HTTP/1.1\r\nHost: x\r\n\r\n"));
@@ -108,7 +128,7 @@ mod tests {
     #[test]
     fn gzip_round_trips() {
         let text = "<p>hello</p>".repeat(500);
-        let gz = gzip(text.as_bytes());
+        let gz = gzip(text.as_bytes()).expect("gzip");
         assert!(gz.len() < text.len() / 10);
         let mut back = String::new();
         flate2::read::GzDecoder::new(&gz[..])

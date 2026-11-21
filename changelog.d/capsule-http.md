@@ -12,5 +12,6 @@
 - **gzip**: the page (fixed capsule compressed once at startup, 27.6 KB →
   9.8 KB; the `ssr(true)` page compressed per request, ~0.6 ms), text
   `asset()`s and the bundled extension modules, for clients whose
-  `Accept-Encoding` takes gzip, with `Vary: Accept-Encoding`. New dependency:
-  `flate2` (pure-Rust backend).
+  `Accept-Encoding` takes gzip (a `gzip;q=0` wins over `*`), with
+  `Vary: Accept-Encoding`; if the encoder fails, the body goes uncompressed.
+  New dependency: `flate2` (pure-Rust backend).

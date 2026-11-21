@@ -194,7 +194,6 @@ pub async fn serve_static(stream: TcpStream, content_type: &str, body: &[u8]) ->
     serve_static_cached(stream, content_type, body, "public, max-age=3600").await
 }
 
-/// Serve a static body with the `Cache-Control` directive given: a file
 /// [`serve_static_cached`] for a body that may be gzipped: `gzipped` adds
 /// `Content-Encoding: gzip`, `vary` adds `Vary: Accept-Encoding` (set it
 /// whenever the file has a gzipped variant, sent or not).
@@ -231,6 +230,7 @@ pub(crate) async fn serve_static_encoded(
     Ok(())
 }
 
+/// Serve a static body with the `Cache-Control` directive given: a file
 /// whose path carries its content's hash can be kept for a year, immutable.
 pub async fn serve_static_cached(
     mut stream: TcpStream,

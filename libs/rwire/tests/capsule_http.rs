@@ -94,6 +94,32 @@ async fn an_app_with_on_route_routes_every_path() {
     assert!(r.contains("<script>"));
 }
 
+/// Under a `base_path`, the reverse proxy strips the prefix: the server
+/// sees root-relative paths and answers them as at the root, the short 404
+/// included.
+#[tokio::test]
+async fn the_short_404_holds_under_a_base_path() {
+    tokio::spawn(async {
+        let _ = Server::bind("127.0.0.1:19190")
+            .unwrap()
+            .root(page)
+            .capsule_config(CapsuleConfig::new().base_path("/preview/7"))
+            .run()
+            .await;
+    });
+    wait_up(19190).await;
+    let r = text(&get(19190, "/", "").await);
+    assert!(r.starts_with("HTTP/1.1 200 OK"), "{r}");
+    assert!(r.contains("/preview/7"), "the page carries the base path");
+    for miss in ["/favicon.ico", "/a/b", "/preview/7/a"] {
+        let r = get(19190, miss, "").await;
+        let t = text(&r);
+        assert!(t.starts_with("HTTP/1.1 404 Not Found"), "{miss}: {t}");
+        assert!(r.len() < 300, "{miss}: {} bytes", r.len());
+        assert!(!t.contains("<script>"), "{miss}: the page was sent");
+    }
+}
+
 const ICON: &[u8] = b"\x89PNG fake icon";
 
 /// The response body (after the blank line).

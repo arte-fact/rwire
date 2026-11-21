@@ -1396,8 +1396,9 @@ const SSR_CSS_SLOT: &str = "\u{1}rwire-ssr-css\u{1}";
 /// The page served for a `GET`: the capsule as generated at startup, or, with
 /// `ssr(true)`, the capsule around a static first paint rendered per request.
 enum Page {
-    /// The capsule, and the same gzipped once at startup.
-    Fixed { html: String, gzip: Vec<u8> },
+    /// The capsule, and the same gzipped once at startup (`None` if the
+    /// encoder failed: the capsule is then always sent as it is).
+    Fixed { html: String, gzip: Option<Vec<u8>> },
     /// The capsule split at [`SSR_CSS_SLOT`] and [`SSR_HTML_SLOT`].
     Ssr {
         head: String,
@@ -1433,9 +1434,10 @@ impl Page {
     }
 
     /// The status line and page for a `GET` of `target` (the request-line
-    /// target), or `None` for a short `404` (see [`page_status`]). The page is
-    /// gzipped when `gzip` (the client takes it): once at startup for the
-    /// fixed capsule, here for the per-request `ssr(true)` page.
+    /// target), and whether the page is gzipped, or `None` for a short `404`
+    /// (see [`page_status`]). The page is gzipped when `gzip` (the client
+    /// takes it): once at startup for the fixed capsule, here for the
+    /// per-request `ssr(true)` page; if the encoder fails it goes as it is.
     fn render<F>(
         &self,
         root: &F,
@@ -1443,7 +1445,7 @@ impl Page {
         target: &str,
         routes_itself: bool,
         gzip: bool,
-    ) -> Option<(&'static str, Cow<'_, [u8]>)>
+    ) -> Option<(&'static str, Cow<'_, [u8]>, bool)>
     where
         F: Fn() -> ElementBuilder,
     {
@@ -1451,14 +1453,10 @@ impl Page {
         let status = page_status(path, routes_itself)?;
         let page: Cow<'_, str> = match self {
             Page::Fixed { html, gzip: packed } => {
-                return Some((
-                    status,
-                    if gzip {
-                        Cow::Borrowed(packed.as_slice())
-                    } else {
-                        Cow::Borrowed(html.as_bytes())
-                    },
-                ));
+                return Some(match packed {
+                    Some(packed) if gzip => (status, Cow::Borrowed(packed.as_slice()), true),
+                    _ => (status, Cow::Borrowed(html.as_bytes()), false),
+                });
             }
             Page::Ssr {
                 head,
@@ -1474,15 +1472,17 @@ impl Page {
                 }
             }
         };
-        let body = if gzip {
-            Cow::Owned(crate::compress::gzip(page.as_bytes()))
-        } else {
-            match page {
-                Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
-                Cow::Owned(text) => Cow::Owned(text.into_bytes()),
-            }
+        if let Some(packed) = gzip
+            .then(|| crate::compress::gzip(page.as_bytes()))
+            .flatten()
+        {
+            return Some((status, Cow::Owned(packed), true));
+        }
+        let body = match page {
+            Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
+            Cow::Owned(text) => Cow::Owned(text.into_bytes()),
         };
-        Some((status, body))
+        Some((status, body, false))
     }
 }
 
@@ -1965,18 +1965,16 @@ async fn serve_ext_module(
     gzip: bool,
 ) -> std::io::Result<()> {
     // The bundled modules are gzipped once, on first request.
-    static PACKED: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    let bytes = if gzip {
-        PACKED.get_or_init(|| crate::compress::gzip(EXT_VIM_JS.as_bytes()))
-    } else {
-        body.as_bytes()
-    };
+    static PACKED: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
+    let packed = gzip
+        .then(|| PACKED.get_or_init(|| crate::compress::gzip(EXT_VIM_JS.as_bytes())))
+        .and_then(Option::as_deref);
     crate::health::serve_static_encoded(
         stream,
         "text/javascript; charset=utf-8",
-        bytes,
+        packed.unwrap_or(body.as_bytes()),
         "no-cache",
-        gzip,
+        packed.is_some(),
         true,
     )
     .await
@@ -2376,13 +2374,12 @@ async fn handle_client<F>(
         // Rendered here, past the auth gates above: the static paint (and the shared
         // state in it) reaches exactly the visitors the live page would.
         let target = request_line(&peek_str).1;
-        let gzip = crate::compress::accepts_gzip(&peek_str);
-        let Some((status, page)) = capsule.render(
+        let Some((status, page, gzip)) = capsule.render(
             root.as_ref(),
             &shared,
             target,
             route_handler.is_some(),
-            gzip,
+            crate::compress::accepts_gzip(&peek_str),
         ) else {
             let _ = capsule::serve_not_found(stream).await;
             return;
@@ -3643,6 +3640,26 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A capsule whose gzip failed at startup is sent as it is, flagged as
+    /// such, even to a client that takes gzip; with gzip, the packed one is.
+    #[test]
+    fn a_page_without_its_gzip_goes_uncompressed() {
+        let shared = SharedServerState::new(Duration::from_millis(100));
+        let root = || ElementBuilder::new(crate::El::Div);
+        let plain = Page::Fixed {
+            html: "<p>x</p>".into(),
+            gzip: None,
+        };
+        let (status, body, gzipped) = plain.render(&root, &shared, "/", true, true).unwrap();
+        assert_eq!(status, "200 OK");
+        assert_eq!(&*body, b"<p>x</p>");
+        assert!(!gzipped);
+        let packed = Page::fixed("<p>x</p>".into());
+        let (_, body, gzipped) = packed.render(&root, &shared, "/", true, true).unwrap();
+        assert!(gzipped);
+        assert_eq!(&body[..2], &[0x1f, 0x8b], "gzip magic");
+    }
 
     #[test]
     fn action_loading_then_success_clears_to_idle() {
