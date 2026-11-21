@@ -29,6 +29,14 @@ Theme::dark()
   already applies `font:inherit` to form controls).
 - Colours only via semantic tokens (`St::BgApp`, `St::TextMuted`, `St::BorderDefault`, …),
   never hex. The palette maps them.
+- **Subtle pairs are readable by construction.**
+  - In every built-in palette, style and mode, these reach 4.5:1:
+    - `TextWarning` / `TextSuccess` / `TextError`;
+    - the `TextOn*Subtle` tokens, on their `Bg*Subtle`;
+    - `TextDefault` / `TextHigh` on `BgAccentSubtle`.
+  - The theme computes these colours (`subtle_pairs` in theme.rs); `rwire-themes/tests/contrast.rs`
+    guards them.
+  - A custom palette gets the same treatment. Keep text on a `Bg*Subtle` to these tokens.
 
 ## 2. Components before markup
 
