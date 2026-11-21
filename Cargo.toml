@@ -7,6 +7,7 @@ members = [
     "libs/rwire-markdown",
     "libs/rwire-themes",
     "libs/rwire-map",
+    "libs/rwire-push",
     "apps/rwire-website",
     "apps/llama-modnitor",
     "apps/rwire-docs",
@@ -21,6 +22,7 @@ members = [
     "examples/nested",
     "examples/router",
     "examples/async-action",
+    "examples/push",
 ]
 resolver = "2"
 
