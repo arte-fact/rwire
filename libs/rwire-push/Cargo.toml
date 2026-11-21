@@ -9,7 +9,7 @@ keywords = ["web", "push", "notifications", "vapid", "webpush"]
 categories = ["web-programming"]
 
 [dependencies]
-rwire = { path = "../rwire", version = "0.1.0" }
+rwire = { path = "../rwire", version = "0.1.0", default-features = false }
 aes-gcm = "0.10"
 base64 = "0.22"
 futures = "0.3"
