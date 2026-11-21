@@ -85,6 +85,22 @@ Markdown rendering lives in a separate crate, `rwire-markdown`. Add it alongside
 rwire-markdown = "0.1"
 ```
 
+Markdown is treated as untrusted content:
+
+- **Links** keep their `href` only when relative (a path, `?query`, `#anchor`)
+  or `http:`, `https:` or `mailto:`. Any other scheme (`javascript:`, `tel:`,
+  `data:`…) is rendered as plain text.
+- **Images from another origin** (`https://…`, or protocol-relative `//…`)
+  are not loaded by default: loading one tells that server who reads the
+  page and when. The image is rendered as its alt text. Same-origin images
+  (`/img/a.png`) and raster `data:image/*` are kept. For trusted content,
+  turn remote images back on:
+
+```rust
+Markdown::new(post).remote_images(true).build()
+// or: parse_markdown_with_options(post, ParseOptions { remote_images: true, ..Default::default() })
+```
+
 ## Next Steps
 
 Continue to the [Quick Start](./quick-start) guide to build a fully interactive counter app with state, handlers, and reactive rendering.
