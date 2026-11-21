@@ -204,15 +204,21 @@ impl MarkdownBuilder {
                 self.stack.push(el(El::Span).st([St::LineThrough]));
             }
             Tag::Link { dest_url, .. } => {
-                self.stack.push(
-                    el(El::A)
-                        .st([St::TextAccent, St::NoDecoration])
-                        .at_str(At::Href, &dest_url),
-                );
+                // An unsafe URL (`javascript:`, `data:`, an unknown scheme) loses
+                // its href: the text stays, as an inert anchor.
+                let mut link = el(El::A).st([St::TextAccent, St::NoDecoration]);
+                if rwire::url_safety::is_allowed_link(&dest_url) {
+                    link = link.at_str(At::Href, &dest_url);
+                }
+                self.stack.push(link);
             }
             Tag::Image {
                 dest_url, title, ..
             } => {
+                // An unsafe URL drops the image; its alt text still reads.
+                if !rwire::url_safety::is_allowed_image(&dest_url) {
+                    return;
+                }
                 let mut img = el(El::Img)
                     .st([St::MaxWFull, St::HAuto, St::RoundedMd, St::MyMd])
                     .at_str(At::Src, &dest_url);
@@ -387,6 +393,77 @@ fn heading_level_to_u8(level: HeadingLevel) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The static HTML of `markdown`, for checking hrefs and srcs.
+    fn html(markdown: &str) -> String {
+        parse_markdown(markdown).content.to_static_html()
+    }
+
+    const TRAPS: [&str; 9] = [
+        "[x](javascript:alert(1))",
+        "[x](JaVaScRiPt:alert(1))",
+        "[x](<java\tscript:alert(1)>)",
+        "[x](&#106;avascript:alert(1))",
+        "[x](javascript&#58;alert(1))",
+        "[x](%6Aavascript:alert(1))",
+        "[x](vbscript:msgbox(1))",
+        "[x](data:text/html,<script>alert(1)</script>)",
+        "<javascript:alert(1)>",
+    ];
+
+    #[test]
+    fn unsafe_link_urls_lose_their_href() {
+        for md in TRAPS {
+            let out = html(md);
+            assert!(out.contains("<a"), "{md:?} is not a link: {out}");
+            assert!(!out.contains("href"), "{md:?} kept an href: {out}");
+        }
+        // The text stays.
+        assert!(html("[read me](javascript:alert(1))").contains("read me"));
+        // Reference-style links take the same path.
+        let out = html("[x][evil]\n\n[evil]: javascript:alert(1)\n");
+        assert!(!out.contains("href"), "{out}");
+    }
+
+    #[test]
+    fn unsafe_image_urls_drop_the_image() {
+        for md in [
+            "![alt](javascript:alert(1))",
+            "![alt](data:image/svg+xml,<svg onload=alert(1)>)",
+            "![alt](data:text/html,x)",
+            "![alt][pic]\n\n[pic]: vbscript:x\n",
+        ] {
+            let out = html(md);
+            assert!(!out.contains("<img"), "{md:?} kept the image: {out}");
+            assert!(out.contains("alt"), "{md:?} lost its alt text: {out}");
+        }
+        let out = html("![dot](data:image/png;base64,iVBORw0KGgo=)");
+        assert!(
+            out.contains("src=\"data:image/png;base64,iVBORw0KGgo=\""),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn safe_urls_are_kept() {
+        for (md, href) in [
+            ("[a](/docs/intro)", "/docs/intro"),
+            ("[a](guide.md)", "guide.md"),
+            ("[a](#install)", "#install"),
+            ("[a](?tab=2)", "?tab=2"),
+            (
+                "[a](https://example.com/x?y=1)",
+                "https://example.com/x?y=1",
+            ),
+            ("[a](mailto:me@example.com)", "mailto:me@example.com"),
+            ("[a](tel:+33123456789)", "tel:+33123456789"),
+            ("<https://example.com>", "https://example.com"),
+        ] {
+            let out = html(md);
+            assert!(out.contains(&format!("href=\"{href}\"")), "{md:?}: {out}");
+        }
+        assert!(html("![c](/img/cover.png)").contains("src=\"/img/cover.png\""));
+    }
 
     #[test]
     fn test_slugify() {

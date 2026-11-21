@@ -275,6 +275,11 @@ impl Router {
         }
     }
 
+    /// Whether a not-found view was declared with [`Self::not_found`].
+    pub fn has_not_found(&self) -> bool {
+        self.not_found.is_some()
+    }
+
     /// Get all route patterns (for diagnostics).
     pub fn patterns(&self) -> Vec<&str> {
         self.routes.iter().map(|r| r.pattern.pattern()).collect()

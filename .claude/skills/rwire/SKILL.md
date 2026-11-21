@@ -111,6 +111,43 @@ appears in the design-system app automatically. Gate with
   `run()` (`update_shared_if` broadcasts only real changes; sync, callable from any thread).
   `run_until(fut)` stops cleanly: listener closed, sockets closed with 1001, 5 s grace.
 
+## 4b. Web Push notifications (`rwire-push`)
+
+Standard Web Push (VAPID, RFC 8030/8291/8292), no third-party service.
+Example: `examples/push`.
+
+**rwire-push provides:**
+- the VAPID key: `VapidKey::load_or_generate(path)` / `from_env(var)`. Keep it: a new key
+  orphans every subscription;
+- the subscriptions: `Push::new(key, "mailto:…").store("…/subs.json")`, atomic file, mode 0600;
+- encryption and the signed POST to each push service: `push.send_push(&Notification)`.
+  It returns accepted / removed / failed; 404 and 410 purge the subscription;
+- the service-worker half: `Pwa::new(…).push_notifications(true)` (needs the PWA);
+- the browser half: the `push` runtime extension (`.serve_push()` on the server).
+
+**The app writes:**
+- a button that subscribes: `Button::primary("Notify me").build().push_subscribe(&push)`.
+  The permission prompt runs inside that click, the user gesture iOS requires.
+  **Never** subscribe on page load;
+- optionally a `.push_unsubscribe()` button;
+- one `report_input("push-report", on_report())` per page, **outside** re-rendered regions.
+  Its handler does `me.push = push.handle_report(ctx.text().unwrap_or(""))` and renders
+  from the returned `PushState`: Subscribed / Unsubscribed / Denied / Unsupported / Failed.
+  It also fires once on load with the current state;
+- the moment to send, e.g. publishing a post. Send from a task (`tokio::spawn`, or
+  `ctx.defer()` to make the button spin); never block a handler on it;
+- the `Push` handle: handlers take only their state, so keep it in a
+  `static OnceLock<Push>`.
+
+**Limits:**
+- Push needs a secure context: https, or `localhost` / `127.0.0.1`.
+- iOS and iPadOS 16.4+ only inside an installed PWA (home screen), from a user gesture.
+  Elsewhere on iOS the report is `Unsupported`.
+- A refused permission (`Denied`) can only be undone in the browser's site settings.
+- Payload ≤ 3993 bytes (`MAX_PAYLOAD`). One message per subscriber.
+- Endpoints are limited to the browsers' push services (`KNOWN_PUSH_HOSTS`) against SSRF.
+  A self-hosted service or a test double needs `.allow_endpoint_origin(origin)`.
+
 ## 5. Traps a real app hit (each cost a debugging session)
 
 - **Bottom-pinned chat scroll**: `column-reverse` + an **auto bottom margin** on the inner
