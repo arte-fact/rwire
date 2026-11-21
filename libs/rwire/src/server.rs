@@ -1763,7 +1763,12 @@ async fn serve_asset_dir(
 /// handling — once the head is forwarded, frames are just bytes the pump copies each way.
 async fn serve_proxy(mut stream: TcpStream, head: Vec<u8>, port: u16, prefix: &str) {
     let mut upstream = match TcpStream::connect(("127.0.0.1", port)).await {
-        Ok(upstream) => upstream,
+        Ok(upstream) => {
+            // Like the accepted socket: small frames (WebSocket through the
+            // proxy) must not wait for a delayed ACK.
+            let _ = upstream.set_nodelay(true);
+            upstream
+        }
         Err(_) => {
             // A human clicked a link to a service that resolved but isn't answering — a page,
             // not JSON (this is a browser navigation, not a health probe).
