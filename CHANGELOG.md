@@ -90,6 +90,8 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
 - Under a `base_path`, the login redirect's `next` carries the prefix
   (`/rwire/s/x` → `next=%2Frwire%2Fs%2Fx`), and the loop guard compares the
   login page with the full path.
+- `ServerConfig::serve_metrics(false)` turns `/metrics` off entirely (then an
+  ordinary path); `/health` and `/ready` stay.
 
 ### Added: asset folders served from disk
 

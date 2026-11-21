@@ -240,6 +240,9 @@ a private network):
 .config(ServerConfig::new().public_metrics(true))
 ```
 
+To not serve `/metrics` at all (it is then an ordinary path), use
+`ServerConfig::new().serve_metrics(false)`.
+
 ## Session Management
 
 Each WebSocket connection gets a unique session ID. Sessions are used to:

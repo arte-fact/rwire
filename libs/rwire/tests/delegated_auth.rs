@@ -622,3 +622,24 @@ async fn the_login_next_includes_the_base_path() {
     );
     assert_eq!(hub.calls(), 0);
 }
+
+/// `serve_metrics(false)` turns `/metrics` off, even with a session.
+#[tokio::test]
+async fn metrics_can_be_turned_off() {
+    let hub = Hub::start(19174).await;
+    start_with(
+        19077,
+        hub_auth(19174),
+        ServerConfig::new()
+            .serve_metrics(false)
+            .public_metrics(true),
+    )
+    .await;
+    for cookie in [None, Some(TOKEN)] {
+        let response = get(19077, "/metrics", cookie).await;
+        assert!(!response.contains("# HELP"), "{cookie:?}: {response}");
+    }
+    let health = get(19077, "/health", None).await;
+    assert!(health.starts_with("HTTP/1.1 200"), "{health}");
+    let _ = hub;
+}

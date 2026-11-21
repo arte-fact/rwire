@@ -91,6 +91,11 @@ pub struct ServerConfig {
     /// session as the page (without a gate they are public). `/health` and
     /// `/ready` are always public.
     pub public_metrics: bool,
+
+    /// Serve `/metrics` at all. Default: true. When false, `/metrics` is an
+    /// ordinary path (the app's page or its 404), and `public_metrics` has no
+    /// effect. `/health` and `/ready` are always served.
+    pub serve_metrics: bool,
 }
 
 impl Default for ServerConfig {
@@ -104,6 +109,7 @@ impl Default for ServerConfig {
             secure_cookies: false,
             proxy: None,
             public_metrics: false,
+            serve_metrics: true,
         }
     }
 }
@@ -125,6 +131,13 @@ impl ServerConfig {
     /// need a session. Prefer exposing them only on a private network.
     pub fn public_metrics(mut self, public: bool) -> Self {
         self.public_metrics = public;
+        self
+    }
+
+    /// Turn the `/metrics` endpoint off entirely (`false`), for an app that
+    /// doesn't want its counters reachable at all, even with a session.
+    pub fn serve_metrics(mut self, serve: bool) -> Self {
+        self.serve_metrics = serve;
         self
     }
 

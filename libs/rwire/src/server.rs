@@ -1986,7 +1986,8 @@ async fn handle_client<F>(
         }
         // `/metrics` is public without a gate, or when the config says so;
         // otherwise it is served past the gate (below).
-        let metrics_public = config.public_metrics || (auth.is_none() && delegated.is_none());
+        let metrics_public = config.serve_metrics
+            && (config.public_metrics || (auth.is_none() && delegated.is_none()));
         if path == "/health" || path == "/ready" || (path == "/metrics" && metrics_public) {
             let mut drain = vec![0u8; n];
             let _ = stream.read_exact(&mut drain).await;
@@ -2192,7 +2193,10 @@ async fn handle_client<F>(
     }
 
     // `/metrics` behind a gate: the request got through it.
-    if peek_str.starts_with("GET ") && request_line(&peek_str).1 == "/metrics" {
+    if config.serve_metrics
+        && peek_str.starts_with("GET ")
+        && request_line(&peek_str).1 == "/metrics"
+    {
         let mut drain = vec![0u8; n];
         let _ = stream.read_exact(&mut drain).await;
         if let Err(e) = serve_metrics_endpoint(stream, &registry, &metrics).await {
