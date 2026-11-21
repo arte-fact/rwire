@@ -53,6 +53,8 @@ fn bump(state: &mut App) {
 
 Success is *not* stored — only in-flight loading and unacknowledged errors live in the registry, so it stays bounded. If a `Resolver` is dropped without resolving, a 30-second timeout flips the stuck action to errored so nothing hangs forever.
 
+A `Resolver` may also be resolved before the handler returns (the work turned out to be instant, or failed up front): the action then settles as soon as the handler returns, with no loading phase — success leaves the control idle, an error shows at once.
+
 ## Per-instance identity
 
 An action is keyed by `(session, handler_id, param)` — all already on the event binding, so you author no correlation key. Give each control in a list its own `param` and the same handler drives them independently; only the control you click reflects:
