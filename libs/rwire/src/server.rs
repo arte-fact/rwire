@@ -1361,29 +1361,34 @@ impl Page {
 /// persisted state belong to a connection or a session, which a plain `GET`
 /// does not have yet, so their regions render the state's default; the live
 /// render replaces the paint on the first WebSocket frame.
+///
+/// One pass over the tree, under the shared cache's read lock; the CSS rules
+/// are formatted after it is released.
 fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, target: &str) -> (String, String) {
     let path = target.split(['?', '#']).next().unwrap_or("");
     let mut route = crate::router::CurrentRoute::default();
     if path.starts_with('/') {
         route.set_path(path);
     }
-    let cache = shared
-        .shared_cache
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
-    let state_for = |renderer: &dyn SyncedRenderer| -> Option<&dyn Any> {
-        if renderer.state_type_id() == TypeId::of::<crate::router::CurrentRoute>() {
-            return Some(&route);
-        }
-        if renderer.storage_type() != StorageType::Shared {
-            return None;
-        }
-        let key = shared_cache_key(StorageType::Shared, renderer.table_name(), "")?;
-        cache.get(&key).map(|state| state.as_ref() as &dyn Any)
+    let (html, keys) = {
+        let cache = shared
+            .shared_cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let state_for = |renderer: &dyn SyncedRenderer| -> Option<&dyn Any> {
+            if renderer.state_type_id() == TypeId::of::<crate::router::CurrentRoute>() {
+                return Some(&route);
+            }
+            if renderer.storage_type() != StorageType::Shared {
+                return None;
+            }
+            let key = shared_cache_key(StorageType::Shared, renderer.table_name(), "")?;
+            cache.get(&key).map(|state| state.as_ref() as &dyn Any)
+        };
+        root.to_static_html_and_styles(&state_for)
     };
-    let html = root.to_static_html_with(&state_for);
     let mut css = String::new();
-    for key in root.static_style_rules_with(&state_for) {
+    for key in keys {
         if let Some(rule) = key.to_css_rule() {
             css.push_str(&rule);
             css.push('\n');

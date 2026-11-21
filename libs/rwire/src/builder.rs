@@ -927,14 +927,8 @@ impl ElementBuilder {
     /// tokens resolve. Event handlers, synced renderers, and client-action bindings
     /// are runtime-only and omitted.
     pub fn to_static_html(&self) -> String {
-        self.to_static_html_with(&|_| None)
-    }
-
-    /// Like [`Self::to_static_html`], with synced regions rendered from the state
-    /// `state_for` returns for their renderer (`None`: the state's default).
-    pub(crate) fn to_static_html_with(&self, state_for: &StaticStates<'_>) -> String {
         let mut out = String::new();
-        self.write_static_html(&mut out, state_for);
+        self.write_static_html(&mut out, None, &|_| None);
         out
     }
 
@@ -942,18 +936,22 @@ impl ElementBuilder {
     /// (descending into synced regions at their default state), so a statically
     /// rendered page (SSR) can inline exactly the CSS its classes need.
     pub fn static_style_rules(&self) -> std::collections::BTreeSet<StyleKey> {
-        self.static_style_rules_with(&|_| None)
+        let mut keys = std::collections::BTreeSet::new();
+        self.collect_static_style_rules(&mut keys, &|_| None);
+        keys
     }
 
-    /// Like [`Self::static_style_rules`], for the tree [`Self::to_static_html_with`]
-    /// renders with the same `state_for`.
-    pub(crate) fn static_style_rules_with(
+    /// [`Self::to_static_html`] and [`Self::static_style_rules`] in one pass,
+    /// with synced regions rendered from the state `state_for` returns for their
+    /// renderer (`None`: the state's default).
+    pub(crate) fn to_static_html_and_styles(
         &self,
         state_for: &StaticStates<'_>,
-    ) -> std::collections::BTreeSet<StyleKey> {
+    ) -> (String, std::collections::BTreeSet<StyleKey>) {
+        let mut out = String::new();
         let mut keys = std::collections::BTreeSet::new();
-        self.collect_static_style_rules(&mut keys, state_for);
-        keys
+        self.write_static_html(&mut out, Some(&mut keys), state_for);
+        (out, keys)
     }
 
     fn collect_static_style_rules(
@@ -961,6 +959,17 @@ impl ElementBuilder {
         keys: &mut std::collections::BTreeSet<StyleKey>,
         state_for: &StaticStates<'_>,
     ) {
+        self.insert_own_style_keys(keys);
+        if let Some(tree) = self.render_static_region(state_for) {
+            tree.collect_static_style_rules(keys, state_for);
+        }
+        for child in &self.children {
+            child.collect_static_style_rules(keys, state_for);
+        }
+    }
+
+    /// The style keys of this element alone (not its region or children).
+    fn insert_own_style_keys(&self, keys: &mut std::collections::BTreeSet<StyleKey>) {
         for &u in &self.style_utils {
             keys.insert(StyleKey::Util(u));
         }
@@ -974,12 +983,6 @@ impl ElementBuilder {
                 keys.insert(StyleKey::Breakpoint(*bp, u));
             }
         }
-        if let Some(tree) = self.render_static_region(state_for) {
-            tree.collect_static_style_rules(keys, state_for);
-        }
-        for child in &self.children {
-            child.collect_static_style_rules(keys, state_for);
-        }
     }
 
     /// A synced region's content for a static render: rendered from the state
@@ -992,7 +995,17 @@ impl ElementBuilder {
         }
     }
 
-    fn write_static_html(&self, out: &mut String, state_for: &StaticStates<'_>) {
+    /// Write this tree's static HTML to `out`, and its style keys to `keys`
+    /// when given.
+    fn write_static_html(
+        &self,
+        out: &mut String,
+        mut keys: Option<&mut std::collections::BTreeSet<StyleKey>>,
+        state_for: &StaticStates<'_>,
+    ) {
+        if let Some(keys) = keys.as_deref_mut() {
+            self.insert_own_style_keys(keys);
+        }
         let tag = self.el_type.name();
         out.push('<');
         out.push_str(tag);
@@ -1064,10 +1077,10 @@ impl ElementBuilder {
         // default) so crawlers and the pre-WebSocket paint see real markup (the
         // live render replaces it).
         if let Some(tree) = self.render_static_region(state_for) {
-            tree.write_static_html(out, state_for);
+            tree.write_static_html(out, keys.as_deref_mut(), state_for);
         }
         for child in &self.children {
-            child.write_static_html(out, state_for);
+            child.write_static_html(out, keys.as_deref_mut(), state_for);
         }
 
         out.push_str("</");
@@ -3729,6 +3742,20 @@ mod map_def_tests {
             frame.to_static_html(),
             format!("<iframe src=\"{src}\"></iframe>")
         );
+    }
+
+    /// The single SSR pass yields what the two separate static walks do.
+    #[test]
+    fn static_html_and_styles_match_the_separate_walks() {
+        use crate::style_tokens::St;
+        let tree = el(El::Div).style_util(St::FlexCenter).append([
+            el(El::P).style_util(St::BgApp).text("a"),
+            el(El::Input).style_util(St::FlexCenter),
+        ]);
+        let (html, keys) = tree.to_static_html_and_styles(&|_| None);
+        assert_eq!(html, tree.to_static_html());
+        assert_eq!(keys, tree.static_style_rules());
+        assert_eq!(keys.len(), 2);
     }
 
     #[test]
