@@ -51,6 +51,17 @@ plain task, and handlers can `tokio::spawn` directly. The `serve_*` helpers of
   `/path`, not `/`. A path no route matches is answered `404 Not Found`; the
   page still renders the router's not-found view.
 
+### Changed: the PWA manifest is fetched with credentials
+
+- The manifest `<link>` now carries `crossorigin="use-credentials"` (new
+  `Pwa::manifest_credentials`, **on by default**). Without it the browser
+  fetches the manifest without cookies or HTTP auth: behind an auth in front
+  of the app (a proxy's basic auth) it got a 401 and the app was not
+  installable. The manifest is same-origin, so the credentials go nowhere
+  else; `manifest_credentials(false)` restores the previous markup. rwire's
+  own `auth()` / `auth_with()` still serve the manifest, the service worker and
+  the icons before the gate.
+
 ### Added: control over the static first paint
 
 - `CapsuleConfig::ssr_exclude(pattern)`: routes served without the paint, for
