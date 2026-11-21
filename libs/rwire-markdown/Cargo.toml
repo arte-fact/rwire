@@ -9,5 +9,5 @@ keywords = ["web", "markdown", "ui"]
 categories = ["web-programming"]
 
 [dependencies]
-rwire = { path = "../rwire", version = "0.1.0" }
+rwire = { path = "../rwire", version = "0.1.0", default-features = false }
 pulldown-cmark = "0.12"
