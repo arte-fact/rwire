@@ -30,6 +30,20 @@ pub struct TocEntry {
     pub anchor: String,
 }
 
+/// Options for [`parse_markdown_with_options`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ParseOptions {
+    /// Prose text size of the wrapper.
+    pub size: ProseSize,
+    /// Whether the wrapper spans the full width (no reading-width cap).
+    pub full_width: bool,
+    /// Whether images from another origin (`https://…`, `//…`) are loaded.
+    /// Off by default: loading one tells that server who reads the page and
+    /// when (a tracking pixel), so a remote image is rendered as its alt
+    /// text. Same-origin images and raster `data:image/*` are always kept.
+    pub remote_images: bool,
+}
+
 /// Parse markdown into an ElementBuilder tree, wrapped in a default prose container
 /// (`Base` size, max-width constrained). See [`parse_markdown_with`] to control those.
 ///
@@ -42,11 +56,23 @@ pub fn parse_markdown(markdown: &str) -> ParseResult {
 /// `full_width` (dropping the reading-width cap). [`Markdown`](crate::Markdown) routes its
 /// `.size()` / `.full_width()` here.
 pub fn parse_markdown_with(markdown: &str, size: ProseSize, full_width: bool) -> ParseResult {
+    parse_markdown_with_options(
+        markdown,
+        ParseOptions {
+            size,
+            full_width,
+            ..ParseOptions::default()
+        },
+    )
+}
+
+/// Parse markdown with every [`ParseOptions`] (e.g. `remote_images: true`).
+pub fn parse_markdown_with_options(markdown: &str, opts: ParseOptions) -> ParseResult {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
 
     let parser = Parser::new_ext(markdown, options);
-    let mut builder = MarkdownBuilder::new(size, full_width);
+    let mut builder = MarkdownBuilder::new(opts);
 
     for event in parser {
         builder.process_event(event);
@@ -77,10 +103,17 @@ struct MarkdownBuilder {
     size: ProseSize,
     /// Whether the prose wrapper spans full width (no reading-width cap).
     full_width: bool,
+    /// Whether images from another origin are loaded.
+    remote_images: bool,
 }
 
 impl MarkdownBuilder {
-    fn new(size: ProseSize, full_width: bool) -> Self {
+    fn new(opts: ParseOptions) -> Self {
+        let ParseOptions {
+            size,
+            full_width,
+            remote_images,
+        } = opts;
         Self {
             stack: Vec::new(),
             children: Vec::new(),
@@ -92,6 +125,7 @@ impl MarkdownBuilder {
             in_thead: false,
             size,
             full_width,
+            remote_images,
         }
     }
 
@@ -204,8 +238,9 @@ impl MarkdownBuilder {
                 self.stack.push(el(El::Span).st([St::LineThrough]));
             }
             Tag::Link { dest_url, .. } => {
-                // An unsafe URL (`javascript:`, `data:`, an unknown scheme) loses
-                // its href: the text stays, as an inert anchor.
+                // Only relative URLs, anchors, `http`, `https` and `mailto` keep
+                // their href; any other scheme (`javascript:`, `data:`, `tel:`,
+                // an unknown one) loses it: the text stays, as an inert anchor.
                 let mut link = el(El::A).st([St::TextAccent, St::NoDecoration]);
                 if rwire::url_safety::is_allowed_link(&dest_url) {
                     link = link.at_str(At::Href, &dest_url);
@@ -215,8 +250,11 @@ impl MarkdownBuilder {
             Tag::Image {
                 dest_url, title, ..
             } => {
-                // An unsafe URL drops the image; its alt text still reads.
-                if !rwire::url_safety::is_allowed_image(&dest_url) {
+                // An unsafe URL drops the image, and so does a remote one unless
+                // `remote_images` is on; its alt text still reads, as text.
+                if !rwire::url_safety::is_allowed_image(&dest_url)
+                    || (!self.remote_images && rwire::url_safety::is_remote(&dest_url))
+                {
                     return;
                 }
                 let mut img = el(El::Img)
@@ -456,13 +494,73 @@ mod tests {
                 "https://example.com/x?y=1",
             ),
             ("[a](mailto:me@example.com)", "mailto:me@example.com"),
-            ("[a](tel:+33123456789)", "tel:+33123456789"),
             ("<https://example.com>", "https://example.com"),
         ] {
             let out = html(md);
             assert!(out.contains(&format!("href=\"{href}\"")), "{md:?}: {out}");
         }
         assert!(html("![c](/img/cover.png)").contains("src=\"/img/cover.png\""));
+    }
+
+    /// Only relative links, anchors, `http`, `https` and `mailto` keep their
+    /// `href`: `tel:` and any other scheme are rendered as text.
+    #[test]
+    fn other_link_schemes_are_text() {
+        for md in [
+            "[call](tel:+33123456789)",
+            "[x](sms:+33123456789)",
+            "[x](foo:bar)",
+            "[x](magnet:?xt=urn:btih:x)",
+            "[x](file:///etc/passwd)",
+        ] {
+            let out = html(md);
+            assert!(!out.contains("href"), "{md:?} kept an href: {out}");
+        }
+        assert!(html("[call](tel:+33123456789)").contains("call"));
+    }
+
+    /// A remote image (absolute `http(s)://` or protocol-relative `//`) is not
+    /// loaded by default: its alt text reads instead, as text.
+    #[test]
+    fn remote_images_are_not_loaded_by_default() {
+        for md in [
+            "![a cat](https://x.example/y.png)",
+            "![a cat](http://x.example/y.png)",
+            "![a cat](HTTPS://x.example/y.png)",
+            "![a cat](//x.example/y.png)",
+            "![a cat][pic]\n\n[pic]: https://x.example/y.png\n",
+        ] {
+            let out = html(md);
+            assert!(!out.contains("<img"), "{md:?} loads a remote image: {out}");
+            assert!(!out.contains("x.example"), "{md:?}: {out}");
+            assert!(out.contains("a cat"), "{md:?} lost its alt text: {out}");
+        }
+        // Same-origin images and raster data stay.
+        assert!(html("![c](/img/cover.png)").contains("src=\"/img/cover.png\""));
+        assert!(html("![c](img/cover.png)").contains("src=\"img/cover.png\""));
+        assert!(html("![d](data:image/png;base64,iVBORw0KGgo=)").contains("<img"));
+    }
+
+    #[test]
+    fn remote_images_load_when_allowed() {
+        let opts = ParseOptions {
+            remote_images: true,
+            ..ParseOptions::default()
+        };
+        for (md, src) in [
+            ("![a](https://x.example/y.png)", "https://x.example/y.png"),
+            ("![a](//x.example/y.png)", "//x.example/y.png"),
+        ] {
+            let out = parse_markdown_with_options(md, opts)
+                .content
+                .to_static_html();
+            assert!(out.contains(&format!("src=\"{src}\"")), "{md:?}: {out}");
+        }
+        // Unsafe URLs stay dropped.
+        let out = parse_markdown_with_options("![a](javascript:alert(1))", opts)
+            .content
+            .to_static_html();
+        assert!(!out.contains("<img"), "{out}");
     }
 
     #[test]
