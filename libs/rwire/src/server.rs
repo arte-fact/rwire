@@ -2116,6 +2116,24 @@ async fn handle_client<F>(
     // login URL and a handshake gets 401. The cookie is never logged.
     let mut identity = None;
     if let Some(delegated) = delegated.as_ref() {
+        // A handshake the admission caps would refuse is refused before its
+        // credential costs a validation (the caps are checked again, and the
+        // connection registered, after the gate).
+        if capsule::is_websocket_upgrade(&peek_str) {
+            if let Err(reason) = registry.check_admission(
+                peer_addr.ip(),
+                config.max_connections,
+                config.max_connections_per_ip,
+            ) {
+                let why = match reason {
+                    AdmissionError::AtCapacity => "at_capacity",
+                    AdmissionError::TooManyFromIp => "too_many_from_ip",
+                };
+                metrics.connections_rejected.inc();
+                let _ = crate::health::serve_unavailable(stream, why).await;
+                return;
+            }
+        }
         match delegated.identify(&peek_str).await {
             Some(found) => identity = Some(found),
             None => {

@@ -11,7 +11,7 @@ use futures::{SinkExt, StreamExt};
 use rwire::delegated_auth::CLOSE_UNAUTHORIZED;
 use rwire::{
     el, handler, renderer, AuthRequest, DelegatedAuth, El, ElementBuilder, Ev, Identity, Server,
-    State, AUTH_CONFLICT,
+    ServerConfig, State, AUTH_CONFLICT,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -144,11 +144,16 @@ fn app() -> ElementBuilder {
 }
 
 async fn start(port: u16, auth: DelegatedAuth) {
+    start_with(port, auth, ServerConfig::new()).await;
+}
+
+async fn start_with(port: u16, auth: DelegatedAuth, config: ServerConfig) {
     tokio::spawn(async move {
         let _ = Server::bind(&format!("127.0.0.1:{port}"))
             .unwrap()
             .root(app)
             .auth_with(auth)
+            .config(config)
             .run()
             .await;
     });
@@ -258,11 +263,12 @@ async fn anonymous_or_invalid_page_is_sent_to_login_with_next() {
     assert!(anonymous.contains(&location), "{anonymous}");
     assert_eq!(hub.calls(), 0, "no cookie: the hub is not asked");
 
-    for attempt in 1..=2 {
+    for _ in 1..=2 {
         let invalid = get(19062, "/inbox?tab=2", Some("forged")).await;
         assert!(invalid.starts_with("HTTP/1.1 303"), "{invalid}");
         assert!(invalid.contains(&location), "{invalid}");
-        assert_eq!(hub.calls(), attempt, "a failure is never cached");
+        // A rejection is remembered briefly (never as a success).
+        assert_eq!(hub.calls(), 1, "the rejection is remembered");
     }
 }
 
@@ -354,4 +360,44 @@ async fn on_route_sees_the_identity_so_renderers_can_show_it() {
     // What the browser runtime sends on every open.
     ws.send(Message::Text("R/".to_string())).await.unwrap();
     wait_for(&mut ws, "routed as ada").await;
+}
+
+/// A burst of requests with one forged cookie asks the hub once: concurrent
+/// ones share the validation in flight, later ones hit the remembered
+/// rejection.
+#[tokio::test]
+async fn a_burst_of_forged_cookies_asks_the_hub_once() {
+    let hub = Hub::start(19167).await;
+    start(19067, hub_auth(19167)).await;
+    let tasks: Vec<_> = (0..40)
+        .map(|_| tokio::spawn(async { get(19067, "/", Some("forged")).await }))
+        .collect();
+    for task in tasks {
+        let response = task.await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 303"), "{response}");
+    }
+    for _ in 0..10 {
+        assert!(get(19067, "/", Some("forged"))
+            .await
+            .starts_with("HTTP/1.1 303"));
+    }
+    assert_eq!(hub.calls(), 1, "50 requests, one hub call");
+}
+
+/// A handshake over the admission caps is refused before its cookie reaches
+/// the hub.
+#[tokio::test]
+async fn a_handshake_over_the_caps_never_reaches_the_hub() {
+    let hub = Hub::start(19168).await;
+    start_with(
+        19068,
+        hub_auth(19168),
+        ServerConfig::new().max_connections_per_ip(0),
+    )
+    .await;
+    for cookie in ["forged-1", "forged-2", TOKEN] {
+        let response = ws_handshake(19068, Some(cookie)).await;
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+    }
+    assert_eq!(hub.calls(), 0);
 }
