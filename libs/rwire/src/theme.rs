@@ -282,6 +282,41 @@ pub struct Theme {
     base_font: Option<(u8, u8)>,
     /// Font stacks (see [`Theme::fonts`]).
     fonts: Fonts,
+    /// Control and row dimensions (see [`Theme::density`]).
+    density: Density,
+}
+
+/// How dense the controls and lists are, for a site or for a tool.
+///
+/// It sets the `--Qz*` hooks: control height (`--Qzh`, `St::HControl`), control
+/// text (`--Qzt`, `St::TextControl`), tab padding (`--Qzy`, `St::PyTab`), chip
+/// padding (`--Qzc`, `St::PadChip`) and list-row padding (`--Qzp`,
+/// `St::PadRow`), icon buttons' square and glyph (`--Qzi`, `--Qzg`, `--Qzq`:
+/// `Button::icon_only` and `ThemeToggle`, 32 px with an 18 px glyph in
+/// `Compact`). `Button`, `Input`, `Select` (default size), `Chip`, `Tabs` and
+/// `ThemeToggle` read them. Whatever the density, interactive controls are at least
+/// 44 px under a coarse pointer or below the `sm` breakpoint (base CSS).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Density {
+    /// Sized for a site (the default).
+    #[default]
+    Comfortable,
+    /// Sized for a tool: 32 px controls, tighter tabs, chips and rows.
+    Compact,
+}
+
+impl Density {
+    /// The `--Qz*` declarations.
+    fn css(self) -> &'static str {
+        match self {
+            // The tokens' fallbacks are the comfortable sizes.
+            Density::Comfortable => "",
+            Density::Compact => {
+                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzc:.125rem var(--S2);--Qzp:.38rem .55rem;\
+                 --Qzi:32px;--Qzg:18px;--Qzq:0;"
+            }
+        }
+    }
 }
 
 /// The theme's three font stacks, each a CSS `font-family` list. A stack left
@@ -404,6 +439,12 @@ impl Theme {
     /// The font stacks set with [`Theme::fonts`].
     pub fn fonts_ref(&self) -> &Fonts {
         &self.fonts
+    }
+
+    /// Set the density of controls and lists (see [`Density`]).
+    pub fn density(mut self, density: Density) -> Self {
+        self.density = density;
+        self
     }
 
     /// Set the mode: `Light` or `Dark` force it, `System` follows the OS.
@@ -674,7 +715,10 @@ pub fn generate_base_css() -> &'static str {
      ::-webkit-scrollbar-track{background:transparent}\
      ::-webkit-scrollbar-thumb{background:var(--c);border-radius:3px}\
      ::-webkit-scrollbar-thumb:hover{background:var(--e)}\
-     [data-busy]{cursor:progress;opacity:.6;transition:opacity .25s .2s}\n"
+     [data-busy]{cursor:progress;opacity:.6;transition:opacity .25s .2s}\
+     @media (pointer:coarse),(max-width:639.98px){\
+     :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){min-height:44px}\
+     :where(button,[role=tab],[role=button]){min-width:44px}}\n"
 }
 
 /// Generate complete theme CSS from a Theme value.
@@ -814,6 +858,9 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
 
     // --- Font stacks: after the style's hooks, so the theme's own win ---
     theme.fonts.css(&mut css);
+
+    // --- Density: control and row dimensions (`--Qz*`) ---
+    css.push_str(theme.density.css());
 
     // --- Radius overrides ---
     match theme.radius {
@@ -1299,6 +1346,56 @@ mod tests {
     }
 
     #[test]
+    fn density_sets_the_control_hooks() {
+        // Comfortable: nothing emitted, the tokens' fallbacks apply.
+        let comfy = generate_theme_css(&Theme::new());
+        assert!(!comfy.contains("--Qz"), "{comfy}");
+        let compact = generate_theme_css(&Theme::new().density(Density::Compact));
+        assert!(compact.contains("--Qzh:2rem;"), "{compact}");
+        assert!(compact.contains("--Qzp:.38rem .55rem;"));
+        assert!(compact.contains("--Qzy:var(--S2);"));
+        // Icon buttons: 32 px squares, 18 px glyphs, no padding (`/app`).
+        assert!(
+            compact.contains("--Qzi:32px;--Qzg:18px;--Qzq:0;"),
+            "{compact}"
+        );
+        assert_eq!(
+            St::SqIconButton.css(),
+            "width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem)"
+        );
+        assert_eq!(
+            St::SqIconToggle.css(),
+            "width:var(--Qzi,auto);height:var(--Qzi,auto)"
+        );
+        // The tokens read them, with the comfortable sizes as fallbacks.
+        use crate::St;
+        assert_eq!(St::HControl.css(), "height:var(--Qzh,2.25rem)");
+        assert_eq!(St::TextControl.css(), "font-size:var(--Qzt,var(--T2))");
+        assert_eq!(St::PyTab.css(), "padding-block:var(--Qzy,var(--S3))");
+        assert_eq!(St::PadChip.css(), "padding:var(--Qzc,var(--S1) var(--S2))");
+        assert_eq!(St::PadRow.css(), "padding:var(--Qzp,var(--S2) var(--S3))");
+    }
+
+    #[test]
+    fn touch_targets_are_44px_under_a_coarse_pointer_or_below_sm() {
+        let base = generate_base_css();
+        let rule = base
+            .split_once("@media (pointer:coarse),(max-width:639.98px){")
+            .expect("the touch-target media block")
+            .1;
+        assert!(rule.contains(":where(button,select,input:not("), "{rule}");
+        assert!(
+            rule.contains("[role=tab],[role=button]){min-height:44px}"),
+            "{rule}"
+        );
+        assert!(rule.contains("{min-width:44px}"), "{rule}");
+        // Zero specificity (`:where`): an app's own min-height still wins.
+        assert!(!rule.contains("button{min-height"));
+        // Checkboxes, radios and sliders keep their size.
+        assert!(rule.contains("[type=checkbox],[type=radio],[type=range]"));
+    }
+
+    #[test]
     fn modes_cycle_parse_and_toggle() {
         use ThemeMode::*;
         assert_eq!(
@@ -1381,7 +1478,9 @@ mod tests {
         let css = generate_base_css();
         // +~70B (2026-09): the tapped control waiting on the server (`data-busy`, set by the
         // runtime at the tap) dims after 200ms; client-set, so it can't ride STYLE_DEF.
-        assert!(css.len() < 800, "Base CSS too large: {} bytes", css.len());
+        // +~180B (R1): 44px touch targets under a coarse pointer or below `sm`, for every
+        // interactive control whatever its classes, so it belongs to the base CSS.
+        assert!(css.len() < 1000, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]
@@ -1452,8 +1551,9 @@ mod tests {
             .style(ThemeStyle::soft())
             .radius(RadiusScale::Large);
         let css = generate_theme_css(&theme);
-        // Single block should be compact
-        assert!(css.len() < 2048, "Theme CSS too large: {} bytes", css.len());
+        // Single block should be compact.
+        // +~400B (R1): the neutral and six categorical tones (`--Y0g…--Y6o`), the faint ink.
+        assert!(css.len() < 2560, "Theme CSS too large: {} bytes", css.len());
     }
 
     #[test]

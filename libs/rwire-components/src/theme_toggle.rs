@@ -212,16 +212,22 @@ impl ThemeToggle {
     fn size_token(&self) -> St {
         match self.size {
             ToggleSize::Sm => St::PXs,
-            ToggleSize::Md => St::PSm,
+            // The theme's density sizes the default toggle (`--Qzq`, `--Qzi`).
+            ToggleSize::Md => St::PadIconToggle,
             ToggleSize::Lg => St::PSp3,
         }
     }
 
     fn render_icon(&self) -> ElementBuilder {
-        match self.current_mode {
+        let glyph = match self.current_mode {
             ThemeToggleMode::Light => icon(Icon::Moon),
             ThemeToggleMode::Dark => icon(Icon::Sun),
             ThemeToggleMode::System => icon(Icon::Monitor),
+        };
+        if self.size == ToggleSize::Md {
+            glyph.st([St::GlyphIconToggle])
+        } else {
+            glyph
         }
     }
 
@@ -230,6 +236,9 @@ impl ThemeToggle {
         let icon_el = self.render_icon();
         let mut tokens = self.compute_tokens();
         tokens.push(self.size_token());
+        if self.size == ToggleSize::Md {
+            tokens.push(St::SqIconToggle);
+        }
 
         let mut button = el(El::Button)
             .st(tokens)
@@ -340,6 +349,26 @@ mod tests {
             .to_static_html();
         assert!(html.contains("aria-label=\"Toggle theme\""), "{html}");
         assert!(html.contains("title=\"Theme: dark\""), "{html}");
+    }
+
+    #[test]
+    fn the_default_toggle_follows_the_density_hooks() {
+        let btn = ThemeToggle::new().build();
+        let utils = btn.get_style_utils();
+        assert!(utils.contains(&St::SqIconToggle.as_u16()));
+        assert!(utils.contains(&St::PadIconToggle.as_u16()));
+        assert!(btn.children()[0]
+            .get_style_utils()
+            .contains(&St::GlyphIconToggle.as_u16()));
+        // Comfortable fallbacks: 8 px padding around a 24 px glyph, as before.
+        assert_eq!(St::PadIconToggle.css(), "padding:var(--Qzq,var(--S2))");
+        assert_eq!(
+            St::GlyphIconToggle.css(),
+            "width:var(--Qzg,24px);height:var(--Qzg,24px)"
+        );
+        // Other sizes keep theirs.
+        let sm = ThemeToggle::new().size(ToggleSize::Sm).build();
+        assert!(!sm.get_style_utils().contains(&St::SqIconToggle.as_u16()));
     }
 
     #[test]

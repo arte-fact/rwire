@@ -1136,6 +1136,31 @@ define_token_enum! {
         TextOnCat6 = 0x3C1 => "color:var(--Y6o)",
         /// A 1px border in categorical color 6.
         BorderCat6 = 0x3C2 => "border:1px solid var(--Y6)",
+        // Density (0x3C3-0x3C7): control dimensions a theme's `Density` sets in
+        // `--Qz*`; the fallbacks are the comfortable sizes.
+        /// A control's height (`Button`/`Input`/`Select` at their default size).
+        HControl = 0x3C3 => "height:var(--Qzh,2.25rem)",
+        /// A control's text size.
+        TextControl = 0x3C4 => "font-size:var(--Qzt,var(--T2))",
+        /// A tab's vertical padding.
+        PyTab = 0x3C5 => "padding-block:var(--Qzy,var(--S3))",
+        /// A chip's padding.
+        PadChip = 0x3C6 => "padding:var(--Qzc,var(--S1) var(--S2))",
+        /// A list row's padding (dense navigation lists).
+        PadRow = 0x3C7 => "padding:var(--Qzp,var(--S2) var(--S3))",
+        // Icon buttons (0x3C8-0x3CC): a square of `--Qzi` with a glyph of `--Qzg`
+        // under a dense theme (32 and 18 px); each fallback is the component's
+        // comfortable size.
+        /// `Button::icon_only` (default size): its square.
+        SqIconButton = 0x3C8 => "width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem)",
+        /// `Button::icon_only` (default size): its glyph.
+        GlyphIconButton = 0x3C9 => "width:var(--Qzg,14px);height:var(--Qzg,14px)",
+        /// `ThemeToggle` (default size): its square (its padding otherwise).
+        SqIconToggle = 0x3CA => "width:var(--Qzi,auto);height:var(--Qzi,auto)",
+        /// `ThemeToggle` (default size): its padding.
+        PadIconToggle = 0x3CB => "padding:var(--Qzq,var(--S2))",
+        /// `ThemeToggle` (default size): its glyph.
+        GlyphIconToggle = 0x3CC => "width:var(--Qzg,24px);height:var(--Qzg,24px)",
     }
 }
 

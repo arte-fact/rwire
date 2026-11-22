@@ -279,7 +279,11 @@ impl Button {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextXs, St::GapXs]);
             }
-            ButtonSize::Md => {} // defaults
+            // The theme's density sets the default size's text (`--Qzt`).
+            ButtonSize::Md => {
+                tokens.retain(|t| *t != St::TextSm);
+                tokens.push(St::TextControl);
+            }
             ButtonSize::Lg => {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextBase, St::GapMd]);
@@ -348,7 +352,7 @@ impl Button {
         match self.size {
             ButtonSize::Xs => vec![St::H1_5rem, St::Py0, St::PxSm],
             ButtonSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSp3],
-            ButtonSize::Md => vec![St::H2_25rem, St::Py0, St::PxMd],
+            ButtonSize::Md => vec![St::HControl, St::Py0, St::PxMd],
             ButtonSize::Lg => vec![St::H2_75rem, St::Py0, St::PxLg],
         }
     }
@@ -371,6 +375,11 @@ impl Button {
             // the width to the height, centering the glyph.
             tokens.retain(|t| !matches!(t, St::PxSp3 | St::PxMd | St::PxLg));
             tokens.push(St::AspectSquare);
+            // At the default size the theme's density sizes the square (`--Qzi`).
+            if self.size == ButtonSize::Md {
+                tokens.retain(|t| *t != St::HControl);
+                tokens.push(St::SqIconButton);
+            }
         }
         let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
         if !self.hover_extra.is_empty() && !self.disabled {
@@ -386,7 +395,11 @@ impl Button {
         let icon = self.icon.take();
         let text = self.text.take();
         if show_icon {
-            let icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            let mut icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            if icon_only && self.size == ButtonSize::Md {
+                // …and its glyph (`--Qzg`), 14 px otherwise.
+                icon_el = icon_el.st([St::GlyphIconButton]);
+            }
             builder = match text {
                 Some(t) => builder.append([icon_el, el(El::Span).text(&t)]),
                 None => builder.append([icon_el]),
@@ -779,6 +792,29 @@ mod tests {
     }
 
     #[test]
+    fn an_icon_button_follows_the_density_hooks_at_the_default_size() {
+        let btn = Button::icon_only(Icon::Settings, "Settings").build();
+        let utils = btn.get_style_utils();
+        assert!(utils.contains(&St::SqIconButton.as_u16()));
+        assert!(
+            !utils.contains(&St::HControl.as_u16()),
+            "the square sets the height"
+        );
+        let glyph = btn.children()[0].get_style_utils();
+        assert!(glyph.contains(&St::GlyphIconButton.as_u16()));
+        // Other sizes, and buttons with text, keep their own dimensions.
+        let sm = Button::icon_only(Icon::Settings, "Settings")
+            .size(ButtonSize::Sm)
+            .build();
+        assert!(!sm.get_style_utils().contains(&St::SqIconButton.as_u16()));
+        let text = Button::primary("Save").icon(Icon::Check).build();
+        assert!(!text.get_style_utils().contains(&St::SqIconButton.as_u16()));
+        assert!(!text.children()[0]
+            .get_style_utils()
+            .contains(&St::GlyphIconButton.as_u16()));
+    }
+
+    #[test]
     fn test_loading_hides_icon() {
         // The spinner overlay replaces the icon, so it isn't rendered while loading. The label is
         // kept — in an invisible span, not textContent — so the button's footprint never shrinks
@@ -802,7 +838,7 @@ mod tests {
 
         let btn = Button::new().size(ButtonSize::Md);
         let tokens = btn.size_tokens();
-        assert_eq!(tokens, vec![St::H2_25rem, St::Py0, St::PxMd]);
+        assert_eq!(tokens, vec![St::HControl, St::Py0, St::PxMd]);
 
         let btn = Button::new().size(ButtonSize::Lg);
         let tokens = btn.size_tokens();

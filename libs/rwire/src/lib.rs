@@ -181,8 +181,8 @@ pub use tokens::{ColorPalette, ColorScale};
 
 // Theme exports
 pub use theme::{
-    css_var, generate_base_css, generate_theme_css, Fonts, IntoPalette, IntoStyle, RadiusScale,
-    ResolvedPalette, Theme, ThemeMode, ThemeProvider, ThemeStyle,
+    css_var, generate_base_css, generate_theme_css, Density, Fonts, IntoPalette, IntoStyle,
+    RadiusScale, ResolvedPalette, Theme, ThemeMode, ThemeProvider, ThemeStyle,
 };
 
 // Icon exports

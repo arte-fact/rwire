@@ -98,11 +98,11 @@ impl Tabs {
             let mut button_tokens = vec![
                 St::BgTransparent,
                 St::BorderNone,
-                St::TextSm,
+                St::TextControl,
                 St::FontMedium,
                 St::CursorPointer,
                 St::TransitionAll,
-                St::PySp3,
+                St::PyTab,
                 St::PxMd,
                 St::MbNeg2px,
             ];

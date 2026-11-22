@@ -264,7 +264,11 @@ impl Input {
                 tokens.retain(|t| !matches!(t, St::TextSm));
                 tokens.push(St::TextXs);
             }
-            InputSize::Md => {}
+            // The theme's density sets the default size's text (`--Qzt`).
+            InputSize::Md => {
+                tokens.retain(|t| *t != St::TextSm);
+                tokens.push(St::TextControl);
+            }
             InputSize::Lg => {
                 tokens.retain(|t| !matches!(t, St::TextSm));
                 tokens.push(St::TextBase);
@@ -282,7 +286,7 @@ impl Input {
     fn size_tokens(&self) -> Vec<St> {
         match self.size {
             InputSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSm],
-            InputSize::Md => vec![St::H2_25rem, St::Py0, St::PxSp3],
+            InputSize::Md => vec![St::HControl, St::Py0, St::PxSp3],
             InputSize::Lg => vec![St::H2_75rem, St::Py0, St::PxMd],
         }
     }
