@@ -2265,16 +2265,29 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
             .text(name)
             .build()
     };
+    // The dot is the row's only sign of its state: it carries its name.
     let generating = || {
         StatusDot::new()
             .intent(StatusDotIntent::Success)
             .ring(true)
             .pulse(true)
+            .aria_label("Generating")
             .build()
     };
-    let validating = || StatusDot::new().tone(Tone::Cat(5)).ring(true).build();
-    let typing = || StatusDot::new().build();
-    let inactive = || StatusDot::new().intent(StatusDotIntent::Hollow).build();
+    let validating = || {
+        StatusDot::new()
+            .tone(Tone::Cat(5))
+            .ring(true)
+            .aria_label("Waiting for approval")
+            .build()
+    };
+    let typing = || StatusDot::new().aria_label("Waiting for input").build();
+    let inactive = || {
+        StatusDot::new()
+            .intent(StatusDotIntent::Hollow)
+            .aria_label("Inactive")
+            .build()
+    };
     // (href, project, machine, dot, runtime, gist, hash, attention)
     type Row = (
         &'static str,
@@ -2389,6 +2402,7 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
                 .map(|(i, (machine, dot, rows))| {
                     let count = rows.len() as u32;
                     let mut group = NavGroup::new(machine)
+                        .on_toggle(rwire::HandlerSpec::memory::<GalleryShell>(gallery_noop))
                         .count(count)
                         .leading(dot())
                         .folded(folded && i == 2);
@@ -2436,12 +2450,12 @@ fn navigation_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .append([gallery_nav(b(bools, 0), "/s/1")])
 }
 
-/// The handler the gallery shell's resize handles call (the widths stay
-/// client-side in the gallery).
+/// The handler the gallery's resize handles and group headers call: a no-op
+/// (widths and folds stay as they are in the gallery).
 #[derive(Default)]
 struct GalleryShell;
 impl rwire::MemoryState for GalleryShell {}
-fn gallery_resized(_: &mut GalleryShell) {}
+fn gallery_noop(_: &mut GalleryShell) {}
 
 /// A three-column shell: sidebar (brand, search, chips, sessions, footer),
 /// main, panel; resize handles; `collapsed`, `no_panel`, `mobile_main`.
@@ -2531,15 +2545,22 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .sidebar_width(264)
         .panel_width(340)
         .collapsed(b(bools, 0))
-        .resizable(HandlerSpec::memory::<GalleryShell>(gallery_resized))
+        .resizable(HandlerSpec::memory::<GalleryShell>(gallery_noop))
+        // Inside the gallery page's own <main>: no second landmark.
+        .landmarks(false)
         .mobile(if b(bools, 2) {
             MobilePane::Main
         } else {
             MobilePane::List
         })
         .build()
-        // A frame in the gallery, not the whole viewport.
-        .st([St::MaxH60Dvh, St::BorderDefault, St::RoundedLg])
+        // A frame in the gallery, not the whole viewport; its drawer stays inside.
+        .st([
+            St::MaxH60Dvh,
+            St::BorderDefault,
+            St::RoundedLg,
+            St::ContainLayout,
+        ])
         .attr("data-demo", "shell")
 }
 

@@ -112,8 +112,16 @@ impl Sidebar {
         children.push(body);
         if let Some(footer) = self.footer {
             children.push(
-                slot(footer, &[St::BorderT, St::PxSp3, St::PtXs, St::PbSafe])
-                    .attr("data-sidebar", "footer"),
+                slot(
+                    footer,
+                    &[
+                        St::BorderT,
+                        St::PxSp3,
+                        St::PtSidebarFoot,
+                        St::PbSidebarFootSafe,
+                    ],
+                )
+                .attr("data-sidebar", "footer"),
             );
         }
         let mut aside = el(El::Aside).st(tokens);
@@ -149,12 +157,34 @@ mod tests {
         for st in [St::Flex1, St::MinH0, St::OverflowYAuto] {
             assert!(body.contains(&st.as_u16()), "body {st:?}");
         }
-        assert!(kids[4].get_style_utils().contains(&St::PbSafe.as_u16()));
+        assert!(kids[4]
+            .get_style_utils()
+            .contains(&St::PbSidebarFootSafe.as_u16()));
         assert!(kids[0].get_style_utils().contains(&St::PtSafe.as_u16()));
         let aside = built.get_style_utils();
         for st in [St::HFull, St::FlexCol, St::BgSidebar, St::PlSafe] {
             assert!(aside.contains(&st.as_u16()), "aside {st:?}");
         }
+    }
+
+    /// The old front's footer: 10 px 12 px, the bottom safe area added.
+    #[test]
+    fn the_footer_is_padded_like_the_old_front() {
+        let built = Sidebar::new().footer(el(El::Span)).build();
+        let foot = built.children()[1].get_style_utils();
+        for st in [
+            St::BorderT,
+            St::PxSp3,
+            St::PtSidebarFoot,
+            St::PbSidebarFootSafe,
+        ] {
+            assert!(foot.contains(&st.as_u16()), "{st:?}");
+        }
+        assert_eq!(St::PtSidebarFoot.css(), "padding-top:10px");
+        assert_eq!(
+            St::PbSidebarFootSafe.css(),
+            "padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))"
+        );
     }
 
     #[test]

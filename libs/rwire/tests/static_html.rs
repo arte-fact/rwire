@@ -260,3 +260,14 @@ fn a_region_wrapper_has_the_same_classes_static_and_live() {
     );
     assert!(has(STYLE_PSEUDO, 0, hover), "live wrapper: no hover");
 }
+
+/// A `<style>` (or `<script>`) element's text is raw text: not entity-escaped
+/// (the shell's child combinators, `>`, must survive the static paint), only
+/// kept from closing the element early.
+#[test]
+fn style_text_is_raw_in_the_static_paint() {
+    let html = el(El::Style).text("a>b{c:d}</style><b>").to_static_html();
+    assert!(html.contains("a>b{c:d}"), "{html}");
+    assert!(!html.contains("&gt;"), "{html}");
+    assert!(!html.contains("</style><b>"), "{html}");
+}

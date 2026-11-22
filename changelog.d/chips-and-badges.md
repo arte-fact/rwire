@@ -18,3 +18,14 @@
   `St::PxSearchSm` / `St::PySearchSm` (.7rem / .45rem), `St::TextBadgeXs`
   (10.5 px), `St::RoundedBadgeXs` (5 px). The search keeps `RoundedMd`
   (`--R2`, 8 px with `studio`).
+- **A link chip** (`Chip::href`) is client-routed (`data-route`, like
+  `NavRow`) and, when active, marked `aria-current="page"`; it never carries
+  `aria-pressed` (not allowed on a link).
+- **A button chip is a toggle only when `active` is set:** `aria-pressed`
+  appears with `.active(true)` or `.active(false)`, not on a chip that never
+  says (behaviour change).
+- **A counted chip** names itself with a separator: `aria-label="Failed, 3"`.
+- **The small search matches the old mcp-agents front:** its height comes from
+  its padding (13 px × 1.5 + .45rem × 2 + the border: about 36 px; no fixed
+  height), on the surface (`BgSurface`), in the ordinary ink (`TextDefault`);
+  44 px under a finger still.

@@ -1268,6 +1268,14 @@ define_token_enum! {
         TextBadgeXs = 0x3F9 => "font-size:10.5px",
         /// An extra-small badge's radius: 5 px.
         RoundedBadgeXs = 0x3FA => "border-radius:5px",
+        // Sidebar footer (0x3FB-0x3FC): the old front's 10 px 12 px.
+        /// A sidebar footer's top padding: 10 px.
+        PtSidebarFoot = 0x3FB => "padding-top:10px",
+        /// A sidebar footer's bottom padding: 10 px plus the bottom safe area.
+        PbSidebarFootSafe = 0x3FC => "padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))",
+        /// Contain layout and paint: the box becomes the containing block of its
+        /// fixed descendants (a demo frame that keeps a shell's drawer inside).
+        ContainLayout = 0x3FD => "contain:layout paint",
     }
 }
 

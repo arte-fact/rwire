@@ -20,3 +20,7 @@
   light grounds); the label's color is the tone's ink.
 - `contrast.rs`: every dot at 3:1 on every dot ground in every built-in theme;
   studio + Nord dots equal to the old mcp-agents front where its value passes.
+- `StatusDot::aria_label(…)`: the dot gets `role="img"` and that name, for a dot
+  that is the only sign of a state (a navigation row's leading dot).
+- **Breaking:** `StatusDotIntent` gains `Hollow`: an exhaustive `match` needs an
+  arm.

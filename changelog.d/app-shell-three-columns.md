@@ -20,3 +20,22 @@
   right-hand panel), reports the width on release (a click carrying
   `data-w`) and resets it on double-click. Existing handles (`SplitPane`)
   gain the double-click reset. Budget +300 B raw / +100 B gzip.
+- **Review fixes:**
+  - A plain (native) click on a handle sends nothing; a drag sends once, a
+    double-click one reset; the report goes through the handle's own click
+    binding only (it no longer bubbles to an ancestor's handler, `SplitPane`'s
+    included). `pointercancel` ends a drag; the width stays between 8rem and the
+    parent's width minus 256 px; handles that size the next sibling have their
+    own binding key.
+  - Without a visible sidebar (none, or `collapsed`), a phone shows the main
+    column (it could show an empty screen).
+  - The one-column threshold never exceeds the drawer's (`touch_below(1200)`,
+    `.breakpoints(1200, 1100)`).
+  - The rules use child combinators: a shell nested in another's main column
+    keeps its own layout.
+  - `landmarks(false)` renders the columns as `<div>`s (a shell embedded in a
+    page that has its own `<main>`); the panel is `<aside aria-label="Panel">`.
+  - **Behaviour change:** `AppShell`'s default sidebar width is 264 px (it was
+    260), in the legacy layout too.
+  - The drawer is the app's to manage (close with `panel(None)`, focus); see
+    the module docs.

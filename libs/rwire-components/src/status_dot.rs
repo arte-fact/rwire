@@ -60,6 +60,7 @@ pub struct StatusDot {
     ring: bool,
     size: StatusDotSize,
     label: Option<Cow<'static, str>>,
+    aria_label: Option<Cow<'static, str>>,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -103,6 +104,13 @@ impl StatusDot {
     /// Add an inline label after the dot, in the tone's readable ink.
     pub fn label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Name the dot for assistive technology (`role="img"`): use it when the
+    /// dot is the only sign of a state (a navigation row's leading dot).
+    pub fn aria_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
+        self.aria_label = Some(label.into());
         self
     }
 
@@ -152,7 +160,10 @@ impl StatusDot {
 
     /// Build the dot (and optional label) into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        let dot = el(El::Span).st(self.dot_tokens());
+        let mut dot = el(El::Span).st(self.dot_tokens());
+        if let Some(ref name) = self.aria_label {
+            dot = dot.attr("role", "img").attr("aria-label", name.as_ref());
+        }
         let mut builder = match self.label {
             Some(ref label) => el(El::Span)
                 .st([
@@ -163,6 +174,7 @@ impl StatusDot {
                     self.tone_of().ink(),
                 ])
                 .append([dot, el(El::Span).text(label.as_ref())]),
+            None if self.aria_label.is_some() => dot,
             None => dot.attr("aria-hidden", "true"),
         };
         if let Some(ref extra) = self.extra_class {
@@ -231,6 +243,18 @@ mod tests {
             rule.contains(&format!(".u{},", St::AnimatePulse.as_u16())),
             "{rule}"
         );
+    }
+
+    #[test]
+    fn a_dot_alone_can_carry_its_state_as_an_image_name() {
+        let html = StatusDot::new()
+            .intent(StatusDotIntent::Success)
+            .aria_label("Generating")
+            .build()
+            .to_static_html();
+        assert!(html.contains("role=\"img\""), "{html}");
+        assert!(html.contains("aria-label=\"Generating\""), "{html}");
+        assert!(!html.contains("aria-hidden"), "{html}");
     }
 
     #[test]

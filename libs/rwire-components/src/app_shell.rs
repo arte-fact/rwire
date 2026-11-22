@@ -27,7 +27,17 @@
 //!   move.
 //! - Resize handles (`BIND_RESIZE`) drag a column's width client-side; on
 //!   release the handler gets `pane` (`sidebar` / `panel`) and `w` (px; empty
-//!   after a double-click, which restores the default width).
+//!   after a double-click, which restores the default width). A plain click on
+//!   a handle sends nothing.
+//! - Without a visible sidebar (none, or `collapsed`), a phone shows the main
+//!   column whatever `mobile(…)` says.
+//! - **The drawer is the app's to manage.** Below the drawer threshold the
+//!   panel overlays the main column; the app closes it by passing
+//!   `panel(None)` (a close button in the panel, Escape) and moves the focus
+//!   into it and back. The shell cannot mark it `aria-modal` or make the main
+//!   column `inert`: whether the panel is a drawer depends on the viewport,
+//!   which the server does not know, and `inert` on a desktop's main column
+//!   would make it unusable.
 //!
 //! # Example
 //!
@@ -71,6 +81,7 @@ pub struct AppShell {
     mobile: Option<MobilePane>,
     breakpoints: Option<(u16, u16)>,
     three_columns: bool,
+    no_landmarks: bool,
 }
 
 #[rwire::component]
@@ -78,7 +89,7 @@ impl AppShell {
     /// Create a new AppShell with default dimensions.
     pub fn new() -> Self {
         Self {
-            sidebar_width: 260,
+            sidebar_width: 264,
             header_height: 56,
             ..Self::default()
         }
@@ -156,6 +167,14 @@ impl AppShell {
     /// 1100).
     pub fn breakpoints(mut self, one_column: u16, drawer: u16) -> Self {
         self.breakpoints = Some((one_column, drawer));
+        self.three_columns = true;
+        self
+    }
+
+    /// Render the columns as landmarks (`<main>`, `<aside>`), the default. Turn
+    /// it off for a shell embedded in a page that has its own `<main>` (a demo).
+    pub fn landmarks(mut self, on: bool) -> Self {
+        self.no_landmarks = !on;
         self.three_columns = true;
         self
     }
@@ -290,11 +309,24 @@ impl AppShell {
         if let Some(pw) = self.panel_width {
             vars.push_str(&format!(";--Qpw:{pw}px"));
         }
+        // Without a visible sidebar, a phone shows the main column whatever the
+        // app asked: the list would be an empty screen.
+        let sidebar_shown = self.sidebar.is_some() && !self.collapsed;
+        let pane = if sidebar_shown {
+            self.mobile.unwrap_or_default()
+        } else {
+            MobilePane::Main
+        };
+        let (main_el, aside_el) = if self.no_landmarks {
+            (El::Div, El::Div)
+        } else {
+            (El::Main, El::Aside)
+        };
         let mut root = el(El::Div)
             .attr("data-shell-root", "")
             .attr(
                 "data-mobile",
-                match self.mobile.unwrap_or_default() {
+                match pane {
                     MobilePane::List => "list",
                     MobilePane::Main => "main",
                 },
@@ -312,6 +344,8 @@ impl AppShell {
             root = root.class(extra.as_ref());
         }
         if let Some((one, drawer)) = self.breakpoints {
+            // One column never starts above the drawer threshold.
+            let one = one.min(drawer);
             let key = format!("{one}-{drawer}");
             let scope = format!("[data-shell-root][data-shell-bp=\"{key}\"]");
             root = root
@@ -349,7 +383,7 @@ impl AppShell {
             }
         }
         row.push(
-            el(El::Main)
+            el(main_el)
                 .attr("data-shell", "main")
                 .st([St::Flex1, St::MinW0, St::MinH0, St::OverflowYAuto])
                 .append(self.main_content),
@@ -359,8 +393,9 @@ impl AppShell {
                 row.push(Self::handle("panel", h));
             }
             row.push(
-                el(El::Aside)
+                el(aside_el)
                     .attr("data-shell", "panel")
+                    .attr("aria-label", "Panel")
                     .st([
                         St::WShellPanel,
                         St::MinH0,
@@ -384,7 +419,7 @@ mod tests {
     #[test]
     fn test_app_shell_defaults() {
         let shell = AppShell::new();
-        assert_eq!(shell.sidebar_width, 260);
+        assert_eq!(shell.sidebar_width, 264);
         assert_eq!(shell.header_height, 56);
         assert!(shell.header.is_none());
         assert!(shell.sidebar.is_none());
@@ -440,7 +475,7 @@ mod tests {
             .main(el(El::Span))
             .build()
             .to_static_html();
-        assert!(html.contains("grid-template-columns:260px 1fr"), "{html}");
+        assert!(html.contains("grid-template-columns:264px 1fr"), "{html}");
         assert!(!html.contains("data-shell"), "{html}");
     }
 
@@ -493,9 +528,9 @@ mod tests {
     fn the_theme_lays_out_shells_at_its_thresholds_and_a_shell_at_its_own() {
         use rwire::theme::{generate_theme_css, Theme};
         let css = generate_theme_css(&Theme::new());
-        assert!(css.contains("@media (max-width:1099.98px){[data-shell-root]:not([data-shell-bp]) [data-shell=panel]{position:fixed;"), "{css}");
-        assert!(css.contains("@media (max-width:759.98px){[data-shell-root]:not([data-shell-bp]) [data-shell=handle]{display:none}"), "{css}");
-        assert!(css.contains("[data-shell-root]:not([data-shell-bp])[data-mobile=main] [data-shell=sidebar]{display:none}"));
+        assert!(css.contains("@media (max-width:1099.98px){[data-shell-root]:not([data-shell-bp])>div>[data-shell=panel]{position:fixed;"), "{css}");
+        assert!(css.contains("@media (max-width:759.98px){[data-shell-root]:not([data-shell-bp])>div>[data-shell=handle]{display:none}"), "{css}");
+        assert!(css.contains("[data-shell-root]:not([data-shell-bp])[data-mobile=main]>div>[data-shell=sidebar]{display:none}"));
         // The one-column threshold follows touch_below.
         let phone = generate_theme_css(&Theme::new().touch_below(800));
         assert!(
@@ -509,7 +544,106 @@ mod tests {
             .build()
             .to_static_html();
         assert!(html.contains("data-shell-bp=\"700-1200\""), "{html}");
-        assert!(html.contains("@media (max-width:1199.98px){[data-shell-root][data-shell-bp=\"700-1200\"] [data-shell=panel]"), "{html}");
+        assert!(html.contains("@media (max-width:1199.98px){[data-shell-root][data-shell-bp=\"700-1200\"]>div>[data-shell=panel]"), "{html}");
+    }
+
+    #[test]
+    fn without_a_visible_sidebar_a_phone_shows_main() {
+        // No sidebar at all.
+        let html = AppShell::new()
+            .main(el(El::Span))
+            .mobile(MobilePane::List)
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-mobile=\"main\""), "{html}");
+        // A collapsed sidebar.
+        let html = AppShell::new()
+            .sidebar(el(El::Span))
+            .main(el(El::Span))
+            .collapsed(true)
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-mobile=\"main\""), "{html}");
+        // A visible sidebar keeps the app's choice (List by default).
+        let html = AppShell::new()
+            .sidebar(el(El::Span))
+            .main(el(El::Span))
+            .resizable(handler())
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-mobile=\"list\""), "{html}");
+    }
+
+    #[test]
+    fn inverted_thresholds_are_clamped_to_the_drawer() {
+        let html = AppShell::new()
+            .main(el(El::Span))
+            .breakpoints(1200, 1100)
+            .build()
+            .to_static_html();
+        assert!(!html.contains("1199.98"), "{html}");
+        assert_eq!(
+            html.matches("@media (max-width:1099.98px)").count(),
+            2,
+            "{html}"
+        );
+        let css = rwire::theme::generate_theme_css(&rwire::theme::Theme::new().touch_below(1200));
+        assert!(
+            !css.contains("(max-width:1199.98px){[data-shell-root]"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn rules_reach_a_shells_own_columns_only() {
+        let css = rwire::theme::shell_layout_css("S", 760, 1100);
+        assert!(
+            !css.contains(" [data-shell="),
+            "descendant selectors: {css}"
+        );
+        assert!(css.contains("S>div>[data-shell=panel]"), "{css}");
+        assert!(
+            css.contains("S[data-mobile=list]>div>[data-shell=main]"),
+            "{css}"
+        );
+        // A shell inside another's main column: the outer rules stop at its row.
+        let inner = AppShell::new()
+            .main(el(El::Span))
+            .panel(Some(el(El::Span)))
+            .build();
+        let outer = AppShell::new()
+            .main(inner)
+            .panel(Some(el(El::Span)))
+            .build();
+        let html = outer.to_static_html();
+        assert_eq!(html.matches("data-shell-root").count(), 2, "{html}");
+    }
+
+    #[test]
+    fn the_panel_is_a_labelled_landmark_and_landmarks_can_be_turned_off() {
+        let html = AppShell::new()
+            .main(el(El::Span))
+            .panel(Some(el(El::Span)))
+            .build()
+            .to_static_html();
+        assert!(html.contains("<aside "), "{html}");
+        assert!(html.contains("aria-label=\"Panel\""), "{html}");
+        // Embedded (a gallery demo inside a page's own <main>): no landmarks.
+        let html = AppShell::new()
+            .main(el(El::Span))
+            .panel(Some(el(El::Span)))
+            .landmarks(false)
+            .build()
+            .to_static_html();
+        assert!(
+            !html.contains("<main") && !html.contains("<aside"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn the_default_sidebar_width_is_264() {
+        assert_eq!(AppShell::new().sidebar_width, 264);
     }
 
     #[test]

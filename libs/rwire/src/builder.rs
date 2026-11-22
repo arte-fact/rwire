@@ -1217,7 +1217,13 @@ impl ElementBuilder {
         }
 
         if let Some(text) = &self.text {
-            push_text_escaped(out, text);
+            if matches!(tag, "style" | "script") {
+                // Raw text (CSS, JS): not entity-escaped, only kept from closing
+                // the element early.
+                out.push_str(&text.replace("</", "<\\/"));
+            } else {
+                push_text_escaped(out, text);
+            }
         }
         // Synced region: render its content (from the supplied state, else the
         // default) so crawlers and the pre-WebSocket paint see real markup (the

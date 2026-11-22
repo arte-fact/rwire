@@ -279,9 +279,10 @@ impl Input {
         // padding. The 44 px touch target comes from the theme's coarse-pointer
         // rule (`min-height:44px` on inputs), not from the input itself.
         // The radius stays `RoundedMd` (`--R2`: 8 px with studio).
+        // On the surface, in the ordinary ink (the old front's sidebar search).
         if self.input_type == InputType::Search && self.size == InputSize::Sm {
-            tokens.retain(|t| *t != St::TextXs);
-            tokens.push(St::TextSearchSm);
+            tokens.retain(|t| !matches!(t, St::TextXs | St::TextHigh | St::BgApp));
+            tokens.extend([St::TextSearchSm, St::TextDefault, St::BgSurface]);
         }
 
         if self.invalid {
@@ -309,8 +310,10 @@ impl Input {
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size_tokens());
         if self.input_type == InputType::Search && self.size == InputSize::Sm {
-            // Its padding, inline and block apart so an app's `.st([St::PxMd])` wins.
-            tokens.retain(|t| !matches!(t, St::PxSm | St::Py0));
+            // Its padding, inline and block apart so an app's `.st([St::PxMd])` wins;
+            // its height comes from it (13 px × 1.5 + .45rem × 2 + the border:
+            // 35.9 px), not from a fixed height.
+            tokens.retain(|t| !matches!(t, St::PxSm | St::Py0 | St::H1_75rem));
             tokens.extend([St::PxSearchSm, St::PySearchSm]);
         }
         let mut builder = el(El::Input)
@@ -462,6 +465,28 @@ mod tests {
             !over.get_style_utils().contains(&St::PxSearchSm.as_u16()),
             "PxMd replaces it"
         );
+    }
+
+    /// The old front's sidebar search: its height comes from its padding (no
+    /// fixed height), on the surface, in the ordinary ink.
+    #[test]
+    fn the_small_search_matches_the_old_front() {
+        let built = Input::search().size(InputSize::Sm).build();
+        let utils = built.get_style_utils();
+        for st in [
+            St::BgSurface,
+            St::TextDefault,
+            St::LeadingNormal,
+            St::BorderDefault,
+        ] {
+            assert!(utils.contains(&st.as_u16()), "{st:?}");
+        }
+        for st in [St::H1_75rem, St::HControl, St::BgApp, St::TextHigh] {
+            assert!(!utils.contains(&st.as_u16()), "{st:?} must go");
+        }
+        // Other inputs keep theirs.
+        let text = Input::text().size(InputSize::Sm).build();
+        assert!(text.get_style_utils().contains(&St::H1_75rem.as_u16()));
     }
 
     #[test]

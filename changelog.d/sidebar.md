@@ -6,3 +6,5 @@
   at the bottom, over a hairline.
 - Safe areas: the column clears the left inset (`St::PlSafe`), the header the
   top one (`St::PtSafe`), the footer the bottom one (`St::PbSafe`).
+- The footer is padded like the old mcp-agents front: 10 px 12 px, the bottom
+  safe area added (`St::PtSidebarFoot`, `St::PbSidebarFootSafe`).

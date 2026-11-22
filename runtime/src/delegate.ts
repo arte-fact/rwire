@@ -61,6 +61,13 @@ function dispatch(type: string, e: Event): void {
   }
 }
 
+/** Fire `el`'s own `type` bindings only, without a DOM event and without
+ *  bubbling: a control reporting to the server (a resize handle). */
+export function own(el: RwEl, type: string): void {
+  const recs = el.__b && el.__b[type];
+  if (recs) for (const r of recs) fire(r, { type, target: el } as unknown as Event, el);
+}
+
 function fire(r: Binding, e: Event, el: RwEl): void {
   if (r.ms !== undefined) {
     clearTimeout(r.tm);

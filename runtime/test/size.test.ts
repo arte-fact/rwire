@@ -23,8 +23,11 @@ import { gzipSync } from "node:zlib";
 // +300B raw / +100B gzip (shell navigation, R2): a resize handle can size the next
 // sibling (a right-hand panel), reports the width to the server on release and resets it
 // on double-click; it is the existing BIND_RESIZE opcode, so it cannot be lazy.
-const MAX_RAW = 21_000;
-const MAX_GZIP = 7_920;
+// +250B raw / +120B gzip (R2 review): a handle reports through its own binding (no
+// bubbling to an ancestor's handler), swallows native clicks, handles pointercancel and
+// bounds the width; a correctness fix of the same opcode.
+const MAX_RAW = 21_250;
+const MAX_GZIP = 8_040;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

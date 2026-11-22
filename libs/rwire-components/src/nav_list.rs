@@ -36,6 +36,7 @@ use std::borrow::Cow;
 /// A list of navigation groups (`<nav>`).
 #[derive(Clone, Default)]
 pub struct NavList {
+    id: Option<Cow<'static, str>>,
     groups: Vec<NavGroup>,
     aria_label: Option<Cow<'static, str>>,
 }
@@ -44,6 +45,13 @@ impl NavList {
     /// An empty list.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The prefix of the groups' ids (`<prefix>-g0`, `-g1`…; default `nav`),
+    /// so two lists on a page, or two groups with the same label, never share one.
+    pub fn id(mut self, prefix: impl Into<Cow<'static, str>>) -> Self {
+        self.id = Some(prefix.into());
+        self
     }
 
     /// Add a group.
@@ -70,7 +78,15 @@ impl NavList {
         if let Some(label) = &self.aria_label {
             nav = nav.attr("aria-label", label);
         }
-        nav.append(self.groups.into_iter().map(NavGroup::build))
+        let prefix = self.id.unwrap_or(Cow::Borrowed("nav"));
+        nav.append(self.groups.into_iter().enumerate().map(|(i, group)| {
+            let group = if group.id.is_none() {
+                group.id(format!("{prefix}-g{i}"))
+            } else {
+                group
+            };
+            group.build()
+        }))
     }
 }
 
@@ -203,30 +219,43 @@ impl NavGroup {
                     .text(&count.to_string()),
             );
         }
-        let mut head = el(El::Button)
-            .attr("type", "button")
-            .attr("aria-expanded", if self.folded { "false" } else { "true" })
-            .attr("aria-controls", &rows_id)
-            .st([
-                St::DisplayFlex,
-                St::ItemsCenter,
-                St::GapSm,
-                St::WFull,
-                St::BgTransparent,
-                St::BorderNone,
-                St::RoundedMd,
-                St::PxSm,
-                St::PyXs,
-                St::TextMuted,
-                St::NavGroupHead,
-                St::CursorPointer,
-            ])
-            .hover([St::BgSurfaceRaised])
-            .focus_visible([St::RingFocus])
-            .append(head_children);
-        if let Some(handler) = self.on_toggle {
-            head = head.on(Ev::Click, handler);
-        }
+        let head_tokens = [
+            St::DisplayFlex,
+            St::ItemsCenter,
+            St::GapSm,
+            St::WFull,
+            St::PxSm,
+            St::PyXs,
+            St::TextMuted,
+            St::NavGroupHead,
+        ];
+        // A header that folds is a button naming its rows (when shown); one
+        // that does not is a plain title.
+        let head = match self.on_toggle {
+            Some(handler) => {
+                let mut head = el(El::Button)
+                    .attr("type", "button")
+                    .attr("aria-expanded", if self.folded { "false" } else { "true" })
+                    .st(head_tokens)
+                    .st([
+                        St::BgTransparent,
+                        St::BorderNone,
+                        St::RoundedMd,
+                        St::CursorPointer,
+                    ])
+                    .hover([St::BgSurfaceRaised])
+                    .focus_visible([St::RingFocus])
+                    .on(Ev::Click, handler)
+                    .append(head_children);
+                if !self.folded {
+                    head = head.attr("aria-controls", &rows_id);
+                }
+                head
+            }
+            None => el(El::Div)
+                .st(head_tokens)
+                .append(head_children.into_iter().skip(1)),
+        };
 
         let mut group = el(El::Div)
             .st([St::DisplayFlex, St::FlexCol, St::GapXs])
@@ -408,6 +437,14 @@ mod tests {
     use super::*;
     use crate::StatusDot;
 
+    fn toggle() -> HandlerSpec {
+        #[derive(Default)]
+        struct S;
+        impl rwire::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        HandlerSpec::memory::<S>(noop)
+    }
+
     fn row() -> NavRow {
         NavRow::new("/s/abc")
             .leading(StatusDot::new().build())
@@ -473,6 +510,7 @@ mod tests {
     #[test]
     fn a_group_header_controls_its_rows_and_folds() {
         let open = NavGroup::new("Home Lab")
+            .on_toggle(toggle())
             .count(3)
             .rows([row(), row()])
             .build();
@@ -486,7 +524,11 @@ mod tests {
         let head = &open.children()[0];
         assert!(head.get_style_utils().contains(&St::NavGroupHead.as_u16()));
 
-        let folded = NavGroup::new("Home Lab").folded(true).rows([row()]).build();
+        let folded = NavGroup::new("Home Lab")
+            .on_toggle(toggle())
+            .folded(true)
+            .rows([row()])
+            .build();
         let html = folded.to_static_html();
         assert!(html.contains("aria-expanded=\"false\""), "{html}");
         assert!(
@@ -514,11 +556,44 @@ mod tests {
     }
 
     #[test]
+    fn a_group_without_a_toggle_has_a_plain_title() {
+        let html = NavGroup::new("home").rows([row()]).build().to_static_html();
+        assert!(!html.contains("<button"), "{html}");
+        assert!(!html.contains("aria-expanded"), "{html}");
+        assert!(!html.contains("aria-controls"), "{html}");
+    }
+
+    #[test]
+    fn a_folded_group_names_no_absent_id() {
+        let html = NavGroup::new("home")
+            .on_toggle(toggle())
+            .folded(true)
+            .rows([row()])
+            .build()
+            .to_static_html();
+        assert!(html.contains("aria-expanded=\"false\""), "{html}");
+        assert!(!html.contains("aria-controls"), "{html}");
+    }
+
+    #[test]
+    fn a_lists_group_ids_are_unique() {
+        let html = NavList::new()
+            .id("side")
+            .group(NavGroup::new("home").on_toggle(toggle()).rows([row()]))
+            .group(NavGroup::new("home").on_toggle(toggle()).rows([row()]))
+            .build()
+            .to_static_html();
+        assert!(html.contains("id=\"side-g0\""), "{html}");
+        assert!(html.contains("id=\"side-g1\""), "{html}");
+        assert!(html.contains("aria-controls=\"side-g1\""), "{html}");
+    }
+
+    #[test]
     fn a_list_is_a_labelled_nav() {
         let html = NavList::new()
             .aria_label("Sessions")
-            .group(NavGroup::new("a").rows([row()]))
-            .group(NavGroup::new("b"))
+            .group(NavGroup::new("a").on_toggle(toggle()).rows([row()]))
+            .group(NavGroup::new("b").on_toggle(toggle()))
             .build()
             .to_static_html();
         assert!(html.starts_with("<nav "), "{html}");

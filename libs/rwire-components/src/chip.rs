@@ -24,7 +24,8 @@ use std::borrow::Cow;
 #[derive(Debug, Default)]
 pub struct Chip {
     label: Cow<'static, str>,
-    active: bool,
+    /// `Some` when set explicitly: a button chip is then a toggle (`aria-pressed`).
+    active: Option<bool>,
     on_click: Option<HandlerSpec>,
     extra_class: Option<Cow<'static, str>>,
     count: Option<u64>,
@@ -40,9 +41,11 @@ impl Chip {
         }
     }
 
-    /// Mark the chip as the active selection (accent-filled).
+    /// Mark the chip as the active selection (accent-filled). Setting it makes
+    /// a button chip a toggle (`aria-pressed`); a link chip (`href`) is marked
+    /// `aria-current="page"` when active.
     pub fn active(mut self, active: bool) -> Self {
-        self.active = active;
+        self.active = Some(active);
         self
     }
 
@@ -52,7 +55,8 @@ impl Chip {
         self
     }
 
-    /// Make the chip a link (`<a href>`); `aria-pressed` reflects `active`.
+    /// Make the chip a client-routed link (`<a href data-route>`); when active it
+    /// is the current page (`aria-current="page"`).
     pub fn href(mut self, path: impl Into<Cow<'static, str>>) -> Self {
         self.href = Some(path.into());
         self
@@ -82,7 +86,7 @@ impl Chip {
             St::BorderDefault,
             St::CursorPointer,
         ];
-        if self.active {
+        if self.active == Some(true) {
             tokens.extend([
                 Tone::Accent.solid(),
                 Tone::Accent.on_solid(),
@@ -96,14 +100,22 @@ impl Chip {
 
     /// Build the chip into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
-        let active = self.active;
+        let active = self.active == Some(true);
         let mut builder = if let Some(ref href) = self.href {
-            el(El::A).at_str(At::Href, href)
+            let link = rwire::router::Link::route(href);
+            if active {
+                link.attr("aria-current", "page")
+            } else {
+                link
+            }
         } else {
-            el(El::Button).at(At::Type, Av::Button)
+            let button = el(El::Button).at(At::Type, Av::Button);
+            match self.active {
+                Some(on) => button.at(At::AriaPressed, if on { Av::True } else { Av::False }),
+                None => button,
+            }
         }
-        .st(self.compute_tokens())
-        .at(At::AriaPressed, if active { Av::True } else { Av::False });
+        .st(self.compute_tokens());
         if let Some(handler) = self.on_click {
             builder = builder.on(Ev::Click, handler);
         }
@@ -114,7 +126,9 @@ impl Chip {
             builder = builder.hover([St::TextHigh]);
         }
         if let Some(n) = self.count {
+            // The accessible name separates the label from the count: "Failed, 3".
             builder = builder
+                .attr("aria-label", &format!("{}, {n}", self.label))
                 .st([St::DisplayInlineFlex, St::ItemsCenter, St::GapXs])
                 .text(self.label.as_ref())
                 .append([el(El::Span).text(&n.to_string())]);
@@ -169,21 +183,38 @@ mod tests {
     }
 
     #[test]
-    fn chip_href_renders_a_link_with_aria_pressed() {
-        let on = Chip::new("Docs")
+    fn a_link_chip_is_routed_and_marks_the_current_page() {
+        let html = Chip::new("Docs")
             .href("/docs")
             .active(true)
             .build()
             .to_static_html();
-        assert!(on.contains("<a"), "{on}");
-        assert!(on.contains("href=\"/docs\""), "{on}");
-        assert!(on.contains("aria-pressed=\"true\""), "{on}");
-        let off = Chip::new("Docs")
-            .href("/docs")
-            .active(false)
-            .build()
-            .to_static_html();
+        assert!(html.starts_with("<a "), "{html}");
+        assert!(html.contains("data-route"), "{html}");
+        assert!(html.contains("aria-current=\"page\""), "{html}");
+        assert!(
+            !html.contains("aria-pressed"),
+            "not allowed on a link: {html}"
+        );
+        let html = Chip::new("Docs").href("/docs").build().to_static_html();
+        assert!(
+            !html.contains("aria-current") && !html.contains("aria-pressed"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn a_button_chip_is_a_toggle_only_when_active_is_set() {
+        let plain = Chip::new("All").build().to_static_html();
+        assert!(!plain.contains("aria-pressed"), "{plain}");
+        let off = Chip::new("All").active(false).build().to_static_html();
         assert!(off.contains("aria-pressed=\"false\""), "{off}");
+    }
+
+    #[test]
+    fn a_counted_chip_names_itself_with_a_separator() {
+        let html = Chip::new("Failed").count(3).build().to_static_html();
+        assert!(html.contains("aria-label=\"Failed, 3\""), "{html}");
     }
 
     #[test]

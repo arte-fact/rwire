@@ -298,16 +298,19 @@ pub struct Theme {
 /// 1100); a shell with its own thresholds emits its own.
 #[doc(hidden)]
 pub fn shell_layout_css(scope: &str, one_column: u16, drawer: u16) -> String {
+    // One column never starts above the drawer threshold; child combinators keep
+    // a shell nested in another's main column out of the outer rules.
+    let one_column = one_column.min(drawer);
     let (d, o) = (drawer.saturating_sub(1), one_column.saturating_sub(1));
     format!(
         "@media (max-width:{d}.98px){{\
-         {scope} [data-shell=panel]{{position:fixed;top:0;right:0;bottom:0;z-index:40;max-width:100vw;box-shadow:var(--Qd,0 8px 24px rgba(0,0,0,.25))}}\
-         {scope} [data-pane=panel]{{display:none}}}}\
+         {scope}>div>[data-shell=panel]{{position:fixed;top:0;right:0;bottom:0;z-index:40;max-width:100vw;box-shadow:var(--Qd,0 8px 24px rgba(0,0,0,.25))}}\
+         {scope}>div>[data-pane=panel]{{display:none}}}}\
          @media (max-width:{o}.98px){{\
-         {scope} [data-shell=handle]{{display:none}}\
-         {scope} [data-shell=sidebar]{{width:100%!important;border-right:0}}\
-         {scope} [data-shell=panel]{{left:0;width:100%!important}}\
-         {scope}[data-mobile=list] [data-shell=main],{scope}[data-mobile=main] [data-shell=sidebar]{{display:none}}}}\n"
+         {scope}>div>[data-shell=handle]{{display:none}}\
+         {scope}>div>[data-shell=sidebar]{{width:100%!important;border-right:0}}\
+         {scope}>div>[data-shell=panel]{{left:0;width:100%!important}}\
+         {scope}[data-mobile=list]>div>[data-shell=main],{scope}[data-mobile=main]>div>[data-shell=sidebar]{{display:none}}}}\n"
     )
 }
 

@@ -19,3 +19,9 @@
   now covers: under a coarse pointer or below `Theme::touch_below`, a one-line
   row is at least 44 px tall (`:where`, zero specificity). Two-line rows,
   taller already, and desktop rows with a fine pointer are unchanged.
+- **A group without `on_toggle`** has a plain title, not a button with
+  `aria-expanded`. A folded group names no `aria-controls` (its rows are not
+  rendered).
+- **Unique ids:** `NavList::id(prefix)` (default `nav`) gives its groups
+  `<prefix>-g0`, `-g1`…, so two groups with the same label, or two lists, never
+  share an id.
