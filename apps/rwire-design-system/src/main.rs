@@ -598,7 +598,11 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
                     .st([St::TextXs, St::TextMuted, St::FontMedium])
                     .attr("style", "min-width:64px")
                     .text(axis.display_name),
-                Stack::row().gap(Gap::Xs).children(buttons).build(),
+                Stack::row()
+                    .gap(Gap::Xs)
+                    .wrap(true)
+                    .children(buttons)
+                    .build(),
             ])
             .build();
         controls.push(row);
@@ -625,7 +629,13 @@ fn build_playground(entry: &ComponentEntry, state: &DesignSystemState) -> Elemen
 
             toggles.push(toggle);
         }
-        controls.push(Stack::row().gap(Gap::Md).children(toggles).build());
+        controls.push(
+            Stack::row()
+                .gap(Gap::Md)
+                .wrap(true)
+                .children(toggles)
+                .build(),
+        );
     }
 
     // Number params -> sliders (easy to drag), with the live value shown alongside.
