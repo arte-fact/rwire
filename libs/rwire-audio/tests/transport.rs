@@ -49,6 +49,16 @@ struct Seen {
     connection: u64,
 }
 
+/// A port nobody listens on (fixed ports collide with other checkouts
+/// running the same tests on the machine).
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
 /// A server whose audio task echoes every frame and counts it in `Heard`.
 async fn start(port: u16) -> mpsc::UnboundedReceiver<Seen> {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -190,11 +200,12 @@ fn frame(seq: u32) -> Frame {
 
 #[tokio::test]
 async fn frames_echo_through_the_audio_socket_and_tickets_are_single_use() {
-    let mut seen = start(19301).await;
-    let mut page = connect(19301, "/", SID).await;
+    let port = free_port();
+    let mut seen = start(port).await;
+    let mut page = connect(port, "/", SID).await;
     let ticket = rendered_ticket(&mut page).await;
 
-    let mut link = audio(19301, &ticket, SID).await;
+    let mut link = audio(port, &ticket, SID).await;
     let Some(ToBrowser::Ticket(next)) = next_message(&mut link).await else {
         panic!("a connection starts with the next ticket");
     };
@@ -225,34 +236,34 @@ async fn frames_echo_through_the_audio_socket_and_tickets_are_single_use() {
 
     // Replayed, unknown, missing: refused.
     assert_eq!(
-        close_code(&mut audio(19301, &ticket, SID).await).await,
+        close_code(&mut audio(port, &ticket, SID).await).await,
         Some(4403)
     );
     let forged = format!("rwt_{}", "0".repeat(32));
     assert_eq!(
-        close_code(&mut audio(19301, &forged, SID).await).await,
+        close_code(&mut audio(port, &forged, SID).await).await,
         Some(4403)
     );
-    let mut bare = connect(19301, AUDIO_WS_PATH, SID).await;
+    let mut bare = connect(port, AUDIO_WS_PATH, SID).await;
     assert_eq!(close_code(&mut bare).await, Some(4403));
 
     // Another tab of the session: its own ticket and connection id. With
     // another session's cookie, the ticket is refused (and burnt).
-    let mut tab = connect(19301, "/", SID).await;
+    let mut tab = connect(port, "/", SID).await;
     let tab_ticket = rendered_ticket(&mut tab).await;
     assert_ne!(tab_ticket, ticket);
     assert_eq!(
-        close_code(&mut audio(19301, &tab_ticket, OTHER_SID).await).await,
+        close_code(&mut audio(port, &tab_ticket, OTHER_SID).await).await,
         Some(4403)
     );
     assert_eq!(
-        close_code(&mut audio(19301, &tab_ticket, SID).await).await,
+        close_code(&mut audio(port, &tab_ticket, SID).await).await,
         Some(4403),
         "a ticket is burnt by any use"
     );
-    let mut tab = connect(19301, "/", SID).await;
+    let mut tab = connect(port, "/", SID).await;
     let tab_ticket = rendered_ticket(&mut tab).await;
-    let mut tab_link = audio(19301, &tab_ticket, SID).await;
+    let mut tab_link = audio(port, &tab_ticket, SID).await;
     assert!(matches!(
         next_message(&mut tab_link).await,
         Some(ToBrowser::Ticket(_))
@@ -262,7 +273,7 @@ async fn frames_echo_through_the_audio_socket_and_tickets_are_single_use() {
 
     // The socket is lost; the next ticket reconnects it, no render.
     drop(link);
-    let mut again = audio(19301, &next, SID).await;
+    let mut again = audio(port, &next, SID).await;
     let Some(ToBrowser::Ticket(after)) = next_message(&mut again).await else {
         panic!("a reconnection starts with the next ticket");
     };
@@ -282,17 +293,18 @@ async fn frames_echo_through_the_audio_socket_and_tickets_are_single_use() {
     ));
     // The next ticket is single-use too.
     assert_eq!(
-        close_code(&mut audio(19301, &next, SID).await).await,
+        close_code(&mut audio(port, &next, SID).await).await,
         Some(4403)
     );
 }
 
 #[tokio::test]
 async fn the_end_of_the_page_connection_closes_its_audio_socket_and_burns_its_tickets() {
-    let _seen = start(19302).await;
-    let mut page = connect(19302, "/", SID).await;
+    let port = free_port();
+    let _seen = start(port).await;
+    let mut page = connect(port, "/", SID).await;
     let ticket = rendered_ticket(&mut page).await;
-    let mut link = audio(19302, &ticket, SID).await;
+    let mut link = audio(port, &ticket, SID).await;
     let Some(ToBrowser::Ticket(next)) = next_message(&mut link).await else {
         panic!("a connection starts with the next ticket");
     };
@@ -308,7 +320,7 @@ async fn the_end_of_the_page_connection_closes_its_audio_socket_and_burns_its_ti
     .await;
     assert!(ended.is_ok(), "the audio socket outlived its page");
     assert_eq!(
-        close_code(&mut audio(19302, &next, SID).await).await,
+        close_code(&mut audio(port, &next, SID).await).await,
         Some(4403),
         "the handed-over ticket died with its page"
     );
