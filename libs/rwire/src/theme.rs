@@ -780,6 +780,10 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
         css_var(&mut css, "L", &rp.accent[6]); // border-primary
     }
 
+    // --- Canvas: the sunken ground of a reading area (`St::BgCanvas`), under
+    // cards that stay `BgSurface`. The app background unless a style remaps it.
+    css.push_str("--Qw:var(--a);");
+
     // --- Style preset: resolve primary/surface/border overrides inline ---
     (theme.style.color_css)(&mut css, &rp, is_dark);
 

@@ -1064,6 +1064,10 @@ define_token_enum! {
         /// The reading face the theme names in `--Qfr` (`Theme::fonts`): long-form
         /// text such as a reply or an article; the body face otherwise.
         FontRead = 0x3A0 => "font-family:var(--Qfr,inherit)",
+        /// The canvas: the sunken ground of a reading area (a conversation, a
+        /// document) under cards that stay `BgSurface`. Reads `--Qw`, the app
+        /// background unless the theme style remaps it (`studio` does).
+        BgCanvas = 0x3A1 => "background:var(--Qw)",
     }
 }
 

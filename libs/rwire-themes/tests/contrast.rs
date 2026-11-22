@@ -42,6 +42,9 @@ const PAIRS: &[(St, St)] = &[
     (St::TextWarning, St::BgSurfaceRaised),
     (St::TextSuccess, St::BgSurfaceRaised),
     (St::TextError, St::BgSurfaceRaised),
+    // Text on the canvas (the sunken reading ground, `--Qw`).
+    (St::TextDefault, St::BgCanvas),
+    (St::TextHigh, St::BgCanvas),
 ];
 
 fn palettes() -> Vec<(&'static str, Option<ColorPalette>)> {
@@ -70,6 +73,7 @@ fn styles() -> Vec<(&'static str, ThemeStyle)> {
         ("glass", styles::glass()),
         ("neon", styles::neon()),
         ("cloth", styles::cloth()),
+        ("studio", styles::studio()),
     ]
 }
 
@@ -145,6 +149,29 @@ fn every_subtle_pair_reads_at_aa_in_every_builtin_theme() {
         f.len(),
         f.join("\n")
     );
+}
+
+/// E2 criterion: the studio style with the Nord palette (mcp-agents' theme),
+/// in light and dark, reads at AA on every pair, the canvas and the primary
+/// button included.
+#[test]
+fn studio_with_nord_reads_at_aa() {
+    for dark in [false, true] {
+        let theme = if dark { Theme::dark() } else { Theme::light() }
+            .style(styles::studio())
+            .palette(palettes::nord());
+        let v = vars(&generate_theme_css(&theme));
+        let pairs = PAIRS.iter().chain(&[(St::TextOnPrimary, St::BgPrimary)]);
+        for &(text, ground) in pairs {
+            let (t, g) = (resolve(&v, var_of(text)), resolve(&v, var_of(ground)));
+            let r = contrast_ratio(&t, &g);
+            assert!(
+                r >= MIN_TEXT_CONTRAST,
+                "studio/nord/{}: {text:?} on {ground:?} = {r:.2} ({t} on {g})",
+                if dark { "dark" } else { "light" }
+            );
+        }
+    }
 }
 
 #[test]
