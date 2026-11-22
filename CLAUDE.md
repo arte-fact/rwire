@@ -63,6 +63,7 @@ rwire/
 │   ├── rwire-markdown/      # Markdown rendering for docs
 │   ├── rwire-map/           # A pannable, zoomable SVG map: its runtime extension + builder helpers
 │   ├── rwire-push/          # Web Push: VAPID, subscriptions, aes128gcm send + the `push` runtime extension
+│   ├── rwire-audio/         # Microphone capture + gapless playback over a dedicated audio socket (`audio` extension)
 │   └── rwire-themes/        # Predefined styles and palettes
 ├── runtime/                 # TypeScript source of the JS runtime → builds libs/rwire/assets/runtime.min.js
 ├── apps/
@@ -290,6 +291,15 @@ what the user is typing.
   view)` + `view_input(id, handler)` + `.serve_map()` on the server give a map that drags,
   pinches and wheels client-side and reports its view back (`../marches` uses it). The
   TypeScript sources live in `runtime/src/ext/`, built and vendored by `npm run sync`.
+- **Extension sockets** (`rwire::ext_socket`): `ServerWithRoot::ext_socket(path, handler)` accepts
+  WebSocket handshakes on a path of an extension's own (`/_rw/ext/<name>/ws`), for a stream the
+  event path is not made for (binary media). The handshake passes the page socket's gates (auth,
+  Origin, admission) and must carry `?t=<ticket>`: a single-use ticket a render issues with
+  `rwire::ext_socket::ticket(path, label)`, bound to the page connection (session cookie, identity,
+  connection id). A refused ticket closes the socket with 4403. The handler gets an `ExtSocket`
+  (the socket, its claim, the `SharedServerState`); `ExtSocket::next_ticket()` gives the ticket of
+  the next connection, valid while the socket lives and 2 minutes more, so the extension
+  reconnects with no render. `rwire-audio` is built on it (`.serve_audio(|link| …)`).
 
 ## Capsule Size (lazy delivery)
 

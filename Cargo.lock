@@ -1633,6 +1633,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwire-audio"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "rwire",
+ "tokio",
+]
+
+[[package]]
 name = "rwire-components"
 version = "0.1.0"
 dependencies = [

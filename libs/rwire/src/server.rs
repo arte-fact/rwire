@@ -121,6 +121,9 @@ pub struct SharedServerState {
 
     /// Cached session states for reconnection.
     session_state_cache: RwLock<HashMap<String, CachedSession>>,
+
+    /// Extension socket tickets issued and not yet used.
+    pub(crate) tickets: crate::ext_socket::Tickets,
 }
 
 /// Resolve the `shared_cache` key for a state type, or `None` for memory state.
@@ -185,6 +188,7 @@ impl SharedServerState {
             persist_interval,
             broadcast_capacity,
             session_state_cache: RwLock::new(HashMap::new()),
+            tickets: Default::default(),
         })
     }
 
@@ -732,6 +736,7 @@ pub struct ServerWithRoot<F> {
     config: ServerConfig,
     assets: Vec<Asset>,
     asset_dirs: Vec<crate::asset_dir::AssetDir>,
+    ext_sockets: Vec<crate::ext_socket::ExtSocketRoute>,
 }
 
 /// The application's files: fixed ones ([`ServerWithRoot::asset`]) and
@@ -739,6 +744,8 @@ pub struct ServerWithRoot<F> {
 struct ServedFiles {
     assets: Vec<Asset>,
     dirs: Vec<crate::asset_dir::AssetDir>,
+    /// The extension sockets ([`ServerWithRoot::ext_socket`]).
+    sockets: Vec<crate::ext_socket::ExtSocketRoute>,
 }
 
 /// A file the server serves as it is, at a path of the application's choosing:
@@ -824,6 +831,7 @@ impl ServerBuilder {
             config: ServerConfig::default(),
             assets: Vec::new(),
             asset_dirs: Vec::new(),
+            ext_sockets: Vec::new(),
         }
     }
 }
@@ -865,6 +873,23 @@ where
             body: body.into(),
             cache: ASSET_CACHE,
             gzip: None,
+        });
+        self
+    }
+
+    /// Accept WebSocket handshakes on `path` (`"/_rw/ext/<name>/ws"`) for a
+    /// runtime extension's own stream, and hand each accepted socket to
+    /// `handler`. The handshake passes the page socket's gates (auth, Origin,
+    /// admission caps) and must carry a single-use ticket (`?t=`) issued by
+    /// a render of the same session: see [`crate::ext_socket`].
+    pub fn ext_socket<H, Fut>(mut self, path: impl Into<String>, handler: H) -> Self
+    where
+        H: Fn(crate::ext_socket::ExtSocket) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.ext_sockets.push(crate::ext_socket::ExtSocketRoute {
+            path: path.into(),
+            handler: Arc::new(move |socket| Box::pin(handler(socket))),
         });
         self
     }
@@ -1215,6 +1240,7 @@ where
         let assets = Arc::new(ServedFiles {
             assets: files,
             dirs: self.asset_dirs,
+            sockets: self.ext_sockets,
         });
 
         let gated = self.auth.is_some() || self.delegated.is_some();
@@ -2018,6 +2044,68 @@ async fn serve_ext_module(
     .await
 }
 
+/// An extension socket's handshake, past the gates and the Origin check:
+/// admission, upgrade, then the ticket (closed with
+/// [`crate::ext_socket::CLOSE_TICKET_REFUSED`] unless it is valid for this
+/// path, session and identity), then the route's handler.
+#[allow(clippy::too_many_arguments)]
+async fn serve_ext_socket(
+    stream: TcpStream,
+    peer_addr: SocketAddr,
+    route: &crate::ext_socket::ExtSocketRoute,
+    ticket: Option<String>,
+    session: Option<String>,
+    identity: Option<crate::delegated_auth::Identity>,
+    shared: Arc<SharedServerState>,
+    registry: &ConnectionRegistry,
+    config: &ServerConfig,
+    metrics: &Metrics,
+) {
+    let ip = peer_addr.ip();
+    if let Err(reason) =
+        registry.check_admission(ip, config.max_connections, config.max_connections_per_ip)
+    {
+        let why = match reason {
+            AdmissionError::AtCapacity => "at_capacity",
+            AdmissionError::TooManyFromIp => "too_many_from_ip",
+        };
+        metrics.connections_rejected.inc();
+        let _ = crate::health::serve_unavailable(stream, why).await;
+        return;
+    }
+    let _conn_guard = registry.register(ip);
+    let ws_config = WebSocketConfig {
+        max_message_size: Some(MAX_WS_MESSAGE_SIZE),
+        max_frame_size: Some(MAX_WS_FRAME_SIZE),
+        ..Default::default()
+    };
+    let mut ws = match accept_async_with_config(stream, Some(ws_config)).await {
+        Ok(ws) => ws,
+        Err(e) => {
+            eprintln!("[{peer_addr}] {} handshake failed: {e}", route.path);
+            return;
+        }
+    };
+    let claim = ticket
+        .and_then(|t| shared.tickets.redeem(&t, &route.path))
+        .filter(|c| crate::ext_socket::claim_matches(c, session.as_deref(), identity.as_ref()));
+    let Some(claim) = claim else {
+        println!("[{peer_addr}] {} rejected: ticket refused", route.path);
+        metrics.connections_rejected.inc();
+        let _ = ws
+            .close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                code: crate::ext_socket::CLOSE_TICKET_REFUSED.into(),
+                reason: "ticket refused".into(),
+            }))
+            .await;
+        return;
+    };
+    (route.handler)(crate::ext_socket::ExtSocket::new(
+        ws, peer_addr, claim, shared,
+    ))
+    .await;
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_client<F>(
     mut stream: TcpStream,
@@ -2377,6 +2465,19 @@ async fn handle_client<F>(
                 return;
             }
         }
+        // An extension's own socket: same gates, then its ticket decides.
+        let target = request_line(&peek_str).1;
+        let bare = target.split('?').next().unwrap_or(target);
+        if let Some(route) = assets.sockets.iter().find(|r| r.path == bare) {
+            let session = (!is_new_session).then(|| session_id.as_str().to_string());
+            let ticket = crate::ext_socket::ticket_of(target).map(str::to_string);
+            serve_ext_socket(
+                stream, peer_addr, route, ticket, session, identity, shared, &registry, &config,
+                &metrics,
+            )
+            .await;
+            return;
+        }
         // Admission control: enforce total and per-IP connection caps before
         // spawning the (long-lived, stateful) WebSocket session. Rejected clients
         // get a 503 instead of an upgrade.
@@ -2409,7 +2510,7 @@ async fn handle_client<F>(
         };
         match accept_async_with_config(stream, Some(ws_config)).await {
             Ok(ws_stream) => {
-                if let Err(e) = handle_websocket(
+                if let Err(e) = crate::ext_socket::with_scope(handle_websocket(
                     ws_stream,
                     peer_addr,
                     ConnContext {
@@ -2426,7 +2527,7 @@ async fn handle_client<F>(
                             (d, head)
                         }),
                     },
-                )
+                ))
                 .await
                 {
                     eprintln!("[{}] Connection error: {}", peer_addr, e);
@@ -3225,6 +3326,14 @@ where
     };
 
     // Create per-connection state with the session ID from cookie
+    crate::ext_socket::enter(
+        crate::ext_socket::ConnectionInfo {
+            connection_id,
+            session: session_id.as_str().to_string(),
+            identity: identity.clone(),
+        },
+        Arc::clone(&shared),
+    );
     let mut conn_state = ConnectionState::new(connection_id, session_id);
     conn_state.identity = identity;
 

@@ -63,6 +63,7 @@ pub mod capsule_gen;
 mod compress;
 pub mod config;
 pub mod delegated_auth;
+pub mod ext_socket;
 pub mod form;
 pub mod health;
 pub mod icons;
@@ -110,6 +111,7 @@ pub use server::{
 
 // Delegated authentication exports
 pub use delegated_auth::{AuthRequest, DelegatedAuth, Identity, Validation};
+pub use ext_socket::{ConnectionInfo, ExtSocket, NextTicket};
 pub use server::{AUTH_CONFLICT, SHUTDOWN_GRACE};
 
 // Store exports
