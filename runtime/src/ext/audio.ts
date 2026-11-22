@@ -16,15 +16,26 @@
 // - The level of the last frame (0..1) is set as `--rw-level` on the
 //   element, for a meter. It never leaves the browser.
 // - Outcomes are written as a line into the value of the element's
-//   `<input data-audio-report>` and a bubbling `input` event dispatched,
+//   `<input data-audio-report>` and a bubbling `change` event dispatched,
 //   so the handler bound there (`rwire_audio::parse_event`) learns them:
 //     "capture granted|denied|unavailable|insecure"
 //     "output ready|blocked|interrupted"
+//     "started <t>" | "mark <t> <id>" | "underrun <t>" | "ended <t>"
+//     "stopped <t> <samples since the last mark> [<last mark>]"
+//   `<t>` is in seconds on the page's audio clock (the clock of the
+//   microphone's frames), when the sample is heard: the context's output
+//   latency is added, and the line is written at that time.
+// - Playback, from the socket: PCM (resampled from its rate to the
+//   context's), marks, preloaded sounds (`data-audio-sounds`, JSON
+//   `[[name, url], …]`) and the end of the utterance are queued in arrival
+//   order and played gaplessly by the `rw-play` worklet; "stop" drops the
+//   queue at the next render quantum.
 // - The audio context is resumed on any user gesture in the page (pointer,
 //   key, touch), in that gesture: browsers keep a context made without one
 //   suspended.
 
 import { encodeFrame, level, type Frame } from "./audio-dsp.ts";
+import { Resampler, type Item, type Note } from "./audio-play.ts";
 
 /** Version stamp logged by the loader — bump with every change. */
 export const v = 1;
@@ -54,6 +65,9 @@ export interface NodeLike {
   connect(n: unknown): void;
   disconnect(): void;
 }
+export interface BufferLike {
+  getChannelData(c: number): Float32Array;
+}
 export interface CtxLike {
   state: string;
   currentTime: number;
@@ -66,6 +80,7 @@ export interface CtxLike {
   resume(): Promise<void>;
   close(): Promise<void>;
   createMediaStreamSource(m: MediaLike): NodeLike;
+  decodeAudioData(b: ArrayBuffer): Promise<BufferLike>;
 }
 export interface SockLike {
   binaryType: string;
@@ -94,6 +109,8 @@ export interface Env {
   /** Where the worklet module is served. */
   worklet: string;
   later(f: () => void, ms: number): void;
+  /** `fetch`, for the preloaded sounds. */
+  fetch(url: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> }>;
 }
 
 const browserEnv = (): Env => {
@@ -109,6 +126,7 @@ const browserEnv = (): Env => {
     origin: (g.location.protocol === "https:" ? "wss://" : "ws://") + g.location.host + base,
     worklet: base + "/_rw/ext/audio-worklet.js",
     later: (f, ms) => g.setTimeout(f, ms),
+    fetch: (url) => g.fetch(base + url, { credentials: "same-origin" }),
   };
 };
 
@@ -138,6 +156,14 @@ export class Stream {
   media: MediaLike | null = null;
   private source: NodeLike | null = null;
   private capNode: NodeLike | null = null;
+  /** The `rw-play` node, once the context is ready. */
+  private play: Promise<NodeLike | null> | null = null;
+  /** Playback operations run in arrival order: a sound still loading holds what follows. */
+  private chain: Promise<unknown> = Promise.resolve();
+  /** Bumped by stop: operations queued before it are dropped. */
+  private playGen = 0;
+  private resamplers = new Map<number, Resampler>();
+  private sounds = new Map<string, Promise<Float32Array | null>>();
 
   readonly el: Element;
   readonly env: Env;
@@ -152,13 +178,17 @@ export class Stream {
     const input = this.el.querySelector("[data-audio-report]") as HTMLInputElement | null;
     if (!input) return;
     input.value = line;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    // `change`, not `input`: the runtime debounces `input` (250 ms, last
+    // value wins), which would merge lines written in one burst (a mark and
+    // the end); `change` is sent at once, each with its own line.
+    input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   /** Bring the stream in line with the element's attributes. */
   sync(): void {
     if (!this.alive) return;
     if (!this.ws) this.connect();
+    this.loadSounds();
     const want = this.el.getAttribute("data-audio-capture") === "1";
     if (want !== this.want) {
       this.want = want;
@@ -205,7 +235,112 @@ export class Stream {
 
   /** A message from the server. */
   message(b: Uint8Array): void {
-    if (b[0] === 0x80) this.next = new TextDecoder().decode(b.subarray(1));
+    const text = () => new TextDecoder().decode(b.subarray(1));
+    switch (b[0]) {
+      case 0x80:
+        this.next = text();
+        return;
+      case 0x81: {
+        if (b.length < 5) return;
+        const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+        const rate = v.getUint32(1, true);
+        const pcm = new Int16Array((b.length - 5) >> 1);
+        for (let k = 0; k < pcm.length; k++) pcm[k] = v.getInt16(5 + 2 * k, true);
+        return this.enqueue((node, ctx) => {
+          let r = this.resamplers.get(rate);
+          if (!r) this.resamplers.set(rate, (r = new Resampler(rate, ctx.sampleRate)));
+          const data = r.push(pcm);
+          node.port.postMessage({ k: "pcm", data, ratio: rate / ctx.sampleRate } as Item, [data.buffer]);
+        });
+      }
+      case 0x82: {
+        const id = text();
+        return this.enqueue((node) => node.port.postMessage({ k: "mark", id } as Item));
+      }
+      case 0x83: {
+        const name = text();
+        const sound = this.sounds.get(name);
+        return this.enqueue((node) => {
+          if (!sound) return;
+          return sound.then((data) => {
+            // Sounds are not counted in "samples since the last mark".
+            if (data) node.port.postMessage({ k: "pcm", data: data.slice(), ratio: 0 } as Item);
+          });
+        });
+      }
+      case 0x84:
+        return this.stopPlayback();
+      case 0x85:
+        this.resamplers.clear();
+        return this.enqueue((node) => node.port.postMessage({ k: "end" } as Item));
+    }
+  }
+
+  /** Run `op` on the play node after every earlier operation, unless a stop comes first. */
+  private enqueue(op: (node: NodeLike, ctx: CtxLike) => void | Promise<void>): void {
+    const gen = this.playGen;
+    this.chain = this.chain
+      .then(() => this.player())
+      .then((node) => {
+        if (node && this.ctx && gen === this.playGen && this.alive) return op(node, this.ctx);
+      })
+      .catch(() => {});
+  }
+
+  /** Stop now: the queue in the worklet is dropped at its next render quantum, and what waits here too. */
+  stopPlayback(): void {
+    this.playGen++;
+    this.resamplers.clear();
+    this.chain = Promise.resolve();
+    if (this.play) this.play.then((node) => node && node.port.postMessage({ k: "stop" }));
+  }
+
+  /** The `rw-play` node, made once the context is ready. */
+  player(): Promise<NodeLike | null> {
+    if (this.play) return this.play;
+    this.play = this.context().then((ctx) => {
+      if (!ctx || !this.alive) return null;
+      const node = this.env.node(ctx, "rw-play", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+      node.port.onmessage = (m) => this.note(m.data as Note);
+      node.connect(ctx.destination);
+      return node;
+    });
+    return this.play;
+  }
+
+  /** A note of the worklet: reported when its sample is heard, on the audio clock. */
+  note(n: Note): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const latency = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
+    const t = n.at / ctx.sampleRate + latency;
+    const at = t.toFixed(6);
+    let line: string;
+    if (n.e === "mark") line = "mark " + at + " " + n.id;
+    else if (n.e === "stopped") line = "stopped " + at + " " + n.since + (n.mark ? " " + n.mark : "");
+    else line = n.e + " " + at;
+    const wait = Math.max(0, (t - ctx.currentTime) * 1000);
+    this.env.later(() => this.alive && this.report(line), wait);
+  }
+
+  /** Load the sounds the element lists, once each. */
+  loadSounds(): void {
+    let list: [string, string][] = [];
+    try {
+      list = JSON.parse(this.el.getAttribute("data-audio-sounds") || "[]");
+    } catch {
+      return;
+    }
+    for (const [name, url] of list) {
+      if (this.sounds.has(name)) continue;
+      this.sounds.set(
+        name,
+        this.context()
+          .then((ctx) => (ctx ? this.env.fetch(url).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b)) : null))
+          .then((buf) => (buf ? buf.getChannelData(0) : null))
+          .catch(() => null),
+      );
+    }
   }
 
   /** A frame from the worklet: its level on the element, its bytes on the socket. */
@@ -354,7 +489,7 @@ export function i(doc: Document, env: Env = browserEnv()): void {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-audio", "data-audio-ticket", "data-audio-capture"],
+      attributeFilter: ["data-audio", "data-audio-ticket", "data-audio-capture", "data-audio-sounds"],
     });
 }
 

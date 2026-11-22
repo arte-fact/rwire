@@ -206,7 +206,7 @@ function audioEl(attrs: Record<string, string>) {
   const input = doc.createElement("input");
   input.setAttribute("data-audio-report", "1");
   (input as any).dispatchEvent = (ev: Event) => {
-    assert.equal(ev.type, "input");
+    assert.equal(ev.type, "change", "sent at once: `input` is debounced");
     assert.equal(ev.bubbles, true);
     reports.push(input.value);
   };

@@ -147,6 +147,27 @@ Example: `examples/push`.
 - Endpoints are limited to the browsers' push services (`KNOWN_PUSH_HOSTS`) against SSRF.
   A self-hosted service or a test double needs `.allow_endpoint_origin(origin)`.
 
+
+## 4c. Microphone and playback (`rwire-audio`)
+
+The official `audio` extension. Never write free JavaScript for audio.
+Example: `examples/audio`; browser check: `runtime/e2e/audio-chrome.mjs`.
+
+- **Server:** `.serve_audio(|mut link: AudioLink| async move { … })`.
+  - `link.input.recv()` yields 20 ms `Frame`s: `seq`, which restarts at 0 at each capture start; `timestamp`; 320 PCM16 samples at 16 kHz.
+  - `link.output` offers `pcm(&samples, rate)`, `mark(id)`, `sound(name)`, `end()` and `stop()`, played in call order.
+  - `link.server()` updates state and re-renders.
+- **Page:** `el(El::Div).audio(Audio::new("voice").capture(me.listening).sounds([…]).on_event(h()))`.
+  - The render drives the microphone; `capture(false)` stops every track.
+  - One stream per page.
+- **Handler:** `parse_event(ctx)` returns:
+  - `Capture(Granted | Denied | Unavailable | Insecure)` and `Output(Ready | Blocked | Interrupted)`;
+  - `PlaybackStarted`, `MarkReached { id, at }`, `Underrun`, `PlaybackEnded`, `Stopped { last_mark, samples_since }`.
+  - Every `at` is on the browser's audio clock, the frames' clock, at the moment the sample is heard.
+- **Traps:**
+  - `PlaybackEnded` only comes after `end()`. An empty queue before it is an `Underrun`.
+  - The microphone needs a secure context (https, or `localhost` / `127.0.0.1`), otherwise `Capture(Insecure)`.
+  - A context made before any gesture is `Output(Blocked)` until the user taps; any gesture resumes it.
 ## 5. Traps a real app hit (each cost a debugging session)
 
 - **Bottom-pinned chat scroll**: `column-reverse` + an **auto bottom margin** on the inner

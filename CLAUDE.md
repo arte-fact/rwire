@@ -77,6 +77,7 @@ rwire/
     ├── editor/              # File explorer + editor: FsSnapshot sandbox, dirty diff, gated save (E2E: runtime/e2e/editor.mjs)
     ├── counter/             # Simple counter app
     ├── push/                # Web Push: subscribe button, test send (rwire-push)
+    ├── audio/               # Microphone + playback: speak and hear it back, a tone with marks (E2E: runtime/e2e/audio-chrome.mjs)
     ├── todolist/            # Todo list with filtering
     ├── todo-combined/       # Todo list with ItemRef dynamic binding
     └── fine-grained/        # Fine-grained reactivity demo

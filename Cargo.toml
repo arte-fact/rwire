@@ -24,6 +24,7 @@ members = [
     "examples/router",
     "examples/async-action",
     "examples/push",
+    "examples/audio",
 ]
 resolver = "2"
 
