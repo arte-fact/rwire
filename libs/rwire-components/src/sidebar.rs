@@ -102,7 +102,11 @@ impl Sidebar {
         };
         let mut children = Vec::new();
         if let Some(header) = self.header {
-            children.push(slot(header, &[St::PxSp3, St::PtSafe, St::PbSm]));
+            // The old front's brand row: 14 px 14 px 10 px, the top safe area included.
+            children.push(slot(
+                header,
+                &[St::PxSidebarHead, St::PtSidebarHeadSafe, St::PbSidebarHead],
+            ));
         }
         if let Some(search) = self.search {
             children.push(slot(search, &[St::PxSp3, St::PbSm]));
@@ -132,6 +136,7 @@ impl Sidebar {
                         St::PxSp3,
                         St::PtSidebarFoot,
                         St::PbSidebarFootSafe,
+                        St::Text12_5,
                     ],
                 )
                 .attr("data-sidebar", "footer"),
@@ -173,7 +178,9 @@ mod tests {
         assert!(kids[4]
             .get_style_utils()
             .contains(&St::PbSidebarFootSafe.as_u16()));
-        assert!(kids[0].get_style_utils().contains(&St::PtSafe.as_u16()));
+        assert!(kids[0]
+            .get_style_utils()
+            .contains(&St::PtSidebarHeadSafe.as_u16()));
         let aside = built.get_style_utils();
         for st in [St::HFull, St::FlexCol, St::BgSidebar, St::PlSafe] {
             assert!(aside.contains(&st.as_u16()), "aside {st:?}");
@@ -212,6 +219,22 @@ mod tests {
         assert!(!bare
             .get_style_utils()
             .contains(&St::BorderRDefault.as_u16()));
+    }
+
+    /// The old front's header slot: 14 px 14 px 10 px, the top safe area
+    /// included; its footer text: 12.5 px.
+    #[test]
+    fn the_header_and_footer_text_match_the_old_front() {
+        let built = Sidebar::new()
+            .header(el(El::Span))
+            .footer(el(El::Span))
+            .build();
+        let head = built.children()[0].get_style_utils();
+        for st in [St::PtSidebarHeadSafe, St::PxSidebarHead, St::PbSidebarHead] {
+            assert!(head.contains(&st.as_u16()), "header {st:?}");
+        }
+        let foot = built.children()[2].get_style_utils();
+        assert!(foot.contains(&St::Text12_5.as_u16()), "footer 12.5 px");
     }
 
     #[test]

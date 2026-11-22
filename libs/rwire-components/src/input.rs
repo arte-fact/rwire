@@ -318,7 +318,13 @@ impl Input {
         }
         let mut builder = el(El::Input)
             .st(tokens)
-            .placeholder_style([St::TextMuted])
+            // The search placeholder is the faint ink (AA in both modes), apart
+            // from the typed text; other inputs keep the soft ink.
+            .placeholder_style([if self.input_type == InputType::Search {
+                St::TextFaint
+            } else {
+                St::TextMuted
+            }])
             .hover([St::BorderEmphasis])
             .focus([St::BorderPrimary, St::OutlineTheme])
             .at(At::Type, self.input_type.av());
@@ -487,6 +493,26 @@ mod tests {
         // Other inputs keep theirs.
         let text = Input::text().size(InputSize::Sm).build();
         assert!(text.get_style_utils().contains(&St::H1_75rem.as_u16()));
+    }
+
+    /// The search placeholder is the faint ink (AA in both modes), not the
+    /// soft ink, which is too close to the typed text in dark mode.
+    #[test]
+    fn the_search_placeholder_is_the_faint_ink() {
+        let built = Input::search().size(InputSize::Sm).build();
+        let placeholder: Vec<u16> = built
+            .get_pseudo_groups()
+            .iter()
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        assert!(
+            placeholder.contains(&St::TextFaint.as_u16()),
+            "{placeholder:?}"
+        );
+        assert!(
+            !placeholder.contains(&St::TextMuted.as_u16()),
+            "{placeholder:?}"
+        );
     }
 
     #[test]

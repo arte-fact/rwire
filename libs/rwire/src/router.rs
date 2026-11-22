@@ -314,6 +314,7 @@ impl Link {
         el(El::A)
             .attr("href", href)
             .attr("data-route", "")
+            .st([crate::style_tokens::St::TextLink])
             .text(text)
     }
 

@@ -1283,6 +1283,17 @@ define_token_enum! {
         Rounded7 = 0x3FF => "border-radius:7px",
         /// An extra-small dot: 7 px (a connection indicator).
         SizeDotXs = 0x400 => "width:7px;height:7px",
+        // Old-front parity, second pass (0x401-0x405).
+        /// A link's color (`--lk`): AA on the app, surface and sidebar grounds.
+        TextLink = 0x401 => "color:var(--lk)",
+        /// 12.5 px text (a sidebar footer).
+        Text12_5 = 0x402 => "font-size:12.5px",
+        /// A sidebar header's top padding: 14 px, or the top safe area when larger.
+        PtSidebarHeadSafe = 0x403 => "padding-top:max(14px,env(safe-area-inset-top,0px))",
+        /// A sidebar header's inline padding: 14 px.
+        PxSidebarHead = 0x404 => "padding-inline:14px",
+        /// A sidebar header's bottom padding: 10 px.
+        PbSidebarHead = 0x405 => "padding-bottom:10px",
     }
 }
 

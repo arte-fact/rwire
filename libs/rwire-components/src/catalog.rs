@@ -2501,6 +2501,9 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
                         .build(),
                     el(El::Span).text("hub"),
                 ]),
+            Button::icon_only(Icon::SidebarCollapse, "Hide the list")
+                .intent(crate::ButtonIntent::Ghost)
+                .build(),
         ]);
     let sidebar = Sidebar::new()
         .header(brand)
@@ -2522,7 +2525,7 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .body(gallery_nav(false, "/s/2"))
         .footer(
             el(El::Div)
-                .st([St::DisplayFlex, St::ItemsCenter, St::GapSm, St::TextXs])
+                .st([St::DisplayFlex, St::ItemsCenter, St::GapSm])
                 .append([
                     el(El::Span).st([St::TextMuted]).text("Admin"),
                     // A link that is a control: a 44 px target under a finger.

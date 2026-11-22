@@ -504,3 +504,63 @@ fn studio_nord_dots_match_app_where_contrast_allows() {
         }
     }
 }
+
+/// Links (`St::TextLink`, `--lk`) read at AA on the app, surface and sidebar
+/// grounds, in every built-in theme and mode (they were the fixed accent step
+/// 11, 2.28:1 on Nord's dark ground).
+#[test]
+fn links_read_at_aa_on_every_ground() {
+    let mut out = Vec::new();
+    for (palette_name, palette) in palettes() {
+        for (style_name, style) in styles() {
+            for dark in [false, true] {
+                let mut theme = if dark { Theme::dark() } else { Theme::light() }.style(style);
+                if let Some(p) = palette.clone() {
+                    theme = theme.palette(p);
+                }
+                let v = vars(&generate_theme_css(&theme));
+                let link = resolve(&v, var_of(St::TextLink));
+                for g in ["a", "r", "Qs"] {
+                    if !v.contains_key(g) {
+                        continue;
+                    }
+                    let r = contrast_ratio(&link, &resolve(&v, g));
+                    if r < MIN_TEXT_CONTRAST {
+                        out.push(format!(
+                            "{palette_name}/{style_name}/{dark}: --lk {link} on --{g} = {r:.2}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        out.is_empty(),
+        "{} below AA:\n{}",
+        out.len(),
+        out.join("\n")
+    );
+}
+
+/// studio + Nord links against the old front's `--link`: nord8 in dark mode
+/// (equal); in light mode the old front's `#4b6d96`, like the accent's step 11
+/// `#4c6b94`, is under AA on nord4 (the app ground), so rwire takes the nearest
+/// that reads (a named gap).
+#[test]
+fn studio_nord_links_match_the_old_front() {
+    let v = studio_nord(true);
+    let dark = resolve(&v, "lk");
+    assert!(dark.eq_ignore_ascii_case("#88c0d0"), "{dark}");
+    let v = studio_nord(false);
+    let light = resolve(&v, "lk");
+    let worst = |c: &str| {
+        ["a", "r", "Qs"]
+            .iter()
+            .map(|g| contrast_ratio(c, &resolve(&v, g)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (app, ours) = (worst("#4b6d96"), worst(&light));
+    assert!(app < MIN_TEXT_CONTRAST && ours >= MIN_TEXT_CONTRAST);
+    println!("≠ light --lk  /app #4b6d96 worst {app:.2}; old rwire #4c6b94 worst {:.2}; rwire {light} worst {ours:.2}", worst("#4c6b94"));
+    println!("= dark  --lk  #88c0d0 (nord8)");
+}

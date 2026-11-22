@@ -925,6 +925,7 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
     subtle_pairs(&mut css, &rp, is_dark);
     tone_pairs(&mut css, &rp, is_dark);
     dot_colors(&mut css, &rp, is_dark);
+    link_color(&mut css, &rp, is_dark);
 
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
@@ -1333,6 +1334,33 @@ fn dot_colors(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
             }
         }
     }
+}
+
+/// The links' color (`--lk`, `St::TextLink`): at [`MIN_TEXT_CONTRAST`] on the
+/// grounds links sit on (app, surface, the sidebar when the style sets one).
+/// It starts from the accent's step 11 in light mode and step 6 in dark mode
+/// (a style may name its own in `--lk`) and, when that does not read, takes
+/// the nearest that does. Called after the style.
+fn link_color(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let grounds: Vec<String> = ["a", "r", "Qs"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let preferred = declared_color(css, "lk")
+        .unwrap_or_else(|| rp.accent[if is_dark { 5 } else { 10 }].clone());
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let p = hex(&preferred);
+    let link = std::iter::once(p.clone())
+        .chain((1..=100).map(|i| mix(toward, &p, f64::from(i) * 0.01)))
+        .find(|c| {
+            grounds
+                .iter()
+                .all(|g| contrast_ratio(c, g) >= MIN_TEXT_CONTRAST)
+        })
+        .unwrap_or_else(|| toward.to_string());
+    css_var(css, "lk", &link);
 }
 
 /// The last value declared for `--name` in `css`, when it is a plain color
