@@ -167,6 +167,8 @@ impl Field {
     /// otherwise): a re-render matches the live element by that id, so what the
     /// user typed stays in it, even when fields before it appear or disappear.
     /// To empty it after a submit, give it a new id (e.g. with a counter).
+    /// With a [`Field::label`], the wrapping `<label>` gets `<id>-label`, so the
+    /// wrapper is matched by id as well.
     ///
     /// Validation: `required`, `min_length` and `max_length` become the native
     /// constraints; a pattern does not apply to a textarea.
@@ -278,14 +280,9 @@ impl Field {
     /// knows for this kind of control (the browser checks them on submit).
     fn constraints(&self) -> Vec<(&'static str, String)> {
         let textarea = matches!(self.field_type, FieldType::Textarea);
-        let numeric = matches!(
-            self.field_type,
-            FieldType::Number
-                | FieldType::Range
-                | FieldType::Date
-                | FieldType::Time
-                | FieldType::DateTime
-        );
+        // `Min`/`Max` hold a number: emitted only where the native constraint takes one.
+        // A date or time `min` wants a date string, not a float, so they are left out.
+        let numeric = matches!(self.field_type, FieldType::Number | FieldType::Range);
         let mut out = Vec::new();
         for rule in &self.validation_rules {
             match rule {
@@ -311,15 +308,20 @@ impl Field {
         }
 
         let constraints = self.constraints();
-        let mut input = if matches!(self.field_type, FieldType::Textarea) {
-            let id = self
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("field-{}", self.name));
+        // The field's effective id: a textarea always has one, an input only when asked.
+        let field_id = match self.field_type {
+            FieldType::Textarea => Some(
+                self.id
+                    .clone()
+                    .unwrap_or_else(|| format!("field-{}", self.name)),
+            ),
+            _ => self.id.clone(),
+        };
+        let mut input = if let (FieldType::Textarea, Some(id)) = (&self.field_type, &field_id) {
             let rows = self.rows.unwrap_or(4).to_string();
             let mut area = el(El::Textarea)
                 .attr("name", &self.name)
-                .attr("id", &id)
+                .attr("id", id)
                 .attr("rows", &rows)
                 .st([St::ResizeY]);
             // A textarea's initial value is its text, not a `value` attribute.
@@ -365,16 +367,21 @@ impl Field {
             input = input.attr(name, value);
         }
 
-        // Wrap with label if provided
+        // Wrap with label if provided. The label gets a stable id derived from the
+        // field's (`<id>-label`): a re-render matches the wrapper by id rather than by
+        // position, so the field inside keeps what the user typed even when a field
+        // before it appears or disappears.
         if let Some(label_text) = self.label_text {
-            el(El::Label)
-                .st([St::DisplayFlex, St::FlexCol, St::GapXs])
-                .append([
-                    el(El::Span)
-                        .st([St::TextSm, St::TextMuted])
-                        .text(&label_text),
-                    input,
-                ])
+            let mut label = el(El::Label);
+            if let Some(id) = &field_id {
+                label = label.attr("id", &format!("{id}-label"));
+            }
+            label.st([St::DisplayFlex, St::FlexCol, St::GapXs]).append([
+                el(El::Span)
+                    .st([St::TextSm, St::TextMuted])
+                    .text(&label_text),
+                input,
+            ])
         } else {
             input
         }
@@ -724,6 +731,18 @@ mod tests {
             .build()
             .to_static_html();
         assert!(!html.contains("min="), "{html}");
+        // Nor on a date: its `min` is a date string, not a number.
+        let html = Field::new("day", FieldType::Date)
+            .validate(ValidationRule::Min(1.0))
+            .validate(ValidationRule::Max(2.0))
+            .build()
+            .to_static_html();
+        assert!(!html.contains("min=") && !html.contains("max="), "{html}");
+        let html = Field::new("vol", FieldType::Range)
+            .validate(ValidationRule::Max(11.0))
+            .build()
+            .to_static_html();
+        assert!(html.contains("max=\"11\""), "{html}");
         // Inputs get an id only when asked (unchanged default).
         assert!(!html.contains("id="), "{html}");
         assert!(Field::text("x")
@@ -748,5 +767,46 @@ mod tests {
         assert!(label < area, "{html}");
         assert!(html.contains("name=\"body\""), "{html}");
         assert!(html.contains("<button"), "{html}");
+    }
+
+    /// A labelled field's wrapper carries a stable id too: the morph matches the
+    /// `<label>` by id, so a textarea inside it keeps what the user typed when a
+    /// field before it disappears (without one, the label is matched by position
+    /// and the typed text lands in the wrong field or is lost).
+    #[test]
+    fn a_labelled_field_with_an_id_gets_a_stable_label_id() {
+        let render = |with_title: bool| {
+            let mut fields = Vec::new();
+            if with_title {
+                fields.push(Field::text("title").label("Title"));
+            }
+            fields.push(Field::textarea("body").label("Body"));
+            fields.push(Field::email("mail").id("mail-1").label("Mail"));
+            Form::new().fields(fields).build().to_static_html()
+        };
+        // The opening tag of the element carrying `id="<id>"`.
+        let tag_of = |html: &str, id: &str| {
+            let at = html.find(&format!("id=\"{id}\"")).expect(html);
+            html[..at].rsplit('<').next().unwrap().to_string()
+        };
+        for html in [render(true), render(false)] {
+            assert!(
+                tag_of(&html, "field-body-label").starts_with("label "),
+                "{html}"
+            );
+            assert!(
+                tag_of(&html, "mail-1-label").starts_with("label "),
+                "{html}"
+            );
+            let label = html.find("id=\"field-body-label\"").unwrap();
+            assert!(label < html.find("<textarea").unwrap(), "{html}");
+        }
+        // A field without an id keeps a plain label (inputs have no id by default).
+        assert_eq!(
+            render(true).matches("-label\"").count(),
+            2,
+            "{}",
+            render(true)
+        );
     }
 }

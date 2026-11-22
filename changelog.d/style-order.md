@@ -11,6 +11,14 @@
   properties cannot replace it. Both stay, and the shared properties go to the
   higher token code. When that is the earlier token, the later call loses, and
   debug builds report it once per pair on stderr.
+  - **Known case: hiding after a compound token.**
+    `.st([St::FlexCenter]).st([St::DisplayNone])` still shows the element:
+    `DisplayNone` covers only part of `FlexCenter`, and `FlexCenter` wins
+    `display`. Debug builds report it; release builds say nothing. The
+    `hidden` attribute does not help (the base CSS has no `[hidden]` rule). To
+    hide safely, choose the display token
+    (`if visible { FlexCenter } else { DisplayNone }`) or do not render the
+    element.
 - **The stylesheet order no longer depends on the page's history.** The
   runtime used to append each lazily delivered rule at the end of the
   stylesheet, so the order depended on which classes a connection met first.

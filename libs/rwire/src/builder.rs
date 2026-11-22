@@ -61,7 +61,8 @@ use crate::style_tokens::StyleKey;
 
 /// Encode a `STYLE_DEF` opcode block carrying complete CSS rule strings.
 ///
-/// Format: `[STYLE_DEF, count_varint, (rule_len_varint, rule_utf8){count}]`.
+/// Format: `[STYLE_DEF, count_varint, (order_varint, rule_len_varint, rule_utf8){count}]`,
+/// where `order` is the rule's place in the stylesheet (the runtime inserts it there).
 fn encode_style_def(rules: &[(u32, String)]) -> BytesMut {
     let mut buf = BytesMut::new();
     buf.put_u8(STYLE_DEF);
@@ -1294,6 +1295,21 @@ impl ElementBuilder {
     /// (`St::FontInheritAll` then `St::TextXs`: `font:inherit` keeps the
     /// inherited size). Debug builds report that case once per pair on
     /// stderr; pick tokens that do not overlap.
+    ///
+    /// **Hiding needs care with compound tokens.** `St::DisplayNone` replaces
+    /// `St::DisplayFlex` but not `St::FlexCenter` (`display:flex` plus the
+    /// alignment): both stay, `FlexCenter`'s higher code wins `display`, and
+    /// `.st([St::FlexCenter]).st([St::DisplayNone])` **still shows the
+    /// element** (debug builds report it; release builds say nothing). The
+    /// `hidden` attribute does not help either: the base CSS has no `[hidden]`
+    /// rule, so any `display` class beats the browser's default. To hide an
+    /// element safely, choose its display token instead of stacking one:
+    ///
+    /// ```ignore
+    /// el(El::Div).st([if visible { St::FlexCenter } else { St::DisplayNone }])
+    /// ```
+    ///
+    /// or do not render it at all.
     #[track_caller]
     pub fn st<I>(mut self, utils: I) -> Self
     where
@@ -4034,6 +4050,8 @@ mod style_order_tests {
             [St::PositionRelative]
         );
         assert_eq!(after(&[&[St::PLg], &[St::PMd]]), [St::PMd]);
+        // Not a full override: BgShimmer also carries `background-size` and the
+        // animation, which BgApp does not set, so it is kept beside it.
         assert_eq!(
             after(&[&[St::BgShimmer], &[St::BgApp]]),
             [St::BgShimmer, St::BgApp]
@@ -4101,11 +4119,49 @@ mod style_order_tests {
             .hover([St::BgSubtle])
             .hover([St::BgMuted]);
         assert_eq!(b.get_style_utils(), [St::BgApp.as_u16()]);
+        let hover: Vec<u16> = b
+            .get_pseudo_groups()
+            .iter()
+            .flat_map(|(_, codes)| codes.iter().copied())
+            .collect();
+        assert!(hover.contains(&St::BgSubtle.as_u16()), "{hover:?}");
+        assert!(hover.contains(&St::BgMuted.as_u16()), "{hover:?}");
+        // A breakpoint group neither merges with the base tokens nor within itself.
+        let b = el(El::Div)
+            .st([St::DisplayFlex])
+            .md([St::DisplayGrid])
+            .md([St::DisplayNone]);
+        assert_eq!(b.get_style_utils(), [St::DisplayFlex.as_u16()]);
+        let md = crate::style_tokens::Bp::Md.as_u8();
+        assert_eq!(
+            b.get_breakpoint_groups(),
+            [
+                (md, vec![St::DisplayGrid.as_u16()]),
+                (md, vec![St::DisplayNone.as_u16()])
+            ]
+        );
         // style_util goes through the same merge.
         let b = el(El::Div)
             .style_util(St::DisplayFlex)
             .style_util(St::DisplayNone);
         assert_eq!(b.get_style_utils(), [St::DisplayNone.as_u16()]);
+    }
+
+    /// Frozen on purpose (see the `st()` doc): `DisplayNone` covers only part of
+    /// `FlexCenter`, so both stay and the element is still shown. The safe way is
+    /// to choose one display token.
+    #[test]
+    fn display_none_after_a_compound_display_token_does_not_hide() {
+        assert_eq!(
+            after(&[&[St::FlexCenter], &[St::DisplayNone]]),
+            [St::FlexCenter, St::DisplayNone]
+        );
+        // FlexCenter (0xB0) comes after DisplayNone (0x00) in the sheet: it wins
+        // `display`, and the later call is the one reported.
+        assert!(St::FlexCenter.as_u16() > St::DisplayNone.as_u16());
+        assert_eq!(loses(&[St::FlexCenter], St::DisplayNone), [St::FlexCenter]);
+        // The base CSS has no `[hidden]` rule to fall back on.
+        assert!(!crate::theme::generate_base_css().contains("[hidden]"));
     }
 
     #[test]

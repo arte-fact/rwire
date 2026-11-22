@@ -17,10 +17,12 @@
     the hue is kept. The neutral ends are only a last resort; no built-in theme
     needs them.
   - **Status texts.** `TextSuccess` / `TextWarning` / `TextError` read new
-    variables (`--o3` / `--p3` / `--q3`), chosen against both the app and the
-    subtle background. `Bg*` fills and borders keep `--o` / `--p` / `--q`.
+    variables (`--o3` / `--p3` / `--q3`), chosen against their subtle
+    background and the plain grounds they also land on: app, subtle, surface
+    and raised surface (`--a` / `--b` / `--r` / `--t`), as the style finally
+    sets them. `Bg*` fills and borders keep `--o` / `--p` / `--q`.
   - **Accent-subtle ground.** `BgAccentSubtle` reads a new mode-aware
     `--n0`, chosen so that the ordinary text reads on it. It no longer reads
     the fixed accent step 3.
-- **Test.** `rwire-themes/tests/contrast.rs` checks 13 text/ground pairs over
+- **Test.** `rwire-themes/tests/contrast.rs` checks 22 text/ground pairs over
   11 palettes, 8 styles and both modes against 4.5:1.

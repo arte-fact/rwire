@@ -616,8 +616,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     css_var(&mut css, "F", &rp.red[8]); // destructive
     css_var(&mut css, "G", &rp.white); // on-destructive
     css_var(&mut css, "H", &rp.red[9]); // destructive-hover
-                                        // Subtle backgrounds and the text set on them, readable by construction.
-    subtle_pairs(&mut css, &rp, is_dark);
     if is_dark {
         css_var(&mut css, "K", &rp.accent[5]); // focus-ring (brighter in dark)
         css_var(&mut css, "L", &rp.accent[4]); // border-primary (brighter in dark)
@@ -628,6 +626,11 @@ pub fn generate_theme_css(theme: &Theme) -> String {
 
     // --- Style preset: resolve primary/surface/border overrides inline ---
     (theme.style.color_css)(&mut css, &rp, is_dark);
+
+    // Subtle backgrounds and the text set on them, readable by construction.
+    // After the style: the status texts are checked against the plain grounds
+    // (`a`, `b`, `r`, `t`) as the style finally sets them.
+    subtle_pairs(&mut css, &rp, is_dark);
 
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
@@ -741,6 +744,13 @@ fn subtle_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
     } else {
         &rp.neutral[0]
     });
+    // The plain grounds a status text also lands on (app, subtle, surface,
+    // raised surface), as declared so far, style overrides included.
+    let plain_grounds: Vec<String> = ["a", "b", "r", "t"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
     let ends = [
         hex(&rp.neutral[0]),
         hex(&rp.neutral[11]),
@@ -800,7 +810,10 @@ fn subtle_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
             css_var(
                 css,
                 status,
-                &first_readable(&steps(scale, status_order), &[g.clone(), app.clone()]),
+                &first_readable(
+                    &steps(scale, status_order),
+                    &[std::slice::from_ref(&g), &plain_grounds[..]].concat(),
+                ),
             );
         }
         css_var(css, bg, &g);
@@ -829,6 +842,20 @@ fn subtle_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         ]
     };
     css_var(css, "n0", &first_readable(&accent_grounds, &[text, high]));
+}
+
+/// The last value declared for `--name` in `css`, when it is a plain color
+/// (not `transparent`, not a `var(…)`), else None.
+fn declared_color(css: &str, name: &str) -> Option<String> {
+    let key = format!("--{name}:");
+    let at = css
+        .match_indices(&key)
+        .filter(|(i, _)| *i == 0 || matches!(css.as_bytes()[i - 1], b';' | b'{'))
+        .map(|(i, _)| i + key.len())
+        .last()?;
+    let value = css[at..].split(';').next()?.trim();
+    let plain = value.starts_with('#') || value.starts_with("oklch(") || value.starts_with("rgb");
+    plain.then(|| value.to_string())
 }
 
 /// Relative luminance of a hex color (0.0-1.0). Non-hex values (oklch…)

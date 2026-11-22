@@ -31,6 +31,17 @@ const PAIRS: &[(St, St)] = &[
     // Ordinary text on the plain subtle ground.
     (St::TextDefault, St::BgSubtle),
     (St::TextHigh, St::BgSubtle),
+    // A status color as text on the plain grounds it also lands on: the subtle
+    // ground, a surface and a raised surface (a card), as each style sets them.
+    (St::TextWarning, St::BgSubtle),
+    (St::TextSuccess, St::BgSubtle),
+    (St::TextError, St::BgSubtle),
+    (St::TextWarning, St::BgSurface),
+    (St::TextSuccess, St::BgSurface),
+    (St::TextError, St::BgSurface),
+    (St::TextWarning, St::BgSurfaceRaised),
+    (St::TextSuccess, St::BgSurfaceRaised),
+    (St::TextError, St::BgSurfaceRaised),
 ];
 
 fn palettes() -> Vec<(&'static str, Option<ColorPalette>)> {
