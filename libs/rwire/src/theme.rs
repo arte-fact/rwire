@@ -500,7 +500,10 @@ impl ResolvedPalette {
 // Text:              --j (text-muted), --k (text-default), --l (text-high),
 //                    --m (text-on-accent)
 // Accent scale:      --n1..--n12 (accent-1..accent-12)
-// Status:            --o (success), --p (warning), --q (error)
+// Status:            --o (success), --p (warning), --q (error): fills and borders;
+//                    --o3, --p3, --q3: their text, readable on the app and subtle grounds
+// Subtle pairs:      --M/--M1 (success), --N/--N1 (warning), --O/--O1 (info),
+//                    --P/--P1 (error), --n0 (accent-subtle background)
 // Surface:           --r (surface), --s (on-surface), --t (surface-raised),
 //                    --u (on-surface-raised)
 // Primary:           --v (primary), --w (on-primary), --x (primary-hover),
@@ -572,10 +575,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         css_var(&mut css, "C", &rp.neutral[7]); // secondary-hover
         css_var(&mut css, "D", &rp.neutral[9]); // muted
         css_var(&mut css, "E", &rp.neutral[3]); // on-muted
-        css_var(&mut css, "I", &rp.red[9]); // destructive-subtle
-        css_var(&mut css, "J", &rp.red[2]); // on-destructive-subtle
-        css_var(&mut css, "y", &rp.accent[9]); // primary-subtle
-        css_var(&mut css, "z", &rp.accent[2]); // on-primary-subtle
     } else {
         // Light mode
         css_var(&mut css, "a", &rp.neutral[0]); // bg-app
@@ -600,10 +599,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         css_var(&mut css, "C", &rp.neutral[4]); // secondary-hover
         css_var(&mut css, "D", &rp.neutral[2]); // muted
         css_var(&mut css, "E", &rp.neutral[10]); // on-muted
-        css_var(&mut css, "I", &rp.red[2]); // destructive-subtle
-        css_var(&mut css, "J", &rp.red[10]); // on-destructive-subtle
-        css_var(&mut css, "y", &rp.accent[2]); // primary-subtle
-        css_var(&mut css, "z", &rp.accent[10]); // on-primary-subtle
     }
 
     // Mode-independent vars
@@ -621,26 +616,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     css_var(&mut css, "F", &rp.red[8]); // destructive
     css_var(&mut css, "G", &rp.white); // on-destructive
     css_var(&mut css, "H", &rp.red[9]); // destructive-hover
-                                        // Semantic subtle pairs for status colors (mode-aware)
-    if is_dark {
-        css_var(&mut css, "M", &rp.green[9]); // success-subtle bg
-        css_var(&mut css, "M1", &rp.green[2]); // on-success-subtle text
-        css_var(&mut css, "N", &rp.amber[9]); // warning-subtle bg
-        css_var(&mut css, "N1", &rp.amber[2]); // on-warning-subtle text
-        css_var(&mut css, "O", &rp.accent[9]); // info-subtle bg
-        css_var(&mut css, "O1", &rp.accent[2]); // on-info-subtle text
-        css_var(&mut css, "P", &rp.red[9]); // error-subtle bg (alias for --I)
-        css_var(&mut css, "P1", &rp.red[2]); // on-error-subtle text
-    } else {
-        css_var(&mut css, "M", &rp.green[1]);
-        css_var(&mut css, "M1", &rp.green[10]);
-        css_var(&mut css, "N", &rp.amber[1]);
-        css_var(&mut css, "N1", &rp.amber[10]);
-        css_var(&mut css, "O", &rp.accent[1]);
-        css_var(&mut css, "O1", &rp.accent[10]);
-        css_var(&mut css, "P", &rp.red[1]);
-        css_var(&mut css, "P1", &rp.red[10]);
-    }
     if is_dark {
         css_var(&mut css, "K", &rp.accent[5]); // focus-ring (brighter in dark)
         css_var(&mut css, "L", &rp.accent[4]); // border-primary (brighter in dark)
@@ -651,6 +626,11 @@ pub fn generate_theme_css(theme: &Theme) -> String {
 
     // --- Style preset: resolve primary/surface/border overrides inline ---
     (theme.style.color_css)(&mut css, &rp, is_dark);
+
+    // Subtle backgrounds and the text set on them, readable by construction.
+    // After the style: the status texts are checked against the plain grounds
+    // (`a`, `b`, `r`, `t`) as the style finally sets them.
+    subtle_pairs(&mut css, &rp, is_dark);
 
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
@@ -674,6 +654,208 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         );
     }
     css
+}
+
+/// The least WCAG contrast a text color gets against its ground (AA, body text).
+pub const MIN_TEXT_CONTRAST: f64 = 4.5;
+
+/// `#rrggbb` → linear-light sRGB channels.
+fn linear_rgb(hex: &str) -> [f64; 3] {
+    let h = hex.trim_start_matches('#');
+    let ch = |i: usize| {
+        let c = h
+            .get(i..i + 2)
+            .and_then(|s| u8::from_str_radix(s, 16).ok())
+            .unwrap_or(0) as f64
+            / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    [ch(0), ch(2), ch(4)]
+}
+
+/// WCAG 2 relative luminance of a `#rrggbb` color.
+fn wcag_luminance(hex: &str) -> f64 {
+    let [r, g, b] = linear_rgb(hex);
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// WCAG 2 contrast ratio between two `#rrggbb` colors (1 to 21).
+pub fn contrast_ratio(a: &str, b: &str) -> f64 {
+    let (x, y) = (wcag_luminance(a), wcag_luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// `a` laid over `b` at opacity `t` (linear light), as `#rrggbb`.
+fn mix(a: &str, b: &str, t: f64) -> String {
+    let (x, y) = (linear_rgb(a), linear_rgb(b));
+    let enc = |c: f64| {
+        let c = c.clamp(0.0, 1.0);
+        let s = if c <= 0.003_130_8 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u8
+    };
+    let m = |i: usize| enc(x[i] * t + y[i] * (1.0 - t));
+    format!("#{:02x}{:02x}{:02x}", m(0), m(1), m(2))
+}
+
+/// The first candidate readable on every ground in `against` (contrast at
+/// least [`MIN_TEXT_CONTRAST`]), else the one that comes closest.
+fn first_readable(candidates: &[String], against: &[String]) -> String {
+    let worst = |c: &String| {
+        against
+            .iter()
+            .map(|g| contrast_ratio(c, g))
+            .fold(f64::INFINITY, f64::min)
+    };
+    candidates
+        .iter()
+        .find(|c| worst(c) >= MIN_TEXT_CONTRAST)
+        .or_else(|| {
+            candidates
+                .iter()
+                .max_by(|a, b| worst(a).total_cmp(&worst(b)))
+        })
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The subtle backgrounds (success, warning, info, error, destructive,
+/// primary, accent) and the text set on them, plus the status text colors.
+///
+/// Palettes are hand-made scales whose steps do not mean the same lightness
+/// everywhere, so fixed steps gave unreadable pairs (orange on salmon in dark
+/// Nord). Here the grounds come from the palette (light mode: its pale steps;
+/// dark mode: the hue laid over the app background, a dark tint), and each
+/// text is the first of the palette's own steps, in order of preference, that
+/// reaches [`MIN_TEXT_CONTRAST`] on its ground, then the brand step darkened
+/// (dark mode: lightened) until it does, so the hue stays; the ends of the
+/// neutral scale, then black or white, are the last resort.
+fn subtle_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let app = hex(if is_dark {
+        &rp.neutral[11]
+    } else {
+        &rp.neutral[0]
+    });
+    // The plain grounds a status text also lands on (app, subtle, surface,
+    // raised surface), as declared so far, style overrides included.
+    let plain_grounds: Vec<String> = ["a", "b", "r", "t"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let ends = [
+        hex(&rp.neutral[0]),
+        hex(&rp.neutral[11]),
+        "#ffffff".to_string(),
+        "#000000".to_string(),
+    ];
+    // Toward the readable side: black in light mode, white in dark mode.
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let steps = |scale: &[String; 12], order: &[usize]| -> Vec<String> {
+        let brand = hex(&scale[8]);
+        order
+            .iter()
+            .map(|&i| hex(&scale[i]))
+            // Then the brand step darkened (lightened) until it reads: the hue stays.
+            .chain(
+                [0.7, 0.55, 0.4, 0.25]
+                    .iter()
+                    .map(|&t| mix(&brand, toward, t)),
+            )
+            .chain(ends.iter().cloned())
+            .collect()
+    };
+    // Text on a tinted ground: dark mode wants the pale end, light mode the dark end.
+    let on_order: &[usize] = if is_dark { &[2, 1, 0] } else { &[10, 11] };
+    // A status color as text: as close to the brand step (8) as reads.
+    let status_order: &[usize] = if is_dark {
+        &[8, 7, 6, 5, 4, 3, 2, 1, 0]
+    } else {
+        &[8, 9, 10, 11]
+    };
+    let ground = |scale: &[String; 12], light_step: usize| {
+        if is_dark {
+            mix(&hex(&scale[8]), &app, 0.22)
+        } else {
+            hex(&scale[light_step])
+        }
+    };
+
+    // (background var, text var, status text var, scale, light-mode ground step)
+    type Pair<'a> = (&'a str, &'a str, Option<&'a str>, &'a [String; 12], usize);
+    let pairs: [Pair; 6] = [
+        ("M", "M1", Some("o3"), &rp.green, 1),
+        ("N", "N1", Some("p3"), &rp.amber, 1),
+        ("O", "O1", None, &rp.accent, 1),
+        ("P", "P1", Some("q3"), &rp.red, 1),
+        ("I", "J", None, &rp.red, 2),
+        ("y", "z", None, &rp.accent, 2),
+    ];
+    for (bg, text, status, scale, light_step) in pairs {
+        let g = ground(scale, light_step);
+        css_var(
+            css,
+            text,
+            &first_readable(&steps(scale, on_order), std::slice::from_ref(&g)),
+        );
+        if let Some(status) = status {
+            css_var(
+                css,
+                status,
+                &first_readable(
+                    &steps(scale, status_order),
+                    &[std::slice::from_ref(&g), &plain_grounds[..]].concat(),
+                ),
+            );
+        }
+        css_var(css, bg, &g);
+    }
+
+    // The accent-subtle ground (a selected row) carries the ordinary text
+    // colors, which do not change: the ground adapts to them.
+    let (text, high) = if is_dark {
+        (hex(&rp.neutral[1]), hex(&rp.neutral[0]))
+    } else {
+        (hex(&rp.neutral[10]), hex(&rp.neutral[11]))
+    };
+    let a8 = hex(&rp.accent[8]);
+    let accent_grounds: Vec<String> = if is_dark {
+        [0.25, 0.18, 0.12, 0.06]
+            .iter()
+            .map(|&t| mix(&a8, &app, t))
+            .collect()
+    } else {
+        vec![
+            hex(&rp.accent[2]),
+            hex(&rp.accent[1]),
+            hex(&rp.accent[0]),
+            mix(&a8, &app, 0.15),
+            mix(&a8, &app, 0.08),
+        ]
+    };
+    css_var(css, "n0", &first_readable(&accent_grounds, &[text, high]));
+}
+
+/// The last value declared for `--name` in `css`, when it is a plain color
+/// (not `transparent`, not a `var(…)`), else None.
+fn declared_color(css: &str, name: &str) -> Option<String> {
+    let key = format!("--{name}:");
+    let at = css
+        .match_indices(&key)
+        .filter(|(i, _)| *i == 0 || matches!(css.as_bytes()[i - 1], b';' | b'{'))
+        .map(|(i, _)| i + key.len())
+        .last()?;
+    let value = css[at..].split(';').next()?.trim();
+    let plain = value.starts_with('#') || value.starts_with("oklch(") || value.starts_with("rgb");
+    plain.then(|| value.to_string())
 }
 
 /// Relative luminance of a hex color (0.0-1.0). Non-hex values (oklch…)
@@ -1065,6 +1247,41 @@ mod tests {
         ] {
             assert_eq!(oklch_luminance(value), None, "{value:?}");
             assert_eq!(on_solid_color(value, &rp), rp.white, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn mix_and_contrast_helpers() {
+        assert_eq!(mix("#ff0000", "#0000ff", 1.0), "#ff0000");
+        assert_eq!(mix("#ff0000", "#0000ff", 0.0), "#0000ff");
+        // Linear-light mixing: half white over black is #bcbcbc, not #808080.
+        assert_eq!(mix("#ffffff", "#000000", 0.5), "#bcbcbc");
+        assert!((contrast_ratio("#000000", "#ffffff") - 21.0).abs() < 1e-9);
+        let grounds = ["#ffffff".to_string()];
+        // The first readable candidate wins, in order.
+        let pick = first_readable(
+            &["#eeeeee".into(), "#595959".into(), "#000000".into()],
+            &grounds,
+        );
+        assert_eq!(pick, "#595959");
+        // None readable: the closest.
+        let pick = first_readable(&["#eeeeee".into(), "#aaaaaa".into()], &grounds);
+        assert_eq!(pick, "#aaaaaa");
+    }
+
+    #[test]
+    fn status_text_has_its_own_var_and_fills_keep_theirs() {
+        use crate::style_tokens::St;
+        assert_eq!(St::TextWarning.css(), "color:var(--p3)");
+        assert_eq!(St::BgWarning.css(), "background:var(--p)");
+        assert_eq!(St::BgAccentSubtle.css(), "background:var(--n0)");
+        for theme in [Theme::light(), Theme::dark()] {
+            let css = generate_theme_css(&theme);
+            for v in [
+                "--o3:", "--p3:", "--q3:", "--n0:", "--N:", "--N1:", "--y:", "--z:",
+            ] {
+                assert!(css.contains(v), "{v} missing");
+            }
         }
     }
 }

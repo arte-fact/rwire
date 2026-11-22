@@ -399,10 +399,16 @@ fn switch_rich(p: &DemoParams) -> ElementBuilder {
         .build()
 }
 
-const BUTTON_TEXT: &[TextProp] = &[TextProp {
-    name: "text",
-    default: "Button",
-}];
+const BUTTON_TEXT: &[TextProp] = &[
+    TextProp {
+        name: "text",
+        default: "Button",
+    },
+    TextProp {
+        name: "title",
+        default: "Shown on hover, even when disabled",
+    },
+];
 fn button_rich(p: &DemoParams) -> ElementBuilder {
     use crate::{Button, ButtonIntent, ButtonSize};
     let intent = match v(p.variants, 0) {
@@ -425,6 +431,9 @@ fn button_rich(p: &DemoParams) -> ElementBuilder {
         .full_width(b(p.bools, 2));
     if b(p.bools, 3) {
         btn = btn.icon(Icon::Check);
+    }
+    if let Some(title) = p.texts.get(1).filter(|t| !t.is_empty()) {
+        btn = btn.title(title.to_string());
     }
     btn.build()
 }
@@ -1478,6 +1487,26 @@ pub fn generate_code(entry: &ComponentEntry, c: &CodeCtx) -> String {
             if cb(c, 3) {
                 l.push("    .icon(Icon::Check)".to_string());
             }
+            let title = ctext(c, 1, "");
+            if !title.is_empty() {
+                l.push(format!("    .title({title:?})"));
+            }
+            l
+        }
+        // Custom arm: `disabled` takes the reason, not a bool.
+        "composer" => {
+            let mut l = vec![
+                "Composer::new()".to_string(),
+                format!("    .placeholder({COMPOSER_PLACEHOLDER:?})"),
+            ];
+            if cb(c, 0) {
+                l.push("    .compact(true)".to_string());
+            } else {
+                l.push(format!("    .hint({COMPOSER_HINT:?})"));
+            }
+            if cb(c, 1) {
+                l.push(format!("    .disabled({COMPOSER_DISABLED_REASON:?})"));
+            }
             l
         }
         _ => {
@@ -1980,13 +2009,20 @@ fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     dot.build()
 }
 
+const COMPOSER_PLACEHOLDER: &str = "Message the team…";
+const COMPOSER_HINT: &str = "⏎ send · ⇧⏎ newline";
+const COMPOSER_DISABLED_REASON: &str = "Read-only preview: you cannot reply here";
+
 fn composer_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::Composer;
     let mut composer = Composer::new()
-        .placeholder("Message the team…")
+        .placeholder(COMPOSER_PLACEHOLDER)
         .compact(b(bools, 0));
     if !b(bools, 0) {
-        composer = composer.hint("⏎ send · ⇧⏎ newline");
+        composer = composer.hint(COMPOSER_HINT);
+    }
+    if b(bools, 1) {
+        composer = composer.disabled(COMPOSER_DISABLED_REASON);
     }
     composer.build()
 }
@@ -3988,11 +4024,18 @@ const ENTRIES: &[ComponentEntry] = &[
         category: Category::Forms,
         order: 211,
         variants: &[],
-        bool_props: &[BoolProp {
-            name: "compact",
-            description: "Single-row form factor (inline composers)",
-            default: false,
-        }],
+        bool_props: &[
+            BoolProp {
+                name: "compact",
+                description: "Single-row form factor (inline composers)",
+                default: false,
+            },
+            BoolProp {
+                name: "disabled",
+                description: "Read-only: field and send disabled, with the reason",
+                default: false,
+            },
+        ],
         build_demo: composer_demo,
     },
     ComponentEntry {
@@ -4665,5 +4708,50 @@ mod codegen_tests {
                 }
             }
         }
+    }
+
+    /// The gallery's disabled composer says why, on the field and on the send button.
+    #[test]
+    fn the_composer_demo_shows_a_disabled_composer_with_its_reason() {
+        let entry = find("composer").unwrap();
+        let html = (entry.build_demo)(&[], &[false, true]).to_static_html();
+        let reason = format!("title=\"{COMPOSER_DISABLED_REASON}\"");
+        assert_eq!(html.matches(&reason).count(), 2, "{html}");
+        assert!(html.contains("disabled"), "{html}");
+        let code = generate_code(
+            entry,
+            &CodeCtx {
+                variants: &[],
+                nums: &[],
+                texts: &[],
+                bools: &[false, true],
+            },
+        );
+        assert!(code.contains(".disabled(\"Read-only preview"), "{code}");
+    }
+
+    /// The gallery's button carries its tooltip, disabled or not.
+    #[test]
+    fn the_button_demo_shows_a_disabled_button_with_its_tooltip() {
+        let demo = rich_demo("button").unwrap();
+        let html = demo(&DemoParams {
+            variants: &[],
+            bools: &[true],
+            nums: &[],
+            texts: &["Interrupt", "Nothing to interrupt"],
+        })
+        .to_static_html();
+        assert!(html.contains("title=\"Nothing to interrupt\""), "{html}");
+        assert!(html.contains("disabled"), "{html}");
+        let code = generate_code(
+            find("button").unwrap(),
+            &CodeCtx {
+                variants: &[],
+                nums: &[],
+                texts: &["Interrupt", "Nothing to interrupt"],
+                bools: &[true],
+            },
+        );
+        assert!(code.contains(".title(\"Nothing to interrupt\")"), "{code}");
     }
 }

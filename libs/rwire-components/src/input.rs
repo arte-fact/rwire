@@ -257,9 +257,6 @@ impl Input {
             St::RoundedMd,
             St::TransTheme,
             St::BorderWTheme,
-            // Inherit the page font (family + size + weight) so the control doesn't fall
-            // back to the UA default.
-            St::FontInheritAll,
         ];
 
         match self.size {

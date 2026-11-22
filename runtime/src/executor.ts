@@ -279,14 +279,23 @@ export function x(d: Uint8Array): void {
           document.head.appendChild(st.DS);
         }
         while (n--) {
+          // Each rule goes where its order puts it (code order: utilities,
+          // then pseudo-classes, then breakpoints), not at the end: equal-
+          // specificity rules then resolve the same way on every page,
+          // whatever order the classes were first met in.
+          const [k, kl] = rv(d, i);
+          i += kl;
           const [rl, ll] = rv(d, i);
           i += ll;
           const rule = TD.decode(d.slice(i, i + rl));
           i += rl;
+          let j = st.DO.length;
+          while (j && st.DO[j - 1] > k) j--;
           try {
-            st.DS.sheet!.insertRule(rule, st.DS.sheet!.cssRules.length);
+            st.DS.sheet!.insertRule(rule, j);
+            st.DO.splice(j, 0, k);
           } catch (_e) {
-            st.DS.textContent += rule;
+            // A rule this browser rejects (a vendor pseudo-element) is skipped.
           }
         }
       } else if (o === OP.MAP_DEF) {

@@ -105,7 +105,7 @@ Single-byte opcodes followed by arguments. Strings are interned in a symbol tabl
 | BIND_RESIZE | 0x50 | `[ref]` | Pointer-drag handle resizing the previous sibling |
 | LIVE_SOURCE | 0x51 | `[ref, channel]` | Input pushes its value to a live channel (client-side) |
 | LIVE_BIND | 0x52 | `[ref, channel, kind, args...]` | Element follows a live channel (text, fill, lookup, sum…) |
-| STYLE_DEF | 0x87 | `[count, (rule_len, rule)...]` | Lazy CSS rule delivery |
+| STYLE_DEF | 0x87 | `[count, (order, rule_len, rule)...]` | Lazy CSS rule delivery, inserted in `order` (code order) |
 | MAP_DEF | 0x88 | `[count, (kind, code, len, name)...]` | Lazy name-map delivery |
 | MOD_DEF | 0x8B | `[count, (len, name)...]` | Lazy runtime-extension hint (`/_rw/ext/{name}.js`) |
 | EVENT_ACK | 0xF3 | | The server handled one client event (sent alone, after its effects); the runtime releases the controls busied at the tap |
@@ -320,6 +320,10 @@ CSS uses short variable names for minimal wire size. Semantic variables are defi
 | `--n1`..`--n12` | accent scale | resolved from palette |
 | `--r`/`--s` | surface bg/hover | |
 | `--v`/`--w` | primary bg/hover | |
+| `--o`/`--p`/`--q` | success/warning/error fill | brand step of the scale |
+| `--o3`/`--p3`/`--q3` | success/warning/error **text** | computed: ≥ 4.5:1 on app and subtle bg |
+| `--M`,`--N`,`--O`,`--P`,`--I`,`--y` + `--M1`…`--z` | subtle bg + its text | computed in `subtle_pairs` (theme.rs) |
+| `--n0` | accent-subtle bg (selected row) | computed: text-default/high read on it |
 
 Two font hooks: `--Qft` is the body face (the base CSS reads it on `body`; a `ThemeStyle`'s
 `q_css` sets it, `flat()` makes it mono) and `--Qfd` the display face read by `St::FontDisplay`
