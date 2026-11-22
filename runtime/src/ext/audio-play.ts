@@ -23,6 +23,8 @@ export class Resampler {
 
   push(pcm: Int16Array): Float32Array {
     const n = pcm.length;
+    // A rate of 0 (or worse) would never advance: nothing to play.
+    if (!(this.step > 0) || !Number.isFinite(this.step)) return new Float32Array(0);
     const x = (k: number) => (k < 0 ? this.last : pcm[k]) / 32768;
     const out: number[] = [];
     let t = this.t;

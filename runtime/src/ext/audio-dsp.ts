@@ -63,6 +63,16 @@ export class Capture {
       this.edge = frame0 + this.ratio;
       this.next = frame0;
     }
+    else if (frame0 !== this.pos) {
+      // The clock jumped (the audio thread was suspended): realign, and
+      // drop the partial frame so every timestamp stays exact.
+      this.pos = frame0;
+      this.edge = frame0 + this.ratio;
+      this.next = frame0;
+      this.acc = 0;
+      this.n = 0;
+      this.fill = 0;
+    }
     for (let i = 0; i < block.length; i++) {
       const x = block[i];
       const at = this.pos + i;

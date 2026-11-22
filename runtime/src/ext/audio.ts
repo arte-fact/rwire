@@ -203,15 +203,23 @@ export class Stream {
     const rendered = this.el.getAttribute("data-audio-ticket");
     let t = this.next;
     if (!t && rendered && !this.spent.has(rendered)) t = rendered;
-    if (!t || !this.alive) return;
+    if (!t || !this.alive) {
+      // Nothing to present: say so, the app can redraw.
+      if (this.alive && !t) this.interrupted();
+      return;
+    }
     if (t === rendered) this.spent.add(t);
-    this.next = null;
     const path = this.el.getAttribute("data-audio-ws") || "/_rw/ext/audio/ws";
     const ws = this.env.socket(this.env.origin + path + "?t=" + encodeURIComponent(t));
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {
       this.retry = RETRY_MIN;
+      // Presented: spent. Kept until now, so a failed handshake retries it.
+      if (this.next === t) this.next = null;
+      // Back: the output state again (it may have said "interrupted").
+      this.output = "";
+      this.outputState();
     };
     ws.onmessage = (m) => {
       if (typeof m.data !== "string") this.message(new Uint8Array(m.data));
@@ -223,6 +231,7 @@ export class Stream {
       if (e.code === CLOSE_REFUSED) {
         // Refused: no retry with what we hold; a render brings a new ticket.
         this.next = null;
+        this.interrupted();
         return;
       }
       const wait = this.retry;
@@ -244,6 +253,7 @@ export class Stream {
         if (b.length < 5) return;
         const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
         const rate = v.getUint32(1, true);
+        if (!rate) return;
         const pcm = new Int16Array((b.length - 5) >> 1);
         for (let k = 0; k < pcm.length; k++) pcm[k] = v.getInt16(5 + 2 * k, true);
         return this.enqueue((node, ctx) => {
@@ -260,19 +270,24 @@ export class Stream {
       case 0x83: {
         const name = text();
         const sound = this.sounds.get(name);
+        const gen = this.playGen;
         return this.enqueue((node) => {
           if (!sound) return;
           return sound.then((data) => {
-            // Sounds are not counted in "samples since the last mark".
-            if (data) node.port.postMessage({ k: "pcm", data: data.slice(), ratio: 0 } as Item);
+            // A stop while it loaded: dropped. Sounds are not counted in
+            // "samples since the last mark".
+            if (data && gen === this.playGen) node.port.postMessage({ k: "pcm", data: data.slice(), ratio: 0 } as Item);
           });
         });
       }
       case 0x84:
         return this.stopPlayback();
       case 0x85:
-        this.resamplers.clear();
-        return this.enqueue((node) => node.port.postMessage({ k: "end" } as Item));
+        // In queue order: PCM still waiting before the end uses the old resampler.
+        return this.enqueue((node) => {
+          this.resamplers.clear();
+          node.port.postMessage({ k: "end" } as Item);
+        });
     }
   }
 
@@ -381,6 +396,14 @@ export class Stream {
     if (s !== this.output) {
       this.output = s;
       this.report("output " + s);
+    }
+  }
+
+  /** The link is lost and cannot come back by itself. */
+  interrupted(): void {
+    if (this.output !== "interrupted") {
+      this.output = "interrupted";
+      this.report("output interrupted");
     }
   }
 

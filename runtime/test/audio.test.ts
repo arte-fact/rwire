@@ -361,7 +361,8 @@ test("the socket opens with the rendered ticket, then reconnects with the next o
   assert.equal(env.timers.length, 1, "a retry is scheduled");
   env.timers.shift()!();
   assert.equal(env.sockets[1].url, "ws://host/_rw/ext/audio/ws?t=rwt_b");
-  // Lost again before any ticket: the spent render ticket is not reused.
+  // Opened (rwt_b spent), then lost before any ticket: the spent render ticket is not reused.
+  env.sockets[1].open();
   env.sockets[1].drop(1006);
   env.timers.shift()!();
   assert.equal(env.sockets.length, 2, "nothing to present: wait for a render");
@@ -458,4 +459,55 @@ test("seq restarts at 0 at each capture start (each capture(true)), counted by t
   assert.deepEqual(seqs(), [0, 1, 2, 3, 4, 0, 1, 2], "back to 0 at the new capture");
   const ts = env.sockets[0].sent.map((b) => new DataView(b).getFloat64(5, true));
   assert.ok(ts[5] > ts[4], "time keeps running on the audio clock");
+});
+
+// --- review fixes ---
+
+test("a reconnection that fails before opening keeps the next ticket and tries it again", async () => {
+  const env = fakeEnv();
+  const s = await stream(env);
+  env.sockets[0].open();
+  env.sockets[0].serverSends(ticketMsg("rwt_b"));
+  env.sockets[0].drop(1006);
+  env.timers.shift()!();
+  assert.equal(env.sockets[1].url, "ws://host/_rw/ext/audio/ws?t=rwt_b");
+  // The server is down: the handshake fails, the ticket was never presented.
+  env.sockets[1].drop(1006);
+  env.timers.shift()!();
+  assert.equal(env.sockets.length, 3, "retried");
+  assert.equal(env.sockets[2].url, "ws://host/_rw/ext/audio/ws?t=rwt_b");
+  // Once open, the ticket is spent: it is not kept.
+  env.sockets[2].open();
+  assert.equal(s.next, null);
+});
+
+test("a reconnection that cannot go on says so: output interrupted, then the state again once back", async () => {
+  const env = fakeEnv();
+  const s = await stream(env);
+  s.gesture();
+  await tick();
+  env.sockets[0].open();
+  env.sockets[0].serverSends(ticketMsg("rwt_b"));
+  env.sockets[0].drop(1006);
+  env.timers.shift()!();
+  reports = [];
+  env.sockets[1].drop(4403);
+  assert.deepEqual(reports, ["output interrupted"], "the app can redraw");
+  // A render brings a ticket: once the socket is back, the output state is said again.
+  el.setAttribute("data-audio-ticket", "rwt_c");
+  s.sync();
+  env.sockets[2].open();
+  assert.deepEqual(reports, ["output interrupted", "output ready"]);
+});
+
+test("a jump of the audio clock realigns the capture: the next frame is timed from the new position", () => {
+  const c = new Capture(48000);
+  c.push(new Float32Array(128), 0);
+  // The thread was suspended: the next block starts far later.
+  const frames = [];
+  for (let at = 96000; at < 96000 + 48000 * 0.1; at += 128) frames.push(...c.push(new Float32Array(128), at));
+  assert.ok(frames.length >= 4);
+  assert.equal(frames[0].t, 2, "timed at the new position (96000 / 48000), not at 128 samples in");
+  assert.ok(Math.abs(frames[1].t - 2.02) < 1e-9);
+  assert.equal(frames[1].seq, frames[0].seq + 1, "the numbering goes on");
 });

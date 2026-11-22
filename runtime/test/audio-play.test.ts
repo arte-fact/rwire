@@ -318,3 +318,40 @@ test("sounds are queued in call order with the PCM, even when they load last", a
     ["started", "ended"],
   );
 });
+
+// --- review fixes ---
+
+test("a sound already loading when stop comes is not played after it", async () => {
+  const r = rig();
+  await settle();
+  r.sock.serverSends(msg(0x83, text("ding")));
+  await settle(); // the sound's operation runs, waiting for the file
+  r.sock.serverSends(msg(0x84));
+  r.fetches.forEach((f) => f(new ArrayBuffer(8)));
+  await settle();
+  assert.ok(r.render(4).every((x) => x === 0), "the ding played after the stop");
+});
+
+test("end resets the resampler in queue order: the next utterance starts fresh", async () => {
+  const r = rig();
+  await settle();
+  // Sent in one burst: the end arrives before the first PCM is resampled.
+  r.sock.serverSends(pcmMsg(24000, new Array(240).fill(16000)));
+  r.sock.serverSends(msg(0x85));
+  r.sock.serverSends(pcmMsg(24000, new Array(240).fill(0)));
+  await settle();
+  const out = r.render(8);
+  // 240 samples at 24 kHz give 479 at 48 kHz (positions 0, 0.5, … 239).
+  assert.equal(out[478], 16000 / 32768, "the first utterance's last sample");
+  assert.equal(out[479], 0, "the second starts on its own first sample, not interpolated from the first");
+});
+
+test("a PCM rate of 0 is ignored, not an endless loop", async () => {
+  assert.equal(new Resampler(0, 48000).push(Int16Array.from([1, 2, 3])).length, 0);
+  assert.equal(new Resampler(-5, 48000).push(Int16Array.from([1, 2, 3])).length, 0);
+  const r = rig();
+  await settle();
+  r.sock.serverSends(pcmMsg(0, [100, 200, 300]));
+  await settle();
+  assert.ok(r.render(2).every((x) => x === 0));
+});
