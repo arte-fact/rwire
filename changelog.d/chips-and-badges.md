@@ -13,3 +13,8 @@
 - `Input::search().size(InputSize::Sm)` now follows the /app density: 13 px text,
   8 px radius, `.45rem .7rem` padding; the 44 px touch target still comes from the
   theme's coarse-pointer rule.
+- The small search field and the extra-small badge use tokens, not an inline
+  style, so an app can override them with `.st()`: `St::TextSearchSm` (13 px),
+  `St::PxSearchSm` / `St::PySearchSm` (.7rem / .45rem), `St::TextBadgeXs`
+  (10.5 px), `St::RoundedBadgeXs` (5 px). The search keeps `RoundedMd`
+  (`--R2`, 8 px with `studio`).

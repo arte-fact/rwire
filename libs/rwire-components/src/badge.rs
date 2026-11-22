@@ -13,7 +13,7 @@
 //! ```
 
 use rwire::style_tokens::St;
-use rwire::{el, style::Style, El, ElementBuilder, Tone};
+use rwire::{el, El, ElementBuilder, Tone};
 use std::borrow::Cow;
 
 /// Badge intent/color.
@@ -172,10 +172,16 @@ impl Badge {
             tokens.push(St::FontMono);
         }
 
-        tokens.push(match self.shape {
-            BadgeShape::Pill => St::RoundedFull,
-            BadgeShape::Square => St::Rounded0,
+        tokens.push(match (self.size, self.shape) {
+            // The runtime badge: 10.5 px, 5 px radius.
+            (BadgeSize::Xs, _) => St::RoundedBadgeXs,
+            (_, BadgeShape::Pill) => St::RoundedFull,
+            (_, BadgeShape::Square) => St::Rounded0,
         });
+        if self.size == BadgeSize::Xs {
+            tokens.retain(|t| *t != St::TextXs);
+            tokens.push(St::TextBadgeXs);
+        }
 
         if let Some(tone) = self.tone {
             tokens.push(tone.ground());
@@ -243,10 +249,6 @@ impl Badge {
     /// Build the badge into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         let mut builder = el(El::Span).st(self.compute_tokens());
-
-        if self.size == BadgeSize::Xs {
-            builder = builder.style(Style::new().font_size("10.5px").border_radius("5px"));
-        }
 
         if let Some(ref extra) = self.extra_class {
             builder = builder.class(extra.as_ref());
@@ -316,7 +318,10 @@ mod tests {
         let tokens = badge.compute_tokens();
         assert!(tokens.contains(&St::FontMono), "{tokens:?}");
         let html = badge.build().to_static_html();
-        assert!(html.contains("font-size:10.5px"), "{html}");
-        assert!(html.contains("border-radius:5px"), "{html}");
+        // Tokens only: no inline style (an app can still override with `.st()`).
+        assert!(!html.contains(" style="), "{html}");
+        assert!(tokens.contains(&St::TextBadgeXs), "{tokens:?}");
+        assert!(tokens.contains(&St::RoundedBadgeXs), "{tokens:?}");
+        assert!(!tokens.contains(&St::TextXs) && !tokens.contains(&St::RoundedFull));
     }
 }

@@ -1257,6 +1257,17 @@ define_token_enum! {
         ShellHandle = 0x3F4 => "width:10px;margin-inline:-5px;position:relative;z-index:1;flex-shrink:0;cursor:col-resize;touch-action:none",
         /// A resize handle's 2 px accent line (on hover or focus).
         ShellHandleLine = 0x3F5 => "background:linear-gradient(var(--v),var(--v)) center/2px 100% no-repeat",
+        // Dense search and runtime badges (0x3F6-0x3FA).
+        /// A small search field's text: 13 px.
+        TextSearchSm = 0x3F6 => "font-size:13px",
+        /// A small search field's inline padding: .7rem.
+        PxSearchSm = 0x3F7 => "padding-inline:.7rem",
+        /// A small search field's block padding: .45rem.
+        PySearchSm = 0x3F8 => "padding-block:.45rem",
+        /// An extra-small badge's text: 10.5 px.
+        TextBadgeXs = 0x3F9 => "font-size:10.5px",
+        /// An extra-small badge's radius: 5 px.
+        RoundedBadgeXs = 0x3FA => "border-radius:5px",
     }
 }
 
