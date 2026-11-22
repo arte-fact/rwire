@@ -153,7 +153,10 @@ pub use button::{Button, ButtonIntent, ButtonSize};
 pub use card::{Card, CardPadding, CardShadow};
 pub use chat::Chat;
 pub use chat_entry::{ChatEntry, ChatLayout};
-pub use chat_item::{ChatAuthor, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatRole, ChatTag};
+pub use chat_item::{
+    ChatAuthor, ChatDelivery, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatRole, ChatTag,
+    Delivery,
+};
 pub use chat_scroll::ChatScroll;
 pub use chat_transcript::{ChatTranscript, Measure};
 pub use checkbox::Checkbox;

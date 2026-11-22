@@ -2603,6 +2603,8 @@ struct GalleryMsg {
     text: &'static str,
     /// A Markdown body (an agent's answer) instead of plain text.
     markdown: bool,
+    /// An outbox state (with its status line), if any.
+    delivery: Option<(crate::Delivery, &'static str)>,
 }
 
 impl crate::ChatItem for GalleryMsg {
@@ -2631,7 +2633,24 @@ impl crate::ChatItem for GalleryMsg {
         Some(std::borrow::Cow::Borrowed(self.time))
     }
     fn groups_with(&self, prev: &Self) -> bool {
-        prev.user == self.user
+        prev.user == self.user && self.delivery.is_none() && prev.delivery.is_none()
+    }
+    fn delivery(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<crate::ChatDelivery> {
+        self.delivery.map(|(state, status)| crate::ChatDelivery {
+            state,
+            status: std::borrow::Cow::Borrowed(status),
+            actions: match state {
+                crate::Delivery::Unconfirmed | crate::Delivery::Failed => vec![
+                    el(El::Button)
+                        .st([rwire::St::TextSm, rwire::St::TextAccent])
+                        .text("Resend"),
+                    el(El::Button)
+                        .st([rwire::St::TextSm, rwire::St::TextMuted])
+                        .text("Withdraw"),
+                ],
+                _ => vec![],
+            },
+        })
     }
 }
 
@@ -2677,6 +2696,7 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             time: "09:41",
             text: "Can you check why the hub drops the session after a restart?",
             markdown: false,
+            delivery: None,
         },
         GalleryMsg {
             key: "m2",
@@ -2684,6 +2704,7 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             time: "09:42",
             text: GALLERY_MARKDOWN,
             markdown: true,
+            delivery: None,
         },
         GalleryMsg {
             key: "m3",
@@ -2692,6 +2713,34 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             text:
                 "I can make the hub wait for the agent's first heartbeat before it serves the list.",
             markdown: false,
+            delivery: None,
+        },
+        GalleryMsg {
+            key: "m4",
+            user: true,
+            time: "09:43",
+            text: "Then make it wait for the heartbeat.",
+            markdown: false,
+            delivery: Some((crate::Delivery::Sending, "Sending…")),
+        },
+        GalleryMsg {
+            key: "m5",
+            user: true,
+            time: "09:44",
+            text: "And log the re-registration delay.",
+            markdown: false,
+            delivery: Some((
+                crate::Delivery::Unconfirmed,
+                "Not confirmed: the message does not appear in the conversation",
+            )),
+        },
+        GalleryMsg {
+            key: "m6",
+            user: true,
+            time: "09:45",
+            text: "Retry the restart, the hub is down.",
+            markdown: false,
+            delivery: Some((crate::Delivery::Failed, "Send failed: connection reset")),
         },
     ];
     el(El::Div)

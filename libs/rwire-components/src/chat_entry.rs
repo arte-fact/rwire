@@ -13,10 +13,11 @@ use std::borrow::Cow;
 
 use rwire::style::Style;
 use rwire::style_tokens::St;
-use rwire::{el, At, El, ElementBuilder, ProseFace, Tone};
+use rwire::{el, At, Av, El, ElementBuilder, ProseFace, Tone};
 
 use crate::chat_item::{
-    ChatAuthor, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatRole, ChatTag,
+    ChatAuthor, ChatDelivery, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatRole, ChatTag,
+    Delivery,
 };
 use crate::TypingIndicator;
 
@@ -44,6 +45,7 @@ pub struct ChatEntry {
     trailing: Option<ElementBuilder>,
     body: ElementBuilder,
     detail: Option<ChatDetail>,
+    delivery: Option<ChatDelivery>,
     grouped: bool,
     streaming: bool,
 }
@@ -62,6 +64,7 @@ impl ChatEntry {
             trailing: None,
             body,
             detail: None,
+            delivery: None,
             grouped: false,
             streaming: false,
         }
@@ -91,6 +94,7 @@ impl ChatEntry {
         entry.tag = item.tag();
         entry.trailing = item.trailing(ctx);
         entry.detail = item.detail(ctx);
+        entry.delivery = item.delivery(ctx);
         entry.grouped = grouped;
         entry.streaming = item.streaming();
         entry.build()
@@ -143,6 +147,24 @@ impl ChatEntry {
     /// Collapsible detail under the body.
     pub fn detail(mut self, detail: ChatDetail) -> Self {
         self.detail = Some(detail);
+        self
+    }
+
+    /// The outbox state of an outgoing entry: a status line under the body
+    /// (`role=status`, `role=alert` when failed) plus an actions row (Resend,
+    /// Withdraw). `Sending` sets the entry at reduced opacity; `Unconfirmed`
+    /// and `Failed` give the body a dashed outline.
+    pub fn delivery(
+        mut self,
+        state: Delivery,
+        status: impl Into<Cow<'static, str>>,
+        actions: impl IntoIterator<Item = ElementBuilder>,
+    ) -> Self {
+        self.delivery = Some(ChatDelivery {
+            state,
+            status: status.into(),
+            actions: actions.into_iter().collect(),
+        });
         self
     }
 
@@ -225,6 +247,46 @@ impl ChatEntry {
             .text(initials.as_ref())
     }
 
+    /// The chrome a delivery state adds to the body (a dashed outline when
+    /// unconfirmed or failed).
+    fn delivery_body_tokens(state: Delivery) -> Vec<St> {
+        match state {
+            Delivery::Unconfirmed | Delivery::Failed => vec![St::BorderDashed],
+            _ => Vec::new(),
+        }
+    }
+
+    /// The chrome a delivery state adds to the whole entry (reduced opacity
+    /// while sending).
+    fn delivery_root_tokens(state: Delivery) -> Vec<St> {
+        match state {
+            Delivery::Sending => vec![St::Opacity60],
+            _ => Vec::new(),
+        }
+    }
+
+    /// The status line (`role=status`, `role=alert` when failed) and the
+    /// actions row of a delivery state, rendered under the body.
+    fn delivery_rows(delivery: &ChatDelivery) -> Vec<ElementBuilder> {
+        let mut status = el(El::Div)
+            .st([St::TextXs, St::TextFaint])
+            .data("testid", "chat-delivery");
+        status = match delivery.state {
+            Delivery::Failed => status.at(At::Role, Av::RoleAlert).st([St::TextError]),
+            _ => status.at(At::Role, Av::RoleStatus),
+        };
+        let mut rows = vec![status.text(delivery.status.as_ref())];
+        if !delivery.actions.is_empty() {
+            rows.push(
+                el(El::Div)
+                    .st([St::DisplayFlex, St::GapSm, St::ItemsCenter])
+                    .data("testid", "chat-delivery-actions")
+                    .append(delivery.actions.clone()),
+            );
+        }
+        rows
+    }
+
     /// The avatar layout (see [`ChatLayout::Avatar`]).
     fn build_avatar(mut self) -> ElementBuilder {
         let user = self.author.role == ChatRole::User;
@@ -263,6 +325,11 @@ impl ChatEntry {
                     .append(header),
             );
         }
+        let delivery_body = self
+            .delivery
+            .as_ref()
+            .map(|d| Self::delivery_body_tokens(d.state))
+            .unwrap_or_default();
         let body = if self.bubble.unwrap_or(user) {
             el(El::Div)
                 .st([
@@ -274,6 +341,7 @@ impl ChatEntry {
                     St::TextDefault,
                     St::BreakWords,
                 ])
+                .st(delivery_body.clone())
                 .data("testid", "chat-bubble")
                 .append([self.body])
         } else {
@@ -287,6 +355,7 @@ impl ChatEntry {
             face.apply(
                 el(El::Div)
                     .st([St::MinW0, St::BreakWords, St::TextDefault])
+                    .st(delivery_body.clone())
                     .data("testid", "chat-prose"),
             )
             .append([self.body])
@@ -307,9 +376,18 @@ impl ChatEntry {
             }
             body_col.push(details);
         }
+        if let Some(delivery) = &self.delivery {
+            body_col.extend(Self::delivery_rows(delivery));
+        }
         column.extend(body_col);
+        let root_tokens = self
+            .delivery
+            .as_ref()
+            .map(|d| Self::delivery_root_tokens(d.state))
+            .unwrap_or_default();
         let mut root = el(El::Div)
             .st([St::GridChatAvatarPhone, St::MinW0])
+            .st(root_tokens)
             .sm([St::GridChatAvatar])
             .data("testid", "chat-entry")
             .append([
@@ -380,6 +458,9 @@ impl ChatEntry {
             }
             body_col.push(details);
         }
+        if let Some(delivery) = &self.delivery {
+            body_col.extend(Self::delivery_rows(delivery));
+        }
         column.push(
             el(El::Div)
                 .st([St::DisplayFlex, St::FlexCol, St::GapXs, St::MinW0])
@@ -387,6 +468,11 @@ impl ChatEntry {
         );
 
         // MinW0 + BreakWords: wrap at the column edge instead of overflowing.
+        let delivery_body = self
+            .delivery
+            .as_ref()
+            .map(|d| Self::delivery_body_tokens(d.state))
+            .unwrap_or_default();
         let block = el(El::Div)
             .st([
                 St::Flex1,
@@ -396,6 +482,7 @@ impl ChatEntry {
                 St::FlexCol,
                 St::GapXs,
             ])
+            .st(delivery_body)
             .append(column);
 
         let mut row: Vec<ElementBuilder> = vec![Self::rail(intent)];
@@ -409,7 +496,14 @@ impl ChatEntry {
         }
         row.push(block);
 
-        let mut root = el(El::Div).st([St::DisplayFlex, St::GapMd, St::MinW0]);
+        let root_tokens = self
+            .delivery
+            .as_ref()
+            .map(|d| Self::delivery_root_tokens(d.state))
+            .unwrap_or_default();
+        let mut root = el(El::Div)
+            .st([St::DisplayFlex, St::GapMd, St::MinW0])
+            .st(root_tokens);
         if let Some(key) = self.key {
             root = root.id(format!("ce-{key}").as_str());
         }
@@ -510,5 +604,95 @@ mod tests {
     fn no_trailing_by_default() {
         let entry = ChatEntry::new(ChatAuthor::agent("claw"), el(El::P).text("hi")).build();
         assert_eq!(header_texts(&entry), vec!["claw"]);
+    }
+
+    #[test]
+    fn sending_sets_reduced_opacity_and_a_status_line() {
+        let entry = ChatEntry::new(ChatAuthor::user("You"), el(El::P).text("hi"))
+            .layout(ChatLayout::Avatar)
+            .delivery(Delivery::Sending, "Sending…", [])
+            .build();
+        let html = entry.to_static_html();
+        assert!(html.contains("data-testid=\"chat-delivery\""), "{html}");
+        assert!(html.contains("role=\"status\""), "{html}");
+        assert!(html.contains("Sending…"), "{html}");
+        assert!(!html.contains("chat-delivery-actions"), "{html}");
+        let root = entry.get_style_utils();
+        assert!(root.contains(&St::Opacity60.as_u16()));
+        let bubble = entry
+            .children()
+            .last()
+            .unwrap()
+            .children()
+            .iter()
+            .find(|c| c.get_style_utils().contains(&St::BgSurfaceRaised.as_u16()))
+            .unwrap();
+        assert!(
+            !bubble
+                .get_style_utils()
+                .contains(&St::BorderDashed.as_u16()),
+            "sending has no dashed outline"
+        );
+    }
+
+    #[test]
+    fn unconfirmed_and_failed_get_a_dashed_outline_and_actions() {
+        for (state, role, text) in [
+            (Delivery::Unconfirmed, "status", "Not confirmed"),
+            (Delivery::Failed, "alert", "Send failed: boom"),
+        ] {
+            let entry = ChatEntry::new(ChatAuthor::user("You"), el(El::P).text("hi"))
+                .layout(ChatLayout::Avatar)
+                .delivery(
+                    state,
+                    text,
+                    [
+                        el(El::Button).text("Resend"),
+                        el(El::Button).text("Withdraw"),
+                    ],
+                )
+                .build();
+            let html = entry.to_static_html();
+            assert!(html.contains("data-testid=\"chat-delivery\""), "{html}");
+            assert!(html.contains(&format!("role=\"{role}\"")), "{html}");
+            assert!(
+                html.contains("data-testid=\"chat-delivery-actions\""),
+                "{html}"
+            );
+            assert!(
+                html.contains("Resend") && html.contains("Withdraw"),
+                "{html}"
+            );
+            let bubble = entry
+                .children()
+                .last()
+                .unwrap()
+                .children()
+                .iter()
+                .find(|c| c.get_style_utils().contains(&St::BgSurfaceRaised.as_u16()))
+                .unwrap();
+            assert!(
+                bubble
+                    .get_style_utils()
+                    .contains(&St::BorderDashed.as_u16()),
+                "{state:?} dashed outline"
+            );
+            assert!(!entry.get_style_utils().contains(&St::Opacity60.as_u16()));
+        }
+        // Failed colors the status line as an error.
+        let failed = ChatEntry::new(ChatAuthor::user("You"), el(El::P).text("hi"))
+            .layout(ChatLayout::Avatar)
+            .delivery(Delivery::Failed, "Send failed", [])
+            .build();
+        let body_col = &failed.children().last().unwrap();
+        let status = body_col
+            .children()
+            .iter()
+            .find(|c| {
+                c.get_style_utils().contains(&St::TextFaint.as_u16())
+                    || c.get_style_utils().contains(&St::TextError.as_u16())
+            })
+            .unwrap();
+        assert!(status.get_style_utils().contains(&St::TextError.as_u16()));
     }
 }

@@ -133,6 +133,30 @@ impl ChatTag {
     }
 }
 
+/// The delivery state of an outgoing entry (the outbox), with its status line
+/// and actions — see [`ChatEntry::delivery`](crate::ChatEntry::delivery).
+pub struct ChatDelivery {
+    pub state: Delivery,
+    /// The status line under the body ("Sending…", "Not confirmed: …", …).
+    pub status: Cow<'static, str>,
+    /// The actions (Resend, Withdraw), rendered in a row under the status.
+    pub actions: Vec<ElementBuilder>,
+}
+
+/// The delivery state of an outgoing message (the outbox).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Delivery {
+    /// Still sending: the entry is set at reduced opacity.
+    #[default]
+    Sending,
+    /// Acknowledged by the hub, waiting for the session to pick it up.
+    Sent,
+    /// No sign of it in the conversation: dashed outline, status + actions.
+    Unconfirmed,
+    /// The send failed: dashed outline, `role=alert` status + actions.
+    Failed,
+}
+
 /// Collapsible detail under an entry body, rendered with native
 /// `<details>/<summary>` — zero-latency, no server round-trip for the toggle,
 /// keyboard/a11y semantics for free. The server still controls the initial
@@ -235,6 +259,16 @@ pub trait ChatItem {
 
     /// Set the body in a bubble? `None`: yes for the user's entries.
     fn bubble(&self) -> Option<bool> {
+        None
+    }
+
+    /// The outbox state of an outgoing entry: status line + actions under the
+    /// body, plus the state's chrome (opacity, dashed outline). `None`: a
+    /// plain, delivered entry.
+    fn delivery(&self, _ctx: &ChatItemCtx<Self>) -> Option<ChatDelivery>
+    where
+        Self: Sized,
+    {
         None
     }
 

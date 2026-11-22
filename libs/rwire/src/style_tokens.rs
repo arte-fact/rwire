@@ -1336,6 +1336,11 @@ define_token_enum! {
         WFitMax = 0x418 => "width:fit-content;max-width:100%",
         /// A thread's block padding: 24 px on top, 12 px below.
         PyThread = 0x419 => "padding-block:24px 12px",
+        // Conversation, delivery states (0x41A-0x41B).
+        /// A dashed hairline (an unconfirmed or failed outgoing message).
+        BorderDashed = 0x41A => "border:1px dashed var(--h)",
+        /// Reduced opacity (a message still sending).
+        Opacity60 = 0x41B => "opacity:0.6",
     }
 }
 
