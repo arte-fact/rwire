@@ -143,7 +143,7 @@ pub use accordion::{Accordion, AccordionItem};
 pub use action_errors::ActionErrors;
 pub use action_toasts::ActionToasts;
 pub use alert::{Alert, AlertIntent};
-pub use app_shell::AppShell;
+pub use app_shell::{AppShell, MobilePane};
 pub use avatar::{Avatar, AvatarSize};
 pub use avatar_group::AvatarGroup;
 pub use badge::{Badge, BadgeFill, BadgeIntent, BadgeShape};

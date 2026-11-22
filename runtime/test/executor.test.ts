@@ -665,6 +665,51 @@ test("BIND_RESIZE drags the previous sibling's width", () => {
   assert.equal(pane.style.flex, "0 0 auto");
 });
 
+test("BIND_RESIZE reports the width on release and resets it on double-click", () => {
+  const pane = doc.createElement("div");
+  (pane as any).getBoundingClientRect = () => ({ width: 264 });
+  const handle = doc.createElement("div");
+  handle.id = "rz2";
+  (handle as any).previousElementSibling = pane;
+  const clicks: string[] = [];
+  handle.click = () => clicks.push(handle.dataset.w);
+  const winListeners: Record<string, ((e: unknown) => void)[]> = {};
+  (globalThis as any).addEventListener = (t: string, fn: (e: unknown) => void) => {
+    (winListeners[t] || (winListeners[t] = [])).push(fn);
+  };
+  (globalThis as any).removeEventListener = () => {};
+  run(syms("rz2"), [0x01, ...vint(0x80)], [0x50, ...vint(0)]);
+  handle.fire("pointerdown", { clientX: 100 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 140 });
+  for (const fn of winListeners["pointerup"] || []) fn({});
+  assert.equal(pane.style.width, "304px");
+  assert.deepEqual(clicks, ["304"], "the width is sent with a click (data-w)");
+  handle.fire("dblclick", {});
+  assert.equal(pane.style.width, "", "double-click: back to the default width");
+  assert.equal(pane.style.flex, "");
+  assert.deepEqual(clicks, ["304", ""], "and the reset is sent too");
+});
+
+test("BIND_RESIZE with data-rz=n resizes the next sibling, the other way", () => {
+  const panel = doc.createElement("div");
+  (panel as any).getBoundingClientRect = () => ({ width: 340 });
+  const handle = doc.createElement("div");
+  handle.id = "rz3";
+  handle.setAttribute("data-rz", "n");
+  handle.dataset.rz = "n";
+  (handle as any).nextElementSibling = panel;
+  handle.click = () => {};
+  const winListeners: Record<string, ((e: unknown) => void)[]> = {};
+  (globalThis as any).addEventListener = (t: string, fn: (e: unknown) => void) => {
+    (winListeners[t] || (winListeners[t] = [])).push(fn);
+  };
+  (globalThis as any).removeEventListener = () => {};
+  run(syms("rz3"), [0x01, ...vint(0x80)], [0x50, ...vint(0)]);
+  handle.fire("pointerdown", { clientX: 500 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 460 });
+  assert.equal(panel.style.width, "380px", "dragging left widens a right-hand panel");
+});
+
 test("data-kbd: combos click their element; bare keys guarded in fields", async () => {
   const { installRouter } = await import("../src/router.ts");
   (globalThis as any).window = { addEventListener: () => {} };

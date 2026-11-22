@@ -289,6 +289,28 @@ pub struct Theme {
     touch_below: Option<u16>,
 }
 
+/// The responsive rules of a three-column `AppShell` under `scope` (a
+/// selector for its root): below `drawer` px the panel becomes a drawer over
+/// the main column; below `one_column` px a single column shows, the sidebar
+/// or the main one as the root's `data-mobile` says (`list` / `main`), and
+/// the panel covers the screen. The theme emits them for every shell at its
+/// defaults (one column below [`Theme::touch_below`], else 760; drawer below
+/// 1100); a shell with its own thresholds emits its own.
+#[doc(hidden)]
+pub fn shell_layout_css(scope: &str, one_column: u16, drawer: u16) -> String {
+    let (d, o) = (drawer.saturating_sub(1), one_column.saturating_sub(1));
+    format!(
+        "@media (max-width:{d}.98px){{\
+         {scope} [data-shell=panel]{{position:fixed;top:0;right:0;bottom:0;z-index:40;max-width:100vw;box-shadow:var(--Qd,0 8px 24px rgba(0,0,0,.25))}}\
+         {scope} [data-pane=panel]{{display:none}}}}\
+         @media (max-width:{o}.98px){{\
+         {scope} [data-shell=handle]{{display:none}}\
+         {scope} [data-shell=sidebar]{{width:100%!important;border-right:0}}\
+         {scope} [data-shell=panel]{{left:0;width:100%!important}}\
+         {scope}[data-mobile=list] [data-shell=main],{scope}[data-mobile=main] [data-shell=sidebar]{{display:none}}}}\n"
+    )
+}
+
 /// How dense the controls and lists are, for a site or for a tool.
 ///
 /// It sets the `--Qz*` hooks: control height (`--Qzh`, `St::HControl`), control
@@ -773,6 +795,13 @@ pub fn generate_theme_css(theme: &Theme) -> String {
             "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
         );
     }
+    // Three-column shells at the theme's thresholds (a shell with its own emits
+    // its own rules, under `[data-shell-bp]`).
+    css.push_str(&shell_layout_css(
+        "[data-shell-root]:not([data-shell-bp])",
+        theme.touch_below.unwrap_or(760),
+        1100,
+    ));
     // 44 px touch targets under a coarse pointer, or below `touch_below` (the
     // `sm` breakpoint by default), for every interactive control whatever its
     // classes. Zero specificity (`:where`): an app's own min-height wins. Icon
@@ -1747,7 +1776,9 @@ mod tests {
         // Single block should be compact.
         // +~400B (R1): the neutral and six categorical tones (`--Y0g…--Y6o`), the faint ink.
         // +~200B (R1): 44 px touch targets below `Theme::touch_below` (a theme setting).
-        assert!(css.len() < 2800, "Theme CSS too large: {} bytes", css.len());
+        // +~650B (R2): the three-column shell's drawer and single-column rules, whose
+        // one-column threshold follows `Theme::touch_below`.
+        assert!(css.len() < 3500, "Theme CSS too large: {} bytes", css.len());
     }
 
     #[test]

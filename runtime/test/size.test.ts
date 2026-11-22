@@ -20,8 +20,11 @@ import { gzipSync } from "node:zlib";
 // +200B raw / +80B gzip (theme foundations, R1): a theme mode the user picks survives a
 // reload. After each batch the runtime keeps a changed `data-rw-mode` in the `rw_mode`
 // cookie; it must see every batch, so it cannot be lazy.
-const MAX_RAW = 20_700;
-const MAX_GZIP = 7_820;
+// +300B raw / +100B gzip (shell navigation, R2): a resize handle can size the next
+// sibling (a right-hand panel), reports the width to the server on release and resets it
+// on double-click; it is the existing BIND_RESIZE opcode, so it cannot be lazy.
+const MAX_RAW = 21_000;
+const MAX_GZIP = 7_920;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

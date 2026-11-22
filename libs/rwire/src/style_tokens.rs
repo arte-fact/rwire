@@ -1248,6 +1248,15 @@ define_token_enum! {
         PlSafe = 0x3F0 => "padding-left:env(safe-area-inset-left,0px)",
         /// Padding top: `--S3`, or the safe-area inset when larger.
         PtSafe = 0x3F1 => "padding-top:max(var(--S3),env(safe-area-inset-top,0px))",
+        // Three-column shell (0x3F2-0x3F5): AppShell's columns and resize handles.
+        /// The shell's sidebar column: `--Qsw` wide (264 px by default).
+        WShellSidebar = 0x3F2 => "width:var(--Qsw,264px);flex-shrink:0",
+        /// The shell's panel column: `--Qpw` wide (340 px by default).
+        WShellPanel = 0x3F3 => "width:var(--Qpw,340px);flex-shrink:0",
+        /// A column resize handle: a 10 px strip over the column edge.
+        ShellHandle = 0x3F4 => "width:10px;margin-inline:-5px;position:relative;z-index:1;flex-shrink:0;cursor:col-resize;touch-action:none",
+        /// A resize handle's 2 px accent line (on hover or focus).
+        ShellHandleLine = 0x3F5 => "background:linear-gradient(var(--v),var(--v)) center/2px 100% no-repeat",
     }
 }
 

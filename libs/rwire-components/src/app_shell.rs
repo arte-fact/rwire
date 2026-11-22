@@ -2,6 +2,33 @@
 //!
 //! Full-page layout with header, optional sidebar, and main content area.
 //!
+//! # Three columns (sidebar, main, panel)
+//!
+//! With a panel, a mobile view, resize handles, a collapsed sidebar or its own
+//! thresholds, the shell lays out three columns in a full-height row:
+//!
+//! ```ignore
+//! AppShell::new()
+//!     .sidebar(sidebar)                 // Sidebar::new()…build()
+//!     .main(conversation)
+//!     .panel(Some(terminal))            // None: no panel
+//!     .sidebar_width(264)
+//!     .panel_width(340)
+//!     .collapsed(false)
+//!     .resizable(on_resize())           // handler reading ctx.data("pane") / ctx.data("w")
+//!     .mobile(MobilePane::Main)         // the view below the one-column threshold
+//!     .build()
+//! ```
+//!
+//! - Below 1100 px the panel becomes a drawer over the main column; below
+//!   760 px (or the theme's `touch_below`, when set) one column shows, the one
+//!   `mobile(…)` names, and the panel covers the screen. `.breakpoints(one,
+//!   drawer)` sets the shell's own thresholds; the `sm` breakpoint does not
+//!   move.
+//! - Resize handles (`BIND_RESIZE`) drag a column's width client-side; on
+//!   release the handler gets `pane` (`sidebar` / `panel`) and `w` (px; empty
+//!   after a double-click, which restores the default width).
+//!
 //! # Example
 //!
 //! ```ignore
@@ -15,8 +42,18 @@
 //! ```
 
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder};
+use rwire::{el, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
+
+/// Which column a one-column (phone) layout shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MobilePane {
+    /// The sidebar (the list).
+    #[default]
+    List,
+    /// The main column.
+    Main,
+}
 
 /// AppShell builder.
 #[derive(Clone, Default)]
@@ -27,6 +64,13 @@ pub struct AppShell {
     sidebar_width: u16,
     header_height: u16,
     extra_class: Option<Cow<'static, str>>,
+    panel: Option<ElementBuilder>,
+    panel_width: Option<u16>,
+    collapsed: bool,
+    on_resize: Option<HandlerSpec>,
+    mobile: Option<MobilePane>,
+    breakpoints: Option<(u16, u16)>,
+    three_columns: bool,
 }
 
 #[rwire::component]
@@ -67,6 +111,52 @@ impl AppShell {
     /// Set the header height in pixels.
     pub fn header_height(mut self, px: u16) -> Self {
         self.header_height = px;
+        self
+    }
+
+    /// A right-hand panel (three-column layout); `None` for none.
+    pub fn panel(mut self, panel: Option<ElementBuilder>) -> Self {
+        self.panel = panel;
+        self.three_columns = true;
+        self
+    }
+
+    /// The panel's width in pixels (340 by default).
+    pub fn panel_width(mut self, px: u16) -> Self {
+        self.panel_width = Some(px);
+        self.three_columns = true;
+        self
+    }
+
+    /// Hide the sidebar (the app keeps its own menu button to bring it back).
+    pub fn collapsed(mut self, collapsed: bool) -> Self {
+        self.collapsed = collapsed;
+        self.three_columns = true;
+        self
+    }
+
+    /// Resize handles on the sidebar's and the panel's edges. `handler` gets
+    /// `ctx.data("pane")` (`sidebar` / `panel`) and `ctx.data("w")` (the width
+    /// in px, or empty after a double-click: the default width).
+    pub fn resizable(mut self, handler: HandlerSpec) -> Self {
+        self.on_resize = Some(handler);
+        self.three_columns = true;
+        self
+    }
+
+    /// The column a one-column layout shows.
+    pub fn mobile(mut self, pane: MobilePane) -> Self {
+        self.mobile = Some(pane);
+        self.three_columns = true;
+        self
+    }
+
+    /// The shell's own thresholds: one column below `one_column` px, the panel
+    /// as a drawer below `drawer` px (the theme's: `touch_below` or 760, and
+    /// 1100).
+    pub fn breakpoints(mut self, one_column: u16, drawer: u16) -> Self {
+        self.breakpoints = Some((one_column, drawer));
+        self.three_columns = true;
         self
     }
 
@@ -114,6 +204,9 @@ impl AppShell {
 
     /// Build the app shell into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
+        if self.three_columns {
+            return self.build_three_columns();
+        }
         let has_sidebar = self.sidebar.is_some();
         let grid_cols = if has_sidebar {
             format!("grid-template-columns:{}px 1fr", self.sidebar_width)
@@ -164,6 +257,126 @@ impl AppShell {
     }
 }
 
+impl AppShell {
+    /// A resize handle for `pane`, on the edge of the column before it
+    /// (`sidebar`) or after it (`panel`, `data-rz="n"`).
+    fn handle(pane: &str, handler: &HandlerSpec) -> ElementBuilder {
+        let mut h = el(El::Div)
+            .attr("data-shell", "handle")
+            .attr("data-pane", pane)
+            .attr("role", "separator")
+            .attr("aria-orientation", "vertical")
+            .attr(
+                "aria-label",
+                if pane == "panel" {
+                    "Resize the panel"
+                } else {
+                    "Resize the sidebar"
+                },
+            )
+            .st([St::ShellHandle])
+            .hover([St::ShellHandleLine])
+            .resize_handle()
+            .on(Ev::Click, handler.clone());
+        if pane == "panel" {
+            h = h.attr("data-rz", "n");
+        }
+        h
+    }
+
+    /// The three-column layout (see the module docs).
+    fn build_three_columns(self) -> ElementBuilder {
+        let mut vars = format!("--Qsw:{}px", self.sidebar_width);
+        if let Some(pw) = self.panel_width {
+            vars.push_str(&format!(";--Qpw:{pw}px"));
+        }
+        let mut root = el(El::Div)
+            .attr("data-shell-root", "")
+            .attr(
+                "data-mobile",
+                match self.mobile.unwrap_or_default() {
+                    MobilePane::List => "list",
+                    MobilePane::Main => "main",
+                },
+            )
+            .attr("style", &vars)
+            .st([
+                St::DisplayFlex,
+                St::FlexCol,
+                St::HDvh,
+                St::MinH0,
+                St::OverflowHidden,
+                St::BgApp,
+            ]);
+        if let Some(ref extra) = self.extra_class {
+            root = root.class(extra.as_ref());
+        }
+        if let Some((one, drawer)) = self.breakpoints {
+            let key = format!("{one}-{drawer}");
+            let scope = format!("[data-shell-root][data-shell-bp=\"{key}\"]");
+            root = root
+                .attr("data-shell-bp", &key)
+                .append([el(El::Style).text(&rwire::theme::shell_layout_css(&scope, one, drawer))]);
+        }
+        if let Some(header) = self.header {
+            root = root.append([el(El::Header)
+                .st([
+                    St::BgApp,
+                    St::BorderBDefault,
+                    St::DisplayFlex,
+                    St::ItemsCenter,
+                    St::PxMd,
+                ])
+                .attr("style", &format!("height:{}px", self.header_height))
+                .append([header])]);
+        }
+        let mut row = vec![];
+        if let (Some(sidebar), false) = (self.sidebar, self.collapsed) {
+            row.push(
+                el(El::Div)
+                    .attr("data-shell", "sidebar")
+                    .st([
+                        St::WShellSidebar,
+                        St::MinH0,
+                        St::DisplayFlex,
+                        St::FlexCol,
+                        St::BorderRDefault,
+                    ])
+                    .append([sidebar]),
+            );
+            if let Some(ref h) = self.on_resize {
+                row.push(Self::handle("sidebar", h));
+            }
+        }
+        row.push(
+            el(El::Main)
+                .attr("data-shell", "main")
+                .st([St::Flex1, St::MinW0, St::MinH0, St::OverflowYAuto])
+                .append(self.main_content),
+        );
+        if let Some(panel) = self.panel {
+            if let Some(ref h) = self.on_resize {
+                row.push(Self::handle("panel", h));
+            }
+            row.push(
+                el(El::Aside)
+                    .attr("data-shell", "panel")
+                    .st([
+                        St::WShellPanel,
+                        St::MinH0,
+                        St::OverflowYAuto,
+                        St::BorderL,
+                        St::BgApp,
+                    ])
+                    .append([panel]),
+            );
+        }
+        root.append([el(El::Div)
+            .st([St::DisplayFlex, St::Flex1, St::MinH0])
+            .append(row)])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +422,94 @@ mod tests {
         assert!(tokens.contains(&St::BorderRDefault));
         assert!(tokens.contains(&St::OverflowYScroll));
         assert!(tokens.contains(&St::PositionSticky));
+    }
+
+    fn handler() -> HandlerSpec {
+        #[derive(Default)]
+        struct S;
+        impl rwire::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        HandlerSpec::memory::<S>(noop)
+    }
+
+    #[test]
+    fn the_legacy_shell_is_unchanged_without_the_new_options() {
+        let html = AppShell::new()
+            .header(el(El::Span))
+            .sidebar(el(El::Span))
+            .main(el(El::Span))
+            .build()
+            .to_static_html();
+        assert!(html.contains("grid-template-columns:260px 1fr"), "{html}");
+        assert!(!html.contains("data-shell"), "{html}");
+    }
+
+    #[test]
+    fn three_columns_with_handles_widths_and_a_mobile_view() {
+        let html = AppShell::new()
+            .sidebar(el(El::Span).text("list"))
+            .main(el(El::Span).text("thread"))
+            .panel(Some(el(El::Span).text("terminal")))
+            .sidebar_width(264)
+            .panel_width(340)
+            .resizable(handler())
+            .mobile(MobilePane::Main)
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-shell-root"), "{html}");
+        assert!(html.contains("data-mobile=\"main\""), "{html}");
+        assert!(html.contains("--Qsw:264px;--Qpw:340px"), "{html}");
+        let order = [
+            "data-shell=\"sidebar\"",
+            "data-pane=\"sidebar\"",
+            "data-shell=\"main\"",
+            "data-pane=\"panel\"",
+            "data-shell=\"panel\"",
+        ]
+        .map(|s| html.find(s).unwrap_or_else(|| panic!("{s}: {html}")));
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{html}");
+        assert!(
+            html.contains("data-rz=\"n\""),
+            "the panel handle sizes the next column"
+        );
+        assert_eq!(html.matches("role=\"separator\"").count(), 2);
+    }
+
+    #[test]
+    fn collapsed_drops_the_sidebar_and_its_handle() {
+        let html = AppShell::new()
+            .sidebar(el(El::Span).text("list"))
+            .main(el(El::Span))
+            .collapsed(true)
+            .resizable(handler())
+            .build()
+            .to_static_html();
+        assert!(!html.contains("data-shell=\"sidebar\""), "{html}");
+        assert!(!html.contains("data-pane"), "{html}");
+        assert!(html.contains("data-shell=\"main\""), "{html}");
+    }
+
+    #[test]
+    fn the_theme_lays_out_shells_at_its_thresholds_and_a_shell_at_its_own() {
+        use rwire::theme::{generate_theme_css, Theme};
+        let css = generate_theme_css(&Theme::new());
+        assert!(css.contains("@media (max-width:1099.98px){[data-shell-root]:not([data-shell-bp]) [data-shell=panel]{position:fixed;"), "{css}");
+        assert!(css.contains("@media (max-width:759.98px){[data-shell-root]:not([data-shell-bp]) [data-shell=handle]{display:none}"), "{css}");
+        assert!(css.contains("[data-shell-root]:not([data-shell-bp])[data-mobile=main] [data-shell=sidebar]{display:none}"));
+        // The one-column threshold follows touch_below.
+        let phone = generate_theme_css(&Theme::new().touch_below(800));
+        assert!(
+            phone.contains("@media (max-width:799.98px){[data-shell-root]:not([data-shell-bp])"),
+            "{phone}"
+        );
+        // A shell with its own thresholds carries its rules.
+        let html = AppShell::new()
+            .main(el(El::Span))
+            .breakpoints(700, 1200)
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-shell-bp=\"700-1200\""), "{html}");
+        assert!(html.contains("@media (max-width:1199.98px){[data-shell-root][data-shell-bp=\"700-1200\"] [data-shell=panel]"), "{html}");
     }
 
     #[test]

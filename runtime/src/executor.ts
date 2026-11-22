@@ -478,28 +478,45 @@ export function x(d: Uint8Array): void {
         ob.observe(sel);
       } else if (o === OP.BIND_RESIZE) {
         // Pointer-drag resize handle: dragging resizes the PREVIOUS element
-        // sibling's width (client-side only; min 8rem). Adjacency pairing
-        // keeps the wire format to a single ref.
+        // sibling's width (the NEXT one with data-rz="n", a right-hand panel;
+        // client-side; min 8rem). On release the width goes to the server in a
+        // click carrying data-w; a double-click restores the default width
+        // (data-w=""). Adjacency pairing keeps the wire format to a single ref.
         const [f, fl] = rv(d, i);
         i += fl;
         const h = r[f];
         h.__hk = "z";
+        const n = h.dataset.rz == "n";
+        const tg = () => (n ? h.nextElementSibling : h.previousElementSibling) as HTMLElement | null;
+        const tell = (w: string) => {
+          h.dataset.w = w;
+          h.click();
+        };
         h.addEventListener("pointerdown", (e) => {
-          const tgt = h.previousElementSibling as HTMLElement | null;
+          const tgt = tg();
           if (!tgt) return;
           e.preventDefault();
           const sx = (e as PointerEvent).clientX,
             sw = tgt.getBoundingClientRect().width;
+          let w = 0;
           const mv = (ev: PointerEvent) => {
-            tgt.style.width = Math.max(128, sw + ev.clientX - sx) + "px";
+            w = Math.max(128, sw + (n ? sx - ev.clientX : ev.clientX - sx));
+            tgt.style.width = w + "px";
             tgt.style.flex = "0 0 auto";
           };
           const up = () => {
             removeEventListener("pointermove", mv as EventListener);
             removeEventListener("pointerup", up);
+            if (w) tell("" + Math.round(w));
           };
           addEventListener("pointermove", mv as EventListener);
           addEventListener("pointerup", up);
+        });
+        h.addEventListener("dblclick", () => {
+          const tgt = tg();
+          if (!tgt) return;
+          tgt.style.width = tgt.style.flex = "";
+          tell("");
         });
       } else if (o === OP.LIVE_SOURCE) {
         const [f, fl] = rv(d, i);
