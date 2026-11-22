@@ -128,6 +128,25 @@ impl Tone {
         }
     }
 
+    /// A mark on [`Tone::solid`] at 3:1 (the WCAG threshold for graphics):
+    /// for a logotype or an `aria-hidden` decorative glyph, **never for read
+    /// text** ([`Tone::on_solid`] is at 4.5:1). Categorical tones take the
+    /// palette's preferred mark (`ColorPalette::categorical_on_solids`); the
+    /// others use their on-solid text.
+    pub fn on_solid_mark(self) -> St {
+        match self {
+            Tone::Cat(n) => [
+                St::TextCat1Mark,
+                St::TextCat2Mark,
+                St::TextCat3Mark,
+                St::TextCat4Mark,
+                St::TextCat5Mark,
+                St::TextCat6Mark,
+            ][Self::cat(n) - 1],
+            other => other.on_solid(),
+        }
+    }
+
     /// A 1px border in the tone (an outlined badge).
     pub fn border(self) -> St {
         match self {
@@ -185,6 +204,7 @@ mod tests {
                 tone.ink(),
                 tone.solid(),
                 tone.on_solid(),
+                tone.on_solid_mark(),
                 tone.border(),
             ] {
                 let css = st.css();

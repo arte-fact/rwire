@@ -1152,15 +1152,37 @@ define_token_enum! {
         // under a dense theme (32 and 18 px); each fallback is the component's
         // comfortable size.
         /// `Button::icon_only` (default size): its square.
-        SqIconButton = 0x3C8 => "width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem)",
+        SqIconButton = 0x3C8 => "width:var(--Qzi,2.25rem);min-width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem);flex-shrink:0",
         /// `Button::icon_only` (default size): its glyph.
         GlyphIconButton = 0x3C9 => "width:var(--Qzg,14px);height:var(--Qzg,14px)",
-        /// `ThemeToggle` (default size): its square (its padding otherwise).
-        SqIconToggle = 0x3CA => "width:var(--Qzi,auto);height:var(--Qzi,auto)",
+        /// `ThemeToggle` (default size): its square (its padding otherwise). The
+        /// min-width and flex-shrink keep it square in a crowded flex row.
+        SqIconToggle = 0x3CA => "width:var(--Qzi,auto);min-width:var(--Qzi,auto);height:var(--Qzi,auto);flex-shrink:0",
         /// `ThemeToggle` (default size): its padding.
         PadIconToggle = 0x3CB => "padding:var(--Qzq,var(--S2))",
         /// `ThemeToggle` (default size): its glyph.
         GlyphIconToggle = 0x3CC => "width:var(--Qzg,24px);height:var(--Qzg,24px)",
+        /// A mark on categorical color 1's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat1`).
+        TextCat1Mark = 0x3CD => "color:var(--Y1m)",
+        /// A mark on categorical color 2's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat2`).
+        TextCat2Mark = 0x3CE => "color:var(--Y2m)",
+        /// A mark on categorical color 3's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat3`).
+        TextCat3Mark = 0x3CF => "color:var(--Y3m)",
+        /// A mark on categorical color 4's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat4`).
+        TextCat4Mark = 0x3D0 => "color:var(--Y4m)",
+        /// A mark on categorical color 5's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat5`).
+        TextCat5Mark = 0x3D1 => "color:var(--Y5m)",
+        /// A mark on categorical color 6's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat6`).
+        TextCat6Mark = 0x3D2 => "color:var(--Y6m)",
+        /// A 1px border, transparent: a ghost control's resting stroke, so its
+        /// hover border (`BorderDefault`) does not move it.
+        BorderGhost = 0x3D3 => "border:1px solid transparent",
     }
 }
 

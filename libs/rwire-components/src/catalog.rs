@@ -2081,9 +2081,27 @@ fn tones_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
             ])
             .text(name)
     });
+    // A brand mark: an "m" on Cat(1)'s fill, in its 3:1 mark color (aria-hidden).
+    let brand = el(El::Span)
+        .st([
+            Tone::Cat(1).solid(),
+            Tone::Cat(1).on_solid_mark(),
+            St::DisplayInlineFlex,
+            St::ItemsCenter,
+            St::JustifyCenter,
+            St::H1_75rem,
+            St::AspectSquare,
+            St::RoundedMd,
+            St::FontBold,
+            St::TextSm,
+        ])
+        .attr("aria-hidden", "true")
+        .data("demo", "brand-mark")
+        .text("m");
     Stack::column()
         .gap(Gap::Md)
         .children([
+            brand,
             Stack::row()
                 .gap(Gap::Sm)
                 .wrap(true)
@@ -2164,6 +2182,15 @@ fn density_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
                         .build()
                         .data("demo", "icon-button"),
                     ThemeToggle::new().build().data("demo", "theme-toggle"),
+                    // Ghost: no ground or stroke at rest (a toolbar's icons).
+                    Button::icon_only(Icon::Settings, "Settings (ghost)")
+                        .intent(crate::ButtonIntent::Ghost)
+                        .build()
+                        .data("demo", "icon-ghost"),
+                    ThemeToggle::new()
+                        .ghost()
+                        .build()
+                        .data("demo", "theme-toggle-ghost"),
                     Chip::new("All").active(true).build(),
                     Chip::new("Working").build(),
                 ])

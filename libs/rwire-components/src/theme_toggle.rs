@@ -68,6 +68,7 @@ pub struct ThemeToggle {
     on_toggle: Option<HandlerSpec>,
     current_mode: ThemeToggleMode,
     labels: ThemeToggleLabels,
+    ghost: bool,
 }
 
 /// The toggle's texts: its accessible name (`aria-label`) and the tooltip
@@ -144,6 +145,7 @@ impl Default for ThemeToggle {
             on_toggle: None,
             current_mode: ThemeToggleMode::Light,
             labels: ThemeToggleLabels::default(),
+            ghost: false,
         }
     }
 }
@@ -182,6 +184,15 @@ impl ThemeToggle {
         self
     }
 
+    /// The ghost look of a toolbar icon: no ground and no stroke at rest, the
+    /// soft ink (`TextMuted`); on hover the raised ground, the hairline and the
+    /// ink (`BgSurfaceRaised`, `BorderDefault`, `TextDefault`). Like
+    /// `Button::icon_only(…).intent(ButtonIntent::Ghost)`.
+    pub fn ghost(mut self) -> Self {
+        self.ghost = true;
+        self
+    }
+
     /// Set the accessible name and the tooltip of each state (translations).
     pub fn labels(mut self, labels: ThemeToggleLabels) -> Self {
         self.labels = labels;
@@ -196,6 +207,19 @@ impl ThemeToggle {
 
     /// Compute style tokens for the theme toggle button.
     pub fn compute_tokens(&self) -> Vec<St> {
+        if self.ghost {
+            return vec![
+                St::DisplayInlineFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::BgTransparent,
+                St::BorderGhost,
+                St::RoundedMd,
+                St::TextMuted,
+                St::CursorPointer,
+                St::TransitionColors,
+            ];
+        }
         vec![
             St::DisplayInlineFlex,
             St::ItemsCenter,
@@ -242,7 +266,11 @@ impl ThemeToggle {
 
         let mut button = el(El::Button)
             .st(tokens)
-            .hover([St::BgHover])
+            .hover(if self.ghost {
+                vec![St::BgSurfaceRaised, St::BorderDefault, St::TextDefault]
+            } else {
+                vec![St::BgHover]
+            })
             .focus_visible([St::RingFocus])
             .active([St::Scale98])
             .at(At::Type, Av::Button)
@@ -369,6 +397,32 @@ mod tests {
         // Other sizes keep theirs.
         let sm = ThemeToggle::new().size(ToggleSize::Sm).build();
         assert!(!sm.get_style_utils().contains(&St::SqIconToggle.as_u16()));
+    }
+
+    #[test]
+    fn a_ghost_toggle_rests_on_nothing_and_raises_on_hover() {
+        let btn = ThemeToggle::new().ghost().build();
+        let rest = btn.get_style_utils();
+        for st in [St::BgTransparent, St::TextMuted, St::BorderGhost] {
+            assert!(rest.contains(&st.as_u16()), "{st:?} at rest");
+        }
+        assert!(!rest.contains(&St::BorderDefault.as_u16()));
+        let hover: Vec<u16> = btn
+            .get_pseudo_groups()
+            .iter()
+            .filter(|(pc, _)| *pc == 0x00)
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        for st in [St::BgSurfaceRaised, St::BorderDefault, St::TextDefault] {
+            assert!(hover.contains(&st.as_u16()), "{st:?} on hover");
+        }
+        // Still sized by the density hooks.
+        assert!(rest.contains(&St::SqIconToggle.as_u16()));
+        // The default toggle keeps its border.
+        assert!(ThemeToggle::new()
+            .build()
+            .get_style_utils()
+            .contains(&St::BorderDefault.as_u16()));
     }
 
     #[test]

@@ -237,6 +237,11 @@ impl Button {
     // Token computation
     // ========================================================================
 
+    /// An icon and no text.
+    fn is_icon_only(&self) -> bool {
+        self.icon.is_some() && self.text.is_none()
+    }
+
     /// Icon edge length (px), scaled to the button size.
     fn icon_px(&self) -> u32 {
         match self.size {
@@ -266,6 +271,10 @@ impl Button {
             ButtonIntent::Primary => tokens.extend([St::BgPrimary, St::TextOnPrimary]),
             ButtonIntent::Secondary => {
                 tokens.extend([St::BgSecondary, St::TextOnSecondary, St::BorderDefault])
+            }
+            // An icon-only ghost rests on nothing, in the soft ink (a toolbar's icons).
+            ButtonIntent::Ghost if self.is_icon_only() => {
+                tokens.extend([St::BgTransparent, St::TextMuted, St::BorderGhost])
             }
             ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
             ButtonIntent::Outline => {
@@ -317,6 +326,10 @@ impl Button {
                 ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
                 ButtonIntent::Secondary => {
                     builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
+                }
+                // …and on hover takes the raised ground, the hairline and the ink.
+                ButtonIntent::Ghost if self.is_icon_only() => {
+                    builder.hover([St::BgSurfaceRaised, St::BorderDefault, St::TextDefault])
                 }
                 ButtonIntent::Ghost => builder.hover([St::BgHover]),
                 ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
@@ -789,6 +802,38 @@ mod tests {
         assert_eq!(btn.children().len(), 1);
         assert_eq!(btn.text_content(), None);
         assert!(btn.get_style_utils().contains(&(St::AspectSquare as u16)));
+    }
+
+    #[test]
+    fn a_ghost_icon_button_rests_on_nothing_and_raises_on_hover() {
+        let btn = Button::icon_only(Icon::Settings, "Settings")
+            .intent(ButtonIntent::Ghost)
+            .build();
+        let rest = btn.get_style_utils();
+        for st in [St::BgTransparent, St::TextMuted, St::BorderGhost] {
+            assert!(rest.contains(&st.as_u16()), "{st:?} at rest");
+        }
+        assert!(!rest.contains(&St::TextHigh.as_u16()));
+        let hover: Vec<u16> = btn
+            .get_pseudo_groups()
+            .iter()
+            .filter(|(pc, _)| *pc == 0x00)
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        for st in [St::BgSurfaceRaised, St::BorderDefault, St::TextDefault] {
+            assert!(hover.contains(&st.as_u16()), "{st:?} on hover");
+        }
+        // A ghost button with text is unchanged.
+        let text = Button::ghost("Cancel").build();
+        assert!(text.get_style_utils().contains(&St::TextHigh.as_u16()));
+        assert!(!text.get_style_utils().contains(&St::BorderGhost.as_u16()));
+        let hover: Vec<u16> = text
+            .get_pseudo_groups()
+            .iter()
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        assert!(hover.contains(&St::BgHover.as_u16()));
+        assert!(!hover.contains(&St::BgSurfaceRaised.as_u16()));
     }
 
     #[test]

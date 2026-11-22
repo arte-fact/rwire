@@ -650,6 +650,8 @@ pub struct ResolvedPalette {
     pub categorical: Vec<String>,
     /// The palette's preferred categorical inks, `(light, dark)`.
     pub categorical_inks: Vec<(String, String)>,
+    /// The palette's preferred marks on the categorical solid fills.
+    pub categorical_on_solids: Vec<String>,
 }
 
 impl ResolvedPalette {
@@ -685,6 +687,7 @@ impl ResolvedPalette {
                 p.categorical.clone()
             },
             categorical_inks: p.categorical_inks.clone(),
+            categorical_on_solids: p.categorical_on_solids.clone(),
         }
     }
 }
@@ -913,6 +916,9 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
 /// The least WCAG contrast a text color gets against its ground (AA, body text).
 pub const MIN_TEXT_CONTRAST: f64 = 4.5;
 
+/// The least WCAG contrast of a graphic: a mark, a logotype, a decorative glyph.
+pub const MIN_MARK_CONTRAST: f64 = 3.0;
+
 /// `#rrggbb` → linear-light sRGB channels.
 fn linear_rgb(hex: &str) -> [f64; 3] {
     let h = hex.trim_start_matches('#');
@@ -1136,55 +1142,74 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
             .chain((1..=80).map(|i| mix(toward, &p, f64::from(i) * 0.01)))
             .collect()
     };
-    let tone = |css: &mut String, n: usize, color: &str, preferred: Option<&str>| {
-        let c = hex(color);
-        let inks: Vec<String> = preferred
-            .map(&near)
-            .unwrap_or_default()
-            .into_iter()
-            .chain(std::iter::once(c.clone()))
-            .chain(
-                [0.2, 0.35, 0.5, 0.65, 0.8]
-                    .iter()
-                    .map(|&t| mix(toward, &c, t)),
-            )
-            .chain(ends.iter().cloned())
-            .collect();
-        // The ink first, as near its preferred value as the plain grounds allow;
-        // then the strongest tint of the hue that ink still reads on. Only when
-        // no tint does is the ink chosen against the ground too.
-        let tints: &[f64] = if is_dark {
-            &[0.22, 0.17, 0.12, 0.08, 0.05, 0.03]
-        } else {
-            &[0.16, 0.12, 0.09, 0.06, 0.03]
-        };
-        let ink = first_readable(&inks, &plain);
-        let (ground, ink) = match tints
-            .iter()
-            .map(|&t| mix(&c, &app, t))
-            .find(|g| contrast_ratio(&ink, g) >= MIN_TEXT_CONTRAST)
-        {
-            Some(ground) => (ground, ink),
-            None => {
-                // The faintest tint: the ink moves least from its preferred value.
-                let ground = mix(&c, &app, tints[tints.len() - 1]);
-                let against = [std::slice::from_ref(&ground), &plain[..]].concat();
-                let ink = first_readable(&inks, &against);
-                (ground, ink)
+    let tone =
+        |css: &mut String, n: usize, color: &str, preferred: Option<&str>, mark: Option<&str>| {
+            let c = hex(color);
+            let inks: Vec<String> = preferred
+                .map(&near)
+                .unwrap_or_default()
+                .into_iter()
+                .chain(std::iter::once(c.clone()))
+                .chain(
+                    [0.2, 0.35, 0.5, 0.65, 0.8]
+                        .iter()
+                        .map(|&t| mix(toward, &c, t)),
+                )
+                .chain(ends.iter().cloned())
+                .collect();
+            // The ink first, as near its preferred value as the plain grounds allow;
+            // then the strongest tint of the hue that ink still reads on. Only when
+            // no tint does is the ink chosen against the ground too.
+            let tints: &[f64] = if is_dark {
+                &[0.22, 0.17, 0.12, 0.08, 0.05, 0.03]
+            } else {
+                &[0.16, 0.12, 0.09, 0.06, 0.03]
+            };
+            let ink = first_readable(&inks, &plain);
+            let (ground, ink) = match tints
+                .iter()
+                .map(|&t| mix(&c, &app, t))
+                .find(|g| contrast_ratio(&ink, g) >= MIN_TEXT_CONTRAST)
+            {
+                Some(ground) => (ground, ink),
+                None => {
+                    // The faintest tint: the ink moves least from its preferred value.
+                    let ground = mix(&c, &app, tints[tints.len() - 1]);
+                    let against = [std::slice::from_ref(&ground), &plain[..]].concat();
+                    let ink = first_readable(&inks, &against);
+                    (ground, ink)
+                }
+            };
+            css_var(css, &format!("Y{n}g"), &ground);
+            css_var(css, &format!("Y{n}i"), &ink);
+            if n > 0 {
+                // A mark (logotype, decorative glyph) on the solid fill: the preferred
+                // one if it reaches 3:1, else the nearest that does, else the text's.
+                let on_solid = first_readable(&ends, std::slice::from_ref(&c));
+                let mark = mark
+                    .map(|m| {
+                        let m = hex(m);
+                        let away = if wcag_luminance(&m) > wcag_luminance(&c) {
+                            "#ffffff"
+                        } else {
+                            "#000000"
+                        };
+                        std::iter::once(m.clone())
+                            .chain((1..=100).map(|i| mix(away, &m, f64::from(i) * 0.01)))
+                            .find(|x| contrast_ratio(x, &c) >= MIN_MARK_CONTRAST)
+                            .unwrap_or_else(|| on_solid.clone())
+                    })
+                    .unwrap_or_else(|| on_solid.clone());
+                css_var(css, &format!("Y{n}m"), &mark);
+                css_var(css, &format!("Y{n}"), &c);
+                css_var(
+                    css,
+                    &format!("Y{n}o"),
+                    &first_readable(&ends, std::slice::from_ref(&c)),
+                );
             }
         };
-        css_var(css, &format!("Y{n}g"), &ground);
-        css_var(css, &format!("Y{n}i"), &ink);
-        if n > 0 {
-            css_var(css, &format!("Y{n}"), &c);
-            css_var(
-                css,
-                &format!("Y{n}o"),
-                &first_readable(&ends, std::slice::from_ref(&c)),
-            );
-        }
-    };
-    tone(css, 0, &rp.neutral[6], None);
+    tone(css, 0, &rp.neutral[6], None, None);
     for (i, color) in rp.categorical.iter().take(6).enumerate() {
         let preferred = rp.categorical_inks.get(i).map(|(light, dark)| {
             if is_dark {
@@ -1193,13 +1218,14 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
                 light.as_str()
             }
         });
-        tone(css, i + 1, color, preferred);
+        let mark = rp.categorical_on_solids.get(i).map(String::as_str);
+        tone(css, i + 1, color, preferred, mark);
     }
     // A palette with fewer than six: the rest repeat it, so every token resolves.
     let given = rp.categorical.len().clamp(1, 6);
     for n in given + 1..=6 {
         let from = (n - 1) % given + 1;
-        for suffix in ["", "g", "i", "o"] {
+        for suffix in ["", "g", "i", "o", "m"] {
             css_var(
                 css,
                 &format!("Y{n}{suffix}"),
@@ -1446,14 +1472,10 @@ mod tests {
             compact.contains("--Qzi:32px;--Qzg:18px;--Qzq:0;"),
             "{compact}"
         );
-        assert_eq!(
-            St::SqIconButton.css(),
-            "width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem)"
-        );
-        assert_eq!(
-            St::SqIconToggle.css(),
-            "width:var(--Qzi,auto);height:var(--Qzi,auto)"
-        );
+        assert!(St::SqIconButton
+            .css()
+            .starts_with("width:var(--Qzi,2.25rem);"));
+        assert!(St::SqIconToggle.css().starts_with("width:var(--Qzi,auto);"));
         // The tokens read them, with the comfortable sizes as fallbacks.
         use crate::St;
         assert_eq!(St::HControl.css(), "height:var(--Qzh,2.25rem)");

@@ -157,6 +157,9 @@ pub struct ColorPalette {
     /// Preferred inks of the categorical colors, `(light, dark)` per color
     /// (see [`ColorPalette::categorical_inks`]).
     pub categorical_inks: Vec<(String, String)>,
+    /// Preferred mark colors on each categorical solid fill (see
+    /// [`ColorPalette::categorical_on_solids`]).
+    pub categorical_on_solids: Vec<String>,
 }
 
 impl Default for ColorPalette {
@@ -234,6 +237,7 @@ impl Default for ColorPalette {
             ]),
             categorical: Vec::new(),
             categorical_inks: Vec::new(),
+            categorical_on_solids: Vec::new(),
         }
     }
 }
@@ -304,6 +308,20 @@ impl ColorPalette {
             .take(6)
             .map(|(l, d)| (l.into(), d.into()))
             .collect();
+        self
+    }
+
+    /// The color a logotype or a decorative `aria-hidden` glyph should take on
+    /// each categorical solid fill (`St::TextCatNMark`), in
+    /// [`ColorPalette::categorical`]'s order. Kept when it reaches 3:1 on the
+    /// fill (the WCAG threshold for graphics), else the nearest that does.
+    /// Never for read text: that is `St::TextOnCatN`, at 4.5:1.
+    pub fn categorical_on_solids<I, S>(mut self, colors: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.categorical_on_solids = colors.into_iter().take(6).map(Into::into).collect();
         self
     }
 }

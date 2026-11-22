@@ -39,6 +39,31 @@ fn compact_icon_buttons_are_32px_with_an_18px_glyph() {
     assert_eq!(resolve(St::PadIconToggle, "padding", &css), "0");
 }
 
+/// Square, not just tall: width, min-width and height all come from `--Qzi`,
+/// and the square does not shrink in a flex row (mcp-agents measured a
+/// 20 × 32 toggle in its sidebar footer).
+#[test]
+fn icon_buttons_are_square_from_qzi_and_do_not_shrink() {
+    let css = generate_theme_css(&Theme::new().density(Density::Compact));
+    for token in [St::SqIconButton, St::SqIconToggle] {
+        for prop in ["width", "min-width", "height"] {
+            assert_eq!(resolve(token, prop, &css), "32px", "{token:?} {prop}");
+            assert!(
+                token.css().contains(&format!("{prop}:var(--Qzi,")),
+                "{token:?}: {prop} from --Qzi"
+            );
+        }
+        assert_eq!(resolve(token, "flex-shrink", &css), "0", "{token:?}");
+    }
+    // Under a finger, both dimensions reach 44 px, `touch_below` included.
+    for theme in [Theme::new(), Theme::new().touch_below(760)] {
+        let css = generate_theme_css(&theme.density(Density::Compact));
+        let block = css.split_once("@media (pointer:coarse)").unwrap().1;
+        assert!(block.contains("{min-height:44px}"));
+        assert!(block.contains(":where(button,[role=tab],[role=button]){min-width:44px}"));
+    }
+}
+
 #[test]
 fn comfortable_icon_buttons_keep_their_sizes() {
     let css = generate_theme_css(&Theme::new());

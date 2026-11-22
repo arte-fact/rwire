@@ -62,6 +62,9 @@ pub fn nord() -> ColorPalette {
         ]
         .map(|(l, d)| (l.to_string(), d.to_string()))
         .to_vec(),
+        // Marks (a logotype, a decorative glyph) on the solid fills: nord6, as the
+        // old front's brand "m" on nord10.
+        categorical_on_solids: vec!["#ECEFF4".to_string(); 6],
     }
 }
 
@@ -93,6 +96,7 @@ pub fn catppuccin() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -124,6 +128,7 @@ pub fn dracula() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -156,6 +161,7 @@ pub fn solarized() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -188,6 +194,7 @@ pub fn gruvbox() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -219,6 +226,7 @@ pub fn tokyo_night() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -251,6 +259,7 @@ pub fn rose_pine() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -282,6 +291,7 @@ pub fn one_dark() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -313,6 +323,7 @@ pub fn indigo() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -421,6 +432,7 @@ pub fn cloth() -> ColorPalette {
         ]),
         categorical: Vec::new(),
         categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 

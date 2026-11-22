@@ -365,3 +365,57 @@ fn studio_nord_gaps_from_app_are_named() {
     assert!(app_dot < 3.0);
     println!("≠ light --o    generation dot: /app #a3be8c {app_dot:.2} on nord4; rwire {} {ours_dot:.2} (kept: text fill)", resolve(&v, "o"));
 }
+
+/// Marks on the categorical solid fills (`St::TextCatNMark`, a logotype or an
+/// `aria-hidden` glyph) reach 3:1, the WCAG threshold for graphics, in every
+/// built-in theme; the read text on the same fills (`TextOnCatN`) stays at
+/// 4.5:1 (it is in `PAIRS`).
+#[test]
+fn categorical_marks_reach_3_to_1_on_their_fill() {
+    use rwire::theme::MIN_MARK_CONTRAST;
+    let marks = [
+        (St::TextCat1Mark, St::BgCat1),
+        (St::TextCat2Mark, St::BgCat2),
+        (St::TextCat3Mark, St::BgCat3),
+        (St::TextCat4Mark, St::BgCat4),
+        (St::TextCat5Mark, St::BgCat5),
+        (St::TextCat6Mark, St::BgCat6),
+    ];
+    let mut out = Vec::new();
+    for (palette_name, palette) in palettes() {
+        for (style_name, style) in styles() {
+            for dark in [false, true] {
+                let mut theme = if dark { Theme::dark() } else { Theme::light() }.style(style);
+                if let Some(p) = palette.clone() {
+                    theme = theme.palette(p);
+                }
+                let v = vars(&generate_theme_css(&theme));
+                for (mark, fill) in marks {
+                    let (m, f) = (resolve(&v, var_of(mark)), resolve(&v, var_of(fill)));
+                    let r = contrast_ratio(&m, &f);
+                    if r < MIN_MARK_CONTRAST {
+                        out.push(format!(
+                            "{palette_name}/{style_name}/{dark}: {mark:?} = {r:.2}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(out.is_empty(), "{}", out.join("\n"));
+}
+
+/// The brand mark of mcp-agents: an "m" in nord6 on `Cat(1)` (nord10), as the
+/// old front draws it (3.6:1, a logotype).
+#[test]
+fn the_nord_brand_mark_is_nord6_on_cat_1() {
+    for dark in [false, true] {
+        let v = studio_nord(dark);
+        let mark = resolve(&v, "Y1m");
+        assert!(mark.eq_ignore_ascii_case("#eceff4"), "{dark}: {mark}");
+        let r = contrast_ratio(&mark, &resolve(&v, "Y1"));
+        println!("Y1m {mark} on Y1 {} = {r:.2}", resolve(&v, "Y1"));
+        // The read text on that fill is still at AA.
+        assert!(contrast_ratio(&resolve(&v, "Y1o"), &resolve(&v, "Y1")) >= MIN_TEXT_CONTRAST);
+    }
+}
