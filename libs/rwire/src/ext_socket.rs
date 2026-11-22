@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 pub use tokio_tungstenite;
 use tokio_tungstenite::WebSocketStream;
 
@@ -77,6 +78,7 @@ pub(crate) async fn with_scope<F: Future>(f: F) -> F::Output {
 /// Record, once, which connection this task serves: every render after it
 /// (initial, handler, broadcast) runs on this task and sees it.
 pub(crate) fn enter(info: ConnectionInfo, shared: Arc<SharedServerState>) {
+    shared.tickets.open_page(info.connection_id);
     let _ = SCOPE.try_with(|s| s.set(Scope { info, shared }));
 }
 
@@ -123,33 +125,67 @@ struct Entry {
     rendered: bool,
 }
 
-/// The tickets issued and not yet used.
+/// How often expired tickets are swept (on the next issue or use).
+const PRUNE_EVERY: Duration = Duration::from_secs(10);
+
+/// The tickets issued and not yet used, and the page connections alive.
 #[derive(Default)]
 pub(crate) struct Tickets {
-    map: Mutex<HashMap<String, Entry>>,
+    inner: Mutex<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
+    map: HashMap<String, Entry>,
+    /// The unused render ticket of each (connection, path, label): a render
+    /// finds it in O(1).
+    rendered: HashMap<(u64, String, String), String>,
+    /// The close signal of each live page connection.
+    pages: HashMap<u64, watch::Sender<bool>>,
+    last_prune: Option<Instant>,
+}
+
+impl Inner {
+    /// Sweep the expired tickets, at most every [`PRUNE_EVERY`]: the cost of
+    /// a sweep is spread over the issues between two.
+    fn maybe_prune(&mut self, now: Instant) {
+        if self
+            .last_prune
+            .is_some_and(|t| now.duration_since(t) < PRUNE_EVERY)
+        {
+            return;
+        }
+        self.last_prune = Some(now);
+        self.map.retain(|_, e| e.expires.is_none_or(|t| t > now));
+        let map = &self.map;
+        self.rendered.retain(|_, t| map.contains_key(t));
+    }
 }
 
 impl Tickets {
-    fn prune(map: &mut HashMap<String, Entry>, now: Instant) {
-        map.retain(|_, e| e.expires.is_none_or(|t| t > now));
+    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn for_render(&self, path: &str, label: &str, info: &ConnectionInfo) -> String {
         let now = Instant::now();
-        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        Self::prune(&mut map, now);
-        let reusable = map.iter().find(|(_, e)| {
-            e.rendered
-                && e.claim.path == path
-                && e.claim.label == label
-                && e.claim.connection.connection_id == info.connection_id
-                && e.expires.is_some_and(|t| t > now + TICKET_TTL / 2)
-        });
-        if let Some((ticket, _)) = reusable {
-            return ticket.clone();
+        let mut inner = self.lock();
+        inner.maybe_prune(now);
+        let key = (info.connection_id, path.to_string(), label.to_string());
+        if let Some(ticket) = inner.rendered.get(&key) {
+            let fresh = inner
+                .map
+                .get(ticket)
+                .and_then(|e| e.expires)
+                .is_some_and(|t| t > now + TICKET_TTL / 2);
+            if fresh {
+                return ticket.clone();
+            }
+            let stale = ticket.clone();
+            inner.map.remove(&stale);
         }
         let ticket = new_ticket();
-        map.insert(
+        inner.map.insert(
             ticket.clone(),
             Entry {
                 claim: TicketClaim {
@@ -161,14 +197,15 @@ impl Tickets {
                 rendered: true,
             },
         );
+        inner.rendered.insert(key, ticket.clone());
         ticket
     }
 
     fn held(&self, claim: TicketClaim) -> String {
         let ticket = new_ticket();
-        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        Self::prune(&mut map, Instant::now());
-        map.insert(
+        let mut inner = self.lock();
+        inner.maybe_prune(Instant::now());
+        inner.map.insert(
             ticket.clone(),
             Entry {
                 claim,
@@ -180,8 +217,7 @@ impl Tickets {
     }
 
     fn release(&self, ticket: &str) {
-        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(e) = map.get_mut(ticket) {
+        if let Some(e) = self.lock().map.get_mut(ticket) {
             e.expires = Some(Instant::now() + TICKET_TTL);
         }
     }
@@ -190,10 +226,41 @@ impl Tickets {
     /// was valid, unexpired and issued for `path`.
     pub(crate) fn redeem(&self, ticket: &str, path: &str) -> Option<TicketClaim> {
         let now = Instant::now();
-        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = map.remove(ticket)?;
-        Self::prune(&mut map, now);
+        let mut inner = self.lock();
+        let entry = inner.map.remove(ticket)?;
+        if entry.rendered {
+            let c = &entry.claim;
+            inner
+                .rendered
+                .remove(&(c.connection.connection_id, c.path.clone(), c.label.clone()));
+        }
+        inner.maybe_prune(now);
         (entry.expires.is_none_or(|t| t > now) && entry.claim.path == path).then_some(entry.claim)
+    }
+
+    /// A page connection starts.
+    pub(crate) fn open_page(&self, connection_id: u64) {
+        self.lock()
+            .pages
+            .insert(connection_id, watch::channel(false).0);
+    }
+
+    /// The close signal of a live page connection; `None` once it ended.
+    fn page_watch(&self, connection_id: u64) -> Option<watch::Receiver<bool>> {
+        self.lock().pages.get(&connection_id).map(|s| s.subscribe())
+    }
+
+    /// A page connection ended: its tickets (rendered and handed over) are
+    /// gone, and its extension sockets told to close.
+    pub(crate) fn close_page(&self, connection_id: u64) {
+        let mut inner = self.lock();
+        if let Some(signal) = inner.pages.remove(&connection_id) {
+            let _ = signal.send(true);
+        }
+        inner
+            .map
+            .retain(|_, e| e.claim.connection.connection_id != connection_id);
+        inner.rendered.retain(|k, _| k.0 != connection_id);
     }
 }
 
@@ -228,6 +295,7 @@ pub struct ExtSocket {
     pub peer: SocketAddr,
     claim: TicketClaim,
     shared: Arc<SharedServerState>,
+    page: Option<watch::Receiver<bool>>,
 }
 
 impl ExtSocket {
@@ -237,11 +305,25 @@ impl ExtSocket {
         claim: TicketClaim,
         shared: Arc<SharedServerState>,
     ) -> Self {
+        let page = shared.tickets.page_watch(claim.connection.connection_id);
         Self {
             ws,
             peer,
             claim,
             shared,
+            page,
+        }
+    }
+
+    /// Resolves when the page connection that issued this socket's ticket
+    /// ends (the tab closed, its page socket lost): the socket should close
+    /// then. Its tickets are already refused.
+    pub fn page_closed(&self) -> impl Future<Output = ()> + Send + 'static {
+        let page = self.page.clone();
+        async move {
+            if let Some(mut rx) = page {
+                let _ = rx.wait_for(|closed| *closed).await;
+            }
         }
     }
 
@@ -344,13 +426,73 @@ mod tests {
             connection: info(1),
         };
         let held = t.held(claim.clone());
-        assert!(t.map.lock().unwrap()[&held].expires.is_none());
+        assert!(t.lock().map[&held].expires.is_none());
         t.release(&held);
-        assert!(t.map.lock().unwrap()[&held].expires.is_some());
+        assert!(t.lock().map[&held].expires.is_some());
         let stale = t.held(claim);
-        t.map.lock().unwrap().get_mut(&stale).unwrap().expires = Some(Instant::now());
+        t.lock().map.get_mut(&stale).unwrap().expires = Some(Instant::now());
         assert!(t.redeem(&stale, "/x").is_none(), "expired");
         assert!(t.redeem(&held, "/x").is_some());
+    }
+
+    #[test]
+    fn a_render_finds_its_ticket_by_index_and_expired_ones_are_swept() {
+        let t = Tickets::default();
+        let mine = t.for_render("/x", "voice", &info(1));
+        for id in 2..200 {
+            t.for_render("/x", "voice", &info(id));
+        }
+        assert_eq!(t.lock().rendered.len(), 199);
+        assert_eq!(
+            t.for_render("/x", "voice", &info(1)),
+            mine,
+            "found by index"
+        );
+        // Half-way to expiry, a render issues a fresh one and drops the old.
+        t.lock().map.get_mut(&mine).unwrap().expires = Some(Instant::now() + TICKET_TTL / 4);
+        let fresh = t.for_render("/x", "voice", &info(1));
+        assert_ne!(fresh, mine);
+        assert!(!t.lock().map.contains_key(&mine));
+        // Expired tickets go at the next sweep, not at every issue.
+        let now = Instant::now();
+        for e in t.lock().map.values_mut() {
+            e.expires = Some(now);
+        }
+        t.lock().last_prune = Some(now);
+        t.for_render("/x", "other", &info(1));
+        assert!(t.lock().map.len() > 100, "no sweep within PRUNE_EVERY");
+        t.lock().last_prune = Some(now - PRUNE_EVERY);
+        t.for_render("/x", "other", &info(2));
+        // Left: the two "other" tickets issued since, still valid.
+        assert_eq!(t.lock().map.len(), 2, "swept");
+        assert_eq!(t.lock().rendered.len(), 2, "the index follows");
+    }
+
+    #[tokio::test]
+    async fn a_page_that_ends_burns_its_tickets_and_signals_its_sockets() {
+        let t = Tickets::default();
+        t.open_page(1);
+        t.open_page(2);
+        let rendered = t.for_render("/x", "voice", &info(1));
+        let held = t.held(TicketClaim {
+            path: "/x".into(),
+            label: "voice".into(),
+            connection: info(1),
+        });
+        let other = t.for_render("/x", "voice", &info(2));
+        let mut watch = t.page_watch(1).unwrap();
+        t.close_page(1);
+        assert!(*watch.borrow_and_update(), "its sockets are told");
+        assert!(t.page_watch(1).is_none());
+        assert!(t.redeem(&rendered, "/x").is_none());
+        assert!(
+            t.redeem(&held, "/x").is_none(),
+            "the handed-over ticket too"
+        );
+        assert!(
+            t.redeem(&other, "/x").is_some(),
+            "another page keeps its own"
+        );
     }
 
     #[test]

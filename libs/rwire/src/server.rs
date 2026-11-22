@@ -3238,6 +3238,8 @@ struct ConnectionGuard {
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         self.shared.unregister_connection(self.connection_id);
+        // Its extension sockets close, its tickets are refused.
+        self.shared.tickets.close_page(self.connection_id);
         // GC this session's action entries so the registry stays bounded by live sessions.
         self.shared.drop_action_session(&self.session);
     }
