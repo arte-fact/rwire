@@ -146,7 +146,7 @@ pub use alert::{Alert, AlertIntent};
 pub use app_shell::{AppShell, MobilePane};
 pub use avatar::{Avatar, AvatarSize};
 pub use avatar_group::AvatarGroup;
-pub use badge::{Badge, BadgeFill, BadgeIntent, BadgeShape};
+pub use badge::{Badge, BadgeFill, BadgeIntent, BadgeShape, BadgeSize};
 pub use blockquote::Blockquote;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonIntent, ButtonSize};
@@ -157,7 +157,7 @@ pub use chat_item::{ChatAuthor, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, C
 pub use chat_scroll::ChatScroll;
 pub use chat_transcript::ChatTranscript;
 pub use checkbox::Checkbox;
-pub use chip::Chip;
+pub use chip::{Chip, ChipGroup};
 pub use code::{Code, CodeMode};
 pub use code_editor::CodeEditor;
 pub use composer::Composer;

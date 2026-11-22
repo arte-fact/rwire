@@ -333,7 +333,7 @@ const BADGE_TEXT: &[TextProp] = &[TextProp {
     default: "Badge",
 }];
 fn badge_rich(p: &DemoParams) -> ElementBuilder {
-    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape, BadgeSize};
     let intent = match v(p.variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -349,10 +349,16 @@ fn badge_rich(p: &DemoParams) -> ElementBuilder {
         1 => BadgeFill::Outline,
         _ => BadgeFill::Solid,
     };
+    let size = match v(p.variants, 3) {
+        1 => BadgeSize::Xs,
+        _ => BadgeSize::Md,
+    };
     Badge::new()
         .intent(intent)
         .shape(shape)
         .fill(fill)
+        .size(size)
+        .mono(b(p.bools, 0))
         .text(p.texts.first().copied().unwrap_or("Badge").to_string())
         .build()
 }
@@ -1966,8 +1972,9 @@ fn text_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         .build()
 }
 
-fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
+fn badge_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape, BadgeSize};
+    use rwire::Tone;
     let intent = match v(variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -1983,12 +1990,43 @@ fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         1 => BadgeFill::Outline,
         _ => BadgeFill::Solid,
     };
-    Badge::new()
+    let size = match v(variants, 3) {
+        1 => BadgeSize::Xs,
+        _ => BadgeSize::Md,
+    };
+    let mono = b(bools, 0);
+    let main = Badge::new()
         .intent(intent)
         .shape(shape)
         .fill(fill)
+        .size(size)
+        .mono(mono)
         .text("Badge")
-        .build()
+        .build();
+    let tones = el(El::Div)
+        .st([
+            rwire::St::DisplayFlex,
+            rwire::St::GapSm,
+            rwire::St::ItemsCenter,
+            rwire::St::FlexWrap,
+        ])
+        .append([
+            Badge::new().tone(Tone::Accent).text("accent").build(),
+            Badge::new().tone(Tone::Success).text("live").build(),
+            Badge::new()
+                .tone(Tone::Danger)
+                .fill(BadgeFill::Outline)
+                .text("error")
+                .build(),
+            Badge::new()
+                .tone(Tone::Cat(2))
+                .size(BadgeSize::Xs)
+                .text("42")
+                .build(),
+        ]);
+    el(El::Div)
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol, rwire::St::GapSm])
+        .append([main, tones])
 }
 
 const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
@@ -2456,17 +2494,29 @@ fn streamed_content_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder 
 }
 
 fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
-    use crate::Chip;
+    use crate::{Chip, ChipGroup};
     el(El::Div)
-        .st([
-            rwire::St::DisplayFlex,
-            rwire::St::GapSm,
-            rwire::St::ItemsCenter,
-        ])
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol, rwire::St::GapSm])
         .append([
-            Chip::new("All").active(b(bools, 0)).build(),
-            Chip::new("Running").build(),
-            Chip::new("Failed").build(),
+            el(El::Div)
+                .st([
+                    rwire::St::DisplayFlex,
+                    rwire::St::GapSm,
+                    rwire::St::ItemsCenter,
+                ])
+                .append([
+                    Chip::new("All").active(b(bools, 0)).build(),
+                    Chip::new("Running").build(),
+                    Chip::new("Failed").count(3).build(),
+                    Chip::new("Docs").href("/docs").active(b(bools, 0)).build(),
+                ]),
+            ChipGroup::new("Filters")
+                .chips([
+                    Chip::new("All").active(true).build(),
+                    Chip::new("Running").count(5).build(),
+                    Chip::new("Failed").count(2).build(),
+                ])
+                .build(),
         ])
 }
 
@@ -3467,6 +3517,22 @@ const BADGE_VARIANTS: &[VariantAxis] = &[
             },
         ],
     },
+    VariantAxis {
+        name: "size",
+        display_name: "Size",
+        rust_type: "BadgeSize",
+        default_index: 0,
+        values: &[
+            VariantValue {
+                label: "Md",
+                rust_expr: "BadgeSize::Md",
+            },
+            VariantValue {
+                label: "Xs (10.5 px mono, r 5)",
+                rust_expr: "BadgeSize::Xs",
+            },
+        ],
+    },
 ];
 
 const TAG_VARIANTS: &[VariantAxis] = &[VariantAxis {
@@ -4331,7 +4397,11 @@ const ENTRIES: &[ComponentEntry] = &[
         category: Category::DataDisplay,
         order: 301,
         variants: BADGE_VARIANTS,
-        bool_props: &[],
+        bool_props: &[BoolProp {
+            name: "mono",
+            description: "Mono font",
+            default: false,
+        }],
         build_demo: badge_demo,
     },
     ComponentEntry {

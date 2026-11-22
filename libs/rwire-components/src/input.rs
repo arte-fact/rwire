@@ -275,6 +275,14 @@ impl Input {
             }
         }
 
+        // Search field density (/app target): 13 px text, 8 px radius, .45rem .7rem
+        // padding. The 44 px touch target comes from the theme's coarse-pointer
+        // rule (`min-height:44px` on inputs), not from the input itself.
+        if self.input_type == InputType::Search && self.size == InputSize::Sm {
+            tokens.retain(|t| !matches!(t, St::RoundedMd | St::TextXs));
+            tokens.push(St::RoundedLg);
+        }
+
         if self.invalid {
             tokens.push(St::BorderRed8);
         }
@@ -299,12 +307,20 @@ impl Input {
     pub fn build(self) -> ElementBuilder {
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size_tokens());
+        let search_sm = self.input_type == InputType::Search && self.size == InputSize::Sm;
         let mut builder = el(El::Input)
             .st(tokens)
             .placeholder_style([St::TextMuted])
             .hover([St::BorderEmphasis])
             .focus([St::BorderPrimary, St::OutlineTheme])
             .at(At::Type, self.input_type.av());
+        if search_sm {
+            builder = builder.style(
+                rwire::style::Style::new()
+                    .font_size("13px")
+                    .padding(".45rem .7rem"),
+            );
+        }
         if self.disabled {
             builder = builder.disabled_style([
                 St::Opacity50,
@@ -420,6 +436,18 @@ mod tests {
         let tokens = input.compute_tokens();
         assert!(tokens.contains(&St::TextXs));
         assert!(!tokens.contains(&St::TextSm));
+    }
+
+    #[test]
+    fn test_search_small_follows_the_app_density() {
+        let input = Input::search().size(InputSize::Sm);
+        let tokens = input.compute_tokens();
+        assert!(tokens.contains(&St::RoundedLg), "radius 8: {tokens:?}");
+        assert!(!tokens.contains(&St::RoundedMd), "{tokens:?}");
+        let html = input.build().to_static_html();
+        assert!(html.contains("type=\"search\""), "{html}");
+        assert!(html.contains("font-size:13px"), "{html}");
+        assert!(html.contains("padding:.45rem .7rem"), "{html}");
     }
 
     #[test]
