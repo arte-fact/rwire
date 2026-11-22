@@ -1341,6 +1341,10 @@ define_token_enum! {
         BorderDashed = 0x41A => "border:1px dashed var(--h)",
         /// Reduced opacity (a message still sending).
         Opacity60 = 0x41B => "opacity:0.6",
+        /// A tool call's output cap: 320 px, scrolling inside.
+        MaxH320 = 0x41C => "max-height:320px",
+        /// A tool call's summary padding: 8 px by 12 px.
+        PadToolSummary = 0x41D => "padding:8px 12px",
     }
 }
 

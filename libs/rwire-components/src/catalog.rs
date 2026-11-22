@@ -2654,6 +2654,35 @@ impl crate::ChatItem for GalleryMsg {
     }
 }
 
+/// A tool call row of the gallery's conversation.
+struct GalleryTool {
+    key: &'static str,
+    name: &'static str,
+    command: &'static str,
+    status: crate::ToolStatus,
+    output: &'static str,
+}
+
+impl crate::ChatItem for GalleryTool {
+    fn key(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(self.key)
+    }
+    fn author(&self) -> crate::ChatAuthor {
+        crate::ChatAuthor::agent("claude").muted()
+    }
+    fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
+        el(El::Div)
+    }
+    fn row(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<ElementBuilder> {
+        Some(
+            crate::ToolCall::new(self.name, self.command)
+                .status(self.status)
+                .output(self.output)
+                .build(),
+        )
+    }
+}
+
 /// A long Markdown answer for the gallery: headings, lists, a quote, a table,
 /// inline code and a long fenced block (it scrolls inside its frame).
 const GALLERY_MARKDOWN: &str = "## What happens on a restart
@@ -2686,27 +2715,120 @@ let re_registered = hub.wait_for(Heartbeat::First, Duration::from_secs(1)).then(
 
 See [the registry docs](https://example.com/registry) for details.";
 
+/// One row of the gallery's conversation: a message or a tool call.
+enum GalleryItem {
+    Msg(GalleryMsg),
+    Tool(GalleryTool),
+}
+
+impl crate::ChatItem for GalleryItem {
+    fn key(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            GalleryItem::Msg(m) => m.key(),
+            GalleryItem::Tool(t) => t.key(),
+        }
+    }
+    fn author(&self) -> crate::ChatAuthor {
+        match self {
+            GalleryItem::Msg(m) => m.author(),
+            GalleryItem::Tool(t) => t.author(),
+        }
+    }
+    fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
+        match self {
+            GalleryItem::Msg(m) => m.body(&crate::ChatItemCtx::<GalleryMsg> { item_ref: None }),
+            GalleryItem::Tool(t) => t.body(&crate::ChatItemCtx::<GalleryTool> { item_ref: None }),
+        }
+    }
+    fn time(&self) -> Option<std::borrow::Cow<'_, str>> {
+        match self {
+            GalleryItem::Msg(m) => m.time(),
+            GalleryItem::Tool(_) => None,
+        }
+    }
+    fn groups_with(&self, prev: &Self) -> bool {
+        match (self, prev) {
+            (GalleryItem::Msg(a), GalleryItem::Msg(b)) => a.groups_with(b),
+            _ => false,
+        }
+    }
+    fn delivery(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<crate::ChatDelivery> {
+        match self {
+            GalleryItem::Msg(m) => m.delivery(&crate::ChatItemCtx::<GalleryMsg> { item_ref: None }),
+            GalleryItem::Tool(_) => None,
+        }
+    }
+    fn row(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<ElementBuilder> {
+        match self {
+            GalleryItem::Msg(_) => None,
+            GalleryItem::Tool(t) => t.row(&crate::ChatItemCtx::<GalleryTool> { item_ref: None }),
+        }
+    }
+}
+
+const TOOL_CALL_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "status",
+    display_name: "Status",
+    rust_type: "ToolStatus",
+    default_index: 1,
+    values: &[
+        VariantValue {
+            label: "Running",
+            rust_expr: "ToolStatus::Running",
+        },
+        VariantValue {
+            label: "Ok",
+            rust_expr: "ToolStatus::Ok",
+        },
+        VariantValue {
+            label: "Err",
+            rust_expr: "ToolStatus::Err",
+        },
+    ],
+}];
+
+/// A tool call card (collapsed by default; open it to see the bounded output).
+fn tool_call_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{ToolCall, ToolStatus};
+    let status = match v(variants, 0) {
+        0 => ToolStatus::Running,
+        2 => ToolStatus::Err,
+        _ => ToolStatus::Ok,
+    };
+    let output = match status {
+        ToolStatus::Err => "error: could not compile `rwire`\n\nlong output line that must scroll inside the 320 px cap — aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        _ => "test result: ok. 320 passed; 0 failed; 0 ignored in 0.24s",
+    };
+    el(El::Div)
+        .st([rwire::St::WFull, rwire::St::MaxWProse])
+        .attr("data-demo", "tool-call")
+        .append([ToolCall::new("bash", "cargo test -p rwire --workspace")
+            .status(status)
+            .output(output)
+            .build()])
+}
+
 /// A conversation in the avatar layout, on the reading column.
 fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{ChatLayout, ChatTranscript, Measure};
     let items = [
-        GalleryMsg {
+        GalleryItem::Msg(GalleryMsg {
             key: "m1",
             user: true,
             time: "09:41",
             text: "Can you check why the hub drops the session after a restart?",
             markdown: false,
             delivery: None,
-        },
-        GalleryMsg {
+        }),
+        GalleryItem::Msg(GalleryMsg {
             key: "m2",
             user: false,
             time: "09:42",
             text: GALLERY_MARKDOWN,
             markdown: true,
             delivery: None,
-        },
-        GalleryMsg {
+        }),
+        GalleryItem::Msg(GalleryMsg {
             key: "m3",
             user: false,
             time: "09:42",
@@ -2714,16 +2836,16 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
                 "I can make the hub wait for the agent's first heartbeat before it serves the list.",
             markdown: false,
             delivery: None,
-        },
-        GalleryMsg {
+        }),
+        GalleryItem::Msg(GalleryMsg {
             key: "m4",
             user: true,
             time: "09:43",
             text: "Then make it wait for the heartbeat.",
             markdown: false,
             delivery: Some((crate::Delivery::Sending, "Sending…")),
-        },
-        GalleryMsg {
+        }),
+        GalleryItem::Msg(GalleryMsg {
             key: "m5",
             user: true,
             time: "09:44",
@@ -2733,15 +2855,29 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
                 crate::Delivery::Unconfirmed,
                 "Not confirmed: the message does not appear in the conversation",
             )),
-        },
-        GalleryMsg {
+        }),
+        GalleryItem::Msg(GalleryMsg {
             key: "m6",
             user: true,
             time: "09:45",
             text: "Retry the restart, the hub is down.",
             markdown: false,
             delivery: Some((crate::Delivery::Failed, "Send failed: connection reset")),
-        },
+        }),
+        GalleryItem::Tool(GalleryTool {
+            key: "t1",
+            name: "bash",
+            command: "cargo test -p rwire --workspace",
+            status: crate::ToolStatus::Ok,
+            output: "test result: ok. 320 passed; 0 failed; 0 ignored in 0.24s\n\nrunning 61 test binaries …",
+        }),
+        GalleryItem::Tool(GalleryTool {
+            key: "t2",
+            name: "bash",
+            command: "cargo build --release --target x86_64-unknown-linux-gnu",
+            status: crate::ToolStatus::Err,
+            output: "error: could not compile `rwire` (bin) due to 1 previous error\n\nlong output line that must scroll inside the 320 px cap, not the page — aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }),
     ];
     el(El::Div)
         .st([
@@ -4630,12 +4766,22 @@ const ENTRIES: &[ComponentEntry] = &[
     ComponentEntry {
         name: "Conversation",
         slug: "conversation",
-        description: "A conversation in the avatar layout: the user's bubbles, an agent's answers in the reading face, on the reading column.",
+        description: "A conversation in the avatar layout: the user's bubbles, an agent's answers in the reading face, tool calls, outbox states, on the reading column.",
         category: Category::DataDisplay,
         order: 320,
         variants: &[],
         bool_props: &[],
         build_demo: conversation_demo,
+    },
+    ComponentEntry {
+        name: "ToolCall",
+        slug: "tool-call",
+        description: "A tool invocation: a collapsed native <details> card (radius 10, 13 px), one-line summary with the status on the right, output in a pre capped at 320 px.",
+        category: Category::DataDisplay,
+        order: 322,
+        variants: TOOL_CALL_VARIANTS,
+        bool_props: &[],
+        build_demo: tool_call_demo,
     },
     ComponentEntry {
         name: "Navigation",
