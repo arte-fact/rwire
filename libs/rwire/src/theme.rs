@@ -1480,7 +1480,9 @@ mod tests {
 
         // System: exactly the light block, then the dark block in the media query
         // (the mode-independent rules, such as touch targets, follow once).
-        let block = |css: &str| css.split("@media (pointer").next().unwrap().to_string();
+        // A mode's block: up to its first closing line (the mode-independent
+        // rules, shells and touch targets, follow once).
+        let block = |css: &str| css.split_inclusive("}\n").next().unwrap().to_string();
         let (light, dark) = (block(&light), block(&dark));
         let (head, tail) = system
             .split_once("@media (prefers-color-scheme:dark){")
