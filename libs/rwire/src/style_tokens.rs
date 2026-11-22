@@ -1243,6 +1243,11 @@ define_token_enum! {
         RotateNeg90 = 0x3EE => "transform:rotate(-90deg)",
         /// A navigation row's meta line, under the title and the trailing cell.
         ColNavMeta = 0x3EF => "grid-column:2/4",
+        // Safe areas (0x3F0-0x3F1): a sidebar under a notch or a rounded corner.
+        /// Padding left: at least the safe-area inset (0 elsewhere).
+        PlSafe = 0x3F0 => "padding-left:env(safe-area-inset-left,0px)",
+        /// Padding top: `--S3`, or the safe-area inset when larger.
+        PtSafe = 0x3F1 => "padding-top:max(var(--S3),env(safe-area-inset-top,0px))",
     }
 }
 
