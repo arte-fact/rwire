@@ -107,6 +107,23 @@ fn push_attr_escaped(out: &mut String, value: &str) {
     }
 }
 
+/// The text of a raw-text element (`<style>`, `<script>`): not
+/// entity-escaped (CSS such as `a>b` must survive), only kept from closing the
+/// element early: `</` becomes `<\\/`. In a `<script>`, `<!--` also becomes
+/// `<\\!--` (the same string to JavaScript), so the text cannot put the HTML
+/// parser in its "script data escaped" state, where a `<script>` in the text
+/// would keep the element open past its `</script>`. A `<style>` has no such
+/// state, and in CSS `<\\!--` would not read as `<!--` outside a string: it is
+/// left as is.
+fn push_raw_text(out: &mut String, tag: &str, text: &str) {
+    let text = text.replace("</", "<\\/");
+    if tag == "script" {
+        out.push_str(&text.replace("<!--", "<\\!--"));
+    } else {
+        out.push_str(&text);
+    }
+}
+
 fn push_text_escaped(out: &mut String, value: &str) {
     for c in value.chars() {
         match c {
@@ -1218,9 +1235,7 @@ impl ElementBuilder {
 
         if let Some(text) = &self.text {
             if matches!(tag, "style" | "script") {
-                // Raw text (CSS, JS): not entity-escaped, only kept from closing
-                // the element early.
-                out.push_str(&text.replace("</", "<\\/"));
+                push_raw_text(out, tag, text);
             } else {
                 push_text_escaped(out, text);
             }
@@ -4310,5 +4325,33 @@ mod style_order_tests {
         // [STYLE_DEF, count=1, order=0, len, rule]
         assert_eq!(&buf[..3], &[STYLE_DEF, 1, 0]);
         assert_eq!(&buf[4..], b".u0{display:none}");
+    }
+}
+
+#[cfg(test)]
+mod raw_text_tests {
+    use super::push_raw_text;
+
+    /// A `<script>` whose text holds `<!--` then `<script>` would put the HTML
+    /// parser in its "script data escaped" state, where the `</script>` that
+    /// ends the element no longer does and the rest of the document is
+    /// swallowed: `<!--` is neutralised in script text.
+    #[test]
+    fn script_text_cannot_open_an_escaped_state() {
+        let mut out = String::from("<script>");
+        push_raw_text(&mut out, "script", "var a = '<!--'; var b = '<script>';");
+        out.push_str("</script><p>after</p>");
+        assert!(!out.contains("<!--"), "{out}");
+        assert!(out.contains("var a = '<\\!--'"), "{out}");
+        // Only one `</script>`, the one that ends the element.
+        assert_eq!(out.matches("</script>").count(), 1, "{out}");
+        assert!(out.ends_with("</script><p>after</p>"), "{out}");
+    }
+
+    #[test]
+    fn closing_sequences_are_neutralised_and_css_stays_raw() {
+        let mut out = String::new();
+        push_raw_text(&mut out, "style", "a>b{c:d}</style>");
+        assert_eq!(out, "a>b{c:d}<\\/style>");
     }
 }
