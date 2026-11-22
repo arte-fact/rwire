@@ -337,7 +337,11 @@ impl NavRow {
 
     /// Build the row.
     pub fn build(self) -> ElementBuilder {
-        let mut row = Link::route(&self.href).st(self.compute_tokens());
+        // `data-touch`: 44 px tall under a finger or below `touch_below`, like a
+        // button (the theme's touch rule, at zero specificity).
+        let mut row = Link::route(&self.href)
+            .attr("data-touch", "")
+            .st(self.compute_tokens());
         if !self.current {
             row = row.hover([St::BgSurfaceRaised]);
         }
@@ -424,6 +428,28 @@ mod tests {
         let tokens = row().compute_tokens();
         for st in [St::GridNavRow, St::PadRow, St::RoundedNavRow] {
             assert!(tokens.contains(&st), "{st:?}");
+        }
+    }
+
+    /// Under a finger (or below `touch_below`) a one-line row gets the 44 px
+    /// touch minimum, like a button; at zero specificity, so a two-line row
+    /// (taller already) and a desktop row with a fine pointer are unchanged.
+    #[test]
+    fn a_row_takes_the_touch_minimum_like_a_button() {
+        let html = NavRow::new("/s/x")
+            .title("one", "")
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-touch"), "{html}");
+        for theme in [
+            rwire::theme::Theme::new(),
+            rwire::theme::Theme::new().touch_below(760),
+        ] {
+            let css = rwire::theme::generate_theme_css(&theme);
+            let block = css.split_once("@media (pointer:coarse)").unwrap().1;
+            let rule = block.split("{min-height:44px}").next().unwrap();
+            assert!(rule.contains("[data-touch]"), "{rule}");
+            assert!(rule.contains(":where("), "zero specificity: {rule}");
         }
     }
 

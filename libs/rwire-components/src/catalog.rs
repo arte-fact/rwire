@@ -2247,6 +2247,302 @@ fn density_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         .build()
 }
 
+// ============================================================================
+// Shell and navigation (R2): NavList, three-column AppShell
+// ============================================================================
+
+/// The gallery's sessions: 3 machines, 10 rows, every dot state.
+fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
+    use crate::{
+        Badge, BadgeFill, BadgeSize, NavGroup, NavList, NavRow, StatusDot, StatusDotIntent,
+    };
+    use rwire::Tone;
+    let runtime = |name: &'static str, tone: Tone| {
+        Badge::new()
+            .tone(tone)
+            .fill(BadgeFill::Outline)
+            .size(BadgeSize::Xs)
+            .text(name)
+            .build()
+    };
+    let generating = || {
+        StatusDot::new()
+            .intent(StatusDotIntent::Success)
+            .ring(true)
+            .pulse(true)
+            .build()
+    };
+    let validating = || StatusDot::new().tone(Tone::Cat(5)).ring(true).build();
+    let typing = || StatusDot::new().build();
+    let inactive = || StatusDot::new().intent(StatusDotIntent::Hollow).build();
+    // (href, project, machine, dot, runtime, gist, hash, attention)
+    type Row = (
+        &'static str,
+        &'static str,
+        &'static str,
+        fn() -> ElementBuilder,
+        (&'static str, Tone),
+        &'static str,
+        &'static str,
+        bool,
+    );
+    let claude = ("claude", Tone::Cat(1));
+    let vibe = ("vibe", Tone::Cat(2));
+    let pi = ("pi", Tone::Cat(3));
+    type Group = (&'static str, fn() -> ElementBuilder, Vec<Row>);
+    let groups: [Group; 3] = [
+        (
+            "home",
+            || StatusDot::new().intent(StatusDotIntent::Success).build(),
+            vec![
+                (
+                    "/s/1",
+                    "mcp-agents",
+                    "@home",
+                    generating,
+                    claude,
+                    "Refactoring the hub",
+                    "a1b2",
+                    false,
+                ),
+                (
+                    "/s/2",
+                    "rwire",
+                    "@home",
+                    validating,
+                    claude,
+                    "Run cargo test --workspace?",
+                    "c3d4",
+                    true,
+                ),
+                (
+                    "/s/3",
+                    "games",
+                    "@home",
+                    typing,
+                    vibe,
+                    "Waiting for input",
+                    "e5f6",
+                    false,
+                ),
+                (
+                    "/s/4",
+                    "notes",
+                    "@home",
+                    inactive,
+                    pi,
+                    "Idle since yesterday",
+                    "a7b8",
+                    false,
+                ),
+            ],
+        ),
+        (
+            "raptors",
+            || StatusDot::new().intent(StatusDotIntent::Success).build(),
+            vec![
+                (
+                    "/s/5",
+                    "rapports",
+                    "@raptors",
+                    generating,
+                    vibe,
+                    "Writing the weekly report",
+                    "c9d0",
+                    false,
+                ),
+                (
+                    "/s/6",
+                    "parity",
+                    "@raptors",
+                    typing,
+                    claude,
+                    "Measuring screen 1",
+                    "e1f2",
+                    false,
+                ),
+                (
+                    "/s/7", "docs", "@raptors", inactive, pi, "Done", "a3b4", false,
+                ),
+            ],
+        ),
+        (
+            "laptop",
+            || StatusDot::new().intent(StatusDotIntent::Hollow).build(),
+            vec![
+                (
+                    "/s/8", "sandbox", "@laptop", inactive, claude, "Offline", "c5d6", false,
+                ),
+                (
+                    "/s/9", "scratch", "@laptop", inactive, vibe, "Offline", "e7f8", false,
+                ),
+                ("/s/10", "drafts", "@laptop", inactive, pi, "", "", false),
+            ],
+        ),
+    ];
+    NavList::new()
+        .aria_label("Sessions")
+        .groups(
+            groups
+                .into_iter()
+                .enumerate()
+                .map(|(i, (machine, dot, rows))| {
+                    let count = rows.len() as u32;
+                    let mut group = NavGroup::new(machine)
+                        .count(count)
+                        .leading(dot())
+                        .folded(folded && i == 2);
+                    if i == 0 {
+                        group = group.badge(
+                            Badge::new()
+                                .tone(Tone::Cat(5))
+                                .size(BadgeSize::Xs)
+                                .text("1")
+                                .build(),
+                        );
+                    }
+                    group.rows(rows.into_iter().map(
+                        |(href, project, at, dot, (rt, tone), gist, hash, attention)| {
+                            let row = NavRow::new(href)
+                                .leading(dot())
+                                .title(project, at)
+                                .trailing(runtime(rt, tone))
+                                .current(href == current)
+                                .attention(attention);
+                            // One row without a meta line: a one-line row.
+                            if gist.is_empty() {
+                                row
+                            } else {
+                                row.meta(gist, hash)
+                            }
+                        },
+                    ))
+                }),
+        )
+        .build()
+}
+
+/// Dense grouped navigation: 3 groups, 10 rows, every dot state, the current
+/// row, a folded group (`folded`).
+fn navigation_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    el(El::Div)
+        .st([
+            rwire::St::WFull,
+            rwire::St::BgSidebar,
+            rwire::St::PSm,
+            rwire::St::RoundedLg,
+        ])
+        .attr("data-demo", "navigation")
+        .append([gallery_nav(b(bools, 0), "/s/1")])
+}
+
+/// The handler the gallery shell's resize handles call (the widths stay
+/// client-side in the gallery).
+#[derive(Default)]
+struct GalleryShell;
+impl rwire::MemoryState for GalleryShell {}
+fn gallery_resized(_: &mut GalleryShell) {}
+
+/// A three-column shell: sidebar (brand, search, chips, sessions, footer),
+/// main, panel; resize handles; `collapsed`, `no_panel`, `mobile_main`.
+fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{
+        AppShell, Button, Chip, ChipGroup, Input, InputSize, MobilePane, Sidebar, ThemeToggle,
+    };
+    use rwire::{HandlerSpec, St, Tone};
+    let brand = el(El::Div)
+        .st([St::DisplayFlex, St::ItemsCenter, St::GapSm, St::FontBold])
+        .append([
+            el(El::Span)
+                .st([
+                    Tone::Cat(1).solid(),
+                    Tone::Cat(1).on_solid_mark(),
+                    St::DisplayInlineFlex,
+                    St::ItemsCenter,
+                    St::JustifyCenter,
+                    St::H1_75rem,
+                    St::AspectSquare,
+                    St::RoundedMd,
+                    St::TextSm,
+                ])
+                .attr("aria-hidden", "true")
+                .text("m"),
+            el(El::Span).text("mcp-agents"),
+        ]);
+    let sidebar = Sidebar::new()
+        .header(brand)
+        .search(
+            Input::search()
+                .size(InputSize::Sm)
+                .placeholder("Search")
+                .build(),
+        )
+        .filters(
+            ChipGroup::new("Filters")
+                .chips([
+                    Chip::new("All").active(true).count(10).build(),
+                    Chip::new("To approve").count(1).build(),
+                    Chip::new("Working").count(2).build(),
+                ])
+                .build(),
+        )
+        .body(gallery_nav(false, "/s/2"))
+        .footer(
+            el(El::Div)
+                .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
+                .append([
+                    Button::icon_only(Icon::Settings, "Settings")
+                        .intent(crate::ButtonIntent::Ghost)
+                        .build(),
+                    ThemeToggle::new().ghost().build(),
+                ]),
+        )
+        .aria_label("Sessions")
+        .build();
+    let main = el(El::Div)
+        .st([
+            St::BgCanvas,
+            St::HFull,
+            St::PLg,
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapSm,
+        ])
+        .append([
+            el(El::H2).st([St::M0, St::TextBase]).text("rwire @home"),
+            el(El::P)
+                .st([St::M0, St::FontRead, St::TextDefault])
+                .text("The main column: a conversation reads here, on the canvas."),
+        ]);
+    let panel = el(El::Div)
+        .st([St::PMd, St::DisplayFlex, St::FlexCol, St::GapSm])
+        .append([
+            el(El::P)
+                .st([St::M0, St::NavGroupHead, St::TextMuted])
+                .text("Terminal"),
+            el(El::Code)
+                .st([St::FontMono, St::TextXs, St::TextMuted])
+                .text("$ cargo test --workspace"),
+        ]);
+    AppShell::new()
+        .sidebar(sidebar)
+        .main(main)
+        .panel((!b(bools, 1)).then_some(panel))
+        .sidebar_width(264)
+        .panel_width(340)
+        .collapsed(b(bools, 0))
+        .resizable(HandlerSpec::memory::<GalleryShell>(gallery_resized))
+        .mobile(if b(bools, 2) {
+            MobilePane::Main
+        } else {
+            MobilePane::List
+        })
+        .build()
+        // A frame in the gallery, not the whole viewport.
+        .st([St::MaxH60Dvh, St::BorderDefault, St::RoundedLg])
+        .attr("data-demo", "shell")
+}
+
 fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{StatusDot, StatusDotIntent};
     let intent = match v(variants, 0) {
@@ -4090,6 +4386,46 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: &[],
         bool_props: &[],
         build_demo: app_shell_demo,
+    },
+    ComponentEntry {
+        name: "Three-column shell",
+        slug: "shell",
+        description: "AppShell with a sidebar, a main column and a panel: resize handles (double-click resets), a drawer below 1100 px, one column below 760 px.",
+        category: Category::Layout,
+        order: 105,
+        variants: &[],
+        bool_props: &[
+            BoolProp {
+                name: "collapsed",
+                description: "Hide the sidebar",
+                default: false,
+            },
+            BoolProp {
+                name: "no_panel",
+                description: "No right-hand panel",
+                default: false,
+            },
+            BoolProp {
+                name: "mobile_main",
+                description: "On a phone, show the main column (else the list)",
+                default: false,
+            },
+        ],
+        build_demo: shell_demo,
+    },
+    ComponentEntry {
+        name: "Navigation",
+        slug: "navigation",
+        description: "NavList, NavGroup, NavRow: machines and sessions, dense, with status dots, runtime badges and the current row.",
+        category: Category::Navigation,
+        order: 405,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "folded",
+            description: "Fold the last group",
+            default: false,
+        }],
+        build_demo: navigation_demo,
     },
     ComponentEntry {
         name: "Spacer",

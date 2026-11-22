@@ -814,7 +814,7 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         let _ = writeln!(
             css,
             "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}\
-             :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){{min-height:44px}}\
+             :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button],[data-touch]){{min-height:44px}}\
              :where(button,[role=tab],[role=button]){{min-width:44px}}}}",
             below.saturating_sub(1)
         );
@@ -1580,7 +1580,7 @@ mod tests {
             .1;
         assert!(rule.contains(":where(button,select,input:not("), "{rule}");
         assert!(
-            rule.contains("[role=tab],[role=button]){min-height:44px}"),
+            rule.contains("[role=tab],[role=button],[data-touch]){min-height:44px}"),
             "{rule}"
         );
         assert!(rule.contains("{min-width:44px}"), "{rule}");

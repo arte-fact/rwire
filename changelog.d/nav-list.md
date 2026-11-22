@@ -15,3 +15,7 @@
   `St::ColNavMeta`) with a 10 px mono suffix (`St::TextNavHash`). The current
   row is tinted (`BgAccentSubtle`) with an accent hairline (`St::NavCurrent`)
   and `aria-current="page"`; `attention` makes its title bold.
+- **Touch targets:** a row carries `data-touch`, which the theme's touch rule
+  now covers: under a coarse pointer or below `Theme::touch_below`, a one-line
+  row is at least 44 px tall (`:where`, zero specificity). Two-line rows,
+  taller already, and desktop rows with a fine pointer are unchanged.

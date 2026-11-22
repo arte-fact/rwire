@@ -95,7 +95,10 @@ fn under_a_finger_or_below_sm_every_button_is_44px() {
         .expect("touch-target media block")
         .1;
     // min-height / min-width beat the 32 px square.
-    assert!(block.contains("[role=button]){min-height:44px}"), "{block}");
+    assert!(
+        block.contains("[role=button],[data-touch]){min-height:44px}"),
+        "{block}"
+    );
     assert!(block.contains(":where(button,[role=tab],[role=button]){min-width:44px}"));
 }
 
