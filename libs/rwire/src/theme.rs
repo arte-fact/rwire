@@ -280,6 +280,77 @@ pub struct Theme {
     palette: Option<ColorPalette>,
     /// Root font size in px below / from the `sm` breakpoint (see [`Theme::base_font_size`]).
     base_font: Option<(u8, u8)>,
+    /// Font stacks (see [`Theme::fonts`]).
+    fonts: Fonts,
+}
+
+/// The theme's three font stacks, each a CSS `font-family` list. A stack left
+/// `None` keeps the style's (or the browser's) default.
+///
+/// | Stack | Variable | Read by |
+/// |---|---|---|
+/// | `ui` | `--Qft` | `body`: the whole interface |
+/// | `read` | `--Qfr` | `St::FontRead`: long-form reading (a reply, an article) |
+/// | `mono` | `--Qm` | `St::FontMono`, code |
+///
+/// ```ignore
+/// Theme::new().fonts(
+///     Fonts::new()
+///         .ui("Inter, system-ui, sans-serif")
+///         .read("'Source Serif 4', Georgia, serif")
+///         .mono("'JetBrains Mono', ui-monospace, monospace"),
+/// )
+/// ```
+///
+/// Web fonts are loaded with [`CapsuleConfig::font_face`](crate::CapsuleConfig::font_face),
+/// from files the app serves itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Fonts {
+    /// The interface face (`--Qft`).
+    pub ui: Option<String>,
+    /// The reading face (`--Qfr`, [`St::FontRead`](crate::St::FontRead)).
+    pub read: Option<String>,
+    /// The monospace face (`--Qm`, [`St::FontMono`](crate::St::FontMono)).
+    pub mono: Option<String>,
+}
+
+impl Fonts {
+    /// No stack set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The interface stack (`--Qft`).
+    pub fn ui(mut self, stack: impl Into<String>) -> Self {
+        self.ui = Some(stack.into());
+        self
+    }
+
+    /// The reading stack (`--Qfr`).
+    pub fn read(mut self, stack: impl Into<String>) -> Self {
+        self.read = Some(stack.into());
+        self
+    }
+
+    /// The monospace stack (`--Qm`).
+    pub fn mono(mut self, stack: impl Into<String>) -> Self {
+        self.mono = Some(stack.into());
+        self
+    }
+
+    /// `--Qft` / `--Qfr` / `--Qm` for the stacks set. A stack's own `;`, `{`
+    /// or `}` would end the declaration: they are dropped.
+    fn css(&self, css: &mut String) {
+        for (var, stack) in [("Qft", &self.ui), ("Qfr", &self.read), ("Qm", &self.mono)] {
+            if let Some(stack) = stack {
+                let clean: String = stack
+                    .chars()
+                    .filter(|c| !matches!(c, ';' | '{' | '}'))
+                    .collect();
+                css_var(css, var, clean.trim());
+            }
+        }
+    }
 }
 
 // Theme implements State manually (can't use derive macro from within rwire crate).
@@ -321,6 +392,18 @@ impl Theme {
             mode: ThemeMode::Dark,
             ..Self::default()
         }
+    }
+
+    /// Set the interface, reading and monospace font stacks (see [`Fonts`]).
+    /// They win over a style's own (`flat`'s monospace UI, for one).
+    pub fn fonts(mut self, fonts: Fonts) -> Self {
+        self.fonts = fonts;
+        self
+    }
+
+    /// The font stacks set with [`Theme::fonts`].
+    pub fn fonts_ref(&self) -> &Fonts {
+        &self.fonts
     }
 
     /// Set the mode: `Light` or `Dark` force it, `System` follows the OS.
@@ -708,6 +791,9 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
 
+    // --- Font stacks: after the style's hooks, so the theme's own win ---
+    theme.fonts.css(&mut css);
+
     // --- Radius overrides ---
     match theme.radius {
         RadiusScale::Medium => {} // default, no overrides needed
@@ -1070,6 +1156,46 @@ mod tests {
             generate_theme_css(&Theme::new().mode(ThemeMode::System).base_font_size(14, 15));
         assert_eq!(sized.matches("html{font-size:14px}").count(), 1);
         assert!(sized.rfind("html{font-size").unwrap() > sized.find("@media (prefers").unwrap());
+    }
+
+    #[test]
+    fn fonts_feed_the_ui_read_and_mono_variables() {
+        let fonts = Fonts::new()
+            .ui("Inter, system-ui, sans-serif")
+            .read("'Source Serif 4', Georgia, serif")
+            .mono("'JetBrains Mono', ui-monospace, monospace");
+        let css = generate_theme_css(&Theme::new().fonts(fonts.clone()));
+        assert!(css.contains("--Qft:Inter, system-ui, sans-serif;"), "{css}");
+        assert!(
+            css.contains("--Qfr:'Source Serif 4', Georgia, serif;"),
+            "{css}"
+        );
+        assert!(
+            css.contains("--Qm:'JetBrains Mono', ui-monospace, monospace;"),
+            "{css}"
+        );
+        // The theme's stacks win over a style's own: flat sets a mono UI first.
+        let flat = generate_theme_css(&Theme::new().style(ThemeStyle::flat()).fonts(fonts));
+        assert!(
+            flat.rfind("--Qft:Inter").unwrap() > flat.find("--Qft:ui-monospace").unwrap(),
+            "{flat}"
+        );
+        // Unset stacks emit nothing; a stack cannot end the declaration.
+        let css = generate_theme_css(&Theme::new().fonts(Fonts::new().read("x;--a:red}")));
+        assert!(!css.contains("--Qm:") && !css.contains("--Qft:"), "{css}");
+        assert!(css.contains("--Qfr:x--a:red;"), "{css}");
+        // In System mode, both blocks carry them.
+        let sys = generate_theme_css(
+            &Theme::new()
+                .mode(ThemeMode::System)
+                .fonts(Fonts::new().ui("Inter")),
+        );
+        assert_eq!(sys.matches("--Qft:Inter;").count(), 2, "{sys}");
+    }
+
+    #[test]
+    fn font_read_reads_the_reading_stack() {
+        assert_eq!(crate::St::FontRead.css(), "font-family:var(--Qfr,inherit)");
     }
 
     #[test]

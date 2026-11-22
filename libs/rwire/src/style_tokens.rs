@@ -1061,6 +1061,9 @@ define_token_enum! {
         /// the cascade. Pair with a width (`Border2`) + `RoundedFull` + `AnimateSpinFast`; the
         /// element must keep a live `color` (hide a label with `FontSize0`, not `TextTransparent`).
         SpinnerRingCurrent = 0x39A => "border-style:solid;border-color:currentColor;border-right-color:transparent",
+        /// The reading face the theme names in `--Qfr` (`Theme::fonts`): long-form
+        /// text such as a reply or an article; the body face otherwise.
+        FontRead = 0x3A0 => "font-family:var(--Qfr,inherit)",
     }
 }
 

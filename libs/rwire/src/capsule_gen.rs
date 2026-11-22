@@ -92,6 +92,9 @@ enum FontSource {
         format: String,
         weight: u16,
     },
+    /// A woff2 file the app serves itself (`asset()` / `asset_dir()`), at a
+    /// path under the app's mount, over a weight range (a variable font).
+    Local { path: String, weights: (u16, u16) },
 }
 
 impl FontFace {
@@ -207,7 +210,30 @@ impl FontFace {
                     self.family, url, format, weight, display
                 )
             }
+            FontSource::Local {
+                path,
+                weights: (low, high),
+            } => {
+                let weight = if low == high {
+                    low.to_string()
+                } else {
+                    format!("{low} {high}")
+                };
+                format!(
+                    "@font-face{{font-family:'{}';src:url('{}') format('woff2');font-weight:{};font-display:{}}}\n",
+                    self.family, path, weight, display
+                )
+            }
         }
+    }
+
+    /// A [`FontSource::Local`] face with its path under the app's mount.
+    fn under_base(&self, base_path: &str) -> Self {
+        let mut face = self.clone();
+        if let FontSource::Local { path, .. } = &mut face.source {
+            *path = format!("{}{}", base_path.trim_end_matches('/'), path);
+        }
+        face
     }
 }
 
@@ -414,6 +440,60 @@ impl CapsuleConfig {
         self.fonts.push(face);
         self
     }
+
+    /// Load a web font from a woff2 file the app serves itself, with
+    /// [`asset()`](crate::ServerWithRoot::asset) or
+    /// [`asset_dir()`](crate::ServerWithRoot::asset_dir): no third-party
+    /// request. `weights` is the weight range the file covers (`400..=400`
+    /// for one weight, `100..=900` for a variable font); `path` is the path
+    /// the app serves it at, from its root (`/fonts/inter.woff2`). A
+    /// `base_path` mount is prefixed for you.
+    ///
+    /// Name the family in a [`Fonts`](crate::Fonts) stack to use it:
+    ///
+    /// ```ignore
+    /// CapsuleConfig::new()
+    ///     .font_face("Inter", 100..=900, "/fonts/inter.woff2")
+    ///     .font_face("Source Serif 4", 400..=700, "/fonts/source-serif-4.woff2");
+    /// // with
+    /// Theme::new().fonts(Fonts::new().ui("Inter, system-ui, sans-serif"));
+    /// // and
+    /// Server::bind(addr)?.asset_dir("/fonts", "assets/fonts")
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `path` is not a path from the app's root (it must start with `/`
+    /// and not with `//`): a URL on another domain is what this method is
+    /// there to avoid.
+    pub fn font_face(
+        mut self,
+        family: &str,
+        weights: std::ops::RangeInclusive<u16>,
+        path: &str,
+    ) -> Self {
+        assert!(
+            path.starts_with('/') && !path.starts_with("//"),
+            "font_face({family:?}): {path:?} must be a path the app serves (\"/fonts/x.woff2\"), not a URL"
+        );
+        let family: String = family
+            .chars()
+            .filter(|c| !matches!(c, '\'' | ';' | '{' | '}'))
+            .collect();
+        let path: String = path
+            .chars()
+            .filter(|c| !matches!(c, '\'' | ')' | ';' | '{' | '}'))
+            .collect();
+        self.fonts.push(FontFace {
+            family,
+            source: FontSource::Local {
+                path,
+                weights: (*weights.start(), *weights.end()),
+            },
+            display: FontDisplay::Swap,
+        });
+        self
+    }
 }
 
 /// Generate complete CSS for the capsule with resolved theme.
@@ -466,7 +546,7 @@ pub fn generate_capsule_css(config: &CapsuleConfig) -> String {
         let mut imports = String::new();
         let mut font_faces = String::new();
         for font in &config.fonts {
-            let font_css = font.to_css();
+            let font_css = font.under_base(&config.base_path).to_css();
             if font_css.starts_with("@import") {
                 imports.push_str(&font_css);
             } else {
@@ -902,6 +982,43 @@ mod tests {
             !css.contains(".c256"),
             "Empty composite CSS should not produce .c256"
         );
+    }
+
+    #[test]
+    fn font_face_loads_a_file_the_app_serves() {
+        let config = CapsuleConfig::new()
+            .font_face("Inter", 100..=900, "/fonts/inter.woff2")
+            .font_face("Source Serif 4", 400..=400, "/fonts/serif.woff2");
+        let css = generate_capsule_css(&config);
+        assert!(
+            css.contains("@font-face{font-family:'Inter';src:url('/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}"),
+            "{css}"
+        );
+        assert!(css.contains("font-family:'Source Serif 4';src:url('/fonts/serif.woff2') format('woff2');font-weight:400;"));
+        // No third-party request: no @import, no other origin.
+        assert!(
+            !css.contains("@import") && !css.contains("https://"),
+            "{css}"
+        );
+        // Under a base_path mount, the path follows the mount.
+        let mounted = generate_capsule_css(&config.base_path("/preview/x"));
+        assert!(
+            mounted.contains("url('/preview/x/fonts/inter.woff2')"),
+            "{mounted}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "must be a path the app serves")]
+    fn font_face_refuses_a_url() {
+        let _ =
+            CapsuleConfig::new().font_face("Inter", 400..=400, "https://fonts.example/inter.woff2");
+    }
+
+    #[test]
+    #[should_panic(expected = "must be a path the app serves")]
+    fn font_face_refuses_a_protocol_relative_url() {
+        let _ = CapsuleConfig::new().font_face("Inter", 400..=400, "//cdn.example/inter.woff2");
     }
 
     #[test]

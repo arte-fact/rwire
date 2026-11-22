@@ -179,7 +179,7 @@ pub use tokens::{ColorPalette, ColorScale};
 
 // Theme exports
 pub use theme::{
-    css_var, generate_base_css, generate_theme_css, IntoPalette, IntoStyle, RadiusScale,
+    css_var, generate_base_css, generate_theme_css, Fonts, IntoPalette, IntoStyle, RadiusScale,
     ResolvedPalette, Theme, ThemeMode, ThemeProvider, ThemeStyle,
 };
 
