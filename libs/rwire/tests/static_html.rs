@@ -170,3 +170,34 @@ fn executable_urls_are_dropped() {
         "{html}"
     );
 }
+
+/// E2 criterion (renderer wrappers): a synced region is wrapped in a `<span>`
+/// in the static paint as in the live page (`CREATE_SYNCED` makes a
+/// class-less `<span id="__synced_N">`), and an unstyled wrapper is
+/// `display:contents` in both, so a region inside a grid or a flex row adds
+/// no box of its own: the two renders lay out the same boxes.
+#[test]
+fn a_region_wrapper_adds_no_box_in_the_static_paint_as_live() {
+    #[derive(Default)]
+    struct Cells;
+    let region = rwire::ElementBuilder::synced::<Cells, _>(|_| el(El::Div).text("cell"));
+    let grid = el(El::Div)
+        .st([St::DisplayGrid])
+        .append([region, el(El::Div).text("next")]);
+    let html = grid.to_static_html();
+    assert!(
+        html.contains("<span data-rwr><div>cell</div></span>"),
+        "{html}"
+    );
+    // The base CSS gives both wrappers, unstyled, no box.
+    let base = rwire::generate_base_css();
+    assert!(
+        base.contains("[id^=__synced_]:not([class]),[data-rwr]:not([class]){display:contents}"),
+        "{base}"
+    );
+    // A styled wrapper (`render_x().st([St::Flex1])`) keeps its box: it has a class.
+    let styled = rwire::ElementBuilder::synced::<Cells, _>(|_| el(El::Div)).st([St::Flex1]);
+    assert!(styled
+        .to_static_html()
+        .starts_with("<span data-rwr class=\"u"));
+}

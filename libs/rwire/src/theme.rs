@@ -284,6 +284,9 @@ pub struct Theme {
     fonts: Fonts,
     /// Control and row dimensions (see [`Theme::density`]).
     density: Density,
+    /// The viewport width below which controls get 44 px touch targets
+    /// (see [`Theme::touch_below`]); `None`: the `sm` breakpoint (640).
+    touch_below: Option<u16>,
 }
 
 /// How dense the controls and lists are, for a site or for a tool.
@@ -439,6 +442,21 @@ impl Theme {
     /// The font stacks set with [`Theme::fonts`].
     pub fn fonts_ref(&self) -> &Fonts {
         &self.fonts
+    }
+
+    /// The viewport width (px) below which interactive controls get 44 px touch
+    /// targets, even under a fine pointer (a coarse pointer gets them at any
+    /// width). The default is the `sm` breakpoint, 640; an app whose "phone"
+    /// layout starts wider sets its own (mcp-agents: 760). The `sm`
+    /// breakpoint itself does not move.
+    pub fn touch_below(mut self, px: u16) -> Self {
+        self.touch_below = Some(px);
+        self
+    }
+
+    /// The density set with [`Theme::density`].
+    pub fn current_density(&self) -> Density {
+        self.density
     }
 
     /// Set the density of controls and lists (see [`Density`]).
@@ -716,9 +734,8 @@ pub fn generate_base_css() -> &'static str {
      ::-webkit-scrollbar-thumb{background:var(--c);border-radius:3px}\
      ::-webkit-scrollbar-thumb:hover{background:var(--e)}\
      [data-busy]{cursor:progress;opacity:.6;transition:opacity .25s .2s}\
-     @media (pointer:coarse),(max-width:639.98px){\
-     :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){min-height:44px}\
-     :where(button,[role=tab],[role=button]){min-width:44px}}\n"
+     [id^=__synced_]:not([class]),[data-rwr]:not([class]){display:contents}\
+\n"
 }
 
 /// Generate complete theme CSS from a Theme value.
@@ -748,6 +765,21 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         let _ = writeln!(
             css,
             "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
+        );
+    }
+    // 44 px touch targets under a coarse pointer, or below `touch_below` (the
+    // `sm` breakpoint by default), for every interactive control whatever its
+    // classes. Zero specificity (`:where`): an app's own min-height wins.
+    // Checkboxes, radios and sliders keep their size.
+    {
+        use std::fmt::Write;
+        let below = theme.touch_below.unwrap_or(640);
+        let _ = writeln!(
+            css,
+            "@media (pointer:coarse),(max-width:{}.98px){{\
+             :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){{min-height:44px}}\
+             :where(button,[role=tab],[role=button]){{min-width:44px}}}}",
+            below.saturating_sub(1)
         );
     }
     css
@@ -1287,12 +1319,16 @@ mod tests {
         }
         assert_ne!(light, dark);
 
-        // System: exactly the light block, then the dark block in the media query.
+        // System: exactly the light block, then the dark block in the media query
+        // (the mode-independent rules, such as touch targets, follow once).
+        let block = |css: &str| css.split("@media (pointer").next().unwrap().to_string();
+        let (light, dark) = (block(&light), block(&dark));
         let (head, tail) = system
             .split_once("@media (prefers-color-scheme:dark){")
             .expect("a dark media block");
         assert_eq!(head, light, "the light block, unchanged, on :root");
-        let inner = tail
+        let inner = block(tail);
+        let inner = inner
             .trim_end()
             .strip_suffix('}')
             .expect("closed media block");
@@ -1378,7 +1414,7 @@ mod tests {
 
     #[test]
     fn touch_targets_are_44px_under_a_coarse_pointer_or_below_sm() {
-        let base = generate_base_css();
+        let base = generate_theme_css(&Theme::new());
         let rule = base
             .split_once("@media (pointer:coarse),(max-width:639.98px){")
             .expect("the touch-target media block")
@@ -1393,6 +1429,35 @@ mod tests {
         assert!(!rule.contains("button{min-height"));
         // Checkboxes, radios and sliders keep their size.
         assert!(rule.contains("[type=checkbox],[type=radio],[type=range]"));
+    }
+
+    /// Whether the 44 px touch-target rule of `css` applies to a fine pointer
+    /// on a viewport `width` px wide (its `max-width` branch).
+    fn touch_rule_applies(css: &str, width: f64) -> bool {
+        let max = css
+            .split_once("@media (pointer:coarse),(max-width:")
+            .expect("the touch-target media block")
+            .1
+            .split_once("px)")
+            .unwrap()
+            .0;
+        width <= max.parse::<f64>().unwrap()
+    }
+
+    #[test]
+    fn touch_below_sets_where_the_44px_rule_starts() {
+        // Default: below `sm` (640): a fine pointer at 700 px keeps its sizes.
+        let default = generate_theme_css(&Theme::new());
+        assert!(!touch_rule_applies(&default, 700.0));
+        assert!(touch_rule_applies(&default, 639.0));
+        // mcp-agents' phone threshold: 760.
+        let app = generate_theme_css(&Theme::new().touch_below(760));
+        assert!(touch_rule_applies(&app, 700.0));
+        assert!(!touch_rule_applies(&app, 760.0));
+        assert!(!touch_rule_applies(&app, 800.0));
+        // In System mode the rule is emitted once, after both blocks.
+        let sys = generate_theme_css(&Theme::new().mode(ThemeMode::System).touch_below(760));
+        assert_eq!(sys.matches("{min-height:44px}").count(), 1, "{sys}");
     }
 
     #[test]
@@ -1478,9 +1543,9 @@ mod tests {
         let css = generate_base_css();
         // +~70B (2026-09): the tapped control waiting on the server (`data-busy`, set by the
         // runtime at the tap) dims after 200ms; client-set, so it can't ride STYLE_DEF.
-        // +~180B (R1): 44px touch targets under a coarse pointer or below `sm`, for every
-        // interactive control whatever its classes, so it belongs to the base CSS.
-        assert!(css.len() < 1000, "Base CSS too large: {} bytes", css.len());
+        // +~70B (R1): unstyled renderer wrappers (live `__synced_N`, static `data-rwr`)
+        // add no box, so a region never breaks a grid or a flex row.
+        assert!(css.len() < 900, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]
@@ -1553,7 +1618,8 @@ mod tests {
         let css = generate_theme_css(&theme);
         // Single block should be compact.
         // +~400B (R1): the neutral and six categorical tones (`--Y0g…--Y6o`), the faint ink.
-        assert!(css.len() < 2560, "Theme CSS too large: {} bytes", css.len());
+        // +~200B (R1): 44 px touch targets below `Theme::touch_below` (a theme setting).
+        assert!(css.len() < 2800, "Theme CSS too large: {} bytes", css.len());
     }
 
     #[test]

@@ -1318,6 +1318,33 @@ fn composite_children(slug: &str) -> &'static [&'static str] {
 /// Composite components additionally emit representative children via [`composite_children`].
 pub fn generate_code(entry: &ComponentEntry, c: &CodeCtx) -> String {
     let lines: Vec<String> = match entry.slug {
+        "tones" => vec![
+            "// Theme::new().palette(palettes::nord()) gives the six categorical colors".into(),
+            "Stack::row()".into(),
+            "    .children([el(El::Span)".into(),
+            format!(
+                "        .st([Tone::Cat(1).{}(), Tone::Cat(1).{}(), St::PxSm, St::RoundedFull])",
+                if cb(c, 0) { "solid" } else { "ground" },
+                if cb(c, 0) { "on_solid" } else { "ink" }
+            ),
+            "        .text(\"claude\")])".into(),
+        ],
+        "surfaces" => vec![
+            "// Theme::new().style(styles::studio()).fonts(Fonts::new().read(\"Georgia, serif\"))"
+                .into(),
+            "Stack::column()".into(),
+            "    .children([el(El::Div)".into(),
+            "        .st([St::BgCanvas, St::PLg])".into(),
+            "        .append([el(El::P).st([St::BgSurface, St::FontRead]).text(\"…\")])])".into(),
+        ],
+        "density" => vec![
+            "// Theme::new().density(Density::Compact): 32 px icon buttons, 18 px glyphs".into(),
+            "Stack::row()".into(),
+            "    .children([".into(),
+            "        Button::icon_only(Icon::Settings, \"Settings\").build(),".into(),
+            "        ThemeToggle::new().build(),".into(),
+            "    ])".into(),
+        ],
         "toast" => {
             let mut l = vec![format!(
                 "Toast::new({:?})",
@@ -1992,6 +2019,163 @@ const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
         },
     ],
 }];
+
+// ============================================================================
+// Theme foundations (R1): tones, canvas and fonts, density
+// ============================================================================
+
+/// Every tone as a pill (its ground and ink), a dot (its solid) and an
+/// outlined label (its border and ink); `solid` shows the solid fills.
+fn tones_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Gap, Stack, StackAlign};
+    use rwire::{St, Tone};
+    let tones = [
+        (Tone::Neutral, "neutral"),
+        (Tone::Accent, "accent"),
+        (Tone::Info, "info"),
+        (Tone::Success, "success"),
+        (Tone::Warning, "warning"),
+        (Tone::Danger, "danger"),
+        (Tone::Cat(1), "cat 1"),
+        (Tone::Cat(2), "cat 2"),
+        (Tone::Cat(3), "cat 3"),
+        (Tone::Cat(4), "cat 4"),
+        (Tone::Cat(5), "cat 5"),
+        (Tone::Cat(6), "cat 6"),
+    ];
+    let solid = b(bools, 0);
+    let pills = tones.iter().map(|&(tone, name)| {
+        let (bg, fg) = if solid {
+            (tone.solid(), tone.on_solid())
+        } else {
+            (tone.ground(), tone.ink())
+        };
+        el(El::Span)
+            .st([
+                bg,
+                fg,
+                St::DisplayInlineFlex,
+                St::ItemsCenter,
+                St::GapXs,
+                St::PxSm,
+                St::PyXs,
+                St::RoundedFull,
+                St::TextXs,
+                St::FontMedium,
+            ])
+            .data("tone", name)
+            .append([
+                el(El::Span).st([tone.solid(), St::W05rem, St::H05rem, St::RoundedFull]),
+                el(El::Span).text(name),
+            ])
+    });
+    let outlined = tones.iter().map(|&(tone, name)| {
+        el(El::Span)
+            .st([
+                tone.border(),
+                tone.ink(),
+                St::PxSm,
+                St::RoundedSm,
+                St::TextXs,
+                St::FontMono,
+            ])
+            .text(name)
+    });
+    Stack::column()
+        .gap(Gap::Md)
+        .children([
+            Stack::row()
+                .gap(Gap::Sm)
+                .wrap(true)
+                .align(StackAlign::Center)
+                .children(pills)
+                .build(),
+            Stack::row()
+                .gap(Gap::Sm)
+                .wrap(true)
+                .align(StackAlign::Center)
+                .children(outlined)
+                .build(),
+        ])
+        .build()
+}
+
+/// The canvas (`BgCanvas`) under a card (`BgSurface`), with the three faces
+/// (interface, reading, mono) and the three inks (default, muted, faint).
+fn surfaces_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{Gap, Stack};
+    use rwire::St;
+    let card = el(El::Div)
+        .st([
+            St::BgSurface,
+            St::BorderDefault,
+            St::RoundedLg,
+            St::ShadowTheme,
+            St::PMd,
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapSm,
+        ])
+        .append([
+            el(El::P)
+                .st([St::FontRead, St::TextBase, St::TextDefault, St::M0])
+                .text("The reading face (St::FontRead): long-form answers read in it."),
+            el(El::P)
+                .st([St::TextSm, St::TextDefault, St::M0])
+                .text("The interface face: controls, lists and labels."),
+            el(El::Code)
+                .st([St::FontMono, St::TextXs, St::TextMuted])
+                .text("cargo test --workspace"),
+            el(El::P)
+                .st([St::TextXs, St::TextMuted, St::M0])
+                .text("TextMuted: the soft ink"),
+            el(El::P)
+                .st([St::TextXs, St::TextFaint, St::M0])
+                .text("TextFaint: the faint ink, still AA"),
+        ]);
+    el(El::Div)
+        .st([St::BgCanvas, St::RoundedLg, St::PLg, St::WFull])
+        .data("demo", "canvas")
+        .append([Stack::column()
+            .gap(Gap::Md)
+            .children([
+                el(El::P)
+                    .st([St::TextSm, St::TextDefault, St::M0])
+                    .text("St::BgCanvas: the sunken reading ground"),
+                card,
+            ])
+            .build()])
+}
+
+/// The controls the density hooks size: switch the density in the header.
+fn density_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{Button, Chip, Gap, Input, Stack, StackAlign, Tab, Tabs, ThemeToggle};
+    Stack::column()
+        .gap(Gap::Md)
+        .children([
+            Stack::row()
+                .gap(Gap::Sm)
+                .wrap(true)
+                .align(StackAlign::Center)
+                .children([
+                    Button::primary("Send").build(),
+                    Button::icon_only(Icon::Settings, "Settings")
+                        .intent(crate::ButtonIntent::Ghost)
+                        .build()
+                        .data("demo", "icon-button"),
+                    ThemeToggle::new().build().data("demo", "theme-toggle"),
+                    Chip::new("All").active(true).build(),
+                    Chip::new("Working").build(),
+                ])
+                .build(),
+            Input::text().placeholder("Search sessions").build(),
+            Tabs::new()
+                .tab(Tab::new("Terminal", el(El::P).text("…")))
+                .tab(Tab::new("Session", el(El::P).text("…")))
+                .build(),
+        ])
+        .build()
+}
 
 fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{StatusDot, StatusDotIntent};
@@ -4016,6 +4200,40 @@ const ENTRIES: &[ComponentEntry] = &[
             default: false,
         }],
         build_demo: label_demo,
+    },
+    ComponentEntry {
+        name: "Tones",
+        slug: "tones",
+        description: "Theme tones: neutral, accent, info, success, warning, danger and six categorical colors, each a ground with its ink.",
+        category: Category::DataDisplay,
+        order: 310,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "solid",
+            description: "Solid fills with their on-solid text",
+            default: false,
+        }],
+        build_demo: tones_demo,
+    },
+    ComponentEntry {
+        name: "Canvas & fonts",
+        slug: "surfaces",
+        description: "The sunken canvas (St::BgCanvas) under a card, the reading, interface and mono faces, and the three inks.",
+        category: Category::Layout,
+        order: 110,
+        variants: &[],
+        bool_props: &[],
+        build_demo: surfaces_demo,
+    },
+    ComponentEntry {
+        name: "Density",
+        slug: "density",
+        description: "Controls sized by the theme's density (switch it in the header): 32 px icon buttons when compact, 44 px under a finger.",
+        category: Category::Forms,
+        order: 212,
+        variants: &[],
+        bool_props: &[],
+        build_demo: density_demo,
     },
     ComponentEntry {
         name: "Composer",

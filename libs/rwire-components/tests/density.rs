@@ -2,7 +2,7 @@
 //! `/app` measures 32 × 32 px with an 18 px glyph on desktop under a dense
 //! theme, 44 × 44 px under a finger (the base CSS rule).
 
-use rwire::theme::{generate_base_css, generate_theme_css, Density, Theme};
+use rwire::theme::{generate_theme_css, Density, Theme};
 use rwire::St;
 
 /// The value `prop` resolves to in `token`'s CSS, given the theme `css`:
@@ -52,7 +52,7 @@ fn comfortable_icon_buttons_keep_their_sizes() {
 
 #[test]
 fn under_a_finger_or_below_sm_every_button_is_44px() {
-    let base = generate_base_css();
+    let base = generate_theme_css(&Theme::new());
     let block = base
         .split_once("@media (pointer:coarse),(max-width:639.98px){")
         .expect("touch-target media block")

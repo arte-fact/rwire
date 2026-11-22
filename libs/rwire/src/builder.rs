@@ -1130,9 +1130,17 @@ impl ElementBuilder {
         if let Some(keys) = keys.as_deref_mut() {
             self.insert_own_style_keys(keys);
         }
-        let tag = self.el_type.name();
+        // A synced region's wrapper is the live render's: a `<span>`, here marked
+        // `data-rwr` (the live one has `id="__synced_N"`). Without classes the
+        // base CSS makes both `display:contents`: the region adds no box, in the
+        // static paint as in the live page.
+        let region = self.synced.is_some();
+        let tag = if region { "span" } else { self.el_type.name() };
         out.push('<');
         out.push_str(tag);
+        if region {
+            out.push_str(" data-rwr");
+        }
 
         let mut classes: Vec<String> = Vec::new();
         if let Some(c) = &self.class {
