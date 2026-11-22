@@ -586,6 +586,9 @@ pub struct ResolvedPalette {
     pub green: [String; 12],
     pub amber: [String; 12],
     pub white: String,
+    /// The categorical colors (`--Y1…--Y6`): the palette's own, or six
+    /// derived from its scales when it names none.
+    pub categorical: Vec<String>,
 }
 
 impl ResolvedPalette {
@@ -607,6 +610,19 @@ impl ResolvedPalette {
             green: p.green.steps().clone(),
             amber: p.amber.steps().clone(),
             white: color::WHITE.to_string(),
+            categorical: if p.categorical.is_empty() {
+                // Six hues the palette already has, far enough apart to tell.
+                vec![
+                    p.accent.steps()[8].clone(),
+                    p.green.steps()[8].clone(),
+                    p.amber.steps()[8].clone(),
+                    p.red.steps()[8].clone(),
+                    p.accent.steps()[5].clone(),
+                    p.neutral.steps()[7].clone(),
+                ]
+            } else {
+                p.categorical.clone()
+            },
         }
     }
 }
@@ -791,6 +807,7 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
     // After the style: the status texts are checked against the plain grounds
     // (`a`, `b`, `r`, `t`) as the style finally sets them.
     subtle_pairs(&mut css, &rp, is_dark);
+    tone_pairs(&mut css, &rp, is_dark);
 
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
@@ -997,6 +1014,85 @@ fn subtle_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         ]
     };
     css_var(css, "n0", &first_readable(&accent_grounds, &[text, high]));
+}
+
+/// The categorical and neutral tones (`Tone::Cat(n)`, `Tone::Neutral`) and the
+/// faint ink, computed per mode against the plain grounds as the style left
+/// them (called after it, like [`subtle_pairs`]).
+///
+/// For each categorical color `n` (1 to 6): `--Yn` the color itself (a dot, a
+/// border, a solid fill), `--Yng` a tinted ground, `--Yni` its ink (the hue,
+/// darkened in light mode or lightened in dark mode until it reads at
+/// [`MIN_TEXT_CONTRAST`] on that ground and on `--a`/`--b`/`--r`/`--t`), and
+/// `--Yno` the text on the solid fill. The neutral tone (gray) gets `--Y0g` and
+/// `--Y0i`. `--j2` is the faint ink: the palest neutral step that still reads at
+/// AA on the plain grounds (below `--k` and `--j`).
+fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let plain: Vec<String> = ["a", "b", "r", "t"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let app = plain
+        .first()
+        .cloned()
+        .unwrap_or_else(|| hex(&rp.neutral[0]));
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let ends = [
+        hex(&rp.neutral[0]),
+        hex(&rp.neutral[11]),
+        "#ffffff".to_string(),
+        "#000000".to_string(),
+    ];
+    let tone = |css: &mut String, n: usize, color: &str| {
+        let c = hex(color);
+        let ground = mix(&c, &app, if is_dark { 0.22 } else { 0.16 });
+        let inks: Vec<String> = std::iter::once(c.clone())
+            .chain(
+                [0.2, 0.35, 0.5, 0.65, 0.8]
+                    .iter()
+                    .map(|&t| mix(toward, &c, t)),
+            )
+            .chain(ends.iter().cloned())
+            .collect();
+        let against = [std::slice::from_ref(&ground), &plain[..]].concat();
+        css_var(css, &format!("Y{n}g"), &ground);
+        css_var(css, &format!("Y{n}i"), &first_readable(&inks, &against));
+        if n > 0 {
+            css_var(css, &format!("Y{n}"), &c);
+            css_var(
+                css,
+                &format!("Y{n}o"),
+                &first_readable(&ends, std::slice::from_ref(&c)),
+            );
+        }
+    };
+    tone(css, 0, &rp.neutral[6]);
+    for (i, color) in rp.categorical.iter().take(6).enumerate() {
+        tone(css, i + 1, color);
+    }
+    // A palette with fewer than six: the rest repeat it, so every token resolves.
+    let given = rp.categorical.len().clamp(1, 6);
+    for n in given + 1..=6 {
+        let from = (n - 1) % given + 1;
+        for suffix in ["", "g", "i", "o"] {
+            css_var(
+                css,
+                &format!("Y{n}{suffix}"),
+                &format!("var(--Y{from}{suffix})"),
+            );
+        }
+    }
+
+    // The faint ink: the palest neutral step that still reads on every plain ground.
+    let faint_order: &[usize] = if is_dark {
+        &[5, 4, 3, 2, 1, 0]
+    } else {
+        &[6, 7, 8, 9, 10, 11]
+    };
+    let faint: Vec<String> = faint_order.iter().map(|&i| hex(&rp.neutral[i])).collect();
+    css_var(css, "j2", &first_readable(&faint, &plain));
 }
 
 /// The last value declared for `--name` in `css`, when it is a plain color

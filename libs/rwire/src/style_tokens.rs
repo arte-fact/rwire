@@ -1068,6 +1068,74 @@ define_token_enum! {
         /// document) under cards that stay `BgSurface`. Reads `--Qw`, the app
         /// background unless the theme style remaps it (`studio` does).
         BgCanvas = 0x3A1 => "background:var(--Qw)",
+        // Tones (0x3A2-0x3C2): the faint ink, the neutral tone pair and the six
+        // categorical tones (`--Yn…`, see `Tone`). Grounds pair with their ink at AA.
+        /// The faint ink, below `TextDefault` and `TextMuted`: still AA on the plain grounds.
+        TextFaint = 0x3A2 => "color:var(--j2)",
+        /// The neutral tone's ground (an idle state).
+        BgNeutralSubtle = 0x3A3 => "background:var(--Y0g)",
+        /// The neutral tone's ink, readable on its ground and the plain grounds.
+        TextNeutral = 0x3A4 => "color:var(--Y0i)",
+        /// Categorical color 1 as a solid fill (`Tone::Cat(1)`).
+        BgCat1 = 0x3A5 => "background:var(--Y1)",
+        /// Categorical color 1: tinted ground.
+        BgCat1Subtle = 0x3A6 => "background:var(--Y1g)",
+        /// Categorical color 1: ink, readable on its ground and the plain grounds.
+        TextCat1 = 0x3A7 => "color:var(--Y1i)",
+        /// Text on categorical color 1's solid fill.
+        TextOnCat1 = 0x3A8 => "color:var(--Y1o)",
+        /// A 1px border in categorical color 1.
+        BorderCat1 = 0x3A9 => "border:1px solid var(--Y1)",
+        /// Categorical color 2 as a solid fill (`Tone::Cat(2)`).
+        BgCat2 = 0x3AA => "background:var(--Y2)",
+        /// Categorical color 2: tinted ground.
+        BgCat2Subtle = 0x3AB => "background:var(--Y2g)",
+        /// Categorical color 2: ink, readable on its ground and the plain grounds.
+        TextCat2 = 0x3AC => "color:var(--Y2i)",
+        /// Text on categorical color 2's solid fill.
+        TextOnCat2 = 0x3AD => "color:var(--Y2o)",
+        /// A 1px border in categorical color 2.
+        BorderCat2 = 0x3AE => "border:1px solid var(--Y2)",
+        /// Categorical color 3 as a solid fill (`Tone::Cat(3)`).
+        BgCat3 = 0x3AF => "background:var(--Y3)",
+        /// Categorical color 3: tinted ground.
+        BgCat3Subtle = 0x3B0 => "background:var(--Y3g)",
+        /// Categorical color 3: ink, readable on its ground and the plain grounds.
+        TextCat3 = 0x3B1 => "color:var(--Y3i)",
+        /// Text on categorical color 3's solid fill.
+        TextOnCat3 = 0x3B2 => "color:var(--Y3o)",
+        /// A 1px border in categorical color 3.
+        BorderCat3 = 0x3B3 => "border:1px solid var(--Y3)",
+        /// Categorical color 4 as a solid fill (`Tone::Cat(4)`).
+        BgCat4 = 0x3B4 => "background:var(--Y4)",
+        /// Categorical color 4: tinted ground.
+        BgCat4Subtle = 0x3B5 => "background:var(--Y4g)",
+        /// Categorical color 4: ink, readable on its ground and the plain grounds.
+        TextCat4 = 0x3B6 => "color:var(--Y4i)",
+        /// Text on categorical color 4's solid fill.
+        TextOnCat4 = 0x3B7 => "color:var(--Y4o)",
+        /// A 1px border in categorical color 4.
+        BorderCat4 = 0x3B8 => "border:1px solid var(--Y4)",
+        /// Categorical color 5 as a solid fill (`Tone::Cat(5)`).
+        BgCat5 = 0x3B9 => "background:var(--Y5)",
+        /// Categorical color 5: tinted ground.
+        BgCat5Subtle = 0x3BA => "background:var(--Y5g)",
+        /// Categorical color 5: ink, readable on its ground and the plain grounds.
+        TextCat5 = 0x3BB => "color:var(--Y5i)",
+        /// Text on categorical color 5's solid fill.
+        TextOnCat5 = 0x3BC => "color:var(--Y5o)",
+        /// A 1px border in categorical color 5.
+        BorderCat5 = 0x3BD => "border:1px solid var(--Y5)",
+        /// Categorical color 6 as a solid fill (`Tone::Cat(6)`).
+        BgCat6 = 0x3BE => "background:var(--Y6)",
+        /// Categorical color 6: tinted ground.
+        BgCat6Subtle = 0x3BF => "background:var(--Y6g)",
+        /// Categorical color 6: ink, readable on its ground and the plain grounds.
+        TextCat6 = 0x3C0 => "color:var(--Y6i)",
+        /// Text on categorical color 6's solid fill.
+        TextOnCat6 = 0x3C1 => "color:var(--Y6o)",
+        /// A 1px border in categorical color 6.
+        BorderCat6 = 0x3C2 => "border:1px solid var(--Y6)",
     }
 }
 

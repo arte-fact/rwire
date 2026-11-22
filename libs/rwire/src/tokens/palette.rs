@@ -151,6 +151,9 @@ pub struct ColorPalette {
     pub green: ColorScale,
     /// Warning color
     pub amber: ColorScale,
+    /// Categorical colors, up to 6 (see [`ColorPalette::categorical`]):
+    /// identities with no meaning of state (a runtime, an author).
+    pub categorical: Vec<String>,
 }
 
 impl Default for ColorPalette {
@@ -226,6 +229,7 @@ impl Default for ColorPalette {
                 color::AMBER_11,
                 color::AMBER_12,
             ]),
+            categorical: Vec::new(),
         }
     }
 }
@@ -263,6 +267,20 @@ impl ColorPalette {
     /// Set the amber/warning scale.
     pub fn with_amber(mut self, scale: ColorScale) -> Self {
         self.amber = scale;
+        self
+    }
+
+    /// Set the categorical colors (`#RRGGBB` or `oklch(…)`), up to 6 (more
+    /// are dropped): identities with no meaning of state, such as a runtime or
+    /// an author. Each becomes `--Y1…--Y6`, with a tinted ground, a readable
+    /// ink and an on-solid ink computed per mode (see `Tone::Cat`). A palette
+    /// without them gets six derived from its own scales.
+    pub fn categorical<I, S>(mut self, colors: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.categorical = colors.into_iter().take(6).map(Into::into).collect();
         self
     }
 }

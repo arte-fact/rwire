@@ -50,6 +50,8 @@
 //!
 //! The mode picked survives a reload (the runtime keeps it in a cookie).
 
+use std::borrow::Cow;
+
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
 use rwire::{
@@ -65,6 +67,52 @@ pub struct ThemeToggle {
     show_label: bool,
     on_toggle: Option<HandlerSpec>,
     current_mode: ThemeToggleMode,
+    labels: ThemeToggleLabels,
+}
+
+/// The toggle's texts: its accessible name (`aria-label`) and the tooltip
+/// (`title`) naming each state. English by default.
+///
+/// ```ignore
+/// ThemeToggle::new().labels(ThemeToggleLabels {
+///     toggle: "Changer de thème".into(),
+///     light: "Thème clair".into(),
+///     dark: "Thème sombre".into(),
+///     system: "Thème du système".into(),
+/// })
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThemeToggleLabels {
+    /// The button's accessible name (`aria-label`).
+    pub toggle: Cow<'static, str>,
+    /// The tooltip in light mode.
+    pub light: Cow<'static, str>,
+    /// The tooltip in dark mode.
+    pub dark: Cow<'static, str>,
+    /// The tooltip when following the system.
+    pub system: Cow<'static, str>,
+}
+
+impl Default for ThemeToggleLabels {
+    fn default() -> Self {
+        Self {
+            toggle: "Toggle theme".into(),
+            light: "Theme: light".into(),
+            dark: "Theme: dark".into(),
+            system: "Theme: follows the system".into(),
+        }
+    }
+}
+
+impl ThemeToggleLabels {
+    /// The tooltip naming `mode`.
+    fn title(&self, mode: ThemeToggleMode) -> &str {
+        match mode {
+            ThemeToggleMode::Light => &self.light,
+            ThemeToggleMode::Dark => &self.dark,
+            ThemeToggleMode::System => &self.system,
+        }
+    }
 }
 
 /// The current mode, shown by the toggle's icon: a moon in light mode (click
@@ -88,17 +136,6 @@ impl From<rwire::theme::ThemeMode> for ThemeToggleMode {
     }
 }
 
-impl ThemeToggleMode {
-    /// The tooltip naming the current mode.
-    fn title(self) -> &'static str {
-        match self {
-            Self::Light => "Theme: light",
-            Self::Dark => "Theme: dark",
-            Self::System => "Theme: follows the system",
-        }
-    }
-}
-
 impl Default for ThemeToggle {
     fn default() -> Self {
         Self {
@@ -106,6 +143,7 @@ impl Default for ThemeToggle {
             show_label: false,
             on_toggle: None,
             current_mode: ThemeToggleMode::Light,
+            labels: ThemeToggleLabels::default(),
         }
     }
 }
@@ -141,6 +179,12 @@ impl ThemeToggle {
     /// Set the current theme mode to display the correct icon.
     pub fn mode(mut self, mode: ThemeToggleMode) -> Self {
         self.current_mode = mode;
+        self
+    }
+
+    /// Set the accessible name and the tooltip of each state (translations).
+    pub fn labels(mut self, labels: ThemeToggleLabels) -> Self {
+        self.labels = labels;
         self
     }
 
@@ -193,8 +237,8 @@ impl ThemeToggle {
             .focus_visible([St::RingFocus])
             .active([St::Scale98])
             .at(At::Type, Av::Button)
-            .at_str(At::AriaLabel, "Toggle theme")
-            .attr("title", self.current_mode.title())
+            .attr("aria-label", &self.labels.toggle)
+            .attr("title", self.labels.title(self.current_mode))
             .append([icon_el]);
 
         if let Some(handler) = self.on_toggle {
@@ -266,6 +310,36 @@ mod tests {
         let svg = |m| ThemeToggle::new().mode(m).build().to_static_html();
         assert_ne!(svg(ThemeToggleMode::System), svg(ThemeToggleMode::Light));
         assert_ne!(svg(ThemeToggleMode::System), svg(ThemeToggleMode::Dark));
+    }
+
+    #[test]
+    fn labels_reach_the_aria_label_and_each_state_title() {
+        let fr = || ThemeToggleLabels {
+            toggle: "Changer de thème".into(),
+            light: "Thème clair".into(),
+            dark: "Thème sombre".into(),
+            system: "Thème du système".into(),
+        };
+        for (mode, title) in [
+            (ThemeToggleMode::Light, "Thème clair"),
+            (ThemeToggleMode::Dark, "Thème sombre"),
+            (ThemeToggleMode::System, "Thème du système"),
+        ] {
+            let html = ThemeToggle::new()
+                .labels(fr())
+                .mode(mode)
+                .build()
+                .to_static_html();
+            assert!(html.contains("aria-label=\"Changer de thème\""), "{html}");
+            assert!(html.contains(&format!("title=\"{title}\"")), "{html}");
+        }
+        // The default stays English.
+        let html = ThemeToggle::new()
+            .mode(ThemeToggleMode::Dark)
+            .build()
+            .to_static_html();
+        assert!(html.contains("aria-label=\"Toggle theme\""), "{html}");
+        assert!(html.contains("title=\"Theme: dark\""), "{html}");
     }
 
     #[test]
