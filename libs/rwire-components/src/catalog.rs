@@ -2091,6 +2091,7 @@ fn tones_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
             St::JustifyCenter,
             St::H1_75rem,
             St::AspectSquare,
+            St::SelfStart,
             St::RoundedMd,
             St::FontBold,
             St::TextSm,
