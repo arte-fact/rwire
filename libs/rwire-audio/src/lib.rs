@@ -80,6 +80,11 @@
 //! - **Autoplay.** The browser keeps an audio context made without a user
 //!   gesture suspended (`Output(Blocked)`); the extension resumes it inside
 //!   any gesture of the page, such as the tap that turns the microphone on.
+//! - **Admission.** A page with an [`Audio`] element holds two connections:
+//!   its page socket and its audio socket. Both count toward the server's
+//!   `max_connections` and `max_connections_per_ip`: size them for it.
+//! - **Client claims.** Playback and capture events are reported by the
+//!   browser: never use them for authorization or billing.
 //! - **Level.** The level of the microphone is computed in the browser only
 //!   (`--rw-level` on the element, for a meter); it is never sent.
 //!

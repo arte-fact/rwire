@@ -15,6 +15,12 @@
 //!   A ticket that is unknown, already used, expired, issued for another
 //!   path, or presented with another session or identity gets the socket
 //!   closed with [`CLOSE_TICKET_REFUSED`] right after the handshake.
+//! - **Admission.** An extension socket holds an admission slot like a page
+//!   socket: a page with one counts twice toward `max_connections` and
+//!   `max_connections_per_ip`.
+//! - **Its page.** When the page connection that issued the ticket ends, its
+//!   tickets are refused and [`ExtSocket::page_closed`] resolves: the
+//!   handler should close the socket then.
 //! - **Reconnecting.** A socket can be lost while the page stays. The
 //!   handler asks [`ExtSocket::next_ticket`] for the ticket of the next
 //!   connection and sends it to the extension over its own protocol; that

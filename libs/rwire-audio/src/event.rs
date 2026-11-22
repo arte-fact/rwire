@@ -35,6 +35,10 @@ pub enum OutputState {
 /// Every `at` is in seconds on the page's audio clock, the clock of
 /// [`crate::Frame::timestamp`], at the moment the sample is **heard**: the
 /// browser adds its output latency and reports the event at that time.
+///
+/// **These are the client's claims.** The browser reports them and nothing
+/// stops a page from sending any line it likes: use them to drive the UI
+/// and the conversation, never for authorization, billing or accounting.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AudioEvent {
     /// The microphone's state, after each `capture(true)`.
