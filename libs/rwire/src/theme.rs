@@ -293,7 +293,7 @@ pub struct Theme {
 ///
 /// It sets the `--Qz*` hooks: control height (`--Qzh`, `St::HControl`), control
 /// text (`--Qzt`, `St::TextControl`), tab padding (`--Qzy`, `St::PyTab`), chip
-/// padding (`--Qzc`, `St::PadChip`) and list-row padding (`--Qzp`,
+/// padding (`--Qzcx` / `--Qzcy`, `St::PxChip` / `St::PyChip`) and list-row padding (`--Qzp`,
 /// `St::PadRow`), icon buttons' square and glyph (`--Qzi`, `--Qzg`, `--Qzq`:
 /// `Button::icon_only` and `ThemeToggle`, 32 px with an 18 px glyph in
 /// `Compact`). `Button`, `Input`, `Select` (default size), `Chip`, `Tabs` and
@@ -315,7 +315,7 @@ impl Density {
             // The tokens' fallbacks are the comfortable sizes.
             Density::Comfortable => "",
             Density::Compact => {
-                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzc:.125rem var(--S2);--Qzp:.38rem .55rem;\
+                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzcx:var(--S2);--Qzcy:.125rem;--Qzp:.38rem .55rem;\
                  --Qzi:32px;--Qzg:18px;--Qzq:0;"
             }
         }
@@ -1204,11 +1204,7 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
                     .unwrap_or_else(|| on_solid.clone());
                 css_var(css, &format!("Y{n}m"), &mark);
                 css_var(css, &format!("Y{n}"), &c);
-                css_var(
-                    css,
-                    &format!("Y{n}o"),
-                    &first_readable(&ends, std::slice::from_ref(&c)),
-                );
+                css_var(css, &format!("Y{n}o"), &on_solid);
             }
         };
     tone(css, 0, &rp.neutral[6], None, None);
@@ -1485,7 +1481,8 @@ mod tests {
         assert_eq!(St::HControl.css(), "height:var(--Qzh,2.25rem)");
         assert_eq!(St::TextControl.css(), "font-size:var(--Qzt,var(--T2))");
         assert_eq!(St::PyTab.css(), "padding-block:var(--Qzy,var(--S3))");
-        assert_eq!(St::PadChip.css(), "padding:var(--Qzc,var(--S1) var(--S2))");
+        assert_eq!(St::PxChip.css(), "padding-inline:var(--Qzcx,var(--S2))");
+        assert_eq!(St::PyChip.css(), "padding-block:var(--Qzcy,var(--S1))");
         assert_eq!(St::PadRow.css(), "padding:var(--Qzp,var(--S2) var(--S3))");
     }
 

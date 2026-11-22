@@ -1144,8 +1144,9 @@ define_token_enum! {
         TextControl = 0x3C4 => "font-size:var(--Qzt,var(--T2))",
         /// A tab's vertical padding.
         PyTab = 0x3C5 => "padding-block:var(--Qzy,var(--S3))",
-        /// A chip's padding.
-        PadChip = 0x3C6 => "padding:var(--Qzc,var(--S1) var(--S2))",
+        /// A chip's inline padding (split from the block one, so a caller's
+        /// `PxMd` replaces it whole).
+        PxChip = 0x3C6 => "padding-inline:var(--Qzcx,var(--S2))",
         /// A list row's padding (dense navigation lists).
         PadRow = 0x3C7 => "padding:var(--Qzp,var(--S2) var(--S3))",
         // Icon buttons (0x3C8-0x3CC): a square of `--Qzi` with a glyph of `--Qzg`
@@ -1158,8 +1159,8 @@ define_token_enum! {
         /// `ThemeToggle` (default size): its square (its padding otherwise). The
         /// min-width and flex-shrink keep it square in a crowded flex row.
         SqIconToggle = 0x3CA => "width:var(--Qzi,auto);min-width:var(--Qzi,auto);height:var(--Qzi,auto);flex-shrink:0",
-        /// `ThemeToggle` (default size): its padding.
-        PadIconToggle = 0x3CB => "padding:var(--Qzq,var(--S2))",
+        /// `ThemeToggle` (default size): its inline padding.
+        PxIconToggle = 0x3CB => "padding-inline:var(--Qzq,var(--S2))",
         /// `ThemeToggle` (default size): its glyph.
         GlyphIconToggle = 0x3CC => "width:var(--Qzg,24px);height:var(--Qzg,24px)",
         /// A mark on categorical color 1's solid fill, at 3:1: for a logotype or an
@@ -1183,6 +1184,10 @@ define_token_enum! {
         /// A 1px border, transparent: a ghost control's resting stroke, so its
         /// hover border (`BorderDefault`) does not move it.
         BorderGhost = 0x3D3 => "border:1px solid transparent",
+        /// A chip's block padding.
+        PyChip = 0x3D4 => "padding-block:var(--Qzcy,var(--S1))",
+        /// `ThemeToggle` (default size): its block padding.
+        PyIconToggle = 0x3D5 => "padding-block:var(--Qzq,var(--S2))",
     }
 }
 

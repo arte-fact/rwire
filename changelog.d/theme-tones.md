@@ -20,5 +20,9 @@
   the text on each solid fill, and the faint ink: 68 pairs over every built-in
   palette, style and mode. For studio + Nord, also the soft ink (`TextMuted`)
   on every ground and the text on the sidebar.
-- **Breaking:** `ColorPalette` gains a public `categorical` field: a struct
-  literal needs it (`categorical: Vec::new()`).
+- **Breaking:** `ColorPalette` gains the public fields `categorical`,
+  `categorical_inks` and `categorical_on_solids` (see the parity and marks
+  entries): a struct literal needs them (`Vec::new()`, or
+  `..ColorPalette::default()`). `ResolvedPalette`, handed to a `ThemeStyle`'s
+  callbacks, gains the public fields `categorical`, `categorical_inks` and
+  `categorical_on_solids`: a struct literal of it needs them too.

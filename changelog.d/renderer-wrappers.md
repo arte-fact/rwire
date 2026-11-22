@@ -9,7 +9,11 @@
 - The static paint now writes `<span data-rwr>`, like the live
   `<span id="__synced_N">`, and the base CSS makes both `display:contents`
   when they carry no class: `[id^=__synced_]:not([class]),[data-rwr]:not([class])`.
-  A wrapper styled with `.st(…)` (`render_x().st([St::Flex1])`) keeps its box.
+  A wrapper styled with `.st(…)` (`render_x().st([St::Flex1])`), a pseudo
+  class or a breakpoint (`.md([…])`) keeps its box, in both renders alike: the
+  live wrapper now gets its pseudo and breakpoint groups too. A region
+  builder's own `.class()` and attributes are applied in neither (the live
+  wrapper never had them).
 - **Behaviour change:** an unstyled region no longer creates a box. A layout
   that relied on the wrapper being an inline (live) or block (static) box
   needs a styled wrapper (`.st(…)` on the region).

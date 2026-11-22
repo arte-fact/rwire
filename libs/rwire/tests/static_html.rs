@@ -201,3 +201,62 @@ fn a_region_wrapper_adds_no_box_in_the_static_paint_as_live() {
         .to_static_html()
         .starts_with("<span data-rwr class=\"u"));
 }
+
+/// A region's wrapper carries the same classes in the static paint and live:
+/// its style tokens, pseudo-classes and breakpoints, applied in both; its own
+/// `.class()` and attributes in neither (the live `CREATE_SYNCED` wrapper
+/// never had them).
+#[test]
+fn a_region_wrapper_has_the_same_classes_static_and_live() {
+    use rwire::builder::BuildContext;
+    use rwire::protocol::opcodes::{CREATE_SYNCED, STYLE_BREAKPOINT, STYLE_PSEUDO};
+    use rwire::Bp;
+
+    #[derive(Default)]
+    struct Cells;
+    let region = || {
+        rwire::ElementBuilder::synced::<Cells, _>(|_| el(El::Div).text("cell"))
+            .st([St::DisplayFlex])
+            .breakpoint(Bp::Md, [St::Flex1])
+            .hover([St::BgHover])
+            .class("x")
+            .attr("data-k", "v")
+    };
+
+    // Static: the token classes, not the region's own class or attributes.
+    let html = region().to_static_html();
+    let flex1 = St::Flex1.as_u16();
+    let hover = St::BgHover.as_u16();
+    let md = Bp::Md.as_u8();
+    let open = &html[..html.find('>').unwrap()];
+    assert!(open.contains(&format!("b{md}u{flex1}")), "{html}");
+    assert!(open.contains(&format!("h0u{hover}")), "{html}");
+    assert!(!open.contains(" x") && !open.contains("\"x"), "{html}");
+    assert!(!open.contains("data-k"), "{html}");
+
+    // Live: the wrapper (ref 0, the first CREATE_SYNCED) gets the same breakpoint
+    // and pseudo groups.
+    let root = region();
+    let mut ctx = BuildContext::new();
+    let cells = Cells;
+    let mut states: std::collections::HashMap<
+        std::any::TypeId,
+        &(dyn std::any::Any + Send + Sync),
+    > = std::collections::HashMap::new();
+    states.insert(std::any::TypeId::of::<Cells>(), &cells);
+    ctx.collect_symbols_multi(&root, &states);
+    ctx.emit_multi(&root);
+    let bytes = ctx.finish();
+    assert!(bytes.contains(&CREATE_SYNCED));
+    // [op, wrapper ref 0, code, 1 token, the token's varint]
+    let has = |op: u8, code: u8, st: u16| {
+        let mut want = vec![op, 0, code, 1];
+        rwire::protocol::varint::write_varint(&mut want, u32::from(st));
+        bytes.windows(want.len()).any(|w| w == &want[..])
+    };
+    assert!(
+        has(STYLE_BREAKPOINT, md, flex1),
+        "live wrapper: no md breakpoint"
+    );
+    assert!(has(STYLE_PSEUDO, 0, hover), "live wrapper: no hover");
+}

@@ -39,7 +39,8 @@ fn compact_icon_buttons_are_32px_with_an_18px_glyph() {
     for token in [St::GlyphIconButton, St::GlyphIconToggle] {
         assert_eq!(resolve(token, "width", &css), "18px", "{token:?}");
     }
-    assert_eq!(resolve(St::PadIconToggle, "padding", &css), "0");
+    assert_eq!(resolve(St::PxIconToggle, "padding-inline", &css), "0");
+    assert_eq!(resolve(St::PyIconToggle, "padding-block", &css), "0");
 }
 
 /// Square, not just tall: width, min-width and height all come from `--Qzi`,
@@ -79,7 +80,10 @@ fn comfortable_icon_buttons_keep_their_sizes() {
     assert_eq!(resolve(St::GlyphIconButton, "width", &css), "14px");
     // The toggle: its padding around its glyph, as before (8 + 24 + 8 + borders).
     assert_eq!(resolve(St::SqIconToggle, "width", &css), "auto");
-    assert_eq!(resolve(St::PadIconToggle, "padding", &css), "var(--S2)");
+    assert_eq!(
+        resolve(St::PxIconToggle, "padding-inline", &css),
+        "var(--S2)"
+    );
     assert_eq!(resolve(St::GlyphIconToggle, "width", &css), "24px");
 }
 
@@ -93,4 +97,34 @@ fn under_a_finger_or_below_sm_every_button_is_44px() {
     // min-height / min-width beat the 32 px square.
     assert!(block.contains("[role=button]){min-height:44px}"), "{block}");
     assert!(block.contains(":where(button,[role=tab],[role=button]){min-width:44px}"));
+}
+
+/// The tokens of `el` that set `prop`.
+fn setting(el: &rwire::ElementBuilder, prop: &str) -> Vec<St> {
+    el.get_style_utils()
+        .iter()
+        .map(|&c| St::try_from(c).unwrap())
+        .filter(|t| t.longhands().contains(&prop))
+        .collect()
+}
+
+/// A caller's partial padding override wins, as before the density hooks:
+/// the chip's and the toggle's paddings are split into inline and block
+/// tokens, so `.st([St::PxMd])` replaces the inline one entirely.
+#[test]
+fn a_callers_inline_padding_overrides_the_density_padding() {
+    use rwire_components::{Chip, ThemeToggle};
+    let chip = Chip::new("All").build().st([St::PxMd]);
+    assert_eq!(setting(&chip, "padding-left"), [St::PxMd]);
+    assert_eq!(setting(&chip, "padding-right"), [St::PxMd]);
+    assert!(
+        !setting(&chip, "padding-top").is_empty(),
+        "block padding kept"
+    );
+    let toggle = ThemeToggle::new().build().st([St::PxMd]);
+    assert_eq!(setting(&toggle, "padding-left"), [St::PxMd]);
+    assert!(
+        !setting(&toggle, "padding-top").is_empty(),
+        "block padding kept"
+    );
 }

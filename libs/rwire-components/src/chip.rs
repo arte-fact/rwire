@@ -59,7 +59,8 @@ impl Chip {
     pub fn compute_tokens(&self) -> Vec<St> {
         let mut tokens = vec![
             St::TextXs,
-            St::PadChip,
+            St::PxChip,
+            St::PyChip,
             St::RoundedMd,
             St::BorderDefault,
             St::CursorPointer,

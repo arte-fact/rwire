@@ -13,9 +13,11 @@
   (`.mode(theme.mode.into())`), and a `title` naming the current mode.
 - **A picked mode survives a reload.** The theme `<style>` carries
   `data-rw-mode`. When it changes during a visit, the runtime writes the
-  `rw_mode` cookie (one year, `path=/`); the server then serves the page (its
+  `rw_mode` cookie (one year, scoped to the app's mount: `path=` its
+  `base_path`, or `/`); the server then serves the page (its
   first paint included: one capsule per mode, built at startup) and starts the
-  connection in that mode. The mode a page starts in is never written, so an
+  connection in that mode. The page response carries `Vary: Accept-Encoding,
+  Cookie`. The mode a page starts in is never written, so an
   app's default stays the app's to change.
 - **Breaking:** `ThemeMode` gains a `System` variant, and `ThemeToggleMode` too:
   an exhaustive `match` on either needs an arm (`.mode(theme.mode.into())`

@@ -233,12 +233,13 @@ impl ThemeToggle {
         ]
     }
 
-    fn size_token(&self) -> St {
+    fn size_tokens(&self) -> Vec<St> {
         match self.size {
-            ToggleSize::Sm => St::PXs,
-            // The theme's density sizes the default toggle (`--Qzq`, `--Qzi`).
-            ToggleSize::Md => St::PadIconToggle,
-            ToggleSize::Lg => St::PSp3,
+            ToggleSize::Sm => vec![St::PXs],
+            // The theme's density sizes the default toggle (`--Qzq`, `--Qzi`),
+            // inline and block apart so a caller's `PxMd` overrides one whole.
+            ToggleSize::Md => vec![St::PxIconToggle, St::PyIconToggle],
+            ToggleSize::Lg => vec![St::PSp3],
         }
     }
 
@@ -259,7 +260,7 @@ impl ThemeToggle {
     pub fn build(self) -> ElementBuilder {
         let icon_el = self.render_icon();
         let mut tokens = self.compute_tokens();
-        tokens.push(self.size_token());
+        tokens.extend(self.size_tokens());
         if self.size == ToggleSize::Md {
             tokens.push(St::SqIconToggle);
         }
@@ -384,12 +385,16 @@ mod tests {
         let btn = ThemeToggle::new().build();
         let utils = btn.get_style_utils();
         assert!(utils.contains(&St::SqIconToggle.as_u16()));
-        assert!(utils.contains(&St::PadIconToggle.as_u16()));
+        assert!(utils.contains(&St::PxIconToggle.as_u16()));
+        assert!(utils.contains(&St::PyIconToggle.as_u16()));
         assert!(btn.children()[0]
             .get_style_utils()
             .contains(&St::GlyphIconToggle.as_u16()));
         // Comfortable fallbacks: 8 px padding around a 24 px glyph, as before.
-        assert_eq!(St::PadIconToggle.css(), "padding:var(--Qzq,var(--S2))");
+        assert_eq!(
+            St::PxIconToggle.css(),
+            "padding-inline:var(--Qzq,var(--S2))"
+        );
         assert_eq!(
             St::GlyphIconToggle.css(),
             "width:var(--Qzg,24px);height:var(--Qzg,24px)"

@@ -246,9 +246,15 @@ async fn text_responses_are_gzipped_when_accepted() {
     let plain = get(19188, "/", "").await;
     let packed = get(19188, "/", GZIP).await;
     assert_eq!(header(&plain, "content-encoding"), None);
-    assert_eq!(header(&plain, "vary").as_deref(), Some("Accept-Encoding"));
+    assert_eq!(
+        header(&plain, "vary").as_deref(),
+        Some("Accept-Encoding, Cookie")
+    );
     assert_eq!(header(&packed, "content-encoding").as_deref(), Some("gzip"));
-    assert_eq!(header(&packed, "vary").as_deref(), Some("Accept-Encoding"));
+    assert_eq!(
+        header(&packed, "vary").as_deref(),
+        Some("Accept-Encoding, Cookie")
+    );
     assert_eq!(gunzip(body(&packed)), body(&plain));
     eprintln!(
         "capsule: {} bytes plain, {} gzipped",

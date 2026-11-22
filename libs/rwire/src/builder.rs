@@ -1143,7 +1143,9 @@ impl ElementBuilder {
         }
 
         let mut classes: Vec<String> = Vec::new();
-        if let Some(c) = &self.class {
+        // A region's own `.class()` and attributes are not applied (the live
+        // wrapper never gets them, see `emit_wrapper_styles`); its tokens are.
+        if let Some(c) = self.class.as_ref().filter(|_| !region) {
             if !c.is_empty() {
                 classes.push(c.clone());
             }
@@ -1167,7 +1169,12 @@ impl ElementBuilder {
             out.push('"');
         }
 
-        for (key, value) in &self.attrs {
+        let (attrs, typed_attrs): (&[_], &[_]) = if region {
+            (&[], &[])
+        } else {
+            (&self.attrs, &self.typed_attrs)
+        };
+        for (key, value) in attrs {
             // Like the runtime: no `javascript:` (or other executable) URL.
             if crate::url_safety::is_executable_attr(key, value) {
                 continue;
@@ -1178,7 +1185,7 @@ impl ElementBuilder {
             push_attr_escaped(out, value);
             out.push('"');
         }
-        for ta in &self.typed_attrs {
+        for ta in typed_attrs {
             match ta {
                 TypedAttr::Enum(at, av) => {
                     out.push(' ');
@@ -2585,9 +2592,7 @@ impl BuildContext {
                 let ref_idx = self.buf.create_synced(synced_id);
                 // The synced element's own style tokens land on the wrapper —
                 // regions can be flex items (`render_x().st([St::Flex1, ...])`).
-                if !el.style_utils.is_empty() {
-                    self.buf.style_multi(ref_idx, &el.style_utils);
-                }
+                emit_wrapper_styles(&mut self.buf, ref_idx, el);
 
                 // Emit the rendered content as a child, tagging nested regions with this
                 // region as their parent.
@@ -2744,9 +2749,7 @@ impl BuildContext {
                 self.synced_hashes
                     .insert(synced_id, rendered.content_hash());
                 let ref_idx = self.buf.create_synced(synced_id);
-                if !el.style_utils.is_empty() {
-                    self.buf.style_multi(ref_idx, &el.style_utils);
-                }
+                emit_wrapper_styles(&mut self.buf, ref_idx, el);
                 let saved_parent = self.current_synced_parent;
                 self.current_synced_parent = Some(synced_id);
                 self.emit_element_multi(&rendered, Some(ref_idx));
@@ -3471,6 +3474,21 @@ fn wire_handler_id(spec: &HandlerSpec, handler: &HandlerFn) -> u32 {
     }
 }
 
+/// A region wrapper's own styles: its tokens, pseudo-classes and breakpoints
+/// (`render_x().st([St::Flex1]).md([…])`). Its `.class()` and attributes are
+/// not applied, live or static: a region's wrapper is the framework's.
+fn emit_wrapper_styles(buf: &mut OpcodeBuffer, wrapper: u32, el: &ElementBuilder) {
+    if !el.style_utils.is_empty() {
+        buf.style_multi(wrapper, &el.style_utils);
+    }
+    for (pc_code, st_codes) in &el.pseudo_groups {
+        buf.style_pseudo(wrapper, *pc_code, st_codes);
+    }
+    for (bp_code, st_codes) in &el.breakpoint_groups {
+        buf.style_breakpoint(wrapper, *bp_code, st_codes);
+    }
+}
+
 /// Emit an element and its children during a synced update.
 ///
 /// This creates new DOM elements and appends them to the parent.
@@ -3536,9 +3554,7 @@ fn emit_update_element(
         });
 
         let wrapper_ref = buf.create_synced(synced_id);
-        if !el.style_utils.is_empty() {
-            buf.style_multi(wrapper_ref, &el.style_utils);
-        }
+        emit_wrapper_styles(buf, wrapper_ref, el);
 
         if is_existing {
             // The region already exists on the client. Emit ONLY the wrapper as a

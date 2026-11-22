@@ -478,11 +478,11 @@ impl CapsuleConfig {
         );
         let family: String = family
             .chars()
-            .filter(|c| !matches!(c, '\'' | ';' | '{' | '}'))
+            .filter(|c| !matches!(c, '\'' | '\\' | '<' | ';' | '{' | '}') && !c.is_control())
             .collect();
         let path: String = path
             .chars()
-            .filter(|c| !matches!(c, '\'' | ')' | ';' | '{' | '}'))
+            .filter(|c| !matches!(c, '\'' | '\\' | '<' | ')' | ';' | '{' | '}') && !c.is_control())
             .collect();
         self.fonts.push(FontFace {
             family,
@@ -1006,6 +1006,17 @@ mod tests {
             mounted.contains("url('/preview/x/fonts/inter.woff2')"),
             "{mounted}"
         );
+    }
+
+    #[test]
+    fn font_face_drops_characters_that_could_break_out() {
+        let css = generate_capsule_css(&CapsuleConfig::new().font_face(
+            "In\\ter</style>\n",
+            400..=400,
+            "/fonts/a\\b<c\u{7}.woff2",
+        ));
+        assert!(css.contains("font-family:'Inter/style>'"), "{css}");
+        assert!(css.contains("url('/fonts/abc.woff2')"), "{css}");
     }
 
     #[test]

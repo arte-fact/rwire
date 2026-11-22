@@ -32,7 +32,8 @@ let tm: string | undefined; // the theme mode last seen this visit
  *  an app's own default stays the app's to change. */
 export function km(m: string | undefined): void {
   if (m) {
-    if (tm && m != tm) document.cookie = "rw_mode=" + m + ";path=/;max-age=31536000";
+    // Scoped to the app's mount: apps under other base paths keep their own.
+    if (tm && m != tm) document.cookie = "rw_mode=" + m + ";path=" + (BASE || "/") + ";max-age=31536000";
     tm = m;
   }
 }

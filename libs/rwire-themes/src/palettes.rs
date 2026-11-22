@@ -52,7 +52,8 @@ pub fn nord() -> ColorPalette {
         .map(String::from)
         .to_vec(),
         // The inks of the old mcp-agents front (/app): runtimes claude, vibe, pi,
-        // then its "wait" and "permission" inks.
+        // then its "wait" and "permission" inks. The sixth (cyan) has none in
+        // /app: its ink is derived from the color.
         categorical_inks: [
             ("#3b5a7f", "#88C0D0"),
             ("#6b4a66", "#cdb0c8"),
