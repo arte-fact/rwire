@@ -79,7 +79,10 @@ struct DesignSystemState {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::default().palette(palettes::nord())
+    // Follows the OS until the visitor picks a mode (the 3-state toggle in the header).
+    Theme::default()
+        .mode(ThemeMode::System)
+        .palette(palettes::nord())
 }
 
 #[tokio::main]
@@ -294,10 +297,7 @@ fn build_header() -> ElementBuilder {
 #[renderer]
 fn render_theme_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(match theme.mode {
-            ThemeMode::Light => ThemeToggleMode::Light,
-            ThemeMode::Dark => ThemeToggleMode::Dark,
-        })
+        .mode(theme.mode.into())
         .on_toggle(toggle_theme())
         .build()
 }
@@ -1123,7 +1123,8 @@ fn set_text_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
 
 #[handler]
 fn toggle_theme(theme: &mut Theme) {
-    theme.mode = theme.mode.toggle();
+    // Three states: follow the OS, then force light, then dark.
+    theme.mode = theme.mode.cycle();
 }
 
 #[handler]

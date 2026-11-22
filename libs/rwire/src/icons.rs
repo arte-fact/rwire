@@ -67,6 +67,8 @@ pub enum Icon {
     // Theme
     Sun,
     Moon,
+    /// A screen: "follow the system" (theme toggles).
+    Monitor,
 
     // Media
     Play,
@@ -187,6 +189,7 @@ impl Icon {
             // Theme
             Icon::Sun => "M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
             Icon::Moon => "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
+            Icon::Monitor => "M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 20h8M12 16v4",
 
             // Media
             Icon::Play => "M5 3l14 9-14 9V3z",
@@ -429,6 +432,7 @@ mod tests {
             Icon::CheckCircle,
             Icon::Sun,
             Icon::Moon,
+            Icon::Monitor,
             Icon::Play,
             Icon::Pause,
             Icon::Settings,

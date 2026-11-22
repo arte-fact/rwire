@@ -1,6 +1,9 @@
-//! ThemeToggle component for switching between light and dark themes.
+//! ThemeToggle component for switching between light and dark themes, or
+//! following the operating system.
 //!
-//! This component renders a button that toggles between light and dark themes.
+//! This component renders a button that toggles between light and dark themes,
+//! or cycles through three states (system → light → dark) with
+//! [`ThemeToggleMode::System`] and [`ThemeMode::cycle`](rwire::theme::ThemeMode::cycle).
 //! It mutates the framework-provided `Theme` state, which reactively updates
 //! CSS variables via the synced element system.
 //!
@@ -25,6 +28,27 @@
 //!     theme.mode = theme.mode.toggle();
 //! }
 //! ```
+//!
+//! # Three states (follow the OS, or force light or dark)
+//!
+//! ```ignore
+//! use rwire::{handler, renderer, theme::ThemeMode, Theme};
+//!
+//! #[renderer]
+//! fn theme_button(theme: &Theme) -> ElementBuilder {
+//!     ThemeToggle::new()
+//!         .mode(theme.mode.into()) // Light, Dark or System
+//!         .on_toggle(cycle_theme())
+//!         .build()
+//! }
+//!
+//! #[handler]
+//! fn cycle_theme(theme: &mut Theme) {
+//!     theme.mode = theme.mode.cycle(); // system → light → dark → system
+//! }
+//! ```
+//!
+//! The mode picked survives a reload (the runtime keeps it in a cookie).
 
 use rwire::attr_tokens::{At, Av};
 use rwire::style_tokens::St;
@@ -43,11 +67,36 @@ pub struct ThemeToggle {
     current_mode: ThemeToggleMode,
 }
 
-/// Display mode for the toggle icon.
+/// The current mode, shown by the toggle's icon: a moon in light mode (click
+/// for dark), a sun in dark mode, a screen when following the system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeToggleMode {
     Light,
     Dark,
+    /// Following the OS (`prefers-color-scheme`): the third state.
+    System,
+}
+
+impl From<rwire::theme::ThemeMode> for ThemeToggleMode {
+    fn from(mode: rwire::theme::ThemeMode) -> Self {
+        use rwire::theme::ThemeMode;
+        match mode {
+            ThemeMode::Light => Self::Light,
+            ThemeMode::Dark => Self::Dark,
+            ThemeMode::System => Self::System,
+        }
+    }
+}
+
+impl ThemeToggleMode {
+    /// The tooltip naming the current mode.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Light => "Theme: light",
+            Self::Dark => "Theme: dark",
+            Self::System => "Theme: follows the system",
+        }
+    }
 }
 
 impl Default for ThemeToggle {
@@ -128,6 +177,7 @@ impl ThemeToggle {
         match self.current_mode {
             ThemeToggleMode::Light => icon(Icon::Moon),
             ThemeToggleMode::Dark => icon(Icon::Sun),
+            ThemeToggleMode::System => icon(Icon::Monitor),
         }
     }
 
@@ -144,6 +194,7 @@ impl ThemeToggle {
             .active([St::Scale98])
             .at(At::Type, Av::Button)
             .at_str(At::AriaLabel, "Toggle theme")
+            .attr("title", self.current_mode.title())
             .append([icon_el]);
 
         if let Some(handler) = self.on_toggle {
@@ -189,6 +240,32 @@ mod tests {
         assert!(groups.iter().any(|(pc, _)| *pc == 0x00)); // Pc::Hover
         assert!(groups.iter().any(|(pc, _)| *pc == 0x02)); // Pc::FocusVisible
         assert!(groups.iter().any(|(pc, _)| *pc == 0x03)); // Pc::Active
+    }
+
+    #[test]
+    fn the_third_state_follows_the_system() {
+        use rwire::theme::ThemeMode;
+        assert_eq!(
+            ThemeToggleMode::from(ThemeMode::System),
+            ThemeToggleMode::System
+        );
+        assert_eq!(
+            ThemeToggleMode::from(ThemeMode::Dark),
+            ThemeToggleMode::Dark
+        );
+        let html = ThemeToggle::new()
+            .mode(ThemeToggleMode::System)
+            .build()
+            .to_static_html();
+        assert!(
+            html.contains("title=\"Theme: follows the system\""),
+            "{html}"
+        );
+        assert!(html.contains("aria-label=\"Toggle theme\""), "{html}");
+        // Each state has its own icon.
+        let svg = |m| ThemeToggle::new().mode(m).build().to_static_html();
+        assert_ne!(svg(ThemeToggleMode::System), svg(ThemeToggleMode::Light));
+        assert_ne!(svg(ThemeToggleMode::System), svg(ThemeToggleMode::Dark));
     }
 
     #[test]

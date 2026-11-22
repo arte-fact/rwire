@@ -346,10 +346,7 @@ fn render_search_input(state: &DocsState) -> ElementBuilder {
 #[renderer]
 fn render_theme_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(match theme.mode {
-            ThemeMode::Light => ThemeToggleMode::Light,
-            ThemeMode::Dark => ThemeToggleMode::Dark,
-        })
+        .mode(theme.mode.into())
         .on_toggle(toggle_theme())
         .build()
 }

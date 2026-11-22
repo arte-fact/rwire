@@ -24,28 +24,59 @@ use crate::protocol::El;
 use crate::state::{State, StorageType};
 use crate::tokens::ColorPalette;
 
-/// Theme mode (light or dark).
+/// Theme mode: light, dark, or following the operating system.
+///
+/// `Light` and `Dark` force a mode. `System` emits both: the light variables on
+/// `:root` and the dark ones under `@media (prefers-color-scheme: dark)`, so the
+/// page follows the OS setting live, without a round trip.
+///
+/// A mode the user picks (a handler setting `theme.mode`) survives a reload:
+/// the runtime keeps it in the `rw_mode` cookie, and the server starts the
+/// next page and connection in that mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ThemeMode {
     #[default]
     Light,
     Dark,
+    /// Follow `prefers-color-scheme`.
+    System,
 }
 
 impl ThemeMode {
-    /// Get the string representation.
+    /// Get the string representation (`light`, `dark`, `system`).
     pub fn as_str(&self) -> &'static str {
         match self {
             ThemeMode::Light => "light",
             ThemeMode::Dark => "dark",
+            ThemeMode::System => "system",
         }
     }
 
-    /// Toggle between light and dark mode.
+    /// Parse [`ThemeMode::as_str`]'s output.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "light" => Some(ThemeMode::Light),
+            "dark" => Some(ThemeMode::Dark),
+            "system" => Some(ThemeMode::System),
+            _ => None,
+        }
+    }
+
+    /// Toggle between light and dark mode (two-state toggles). `System`
+    /// toggles to `Light`.
     pub fn toggle(&self) -> Self {
         match self {
             ThemeMode::Light => ThemeMode::Dark,
-            ThemeMode::Dark => ThemeMode::Light,
+            ThemeMode::Dark | ThemeMode::System => ThemeMode::Light,
+        }
+    }
+
+    /// The next mode of a three-state toggle: System → Light → Dark → System.
+    pub fn cycle(&self) -> Self {
+        match self {
+            ThemeMode::System => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::System,
         }
     }
 }
@@ -292,6 +323,12 @@ impl Theme {
         }
     }
 
+    /// Set the mode: `Light` or `Dark` force it, `System` follows the OS.
+    pub fn mode(mut self, mode: ThemeMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     /// Set a full color palette.
     ///
     /// Accepts any type implementing [`IntoPalette`], including [`ColorPalette`]
@@ -431,7 +468,11 @@ impl ThemeProvider {
 /// Converts `Theme` state to a `<style>` element with CSS variable declarations.
 fn theme_renderer(theme: &Theme) -> ElementBuilder {
     let css = generate_theme_css(theme);
-    el(El::Style).text(&css)
+    // `data-rw-mode`: the runtime keeps a mode changed during the visit in the
+    // `rw_mode` cookie, so it survives a reload (see [`ThemeMode`]).
+    el(El::Style)
+        .attr("data-rw-mode", theme.mode.as_str())
+        .text(&css)
 }
 
 /// Create an `ElementBuilder` representing the theme synced region.
@@ -539,16 +580,48 @@ pub fn generate_base_css() -> &'static str {
 
 /// Generate complete theme CSS from a Theme value.
 ///
-/// Produces a single `:root{...}` block with all resolved CSS variables.
-/// Mode (light/dark) is resolved server-side: picks the right scale indices.
+/// Produces a `:root{...}` block with all resolved CSS variables for a forced
+/// mode (`Light`, `Dark`); for `System`, the light block followed by the dark
+/// one under `@media (prefers-color-scheme:dark)`.
+/// Mode is resolved server-side: picks the right scale indices.
 /// Style preset callbacks generate color overrides and Q-vars inline.
 /// No `data-theme`, `data-style`, or `data-radius` attribute selectors.
 pub fn generate_theme_css(theme: &Theme) -> String {
+    let mut css = match theme.mode {
+        ThemeMode::Light => root_block(theme, false),
+        ThemeMode::Dark => root_block(theme, true),
+        // Light on `:root`, dark when the OS asks for it: the browser switches
+        // live when the OS setting changes.
+        ThemeMode::System => {
+            let mut css = root_block(theme, false);
+            css.push_str("@media (prefers-color-scheme:dark){");
+            css.push_str(root_block(theme, true).trim_end());
+            css.push_str("}\n");
+            css
+        }
+    };
+    if let Some((mobile, desktop)) = theme.base_font {
+        use std::fmt::Write;
+        let _ = writeln!(
+            css,
+            "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
+        );
+    }
+    css
+}
+
+/// The `:root{…}` block of one resolved mode (`is_dark`), newline-terminated.
+/// It also sets `color-scheme`, so native controls and scrollbars follow.
+fn root_block(theme: &Theme, is_dark: bool) -> String {
     let rp = ResolvedPalette::new(theme);
-    let is_dark = theme.mode == ThemeMode::Dark;
     let mut css = String::with_capacity(2048);
 
     css.push_str(":root{");
+    css.push_str(if is_dark {
+        "color-scheme:dark;"
+    } else {
+        "color-scheme:light;"
+    });
 
     // --- Semantic color variables (mode-aware) ---
     if is_dark {
@@ -645,14 +718,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     }
 
     css.push_str("}\n");
-
-    if let Some((mobile, desktop)) = theme.base_font {
-        use std::fmt::Write;
-        let _ = writeln!(
-            css,
-            "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
-        );
-    }
     css
 }
 
@@ -972,6 +1037,63 @@ fn soft_q_css(css: &mut String, _is_dark: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E2 criterion: `System` emits the light block on `:root` and the dark one
+    /// under `prefers-color-scheme: dark`; `Light` and `Dark` force their mode.
+    #[test]
+    fn system_emits_both_modes_and_light_dark_force_one() {
+        let light = generate_theme_css(&Theme::light());
+        let dark = generate_theme_css(&Theme::dark());
+        let system = generate_theme_css(&Theme::new().mode(ThemeMode::System));
+
+        // Forced: one block, no media query, the mode's own colors.
+        for (css, scheme) in [(&light, "light"), (&dark, "dark")] {
+            assert!(!css.contains("prefers-color-scheme"), "{css}");
+            assert_eq!(css.matches(":root{").count(), 1, "{css}");
+            assert!(css.starts_with(&format!(":root{{color-scheme:{scheme};")));
+        }
+        assert_ne!(light, dark);
+
+        // System: exactly the light block, then the dark block in the media query.
+        let (head, tail) = system
+            .split_once("@media (prefers-color-scheme:dark){")
+            .expect("a dark media block");
+        assert_eq!(head, light, "the light block, unchanged, on :root");
+        let inner = tail
+            .trim_end()
+            .strip_suffix('}')
+            .expect("closed media block");
+        assert_eq!(inner, dark.trim_end(), "the dark block, unchanged");
+
+        // The base font size rule follows both blocks, once.
+        let sized =
+            generate_theme_css(&Theme::new().mode(ThemeMode::System).base_font_size(14, 15));
+        assert_eq!(sized.matches("html{font-size:14px}").count(), 1);
+        assert!(sized.rfind("html{font-size").unwrap() > sized.find("@media (prefers").unwrap());
+    }
+
+    #[test]
+    fn modes_cycle_parse_and_toggle() {
+        use ThemeMode::*;
+        assert_eq!(
+            [System.cycle(), Light.cycle(), Dark.cycle()],
+            [Light, Dark, System]
+        );
+        for m in [Light, Dark, System] {
+            assert_eq!(ThemeMode::parse(m.as_str()), Some(m));
+        }
+        assert_eq!(ThemeMode::parse("auto"), None);
+        assert_eq!(
+            [Light.toggle(), Dark.toggle(), System.toggle()],
+            [Dark, Light, Light]
+        );
+    }
+
+    #[test]
+    fn the_theme_style_names_its_mode() {
+        let html = theme_renderer(&Theme::new().mode(ThemeMode::System)).to_static_html();
+        assert!(html.starts_with("<style data-rw-mode=\"system\""), "{html}");
+    }
 
     #[test]
     fn flat_style_sets_the_mono_ui_font() {

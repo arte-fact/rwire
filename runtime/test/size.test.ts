@@ -17,8 +17,11 @@ import { gzipSync } from "node:zlib";
 // +40B gzip (2026-11-21): the attribute sanitizer refuses `vbscript:` and `data:` URLs
 // (images in `src` excepted) besides `javascript:`; it runs inside setAttribute, so it
 // cannot be lazy.
-const MAX_RAW = 20_500;
-const MAX_GZIP = 7_740;
+// +200B raw / +80B gzip (theme foundations, R1): a theme mode the user picks survives a
+// reload. After each batch the runtime keeps a changed `data-rw-mode` in the `rw_mode`
+// cookie; it must see every batch, so it cannot be lazy.
+const MAX_RAW = 20_700;
+const MAX_GZIP = 7_820;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;
