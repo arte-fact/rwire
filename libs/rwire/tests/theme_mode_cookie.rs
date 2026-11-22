@@ -77,5 +77,7 @@ async fn the_first_paint_is_in_the_mode_the_visitor_picked() {
     assert!(!light.contains("prefers-color-scheme"));
 
     // An unknown value is ignored.
-    assert!(page_with("rw_mode=sepia").await.contains("prefers-color-scheme"));
+    assert!(page_with("rw_mode=sepia")
+        .await
+        .contains("prefers-color-scheme"));
 }

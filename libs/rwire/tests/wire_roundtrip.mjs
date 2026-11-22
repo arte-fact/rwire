@@ -105,6 +105,7 @@ function makeDom() {
     },
     addEventListener() {},
     querySelectorAll: () => [],
+    querySelector: () => null,
     head_appended: [],
   };
   return { document, body, byId, attrNames };

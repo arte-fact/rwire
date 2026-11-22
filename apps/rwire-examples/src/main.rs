@@ -4,7 +4,7 @@
 
 use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::style_tokens::St;
-use rwire::theme::{Theme, ThemeMode, ThemeStyle};
+use rwire::theme::{Theme, ThemeStyle};
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Server, State};
 use rwire_components::*;
 use rwire_themes::{palettes, styles};
