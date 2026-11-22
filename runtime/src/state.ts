@@ -37,6 +37,8 @@ export const st = {
   K: {} as Record<number, string>,
   /** The lazily created <style> for STYLE_DEF rules. */
   DS: null as HTMLStyleElement | null,
+  /** The order of each rule in DS, in sheet order (STYLE_DEF inserts by it). */
+  DO: [] as number[],
   /** Morph staged by CLEAR_CHILDREN, flushed at fm(). */
   pm: null as PendingMorph | null,
   /** Told at every BATCH_END: a batch applied end to end (connect.ts resets its backoff on it). */

@@ -1246,7 +1246,8 @@ where
         let gated = self.auth.is_some() || self.delegated.is_some();
         // Generate capsule - styled if config provided, basic otherwise.
         // Also freeze PWA assets (manifest/sw/icons) keyed to the capsule's hash.
-        let (capsule, pwa_assets, ssr_exclude) = if let Some(config) = capsule_config {
+        let (capsule, mode_capsules, pwa_assets, ssr_exclude) = if let Some(config) = capsule_config
+        {
             // If theme provider is set, override config theme with initial theme
             let config = if let Some(ref theme) = initial_theme {
                 config.theme(theme.clone())
@@ -1284,6 +1285,26 @@ where
                 css.push_str(SSR_CSS_SLOT);
             }
             let capsule = capsule_gen::generate_styled_capsule(&config, &css);
+            // A mode the visitor picked (the `rw_mode` cookie, see `ThemeMode`) gets
+            // its own page, so the first paint is already in that mode.
+            let mode_capsules: Vec<(crate::theme::ThemeMode, String)> = if initial_theme.is_some() {
+                use crate::theme::ThemeMode;
+                [ThemeMode::Light, ThemeMode::Dark, ThemeMode::System]
+                    .into_iter()
+                    .filter(|m| *m != config.theme.mode)
+                    .map(|mode| {
+                        let mut alt = config.clone();
+                        alt.theme.mode = mode;
+                        let mut css = capsule_gen::generate_capsule_css(&alt);
+                        if alt.ssr {
+                            css.push_str(SSR_CSS_SLOT);
+                        }
+                        (mode, capsule_gen::generate_styled_capsule(&alt, &css))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
             // PWA: version the service-worker cache by the capsule's hash so a new
             // build invalidates the old shell. The head tags are already inlined.
@@ -1293,13 +1314,24 @@ where
                 capsule.hash(&mut h);
                 Arc::new(p.freeze_served(&config.theme, h.finish()))
             });
-            (capsule, pwa_assets, config.ssr_exclude)
+            (capsule, mode_capsules, pwa_assets, config.ssr_exclude)
         } else {
-            (capsule_gen::generate_capsule(), None, Vec::new())
+            (
+                capsule_gen::generate_capsule(),
+                Vec::new(),
+                None,
+                Vec::new(),
+            )
         };
 
         let capsule_size = capsule.len();
-        let capsule = Arc::new(Page::new(capsule, &ssr_exclude));
+        let capsule = Arc::new(Pages {
+            default: Page::new(capsule, &ssr_exclude),
+            modes: mode_capsules
+                .into_iter()
+                .map(|(mode, page)| (mode, Page::new(page, &ssr_exclude)))
+                .collect(),
+        });
         let composite_table = Arc::new(ctx.composite_table().clone());
 
         println!("Server listening on http://{}", self.addr);
@@ -1434,6 +1466,22 @@ enum Page {
         /// Routes served without the paint ([`CapsuleConfig::ssr_exclude`]).
         exclude: Vec<crate::router::RoutePattern>,
     },
+}
+
+/// The capsule page, plus one per other theme mode when the app has a theme
+/// (picked by the visitor's `rw_mode` cookie, see [`theme_in_visitor_mode`]).
+struct Pages {
+    default: Page,
+    modes: Vec<(crate::theme::ThemeMode, Page)>,
+}
+
+impl Pages {
+    /// The page whose theme CSS is in `theme`'s mode.
+    fn for_mode(&self, theme: Option<&crate::theme::Theme>) -> &Page {
+        theme
+            .and_then(|t| self.modes.iter().find(|(m, _)| *m == t.mode))
+            .map_or(&self.default, |(_, page)| page)
+    }
 }
 
 impl Page {
@@ -1715,6 +1763,28 @@ impl AuthGate {
 /// Constant-time byte equality (avoids leaking the credential via timing).
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// The cookie in which the runtime keeps a theme mode picked during a visit.
+pub(crate) const MODE_COOKIE: &str = "rw_mode";
+
+/// `initial_theme` in the mode of the request's [`MODE_COOKIE`], if it names one.
+fn theme_in_visitor_mode(
+    initial_theme: Option<Arc<crate::theme::Theme>>,
+    request: &str,
+) -> Option<Arc<crate::theme::Theme>> {
+    let theme = initial_theme?;
+    let picked = cookie_value(request, MODE_COOKIE)
+        .and_then(|v| crate::theme::ThemeMode::parse(&v))
+        .filter(|m| *m != theme.mode);
+    Some(match picked {
+        Some(mode) => {
+            let mut t = (*theme).clone();
+            t.mode = mode;
+            Arc::new(t)
+        }
+        None => theme,
+    })
 }
 
 /// Extract a cookie value by name from a raw HTTP request.
@@ -2111,7 +2181,7 @@ async fn handle_client<F>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     root: Arc<F>,
-    capsule: Arc<Page>,
+    capsule: Arc<Pages>,
     shared: Arc<SharedServerState>,
     route_handler: Option<Arc<HandlerFn>>,
     initial_theme: Option<Arc<crate::theme::Theme>>,
@@ -2137,6 +2207,11 @@ async fn handle_client<F>(
     };
 
     let peek_str = String::from_utf8_lossy(&peek_buf[..n]);
+
+    // The mode the visitor picked on an earlier visit (the `rw_mode` cookie the
+    // runtime keeps) replaces the app's initial mode, for the page and the
+    // connection alike.
+    let initial_theme = theme_in_visitor_mode(initial_theme, &peek_str);
 
     // Health/readiness probes: answered before auth and admission so load
     // balancers and orchestrators can reach them without a session and even
@@ -2568,7 +2643,7 @@ async fn handle_client<F>(
         // Rendered here, past the auth gates above: the static paint (and the shared
         // state in it) reaches exactly the visitors the live page would.
         let target = request_line(&peek_str).1;
-        let Some((status, page, gzip)) = capsule.render(
+        let Some((status, page, gzip)) = capsule.for_mode(initial_theme.as_deref()).render(
             root.as_ref(),
             &shared,
             target,
@@ -3913,6 +3988,63 @@ mod auth_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_visitor_mode_cookie_replaces_the_initial_mode() {
+        use crate::theme::{Theme, ThemeMode};
+        let app = Some(Arc::new(Theme::new().mode(ThemeMode::System)));
+        let req = |cookie: &str| format!("GET / HTTP/1.1\r\nHost: x\r\nCookie: {cookie}\r\n\r\n");
+        let mode = |t: Option<Arc<Theme>>| t.map(|t| t.mode);
+        assert_eq!(
+            mode(theme_in_visitor_mode(
+                app.clone(),
+                &req("sid=1; rw_mode=dark")
+            )),
+            Some(ThemeMode::Dark)
+        );
+        assert_eq!(
+            mode(theme_in_visitor_mode(app.clone(), &req("rw_mode=light"))),
+            Some(ThemeMode::Light)
+        );
+        // No cookie, or a value that names no mode: the app's mode.
+        assert_eq!(
+            mode(theme_in_visitor_mode(app.clone(), &req("sid=1"))),
+            Some(ThemeMode::System)
+        );
+        assert_eq!(
+            mode(theme_in_visitor_mode(app, &req("rw_mode=sepia"))),
+            Some(ThemeMode::System)
+        );
+        // No theme configured: nothing to switch.
+        assert!(theme_in_visitor_mode(None, &req("rw_mode=dark")).is_none());
+    }
+
+    #[test]
+    fn each_mode_gets_its_own_page() {
+        use crate::theme::{Theme, ThemeMode};
+        let pages = Pages {
+            default: Page::fixed("system".into()),
+            modes: vec![
+                (ThemeMode::Light, Page::fixed("light".into())),
+                (ThemeMode::Dark, Page::fixed("dark".into())),
+            ],
+        };
+        let html = |p: &Page| match p {
+            Page::Fixed { html, .. } => html.clone(),
+            _ => unreachable!(),
+        };
+        let theme = |m| Theme::new().mode(m);
+        assert_eq!(html(pages.for_mode(Some(&theme(ThemeMode::Dark)))), "dark");
+        assert_eq!(
+            html(pages.for_mode(Some(&theme(ThemeMode::Light)))),
+            "light"
+        );
+        assert_eq!(
+            html(pages.for_mode(Some(&theme(ThemeMode::System)))),
+            "system"
+        );
+        assert_eq!(html(pages.for_mode(None)), "system");
+    }
 
     /// A capsule whose gzip failed at startup is sent as it is, flagged as
     /// such, even to a client that takes gzip; with gzip, the packed one is.

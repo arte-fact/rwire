@@ -21,8 +21,17 @@
 //!     .size(ButtonSize::Sm)
 //!     .text("More options")
 //!     .disabled(true)
+//!     .title("Read-only preview")
 //!     .build()
 //! ```
+//!
+//! # Attributes go on the `Button`, not on what `on_click` returns
+//!
+//! `on_click` / `submit` wrap the button in an action-reflection region that has
+//! no box (`display:contents`). Set `title`, `data`, `aria_label`, `class`,
+//! `hover` or any other attribute (`attr`) on the `Button` **before** it: chained
+//! after, they would land on the wrapper and never show. Debug builds panic at
+//! such a call.
 
 use crate::tooltip::Tooltip;
 use rwire::attr_tokens::{At, Av};
@@ -68,6 +77,9 @@ pub struct Button {
     icon: Option<Icon>,
     text: Option<Cow<'static, str>>,
     aria_label: Option<Cow<'static, str>>,
+    title: Option<Cow<'static, str>>,
+    /// Other attributes for the button element (see [`Button::attr`]).
+    attrs: Vec<(String, String)>,
     disabled: bool,
     loading: bool,
     full_width: bool,
@@ -206,9 +218,29 @@ impl Button {
         self
     }
 
+    /// The native tooltip (`title`). It shows on a disabled button too, so it
+    /// is the place to say why the button is disabled.
+    pub fn title(mut self, title: impl Into<Cow<'static, str>>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Any other attribute, set on the button element itself (unlike an
+    /// `ElementBuilder::attr` chained after `on_click`, which would land on
+    /// the action-reflection wrapper).
+    pub fn attr(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.attrs.push((key.into(), value.into()));
+        self
+    }
+
     // ========================================================================
     // Token computation
     // ========================================================================
+
+    /// An icon and no text.
+    fn is_icon_only(&self) -> bool {
+        self.icon.is_some() && self.text.is_none()
+    }
 
     /// Icon edge length (px), scaled to the button size.
     fn icon_px(&self) -> u32 {
@@ -233,14 +265,16 @@ impl Button {
             St::CursorPointer,
             St::TransTheme,
             St::TextSm,
-            // Inherit the page font rather than the UA button default.
-            St::FontInheritAll,
         ];
 
         match self.intent {
             ButtonIntent::Primary => tokens.extend([St::BgPrimary, St::TextOnPrimary]),
             ButtonIntent::Secondary => {
                 tokens.extend([St::BgSecondary, St::TextOnSecondary, St::BorderDefault])
+            }
+            // An icon-only ghost rests on nothing, in the soft ink (a toolbar's icons).
+            ButtonIntent::Ghost if self.is_icon_only() => {
+                tokens.extend([St::BgTransparent, St::TextMuted, St::BorderGhost])
             }
             ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
             ButtonIntent::Outline => {
@@ -254,7 +288,11 @@ impl Button {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextXs, St::GapXs]);
             }
-            ButtonSize::Md => {} // defaults
+            // The theme's density sets the default size's text (`--Qzt`).
+            ButtonSize::Md => {
+                tokens.retain(|t| *t != St::TextSm);
+                tokens.push(St::TextControl);
+            }
             ButtonSize::Lg => {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextBase, St::GapMd]);
@@ -278,21 +316,27 @@ impl Button {
     fn apply_pseudo(&self, mut builder: ElementBuilder) -> ElementBuilder {
         builder = builder.focus_visible([St::RingTheme]);
 
-        builder = match self.intent {
-            ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
-            ButtonIntent::Secondary => builder.hover([St::BgSecondaryHover, St::BorderEmphasis]),
-            ButtonIntent::Ghost => builder.hover([St::BgHover]),
-            ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
-            ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
+        // A disabled button keeps its pointer events, so its tooltip shows (the
+        // `disabled` attribute already blocks the click); it gets no hover
+        // treatment instead.
+        builder = if self.disabled {
+            builder.disabled_style([St::Opacity50, St::CursorNotAllowed])
+        } else {
+            match self.intent {
+                ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
+                ButtonIntent::Secondary => {
+                    builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
+                }
+                // …and on hover takes the raised ground, the hairline and the ink.
+                ButtonIntent::Ghost if self.is_icon_only() => {
+                    builder.hover([St::BgSurfaceRaised, St::BorderDefault, St::TextDefault])
+                }
+                ButtonIntent::Ghost => builder.hover([St::BgHover]),
+                ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
+                ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
+            }
         };
 
-        if self.disabled {
-            builder = builder.disabled_style([
-                St::Opacity50,
-                St::CursorNotAllowed,
-                St::PointerEventsNone,
-            ]);
-        }
         if self.loading {
             builder = builder.after([
                 St::ContentEmpty,
@@ -321,7 +365,7 @@ impl Button {
         match self.size {
             ButtonSize::Xs => vec![St::H1_5rem, St::Py0, St::PxSm],
             ButtonSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSp3],
-            ButtonSize::Md => vec![St::H2_25rem, St::Py0, St::PxMd],
+            ButtonSize::Md => vec![St::HControl, St::Py0, St::PxMd],
             ButtonSize::Lg => vec![St::H2_75rem, St::Py0, St::PxLg],
         }
     }
@@ -344,9 +388,14 @@ impl Button {
             // the width to the height, centering the glyph.
             tokens.retain(|t| !matches!(t, St::PxSp3 | St::PxMd | St::PxLg));
             tokens.push(St::AspectSquare);
+            // At the default size the theme's density sizes the square (`--Qzi`).
+            if self.size == ButtonSize::Md {
+                tokens.retain(|t| *t != St::HControl);
+                tokens.push(St::SqIconButton);
+            }
         }
         let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
-        if !self.hover_extra.is_empty() {
+        if !self.hover_extra.is_empty() && !self.disabled {
             builder = builder.hover(self.hover_extra.clone());
         }
         for (key, value) in &self.data {
@@ -359,7 +408,11 @@ impl Button {
         let icon = self.icon.take();
         let text = self.text.take();
         if show_icon {
-            let icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            let mut icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            if icon_only && self.size == ButtonSize::Md {
+                // …and its glyph (`--Qzg`), 14 px otherwise.
+                icon_el = icon_el.st([St::GlyphIconButton]);
+            }
             builder = match text {
                 Some(t) => builder.append([icon_el, el(El::Span).text(&t)]),
                 None => builder.append([icon_el]),
@@ -376,6 +429,12 @@ impl Button {
 
         if let Some(label) = self.aria_label {
             builder = builder.at_str(At::AriaLabel, &label);
+        }
+        if let Some(title) = self.title {
+            builder = builder.at_str(At::Title, &title);
+        }
+        for (key, value) in &self.attrs {
+            builder = builder.attr(key, value);
         }
         if self.disabled {
             builder = builder.bool_attr(At::Disabled);
@@ -552,6 +611,60 @@ mod tests {
     }
 
     #[test]
+    fn a_disabled_button_keeps_its_tooltip_and_loses_its_hover() {
+        let btn = Button::primary("Merge")
+            .disabled(true)
+            .title("Read-only preview")
+            .build();
+        let html = btn.to_static_html();
+        assert!(html.contains("title=\"Read-only preview\""), "{html}");
+        assert!(html.contains("disabled"), "{html}");
+        let groups = btn.get_pseudo_groups();
+        let disabled = groups.iter().find(|(pc, _)| *pc == 0x04).unwrap();
+        // The tooltip needs pointer events: no pointer-events:none any more.
+        assert!(!disabled.1.contains(&St::PointerEventsNone.as_u16()));
+        assert!(disabled.1.contains(&St::CursorNotAllowed.as_u16()));
+        assert!(
+            !groups.iter().any(|(pc, _)| *pc == 0x00),
+            "no hover look on a disabled button"
+        );
+        // An enabled button still hovers.
+        let live = Button::primary("Merge").build();
+        assert!(live.get_pseudo_groups().iter().any(|(pc, _)| *pc == 0x00));
+    }
+
+    #[test]
+    fn title_and_attrs_reach_the_button_through_on_click() {
+        #[derive(Default)]
+        struct S;
+        impl rwire::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        let spec = HandlerSpec::memory::<S>(noop);
+        let html = Button::primary("Merge")
+            .title("Merge the branch")
+            .attr("data-testid", "merge")
+            .on_click(spec)
+            .to_static_html();
+        // The reflection wrapper renders the idle button inside it.
+        let button = &html[html.find("<button").unwrap()..];
+        assert!(button.contains("title=\"Merge the branch\""), "{html}");
+        assert!(button.contains("data-testid=\"merge\""), "{html}");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "which has no box")]
+    fn an_attribute_chained_after_on_click_fails_loudly() {
+        #[derive(Default)]
+        struct S;
+        impl rwire::MemoryState for S {}
+        fn noop(_: &mut S) {}
+        let _ = Button::primary("Merge")
+            .on_click(HandlerSpec::memory::<S>(noop))
+            .attr("title", "lost on the wrapper");
+    }
+
+    #[test]
     fn test_button_loading_tokens() {
         let btn = Button::primary("Save").loading(true);
         let tokens = btn.compute_tokens();
@@ -692,6 +805,61 @@ mod tests {
     }
 
     #[test]
+    fn a_ghost_icon_button_rests_on_nothing_and_raises_on_hover() {
+        let btn = Button::icon_only(Icon::Settings, "Settings")
+            .intent(ButtonIntent::Ghost)
+            .build();
+        let rest = btn.get_style_utils();
+        for st in [St::BgTransparent, St::TextMuted, St::BorderGhost] {
+            assert!(rest.contains(&st.as_u16()), "{st:?} at rest");
+        }
+        assert!(!rest.contains(&St::TextHigh.as_u16()));
+        let hover: Vec<u16> = btn
+            .get_pseudo_groups()
+            .iter()
+            .filter(|(pc, _)| *pc == 0x00)
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        for st in [St::BgSurfaceRaised, St::BorderDefault, St::TextDefault] {
+            assert!(hover.contains(&st.as_u16()), "{st:?} on hover");
+        }
+        // A ghost button with text is unchanged.
+        let text = Button::ghost("Cancel").build();
+        assert!(text.get_style_utils().contains(&St::TextHigh.as_u16()));
+        assert!(!text.get_style_utils().contains(&St::BorderGhost.as_u16()));
+        let hover: Vec<u16> = text
+            .get_pseudo_groups()
+            .iter()
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        assert!(hover.contains(&St::BgHover.as_u16()));
+        assert!(!hover.contains(&St::BgSurfaceRaised.as_u16()));
+    }
+
+    #[test]
+    fn an_icon_button_follows_the_density_hooks_at_the_default_size() {
+        let btn = Button::icon_only(Icon::Settings, "Settings").build();
+        let utils = btn.get_style_utils();
+        assert!(utils.contains(&St::SqIconButton.as_u16()));
+        assert!(
+            !utils.contains(&St::HControl.as_u16()),
+            "the square sets the height"
+        );
+        let glyph = btn.children()[0].get_style_utils();
+        assert!(glyph.contains(&St::GlyphIconButton.as_u16()));
+        // Other sizes, and buttons with text, keep their own dimensions.
+        let sm = Button::icon_only(Icon::Settings, "Settings")
+            .size(ButtonSize::Sm)
+            .build();
+        assert!(!sm.get_style_utils().contains(&St::SqIconButton.as_u16()));
+        let text = Button::primary("Save").icon(Icon::Check).build();
+        assert!(!text.get_style_utils().contains(&St::SqIconButton.as_u16()));
+        assert!(!text.children()[0]
+            .get_style_utils()
+            .contains(&St::GlyphIconButton.as_u16()));
+    }
+
+    #[test]
     fn test_loading_hides_icon() {
         // The spinner overlay replaces the icon, so it isn't rendered while loading. The label is
         // kept — in an invisible span, not textContent — so the button's footprint never shrinks
@@ -715,7 +883,7 @@ mod tests {
 
         let btn = Button::new().size(ButtonSize::Md);
         let tokens = btn.size_tokens();
-        assert_eq!(tokens, vec![St::H2_25rem, St::Py0, St::PxMd]);
+        assert_eq!(tokens, vec![St::HControl, St::Py0, St::PxMd]);
 
         let btn = Button::new().size(ButtonSize::Lg);
         let tokens = btn.size_tokens();

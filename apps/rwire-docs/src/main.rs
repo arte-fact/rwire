@@ -7,7 +7,7 @@ use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::icons::{icon, Icon};
 use rwire::router::Link;
 use rwire::style_tokens::St;
-use rwire::theme::{Theme, ThemeMode, ThemeStyle};
+use rwire::theme::{Theme, ThemeStyle};
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Ev, Server, State};
 use rwire_components::*;
 use rwire_markdown::{parse_markdown, DocPage, DocSite, TableOfContents};
@@ -346,10 +346,7 @@ fn render_search_input(state: &DocsState) -> ElementBuilder {
 #[renderer]
 fn render_theme_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(match theme.mode {
-            ThemeMode::Light => ThemeToggleMode::Light,
-            ThemeMode::Dark => ThemeToggleMode::Dark,
-        })
+        .mode(theme.mode.into())
         .on_toggle(toggle_theme())
         .build()
 }

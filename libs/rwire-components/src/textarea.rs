@@ -217,9 +217,9 @@ impl Textarea {
     /// Compute size-specific style tokens.
     fn size_tokens(&self) -> Vec<St> {
         match self.size {
-            TextareaSize::Sm => vec![St::PSm, St::MinH4rem, St::ResizeY, St::FontInheritAll],
-            TextareaSize::Md => vec![St::PSp3, St::MinH5rem, St::ResizeY, St::FontInheritAll],
-            TextareaSize::Lg => vec![St::PMd, St::MinH6rem, St::ResizeY, St::FontInheritAll],
+            TextareaSize::Sm => vec![St::PSm, St::MinH4rem, St::ResizeY],
+            TextareaSize::Md => vec![St::PSp3, St::MinH5rem, St::ResizeY],
+            TextareaSize::Lg => vec![St::PMd, St::MinH6rem, St::ResizeY],
         }
     }
 

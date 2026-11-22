@@ -45,6 +45,27 @@ pub fn nord() -> ColorPalette {
             "#FFFBF0", "#FFF5DC", "#FFECC4", "#FFE0A8", "#F5D08C", "#EBCB8B", "#D9B870", "#C7A55A",
             "#D08770", "#C47A64", "#A66A50", "#8A5A40",
         ]),
+        // Frost and Aurora as identities: blue, purple, teal, orange, yellow, cyan.
+        categorical: [
+            "#5E81AC", "#B48EAD", "#8FBCBB", "#D08770", "#EBCB8B", "#88C0D0",
+        ]
+        .map(String::from)
+        .to_vec(),
+        // The inks of the old mcp-agents front (/app): runtimes claude, vibe, pi,
+        // then its "wait" and "permission" inks. The sixth (cyan) has none in
+        // /app: its ink is derived from the color.
+        categorical_inks: [
+            ("#3b5a7f", "#88C0D0"),
+            ("#6b4a66", "#cdb0c8"),
+            ("#335b5a", "#8FBCBB"),
+            ("#9a5536", "#D08770"),
+            ("#866417", "#EBCB8B"),
+        ]
+        .map(|(l, d)| (l.to_string(), d.to_string()))
+        .to_vec(),
+        // Marks (a logotype, a decorative glyph) on the solid fills: nord6, as the
+        // old front's brand "m" on nord10.
+        categorical_on_solids: vec!["#ECEFF4".to_string(); 6],
     }
 }
 
@@ -74,6 +95,9 @@ pub fn catppuccin() -> ColorPalette {
             "#FFF8F0", "#FFF0DC", "#FFE4C0", "#FFD8A0", "#FFCC80", "#FFC060", "#F9E2AF", "#F5D48A",
             "#F1C665", "#EDB840", "#E9AA1B", "#E59C00",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -103,6 +127,9 @@ pub fn dracula() -> ColorPalette {
             "#FFFFF0", "#FFFFE0", "#FFFFC2", "#FFFFA4", "#FFFF86", "#FFFF68", "#F1FA8C", "#E0E878",
             "#CFD664", "#BEC450", "#ADB23C", "#9CA028",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -133,6 +160,9 @@ pub fn solarized() -> ColorPalette {
             "#FFF8F0", "#FFF0DC", "#FFE4C0", "#FFD8A0", "#FFCC80", "#FFC060", "#B58900", "#A67C00",
             "#976F00", "#886200", "#795500", "#6A4800",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -163,6 +193,9 @@ pub fn gruvbox() -> ColorPalette {
             "#FFF8E0", "#FFF0C0", "#FFE490", "#FFD860", "#FFCC40", "#F0C030", "#D79921", "#C88C18",
             "#B97F0F", "#AA7206", "#9B6500", "#8C5800",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -192,6 +225,9 @@ pub fn tokyo_night() -> ColorPalette {
             "#FFFFF0", "#FFFFE0", "#FFFFC4", "#FFFFA8", "#FFFF8C", "#FFEE70", "#E0AF68", "#D09E58",
             "#C08D48", "#B07C38", "#A06B28", "#905A18",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -222,6 +258,9 @@ pub fn rose_pine() -> ColorPalette {
             "#FFF8F0", "#FFF0E0", "#FFE4C0", "#FFD8A0", "#FFCC80", "#F0C060", "#F6C177", "#EAB567",
             "#DEA957", "#D29D47", "#C69137", "#BA8527",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -251,6 +290,9 @@ pub fn one_dark() -> ColorPalette {
             "#FFF8E8", "#FFF0D0", "#FFE4B0", "#FFD890", "#FFCC70", "#F0C060", "#E5C07B", "#D8B46C",
             "#CBA85D", "#BE9C4E", "#B1903F", "#A48430",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -280,6 +322,9 @@ pub fn indigo() -> ColorPalette {
             "#FFFBEB", "#FEF3C7", "#FDE68A", "#FCD34D", "#FBBF24", "#F59E0B", "#D97706", "#B45309",
             "#92400E", "#78350F", "#613010", "#4A2510",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 
@@ -386,6 +431,9 @@ pub fn cloth() -> ColorPalette {
             "#fff8e0", "#fff0c0", "#ffe490", "#ffd860", "#ffcc40", "#f0c030", "#d79921", "#c88c18",
             "#b97f0f", "#aa7206", "#9b6500", "#8c5800",
         ]),
+        categorical: Vec::new(),
+        categorical_inks: Vec::new(),
+        categorical_on_solids: Vec::new(),
     }
 }
 

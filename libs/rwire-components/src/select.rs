@@ -146,7 +146,6 @@ impl Select {
             St::TransTheme,
             St::BorderWTheme,
             St::AppearanceNone,
-            St::FontInheritAll,
         ];
         if self.invalid {
             tokens.push(St::BorderRed8);
@@ -157,7 +156,7 @@ impl Select {
     /// Build the select into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         let mut tokens = self.compute_tokens();
-        tokens.extend([St::H2_25rem, St::Py0, St::PxSp3]);
+        tokens.extend([St::HControl, St::Py0, St::PxSp3]);
         let mut select = el(El::Select)
             .st(tokens)
             .hover([St::BorderEmphasis])

@@ -21,7 +21,22 @@ let ot: ReturnType<typeof setTimeout>; // overlay delay timer
 // parse error escalates to the reload below instead of looping forever.
 st.onBatch = () => {
   rc = 0;
+  km((document.querySelector("[data-rw-mode]") as HTMLElement | null)?.dataset.rwMode);
 };
+
+let tm: string | undefined; // the theme mode last seen this visit
+
+/** Keep a theme mode changed during the visit (the theme `<style>`'s
+ *  `data-rw-mode`) in the `rw_mode` cookie: the server starts the next page
+ *  and connection in it. The mode the page started in is never written, so
+ *  an app's own default stays the app's to change. */
+export function km(m: string | undefined): void {
+  if (m) {
+    // Scoped to the app's mount: apps under other base paths keep their own.
+    if (tm && m != tm) document.cookie = "rw_mode=" + m + ";path=" + (BASE || "/") + ";max-age=31536000";
+    tm = m;
+  }
+}
 
 /** Strip the BASE mount prefix: browser path → server route. */
 export function bx(p: string): string {

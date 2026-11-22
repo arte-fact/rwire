@@ -199,7 +199,7 @@ pub use tabs::{Tab, Tabs};
 pub use tag::{Tag, TagIntent};
 pub use text::{Text, TextColor, TextVariant};
 pub use textarea::Textarea;
-pub use theme_toggle::{ThemeToggle, ThemeToggleMode, ToggleSize};
+pub use theme_toggle::{ThemeToggle, ThemeToggleLabels, ThemeToggleMode, ToggleSize};
 pub use timeline::{Timeline, TimelineItem};
 pub use toast::{Toast, ToastContainer, ToastIntent};
 pub use tooltip::{Tooltip, TooltipPosition};

@@ -29,6 +29,14 @@ Theme::dark()
   already applies `font:inherit` to form controls).
 - Colours only via semantic tokens (`St::BgApp`, `St::TextMuted`, `St::BorderDefault`, …),
   never hex. The palette maps them.
+- **Subtle pairs are readable by construction.**
+  - In every built-in palette, style and mode, these reach 4.5:1:
+    - `TextWarning` / `TextSuccess` / `TextError`;
+    - the `TextOn*Subtle` tokens, on their `Bg*Subtle`;
+    - `TextDefault` / `TextHigh` on `BgAccentSubtle`.
+  - The theme computes these colours (`subtle_pairs` in theme.rs); `rwire-themes/tests/contrast.rs`
+    guards them.
+  - A custom palette gets the same treatment. Keep text on a `Bg*Subtle` to these tokens.
 
 ## 2. Components before markup
 
@@ -40,13 +48,15 @@ Theme::dark()
 |---|---|
 | a button of any kind | `Button::{primary,secondary,ghost,outline,destructive}(…)` — sizes `Xs` (24px dense chrome) to `Lg`; you get the focus-visible ring, hover/disabled/loading states, icon handling free |
 | an icon-only button | `Button::icon_only(icon, "Aria label")` — squares itself, carries the aria-label |
+| a disabled button that says why | `Button::…().disabled(true).title("why")`. The tooltip shows on the disabled button. Set `title`/`data`/`aria_label`/`class`/`hover`/`attr` on the `Button` **before** `on_click`: chained after, they land on the box-less reflection wrapper, and debug builds panic there |
 | a status chip / label | `Badge::new().intent(…)` + `.shape(BadgeShape::Square)` + `.fill(BadgeFill::Outline)` for the sharp outlined look |
 | a selectable filter / tab / view toggle | `Chip::new(label).active(bool).on_click(h)` — chain `.data(…)` for the payload |
 | a presence / activity dot | `StatusDot::new().intent(…).pulse(bool).label("running")` |
-| a chat input bar | `Composer::new().id(key).placeholder(…).on_submit(h)` — Enter submits, Shift+Enter newline; `.compact(true)` for inline bars |
+| a chat input bar | `Composer::new().id(key).placeholder(…).on_submit(h)` — Enter submits, Shift+Enter newline; `.compact(true)` for inline bars; `.disabled(reason)` for a read-only view (field + send disabled, the reason shown in the field and as tooltip) |
 | a chat / log scroll area | `ChatScroll::new(inner)` — see the trap in §5 |
 | an avatar with initials | `Avatar::new().name("Ada Lovelace")` — derives "AL" |
 | form fields | `Input::text()/email()/number()`, `Textarea`, `Select`, `Checkbox`, `Switch` — they take `name/placeholder/autocomplete/spellcheck/rows` as methods |
+| a plain server-handled form | `rwire::form::Form` + `Field::text/email/password/number/textarea/submit`. `.required()/.min_length()/.max_length()/.pattern()` become native constraints; `Field::textarea` carries a stable id (`field-<name>`), so typed text survives re-renders |
 | empty screens | `EmptyState::new().title(…).description(…).action(…)` |
 | overlays | `Modal`, `Drawer` (position, backdrop, on_close) |
 
@@ -176,9 +186,16 @@ Example: `examples/audio`; browser check: `runtime/e2e/audio-chrome.mjs`.
   exactly what `ChatScroll` encodes; use it.
 - **Width collapse**: a width-spanning child of a flex-*centered* parent needs `St::WFull`
   or it shrinks to content (~0 for empty divs).
-- **Class order ≠ specificity**: `u`-token classes apply in *stylesheet* (token-index) order,
-  not `.st()` call order — you cannot "override" one token with a later conflicting one.
-  Pick the right token instead of stacking.
+- **Stacking tokens**:
+  - A later `.st()` token **replaces** the earlier ones whose every property it sets again:
+    `.st([DisplayFlex])` then `.st([DisplayNone])` hides the element.
+  - A *partial* overlap keeps both, and the shared properties go to the higher token code. The
+    stylesheet is kept in code order on every page.
+    - `BorderNone` then `BorderB2Accent`: works.
+    - `FontInheritAll` then `TextXs`: the size is lost. A debug build prints
+      `rwire: st([TextXs]) loses font-size…` once per pair.
+  - Pick non-overlapping tokens.
+  - Don't put `FontInheritAll` on form controls: the base reset already applies it.
 - **Shared-state renderers inside memory-state renderers** don't receive the shared cache —
   keep shared (`App`) renderers nested under shared parents.
 - **`#[derive(State)]` field ceiling is 64** per struct — split view models out (re-export

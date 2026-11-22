@@ -35,6 +35,10 @@ pub enum Icon {
     ArrowDown,
     Menu,
     Close,
+    Stop,
+    PanelLeft,
+    PanelRight,
+    SidebarCollapse,
 
     // Actions
     Check,
@@ -67,6 +71,8 @@ pub enum Icon {
     // Theme
     Sun,
     Moon,
+    /// A screen: "follow the system" (theme toggles).
+    Monitor,
 
     // Media
     Play,
@@ -155,6 +161,10 @@ impl Icon {
             Icon::ArrowDown => "M12 5v14M19 12l-7 7-7-7",
             Icon::Menu => "M3 12h18M3 6h18M3 18h18",
             Icon::Close => "M18 6L6 18M6 6l12 12",
+            Icon::Stop => "M5 5h14v14H5z",
+            Icon::PanelLeft => "M3 3h18v18H3z M9 3v18",
+            Icon::PanelRight => "M3 3h18v18H3z M15 3v18",
+            Icon::SidebarCollapse => "M3 3h18v18H3z M15 3v18 M12 12H7 M10 9l-3 3 3 3",
 
             // Actions
             Icon::Check => "M20 6L9 17l-5-5",
@@ -187,6 +197,7 @@ impl Icon {
             // Theme
             Icon::Sun => "M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
             Icon::Moon => "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
+            Icon::Monitor => "M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 20h8M12 16v4",
 
             // Media
             Icon::Play => "M5 3l14 9-14 9V3z",
@@ -403,6 +414,10 @@ mod tests {
             Icon::ArrowDown,
             Icon::Menu,
             Icon::Close,
+            Icon::Stop,
+            Icon::PanelLeft,
+            Icon::PanelRight,
+            Icon::SidebarCollapse,
             Icon::Check,
             Icon::Plus,
             Icon::FilePlus,
@@ -429,6 +444,7 @@ mod tests {
             Icon::CheckCircle,
             Icon::Sun,
             Icon::Moon,
+            Icon::Monitor,
             Icon::Play,
             Icon::Pause,
             Icon::Settings,
@@ -500,5 +516,36 @@ mod tests {
 
         let builder = icon_sized(Icon::Menu, 48);
         drop(builder);
+    }
+
+    #[test]
+    fn stop_icon_renders_a_square() {
+        let html = icon(Icon::Stop).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(html.contains("d=\"M5 5h14v14H5z\""), "{html}");
+    }
+
+    #[test]
+    fn panel_left_icon_renders_a_left_panel() {
+        let html = icon(Icon::PanelLeft).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(html.contains("d=\"M3 3h18v18H3z M9 3v18\""), "{html}");
+    }
+
+    #[test]
+    fn panel_right_icon_renders_a_right_panel() {
+        let html = icon(Icon::PanelRight).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(html.contains("d=\"M3 3h18v18H3z M15 3v18\""), "{html}");
+    }
+
+    #[test]
+    fn sidebar_collapse_icon_renders_a_collapse_arrow() {
+        let html = icon(Icon::SidebarCollapse).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(
+            html.contains("d=\"M3 3h18v18H3z M15 3v18 M12 12H7 M10 9l-3 3 3 3\""),
+            "{html}"
+        );
     }
 }

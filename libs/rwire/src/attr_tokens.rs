@@ -98,6 +98,7 @@ define_token_enum! {
         PreserveAspectRatio = 0x60 => "preserveAspectRatio",
         VectorEffect = 0x61 => "vector-effect",
         Open = 0x4A => "open",
+        Title = 0x62 => "title",
     }
 }
 

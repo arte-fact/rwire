@@ -239,9 +239,9 @@ define_token_enum! {
         TextHigh = 0xC9 => "color:var(--l)",
         TextMuted = 0xCA => "color:var(--j)",
         TextOnAccent = 0xCB => "color:var(--m)",
-        TextSuccess = 0xCC => "color:var(--o)",
-        TextWarning = 0xCD => "color:var(--p)",
-        TextError = 0xCE => "color:var(--q)",
+        TextSuccess = 0xCC => "color:var(--o3)",
+        TextWarning = 0xCD => "color:var(--p3)",
+        TextError = 0xCE => "color:var(--q3)",
         TextAccent = 0xCF => "color:var(--n11)",
 
         // Border - Semantic (0xD0-0xD7)
@@ -734,7 +734,7 @@ define_token_enum! {
 
         // Sidebar/TOC navigation (0x2D0-0x2D3)
         TextXsMuted = 0x2D0 => "font-size:var(--T1);color:var(--j)",
-        BgAccentSubtle = 0x2D1 => "background:var(--n3)",
+        BgAccentSubtle = 0x2D1 => "background:var(--n0)",
         TextAccent12 = 0x2D2 => "color:var(--n12)",
         PlMdIndent = 0x2D3 => "padding-left:var(--S6)",
 
@@ -1061,10 +1061,299 @@ define_token_enum! {
         /// the cascade. Pair with a width (`Border2`) + `RoundedFull` + `AnimateSpinFast`; the
         /// element must keep a live `color` (hide a label with `FontSize0`, not `TextTransparent`).
         SpinnerRingCurrent = 0x39A => "border-style:solid;border-color:currentColor;border-right-color:transparent",
+        /// The reading face the theme names in `--Qfr` (`Theme::fonts`): long-form
+        /// text such as a reply or an article; the body face otherwise.
+        FontRead = 0x3A0 => "font-family:var(--Qfr,inherit)",
+        /// The canvas: the sunken ground of a reading area (a conversation, a
+        /// document) under cards that stay `BgSurface`. Reads `--Qw`, the app
+        /// background unless the theme style remaps it (`studio` does).
+        BgCanvas = 0x3A1 => "background:var(--Qw)",
+        // Tones (0x3A2-0x3C2): the faint ink, the neutral tone pair and the six
+        // categorical tones (`--Yn…`, see `Tone`). Grounds pair with their ink at AA.
+        /// The faint ink, below `TextDefault` and `TextMuted`: still AA on the plain grounds.
+        TextFaint = 0x3A2 => "color:var(--j2)",
+        /// The neutral tone's ground (an idle state).
+        BgNeutralSubtle = 0x3A3 => "background:var(--Y0g)",
+        /// The neutral tone's ink, readable on its ground and the plain grounds.
+        TextNeutral = 0x3A4 => "color:var(--Y0i)",
+        /// Categorical color 1 as a solid fill (`Tone::Cat(1)`).
+        BgCat1 = 0x3A5 => "background:var(--Y1)",
+        /// Categorical color 1: tinted ground.
+        BgCat1Subtle = 0x3A6 => "background:var(--Y1g)",
+        /// Categorical color 1: ink, readable on its ground and the plain grounds.
+        TextCat1 = 0x3A7 => "color:var(--Y1i)",
+        /// Text on categorical color 1's solid fill.
+        TextOnCat1 = 0x3A8 => "color:var(--Y1o)",
+        /// A 1px border in categorical color 1's ink (an outlined badge).
+        BorderCat1 = 0x3A9 => "border:1px solid var(--Y1i)",
+        /// Categorical color 2 as a solid fill (`Tone::Cat(2)`).
+        BgCat2 = 0x3AA => "background:var(--Y2)",
+        /// Categorical color 2: tinted ground.
+        BgCat2Subtle = 0x3AB => "background:var(--Y2g)",
+        /// Categorical color 2: ink, readable on its ground and the plain grounds.
+        TextCat2 = 0x3AC => "color:var(--Y2i)",
+        /// Text on categorical color 2's solid fill.
+        TextOnCat2 = 0x3AD => "color:var(--Y2o)",
+        /// A 1px border in categorical color 2's ink (an outlined badge).
+        BorderCat2 = 0x3AE => "border:1px solid var(--Y2i)",
+        /// Categorical color 3 as a solid fill (`Tone::Cat(3)`).
+        BgCat3 = 0x3AF => "background:var(--Y3)",
+        /// Categorical color 3: tinted ground.
+        BgCat3Subtle = 0x3B0 => "background:var(--Y3g)",
+        /// Categorical color 3: ink, readable on its ground and the plain grounds.
+        TextCat3 = 0x3B1 => "color:var(--Y3i)",
+        /// Text on categorical color 3's solid fill.
+        TextOnCat3 = 0x3B2 => "color:var(--Y3o)",
+        /// A 1px border in categorical color 3's ink (an outlined badge).
+        BorderCat3 = 0x3B3 => "border:1px solid var(--Y3i)",
+        /// Categorical color 4 as a solid fill (`Tone::Cat(4)`).
+        BgCat4 = 0x3B4 => "background:var(--Y4)",
+        /// Categorical color 4: tinted ground.
+        BgCat4Subtle = 0x3B5 => "background:var(--Y4g)",
+        /// Categorical color 4: ink, readable on its ground and the plain grounds.
+        TextCat4 = 0x3B6 => "color:var(--Y4i)",
+        /// Text on categorical color 4's solid fill.
+        TextOnCat4 = 0x3B7 => "color:var(--Y4o)",
+        /// A 1px border in categorical color 4's ink (an outlined badge).
+        BorderCat4 = 0x3B8 => "border:1px solid var(--Y4i)",
+        /// Categorical color 5 as a solid fill (`Tone::Cat(5)`).
+        BgCat5 = 0x3B9 => "background:var(--Y5)",
+        /// Categorical color 5: tinted ground.
+        BgCat5Subtle = 0x3BA => "background:var(--Y5g)",
+        /// Categorical color 5: ink, readable on its ground and the plain grounds.
+        TextCat5 = 0x3BB => "color:var(--Y5i)",
+        /// Text on categorical color 5's solid fill.
+        TextOnCat5 = 0x3BC => "color:var(--Y5o)",
+        /// A 1px border in categorical color 5's ink (an outlined badge).
+        BorderCat5 = 0x3BD => "border:1px solid var(--Y5i)",
+        /// Categorical color 6 as a solid fill (`Tone::Cat(6)`).
+        BgCat6 = 0x3BE => "background:var(--Y6)",
+        /// Categorical color 6: tinted ground.
+        BgCat6Subtle = 0x3BF => "background:var(--Y6g)",
+        /// Categorical color 6: ink, readable on its ground and the plain grounds.
+        TextCat6 = 0x3C0 => "color:var(--Y6i)",
+        /// Text on categorical color 6's solid fill.
+        TextOnCat6 = 0x3C1 => "color:var(--Y6o)",
+        /// A 1px border in categorical color 6's ink (an outlined badge).
+        BorderCat6 = 0x3C2 => "border:1px solid var(--Y6i)",
+        // Density (0x3C3-0x3C7): control dimensions a theme's `Density` sets in
+        // `--Qz*`; the fallbacks are the comfortable sizes.
+        /// A control's height (`Button`/`Input`/`Select` at their default size).
+        HControl = 0x3C3 => "height:var(--Qzh,2.25rem)",
+        /// A control's text size.
+        TextControl = 0x3C4 => "font-size:var(--Qzt,var(--T2))",
+        /// A tab's vertical padding.
+        PyTab = 0x3C5 => "padding-block:var(--Qzy,var(--S3))",
+        /// A chip's inline padding (split from the block one, so a caller's
+        /// `PxMd` replaces it whole).
+        PxChip = 0x3C6 => "padding-inline:var(--Qzcx,var(--S2))",
+        /// A list row's padding (dense navigation lists).
+        PadRow = 0x3C7 => "padding:var(--Qzp,var(--S2) var(--S3))",
+        // Icon buttons (0x3C8-0x3CC): a square of `--Qzi` with a glyph of `--Qzg`
+        // under a dense theme (32 and 18 px); each fallback is the component's
+        // comfortable size.
+        /// `Button::icon_only` (default size): its square.
+        SqIconButton = 0x3C8 => "width:var(--Qzi,2.25rem);min-width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem);flex-shrink:0",
+        /// `Button::icon_only` (default size): its glyph.
+        GlyphIconButton = 0x3C9 => "width:var(--Qzg,14px);height:var(--Qzg,14px)",
+        /// `ThemeToggle` (default size): its square (its padding otherwise). The
+        /// min-width and flex-shrink keep it square in a crowded flex row.
+        SqIconToggle = 0x3CA => "width:var(--Qzi,auto);min-width:var(--Qzi,auto);height:var(--Qzi,auto);flex-shrink:0",
+        /// `ThemeToggle` (default size): its inline padding.
+        PxIconToggle = 0x3CB => "padding-inline:var(--Qzq,var(--S2))",
+        /// `ThemeToggle` (default size): its glyph.
+        GlyphIconToggle = 0x3CC => "width:var(--Qzg,24px);height:var(--Qzg,24px)",
+        /// A mark on categorical color 1's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat1`).
+        TextCat1Mark = 0x3CD => "color:var(--Y1m)",
+        /// A mark on categorical color 2's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat2`).
+        TextCat2Mark = 0x3CE => "color:var(--Y2m)",
+        /// A mark on categorical color 3's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat3`).
+        TextCat3Mark = 0x3CF => "color:var(--Y3m)",
+        /// A mark on categorical color 4's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat4`).
+        TextCat4Mark = 0x3D0 => "color:var(--Y4m)",
+        /// A mark on categorical color 5's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat5`).
+        TextCat5Mark = 0x3D1 => "color:var(--Y5m)",
+        /// A mark on categorical color 6's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat6`).
+        TextCat6Mark = 0x3D2 => "color:var(--Y6m)",
+        /// A 1px border, transparent: a ghost control's resting stroke, so its
+        /// hover border (`BorderDefault`) does not move it.
+        BorderGhost = 0x3D3 => "border:1px solid transparent",
+        /// A chip's block padding.
+        PyChip = 0x3D4 => "padding-block:var(--Qzcy,var(--S1))",
+        /// `ThemeToggle` (default size): its block padding.
+        PyIconToggle = 0x3D5 => "padding-block:var(--Qzq,var(--S2))",
     }
 }
 
+/// The longhand properties a CSS property sets: a shorthand expands to the
+/// longhands it resets (`padding` → the four sides), a longhand is itself.
+/// Logical pairs map to their physical sides (`padding-inline` → left and
+/// right): whatever the writing direction, the pair covers both.
+fn longhands_of(prop: &'static str, out: &mut Vec<&'static str>) {
+    const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
+    let expanded: &[&'static str] = match prop {
+        "padding" => &[
+            "padding-top",
+            "padding-right",
+            "padding-bottom",
+            "padding-left",
+        ],
+        "padding-inline" => &["padding-left", "padding-right"],
+        "padding-block" => &["padding-top", "padding-bottom"],
+        "margin" => &["margin-top", "margin-right", "margin-bottom", "margin-left"],
+        "margin-inline" => &["margin-left", "margin-right"],
+        "margin-block" => &["margin-top", "margin-bottom"],
+        "inset" => &SIDES,
+        "gap" => &["row-gap", "column-gap"],
+        "overflow" => &["overflow-x", "overflow-y"],
+        "flex" => &["flex-grow", "flex-shrink", "flex-basis"],
+        "flex-flow" => &["flex-direction", "flex-wrap"],
+        "place-items" => &["align-items", "justify-items"],
+        "place-content" => &["align-content", "justify-content"],
+        "place-self" => &["align-self", "justify-self"],
+        "grid-column" => &["grid-column-start", "grid-column-end"],
+        "grid-row" => &["grid-row-start", "grid-row-end"],
+        "border-radius" => &[
+            "border-top-left-radius",
+            "border-top-right-radius",
+            "border-bottom-right-radius",
+            "border-bottom-left-radius",
+        ],
+        "border" => &["border-top", "border-right", "border-bottom", "border-left"],
+        "border-width" => &[
+            "border-top-width",
+            "border-right-width",
+            "border-bottom-width",
+            "border-left-width",
+        ],
+        "border-style" => &[
+            "border-top-style",
+            "border-right-style",
+            "border-bottom-style",
+            "border-left-style",
+        ],
+        "border-color" => &[
+            "border-top-color",
+            "border-right-color",
+            "border-bottom-color",
+            "border-left-color",
+        ],
+        "border-top" => &["border-top-width", "border-top-style", "border-top-color"],
+        "border-right" => &[
+            "border-right-width",
+            "border-right-style",
+            "border-right-color",
+        ],
+        "border-bottom" => &[
+            "border-bottom-width",
+            "border-bottom-style",
+            "border-bottom-color",
+        ],
+        "border-left" => &[
+            "border-left-width",
+            "border-left-style",
+            "border-left-color",
+        ],
+        "outline" => &["outline-width", "outline-style", "outline-color"],
+        "background" => &[
+            "background-color",
+            "background-image",
+            "background-position",
+            "background-size",
+            "background-repeat",
+            "background-attachment",
+            "background-origin",
+            "background-clip",
+        ],
+        "text-decoration" => &[
+            "text-decoration-line",
+            "text-decoration-color",
+            "text-decoration-style",
+            "text-decoration-thickness",
+        ],
+        "list-style" => &["list-style-type", "list-style-position", "list-style-image"],
+        "font" => &[
+            "font-style",
+            "font-variant",
+            "font-weight",
+            "font-stretch",
+            "font-size",
+            "line-height",
+            "font-family",
+        ],
+        "font-variant" => &[
+            "font-variant-numeric",
+            "font-variant-caps",
+            "font-variant-ligatures",
+        ],
+        "animation" => &[
+            "animation-name",
+            "animation-duration",
+            "animation-timing-function",
+            "animation-delay",
+            "animation-iteration-count",
+            "animation-direction",
+            "animation-fill-mode",
+            "animation-play-state",
+        ],
+        "transition" => &[
+            "transition-property",
+            "transition-duration",
+            "transition-timing-function",
+            "transition-delay",
+        ],
+        _ => {
+            if !out.contains(&prop) {
+                out.push(prop);
+            }
+            return;
+        }
+    };
+    for p in expanded {
+        longhands_of(p, out);
+    }
+}
+
+/// The longhands a token's declarations set on its own element. A token
+/// carrying a nested rule (`&::…{…}`, `& > * + *{…}`) styles other boxes as
+/// well: it gets no set, so it is never treated as overriding or overridden.
+fn token_longhands(css: &'static str) -> Vec<&'static str> {
+    if css.contains('{') {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for decl in css.split(';') {
+        if let Some((prop, _)) = decl.split_once(':') {
+            longhands_of(prop.trim(), &mut out);
+        }
+    }
+    out
+}
+
 impl St {
+    /// The longhand CSS properties this token sets (shorthands expanded),
+    /// computed once per token. Empty for a token with nested rules.
+    pub fn longhands(self) -> &'static [&'static str] {
+        static TABLE: std::sync::OnceLock<std::collections::HashMap<u16, Vec<&'static str>>> =
+            std::sync::OnceLock::new();
+        TABLE
+            .get_or_init(|| {
+                UTIL_MAPPINGS
+                    .iter()
+                    .map(|&(code, css)| (code, token_longhands(css)))
+                    .collect()
+            })
+            .get(&self.as_u16())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// Check if this token fits in a single byte.
     pub fn is_single_byte(self) -> bool {
         (self as u16) <= 0xFF
@@ -1509,6 +1798,26 @@ pub enum StyleKey {
 }
 
 impl StyleKey {
+    /// Where this key's rule sits in the page's stylesheet, as a number the
+    /// runtime inserts by (`STYLE_DEF` carries it): utilities by code, then
+    /// pseudo-class rules, then responsive ones by breakpoint, whatever order
+    /// a connection meets them in. So when two rules of equal specificity
+    /// set the same property, the one with the higher code wins on every
+    /// page, and a breakpoint rule always comes after the base rules.
+    /// The same order as the derived `Ord`.
+    ///
+    /// It fits the wire's varint (at most 4 210 687): token codes stay below
+    /// 4096 (checked by a test), pseudo-classes start at 4096 and responsive
+    /// rules at 2^21.
+    pub fn sheet_order(self) -> u32 {
+        const SPAN: u32 = 1 << 12;
+        match self {
+            StyleKey::Util(st) => st as u32,
+            StyleKey::Pseudo(pc, st) => SPAN + (pc as u32) * SPAN + st as u32,
+            StyleKey::Breakpoint(bp, st) => (1 << 21) + (bp as u32) * SPAN + st as u32,
+        }
+    }
+
     /// Render this key as a complete CSS rule (selector + declaration), matching
     /// the bulk generators (`generate_utility_css`/`generate_pseudo_css`/
     /// `generate_breakpoint_css`). Returns `None` if the token has no declaration.

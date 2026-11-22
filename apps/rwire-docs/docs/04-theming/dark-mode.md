@@ -23,6 +23,30 @@ let theme = Theme::light();
 
 Pass the theme to the server with `.theme(...)` (typically from a `#[theme]` function).
 
+## Following the System
+
+`ThemeMode::System` follows the operating system's setting (`prefers-color-scheme`). The theme
+CSS then carries both modes, light on `:root` and dark under a media query, so the page switches
+live when the OS does, with no round trip:
+
+```rust
+let theme = Theme::new().mode(ThemeMode::System);
+```
+
+```css
+:root{color-scheme:light;--a:…;--k:…}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--a:…;--k:…}}
+```
+
+`Light` and `Dark` force a mode (only their block is emitted). A three-state toggle cycles with
+`theme.mode.cycle()` (system → light → dark → system) and shows the current state with
+`ThemeToggle::new().mode(theme.mode.into())`.
+
+**The user's pick survives a reload.** When a handler changes the mode during a visit, the
+runtime keeps the new mode in the `rw_mode` cookie, and the server starts the next page (its first
+paint included) and connection in that mode. The mode a page starts in is never written, so the
+app's own default stays the app's to change.
+
 ## How It Works
 
 The capsule's `<style>` contains a single `:root{}` block with the resolved color values for the
@@ -75,10 +99,7 @@ fn toggle_theme(theme: &mut Theme) {
 #[renderer]
 fn render_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(match theme.mode {
-            ThemeMode::Light => ThemeToggleMode::Light,
-            ThemeMode::Dark => ThemeToggleMode::Dark,
-        })
+        .mode(theme.mode.into())
         .on_toggle(toggle_theme())
         .build()
 }

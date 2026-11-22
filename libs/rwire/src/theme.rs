@@ -24,28 +24,59 @@ use crate::protocol::El;
 use crate::state::{State, StorageType};
 use crate::tokens::ColorPalette;
 
-/// Theme mode (light or dark).
+/// Theme mode: light, dark, or following the operating system.
+///
+/// `Light` and `Dark` force a mode. `System` emits both: the light variables on
+/// `:root` and the dark ones under `@media (prefers-color-scheme: dark)`, so the
+/// page follows the OS setting live, without a round trip.
+///
+/// A mode the user picks (a handler setting `theme.mode`) survives a reload:
+/// the runtime keeps it in the `rw_mode` cookie, and the server starts the
+/// next page and connection in that mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ThemeMode {
     #[default]
     Light,
     Dark,
+    /// Follow `prefers-color-scheme`.
+    System,
 }
 
 impl ThemeMode {
-    /// Get the string representation.
+    /// Get the string representation (`light`, `dark`, `system`).
     pub fn as_str(&self) -> &'static str {
         match self {
             ThemeMode::Light => "light",
             ThemeMode::Dark => "dark",
+            ThemeMode::System => "system",
         }
     }
 
-    /// Toggle between light and dark mode.
+    /// Parse [`ThemeMode::as_str`]'s output.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "light" => Some(ThemeMode::Light),
+            "dark" => Some(ThemeMode::Dark),
+            "system" => Some(ThemeMode::System),
+            _ => None,
+        }
+    }
+
+    /// Toggle between light and dark mode (two-state toggles). `System`
+    /// toggles to `Light`.
     pub fn toggle(&self) -> Self {
         match self {
             ThemeMode::Light => ThemeMode::Dark,
-            ThemeMode::Dark => ThemeMode::Light,
+            ThemeMode::Dark | ThemeMode::System => ThemeMode::Light,
+        }
+    }
+
+    /// The next mode of a three-state toggle: System → Light → Dark → System.
+    pub fn cycle(&self) -> Self {
+        match self {
+            ThemeMode::System => ThemeMode::Light,
+            ThemeMode::Light => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::System,
         }
     }
 }
@@ -249,6 +280,115 @@ pub struct Theme {
     palette: Option<ColorPalette>,
     /// Root font size in px below / from the `sm` breakpoint (see [`Theme::base_font_size`]).
     base_font: Option<(u8, u8)>,
+    /// Font stacks (see [`Theme::fonts`]).
+    fonts: Fonts,
+    /// Control and row dimensions (see [`Theme::density`]).
+    density: Density,
+    /// The viewport width below which controls get 44 px touch targets
+    /// (see [`Theme::touch_below`]); `None`: the `sm` breakpoint (640).
+    touch_below: Option<u16>,
+}
+
+/// How dense the controls and lists are, for a site or for a tool.
+///
+/// It sets the `--Qz*` hooks: control height (`--Qzh`, `St::HControl`), control
+/// text (`--Qzt`, `St::TextControl`), tab padding (`--Qzy`, `St::PyTab`), chip
+/// padding (`--Qzcx` / `--Qzcy`, `St::PxChip` / `St::PyChip`) and list-row padding (`--Qzp`,
+/// `St::PadRow`), icon buttons' square and glyph (`--Qzi`, `--Qzg`, `--Qzq`:
+/// `Button::icon_only` and `ThemeToggle`, 32 px with an 18 px glyph in
+/// `Compact`). `Button`, `Input`, `Select` (default size), `Chip`, `Tabs` and
+/// `ThemeToggle` read them. Whatever the density, interactive controls are at least
+/// 44 px under a coarse pointer or below the `sm` breakpoint (base CSS).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Density {
+    /// Sized for a site (the default).
+    #[default]
+    Comfortable,
+    /// Sized for a tool: 32 px controls, tighter tabs, chips and rows.
+    Compact,
+}
+
+impl Density {
+    /// The `--Qz*` declarations.
+    fn css(self) -> &'static str {
+        match self {
+            // The tokens' fallbacks are the comfortable sizes.
+            Density::Comfortable => "",
+            Density::Compact => {
+                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzcx:var(--S2);--Qzcy:.125rem;--Qzp:.38rem .55rem;\
+                 --Qzi:32px;--Qzg:18px;--Qzq:0;"
+            }
+        }
+    }
+}
+
+/// The theme's three font stacks, each a CSS `font-family` list. A stack left
+/// `None` keeps the style's (or the browser's) default.
+///
+/// | Stack | Variable | Read by |
+/// |---|---|---|
+/// | `ui` | `--Qft` | `body`: the whole interface |
+/// | `read` | `--Qfr` | `St::FontRead`: long-form reading (a reply, an article) |
+/// | `mono` | `--Qm` | `St::FontMono`, code |
+///
+/// ```ignore
+/// Theme::new().fonts(
+///     Fonts::new()
+///         .ui("Inter, system-ui, sans-serif")
+///         .read("'Source Serif 4', Georgia, serif")
+///         .mono("'JetBrains Mono', ui-monospace, monospace"),
+/// )
+/// ```
+///
+/// Web fonts are loaded with [`CapsuleConfig::font_face`](crate::CapsuleConfig::font_face),
+/// from files the app serves itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Fonts {
+    /// The interface face (`--Qft`).
+    pub ui: Option<String>,
+    /// The reading face (`--Qfr`, [`St::FontRead`](crate::St::FontRead)).
+    pub read: Option<String>,
+    /// The monospace face (`--Qm`, [`St::FontMono`](crate::St::FontMono)).
+    pub mono: Option<String>,
+}
+
+impl Fonts {
+    /// No stack set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The interface stack (`--Qft`).
+    pub fn ui(mut self, stack: impl Into<String>) -> Self {
+        self.ui = Some(stack.into());
+        self
+    }
+
+    /// The reading stack (`--Qfr`).
+    pub fn read(mut self, stack: impl Into<String>) -> Self {
+        self.read = Some(stack.into());
+        self
+    }
+
+    /// The monospace stack (`--Qm`).
+    pub fn mono(mut self, stack: impl Into<String>) -> Self {
+        self.mono = Some(stack.into());
+        self
+    }
+
+    /// `--Qft` / `--Qfr` / `--Qm` for the stacks set. A stack's own `;`, `{`
+    /// or `}` would end the declaration: they are dropped.
+    fn css(&self, css: &mut String) {
+        for (var, stack) in [("Qft", &self.ui), ("Qfr", &self.read), ("Qm", &self.mono)] {
+            if let Some(stack) = stack {
+                let clean: String = stack
+                    .chars()
+                    .filter(|c| !matches!(c, ';' | '{' | '}'))
+                    .collect();
+                css_var(css, var, clean.trim());
+            }
+        }
+    }
 }
 
 // Theme implements State manually (can't use derive macro from within rwire crate).
@@ -290,6 +430,45 @@ impl Theme {
             mode: ThemeMode::Dark,
             ..Self::default()
         }
+    }
+
+    /// Set the interface, reading and monospace font stacks (see [`Fonts`]).
+    /// They win over a style's own (`flat`'s monospace UI, for one).
+    pub fn fonts(mut self, fonts: Fonts) -> Self {
+        self.fonts = fonts;
+        self
+    }
+
+    /// The font stacks set with [`Theme::fonts`].
+    pub fn fonts_ref(&self) -> &Fonts {
+        &self.fonts
+    }
+
+    /// The viewport width (px) below which interactive controls get 44 px touch
+    /// targets, even under a fine pointer (a coarse pointer gets them at any
+    /// width). The default is the `sm` breakpoint, 640; an app whose "phone"
+    /// layout starts wider sets its own (mcp-agents: 760). The `sm`
+    /// breakpoint itself does not move.
+    pub fn touch_below(mut self, px: u16) -> Self {
+        self.touch_below = Some(px);
+        self
+    }
+
+    /// The density set with [`Theme::density`].
+    pub fn current_density(&self) -> Density {
+        self.density
+    }
+
+    /// Set the density of controls and lists (see [`Density`]).
+    pub fn density(mut self, density: Density) -> Self {
+        self.density = density;
+        self
+    }
+
+    /// Set the mode: `Light` or `Dark` force it, `System` follows the OS.
+    pub fn mode(mut self, mode: ThemeMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     /// Set a full color palette.
@@ -431,7 +610,11 @@ impl ThemeProvider {
 /// Converts `Theme` state to a `<style>` element with CSS variable declarations.
 fn theme_renderer(theme: &Theme) -> ElementBuilder {
     let css = generate_theme_css(theme);
-    el(El::Style).text(&css)
+    // `data-rw-mode`: the runtime keeps a mode changed during the visit in the
+    // `rw_mode` cookie, so it survives a reload (see [`ThemeMode`]).
+    el(El::Style)
+        .attr("data-rw-mode", theme.mode.as_str())
+        .text(&css)
 }
 
 /// Create an `ElementBuilder` representing the theme synced region.
@@ -462,6 +645,13 @@ pub struct ResolvedPalette {
     pub green: [String; 12],
     pub amber: [String; 12],
     pub white: String,
+    /// The categorical colors (`--Y1…--Y6`): the palette's own, or six
+    /// derived from its scales when it names none.
+    pub categorical: Vec<String>,
+    /// The palette's preferred categorical inks, `(light, dark)`.
+    pub categorical_inks: Vec<(String, String)>,
+    /// The palette's preferred marks on the categorical solid fills.
+    pub categorical_on_solids: Vec<String>,
 }
 
 impl ResolvedPalette {
@@ -483,6 +673,21 @@ impl ResolvedPalette {
             green: p.green.steps().clone(),
             amber: p.amber.steps().clone(),
             white: color::WHITE.to_string(),
+            categorical: if p.categorical.is_empty() {
+                // Six hues the palette already has, far enough apart to tell.
+                vec![
+                    p.accent.steps()[8].clone(),
+                    p.green.steps()[8].clone(),
+                    p.amber.steps()[8].clone(),
+                    p.red.steps()[8].clone(),
+                    p.accent.steps()[5].clone(),
+                    p.neutral.steps()[7].clone(),
+                ]
+            } else {
+                p.categorical.clone()
+            },
+            categorical_inks: p.categorical_inks.clone(),
+            categorical_on_solids: p.categorical_on_solids.clone(),
         }
     }
 }
@@ -500,7 +705,10 @@ impl ResolvedPalette {
 // Text:              --j (text-muted), --k (text-default), --l (text-high),
 //                    --m (text-on-accent)
 // Accent scale:      --n1..--n12 (accent-1..accent-12)
-// Status:            --o (success), --p (warning), --q (error)
+// Status:            --o (success), --p (warning), --q (error): fills and borders;
+//                    --o3, --p3, --q3: their text, readable on the app and subtle grounds
+// Subtle pairs:      --M/--M1 (success), --N/--N1 (warning), --O/--O1 (info),
+//                    --P/--P1 (error), --n0 (accent-subtle background)
 // Surface:           --r (surface), --s (on-surface), --t (surface-raised),
 //                    --u (on-surface-raised)
 // Primary:           --v (primary), --w (on-primary), --x (primary-hover),
@@ -531,21 +739,72 @@ pub fn generate_base_css() -> &'static str {
      ::-webkit-scrollbar-track{background:transparent}\
      ::-webkit-scrollbar-thumb{background:var(--c);border-radius:3px}\
      ::-webkit-scrollbar-thumb:hover{background:var(--e)}\
-     [data-busy]{cursor:progress;opacity:.6;transition:opacity .25s .2s}\n"
+     [data-busy]{cursor:progress;opacity:.6;transition:opacity .25s .2s}\
+     [id^=__synced_]:not([class]),[data-rwr]:not([class]){display:contents}\
+\n"
 }
 
 /// Generate complete theme CSS from a Theme value.
 ///
-/// Produces a single `:root{...}` block with all resolved CSS variables.
-/// Mode (light/dark) is resolved server-side: picks the right scale indices.
+/// Produces a `:root{...}` block with all resolved CSS variables for a forced
+/// mode (`Light`, `Dark`); for `System`, the light block followed by the dark
+/// one under `@media (prefers-color-scheme:dark)`.
+/// Mode is resolved server-side: picks the right scale indices.
 /// Style preset callbacks generate color overrides and Q-vars inline.
 /// No `data-theme`, `data-style`, or `data-radius` attribute selectors.
 pub fn generate_theme_css(theme: &Theme) -> String {
+    let mut css = match theme.mode {
+        ThemeMode::Light => root_block(theme, false),
+        ThemeMode::Dark => root_block(theme, true),
+        // Light on `:root`, dark when the OS asks for it: the browser switches
+        // live when the OS setting changes.
+        ThemeMode::System => {
+            let mut css = root_block(theme, false);
+            css.push_str("@media (prefers-color-scheme:dark){");
+            css.push_str(root_block(theme, true).trim_end());
+            css.push_str("}\n");
+            css
+        }
+    };
+    if let Some((mobile, desktop)) = theme.base_font {
+        use std::fmt::Write;
+        let _ = writeln!(
+            css,
+            "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
+        );
+    }
+    // 44 px touch targets under a coarse pointer, or below `touch_below` (the
+    // `sm` breakpoint by default), for every interactive control whatever its
+    // classes. Zero specificity (`:where`): an app's own min-height wins. Icon
+    // buttons sized by `--Qzi` (whose min-width would beat `:where`) get 44 px
+    // squares through the variable itself.
+    // Checkboxes, radios and sliders keep their size.
+    {
+        use std::fmt::Write;
+        let below = theme.touch_below.unwrap_or(640);
+        let _ = writeln!(
+            css,
+            "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}\
+             :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){{min-height:44px}}\
+             :where(button,[role=tab],[role=button]){{min-width:44px}}}}",
+            below.saturating_sub(1)
+        );
+    }
+    css
+}
+
+/// The `:root{…}` block of one resolved mode (`is_dark`), newline-terminated.
+/// It also sets `color-scheme`, so native controls and scrollbars follow.
+fn root_block(theme: &Theme, is_dark: bool) -> String {
     let rp = ResolvedPalette::new(theme);
-    let is_dark = theme.mode == ThemeMode::Dark;
     let mut css = String::with_capacity(2048);
 
     css.push_str(":root{");
+    css.push_str(if is_dark {
+        "color-scheme:dark;"
+    } else {
+        "color-scheme:light;"
+    });
 
     // --- Semantic color variables (mode-aware) ---
     if is_dark {
@@ -572,10 +831,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         css_var(&mut css, "C", &rp.neutral[7]); // secondary-hover
         css_var(&mut css, "D", &rp.neutral[9]); // muted
         css_var(&mut css, "E", &rp.neutral[3]); // on-muted
-        css_var(&mut css, "I", &rp.red[9]); // destructive-subtle
-        css_var(&mut css, "J", &rp.red[2]); // on-destructive-subtle
-        css_var(&mut css, "y", &rp.accent[9]); // primary-subtle
-        css_var(&mut css, "z", &rp.accent[2]); // on-primary-subtle
     } else {
         // Light mode
         css_var(&mut css, "a", &rp.neutral[0]); // bg-app
@@ -600,10 +855,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         css_var(&mut css, "C", &rp.neutral[4]); // secondary-hover
         css_var(&mut css, "D", &rp.neutral[2]); // muted
         css_var(&mut css, "E", &rp.neutral[10]); // on-muted
-        css_var(&mut css, "I", &rp.red[2]); // destructive-subtle
-        css_var(&mut css, "J", &rp.red[10]); // on-destructive-subtle
-        css_var(&mut css, "y", &rp.accent[2]); // primary-subtle
-        css_var(&mut css, "z", &rp.accent[10]); // on-primary-subtle
     }
 
     // Mode-independent vars
@@ -621,26 +872,6 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     css_var(&mut css, "F", &rp.red[8]); // destructive
     css_var(&mut css, "G", &rp.white); // on-destructive
     css_var(&mut css, "H", &rp.red[9]); // destructive-hover
-                                        // Semantic subtle pairs for status colors (mode-aware)
-    if is_dark {
-        css_var(&mut css, "M", &rp.green[9]); // success-subtle bg
-        css_var(&mut css, "M1", &rp.green[2]); // on-success-subtle text
-        css_var(&mut css, "N", &rp.amber[9]); // warning-subtle bg
-        css_var(&mut css, "N1", &rp.amber[2]); // on-warning-subtle text
-        css_var(&mut css, "O", &rp.accent[9]); // info-subtle bg
-        css_var(&mut css, "O1", &rp.accent[2]); // on-info-subtle text
-        css_var(&mut css, "P", &rp.red[9]); // error-subtle bg (alias for --I)
-        css_var(&mut css, "P1", &rp.red[2]); // on-error-subtle text
-    } else {
-        css_var(&mut css, "M", &rp.green[1]);
-        css_var(&mut css, "M1", &rp.green[10]);
-        css_var(&mut css, "N", &rp.amber[1]);
-        css_var(&mut css, "N1", &rp.amber[10]);
-        css_var(&mut css, "O", &rp.accent[1]);
-        css_var(&mut css, "O1", &rp.accent[10]);
-        css_var(&mut css, "P", &rp.red[1]);
-        css_var(&mut css, "P1", &rp.red[10]);
-    }
     if is_dark {
         css_var(&mut css, "K", &rp.accent[5]); // focus-ring (brighter in dark)
         css_var(&mut css, "L", &rp.accent[4]); // border-primary (brighter in dark)
@@ -649,11 +880,27 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         css_var(&mut css, "L", &rp.accent[6]); // border-primary
     }
 
+    // --- Canvas: the sunken ground of a reading area (`St::BgCanvas`), under
+    // cards that stay `BgSurface`. The app background unless a style remaps it.
+    css.push_str("--Qw:var(--a);");
+
     // --- Style preset: resolve primary/surface/border overrides inline ---
     (theme.style.color_css)(&mut css, &rp, is_dark);
 
+    // Subtle backgrounds and the text set on them, readable by construction.
+    // After the style: the status texts are checked against the plain grounds
+    // (`a`, `b`, `r`, `t`) as the style finally sets them.
+    subtle_pairs(&mut css, &rp, is_dark);
+    tone_pairs(&mut css, &rp, is_dark);
+
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
+
+    // --- Font stacks: after the style's hooks, so the theme's own win ---
+    theme.fonts.css(&mut css);
+
+    // --- Density: control and row dimensions (`--Qz*`) ---
+    css.push_str(theme.density.css());
 
     // --- Radius overrides ---
     match theme.radius {
@@ -665,15 +912,355 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     }
 
     css.push_str("}\n");
-
-    if let Some((mobile, desktop)) = theme.base_font {
-        use std::fmt::Write;
-        let _ = writeln!(
-            css,
-            "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
-        );
-    }
     css
+}
+
+/// The least WCAG contrast a text color gets against its ground (AA, body text).
+pub const MIN_TEXT_CONTRAST: f64 = 4.5;
+
+/// The least WCAG contrast of a graphic: a mark, a logotype, a decorative glyph.
+pub const MIN_MARK_CONTRAST: f64 = 3.0;
+
+/// `#rrggbb` → linear-light sRGB channels.
+fn linear_rgb(hex: &str) -> [f64; 3] {
+    let h = hex.trim_start_matches('#');
+    let ch = |i: usize| {
+        let c = h
+            .get(i..i + 2)
+            .and_then(|s| u8::from_str_radix(s, 16).ok())
+            .unwrap_or(0) as f64
+            / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    [ch(0), ch(2), ch(4)]
+}
+
+/// WCAG 2 relative luminance of a `#rrggbb` color.
+fn wcag_luminance(hex: &str) -> f64 {
+    let [r, g, b] = linear_rgb(hex);
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// WCAG 2 contrast ratio between two `#rrggbb` colors (1 to 21).
+pub fn contrast_ratio(a: &str, b: &str) -> f64 {
+    let (x, y) = (wcag_luminance(a), wcag_luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// `a` laid over `b` at opacity `t` (linear light), as `#rrggbb`.
+fn mix(a: &str, b: &str, t: f64) -> String {
+    let (x, y) = (linear_rgb(a), linear_rgb(b));
+    let enc = |c: f64| {
+        let c = c.clamp(0.0, 1.0);
+        let s = if c <= 0.003_130_8 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u8
+    };
+    let m = |i: usize| enc(x[i] * t + y[i] * (1.0 - t));
+    format!("#{:02x}{:02x}{:02x}", m(0), m(1), m(2))
+}
+
+/// The first candidate readable on every ground in `against` (contrast at
+/// least [`MIN_TEXT_CONTRAST`]), else the one that comes closest.
+fn first_readable(candidates: &[String], against: &[String]) -> String {
+    let worst = |c: &String| {
+        against
+            .iter()
+            .map(|g| contrast_ratio(c, g))
+            .fold(f64::INFINITY, f64::min)
+    };
+    candidates
+        .iter()
+        .find(|c| worst(c) >= MIN_TEXT_CONTRAST)
+        .or_else(|| {
+            candidates
+                .iter()
+                .max_by(|a, b| worst(a).total_cmp(&worst(b)))
+        })
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The subtle backgrounds (success, warning, info, error, destructive,
+/// primary, accent) and the text set on them, plus the status text colors.
+///
+/// Palettes are hand-made scales whose steps do not mean the same lightness
+/// everywhere, so fixed steps gave unreadable pairs (orange on salmon in dark
+/// Nord). Here the grounds come from the palette (light mode: its pale steps;
+/// dark mode: the hue laid over the app background, a dark tint), and each
+/// text is the first of the palette's own steps, in order of preference, that
+/// reaches [`MIN_TEXT_CONTRAST`] on its ground, then the brand step darkened
+/// (dark mode: lightened) until it does, so the hue stays; the ends of the
+/// neutral scale, then black or white, are the last resort.
+fn subtle_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let app = hex(if is_dark {
+        &rp.neutral[11]
+    } else {
+        &rp.neutral[0]
+    });
+    // The plain grounds a status text also lands on (app, subtle, surface,
+    // raised surface), as declared so far, style overrides included.
+    let plain_grounds: Vec<String> = ["a", "b", "r", "t"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let ends = [
+        hex(&rp.neutral[0]),
+        hex(&rp.neutral[11]),
+        "#ffffff".to_string(),
+        "#000000".to_string(),
+    ];
+    // Toward the readable side: black in light mode, white in dark mode.
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let steps = |scale: &[String; 12], order: &[usize]| -> Vec<String> {
+        let brand = hex(&scale[8]);
+        order
+            .iter()
+            .map(|&i| hex(&scale[i]))
+            // Then the brand step darkened (lightened) until it reads: the hue stays.
+            .chain(
+                [0.7, 0.55, 0.4, 0.25]
+                    .iter()
+                    .map(|&t| mix(&brand, toward, t)),
+            )
+            .chain(ends.iter().cloned())
+            .collect()
+    };
+    // Text on a tinted ground: dark mode wants the pale end, light mode the dark end.
+    let on_order: &[usize] = if is_dark { &[2, 1, 0] } else { &[10, 11] };
+    // A status color as text: as close to the brand step (8) as reads.
+    let status_order: &[usize] = if is_dark {
+        &[8, 7, 6, 5, 4, 3, 2, 1, 0]
+    } else {
+        &[8, 9, 10, 11]
+    };
+    let ground = |scale: &[String; 12], light_step: usize| {
+        if is_dark {
+            mix(&hex(&scale[8]), &app, 0.22)
+        } else {
+            hex(&scale[light_step])
+        }
+    };
+
+    // (background var, text var, status text var, scale, light-mode ground step)
+    type Pair<'a> = (&'a str, &'a str, Option<&'a str>, &'a [String; 12], usize);
+    let pairs: [Pair; 6] = [
+        ("M", "M1", Some("o3"), &rp.green, 1),
+        ("N", "N1", Some("p3"), &rp.amber, 1),
+        ("O", "O1", None, &rp.accent, 1),
+        ("P", "P1", Some("q3"), &rp.red, 1),
+        ("I", "J", None, &rp.red, 2),
+        ("y", "z", None, &rp.accent, 2),
+    ];
+    for (bg, text, status, scale, light_step) in pairs {
+        let g = ground(scale, light_step);
+        css_var(
+            css,
+            text,
+            &first_readable(&steps(scale, on_order), std::slice::from_ref(&g)),
+        );
+        if let Some(status) = status {
+            css_var(
+                css,
+                status,
+                &first_readable(
+                    &steps(scale, status_order),
+                    &[std::slice::from_ref(&g), &plain_grounds[..]].concat(),
+                ),
+            );
+        }
+        css_var(css, bg, &g);
+    }
+
+    // The accent-subtle ground (a selected row) carries the ordinary text
+    // colors, which do not change: the ground adapts to them.
+    let (text, high) = if is_dark {
+        (hex(&rp.neutral[1]), hex(&rp.neutral[0]))
+    } else {
+        (hex(&rp.neutral[10]), hex(&rp.neutral[11]))
+    };
+    let a8 = hex(&rp.accent[8]);
+    let accent_grounds: Vec<String> = if is_dark {
+        [0.25, 0.18, 0.12, 0.06]
+            .iter()
+            .map(|&t| mix(&a8, &app, t))
+            .collect()
+    } else {
+        vec![
+            hex(&rp.accent[2]),
+            hex(&rp.accent[1]),
+            hex(&rp.accent[0]),
+            mix(&a8, &app, 0.15),
+            mix(&a8, &app, 0.08),
+        ]
+    };
+    css_var(css, "n0", &first_readable(&accent_grounds, &[text, high]));
+}
+
+/// The categorical and neutral tones (`Tone::Cat(n)`, `Tone::Neutral`) and the
+/// faint ink, computed per mode against the plain grounds as the style left
+/// them (called after it, like [`subtle_pairs`]).
+///
+/// For each categorical color `n` (1 to 6): `--Yn` the color itself (a dot, a
+/// solid fill), `--Yni` its ink (text and outline: the palette's preferred ink,
+/// else the hue, darkened in light mode or lightened in dark mode, the nearest
+/// that reads at [`MIN_TEXT_CONTRAST`] on `--a`/`--b`/`--r`/`--t`), `--Yng` the
+/// strongest tint of the hue that ink still reads on, and `--Yno` the text on
+/// the solid fill. The neutral tone (gray) gets `--Y0g` and
+/// `--Y0i`. `--j2` is the faint ink: the palest neutral step that still reads at
+/// AA on the plain grounds (below `--k` and `--j`).
+fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let plain: Vec<String> = ["a", "b", "r", "t"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let app = plain
+        .first()
+        .cloned()
+        .unwrap_or_else(|| hex(&rp.neutral[0]));
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let ends = [
+        hex(&rp.neutral[0]),
+        hex(&rp.neutral[11]),
+        "#ffffff".to_string(),
+        "#000000".to_string(),
+    ];
+    // `preferred`, then it pushed toward the readable side, step by step: the
+    // first that reads is the nearest to it.
+    let near = |preferred: &str| -> Vec<String> {
+        let p = hex(preferred);
+        std::iter::once(p.clone())
+            .chain((1..=80).map(|i| mix(toward, &p, f64::from(i) * 0.01)))
+            .collect()
+    };
+    let tone =
+        |css: &mut String, n: usize, color: &str, preferred: Option<&str>, mark: Option<&str>| {
+            let c = hex(color);
+            let inks: Vec<String> = preferred
+                .map(&near)
+                .unwrap_or_default()
+                .into_iter()
+                .chain(std::iter::once(c.clone()))
+                .chain(
+                    [0.2, 0.35, 0.5, 0.65, 0.8]
+                        .iter()
+                        .map(|&t| mix(toward, &c, t)),
+                )
+                .chain(ends.iter().cloned())
+                .collect();
+            // The ink first, as near its preferred value as the plain grounds allow;
+            // then the strongest tint of the hue that ink still reads on. Only when
+            // no tint does is the ink chosen against the ground too.
+            let tints: &[f64] = if is_dark {
+                &[0.22, 0.17, 0.12, 0.08, 0.05, 0.03]
+            } else {
+                &[0.16, 0.12, 0.09, 0.06, 0.03]
+            };
+            let ink = first_readable(&inks, &plain);
+            let (ground, ink) = match tints
+                .iter()
+                .map(|&t| mix(&c, &app, t))
+                .find(|g| contrast_ratio(&ink, g) >= MIN_TEXT_CONTRAST)
+            {
+                Some(ground) => (ground, ink),
+                None => {
+                    // The faintest tint: the ink moves least from its preferred value.
+                    let ground = mix(&c, &app, tints[tints.len() - 1]);
+                    let against = [std::slice::from_ref(&ground), &plain[..]].concat();
+                    let ink = first_readable(&inks, &against);
+                    (ground, ink)
+                }
+            };
+            css_var(css, &format!("Y{n}g"), &ground);
+            css_var(css, &format!("Y{n}i"), &ink);
+            if n > 0 {
+                // A mark (logotype, decorative glyph) on the solid fill: the preferred
+                // one if it reaches 3:1, else the nearest that does, else the text's.
+                let on_solid = first_readable(&ends, std::slice::from_ref(&c));
+                let mark = mark
+                    .map(|m| {
+                        let m = hex(m);
+                        let away = if wcag_luminance(&m) > wcag_luminance(&c) {
+                            "#ffffff"
+                        } else {
+                            "#000000"
+                        };
+                        std::iter::once(m.clone())
+                            .chain((1..=100).map(|i| mix(away, &m, f64::from(i) * 0.01)))
+                            .find(|x| contrast_ratio(x, &c) >= MIN_MARK_CONTRAST)
+                            .unwrap_or_else(|| on_solid.clone())
+                    })
+                    .unwrap_or_else(|| on_solid.clone());
+                css_var(css, &format!("Y{n}m"), &mark);
+                css_var(css, &format!("Y{n}"), &c);
+                css_var(css, &format!("Y{n}o"), &on_solid);
+            }
+        };
+    tone(css, 0, &rp.neutral[6], None, None);
+    for (i, color) in rp.categorical.iter().take(6).enumerate() {
+        let preferred = rp.categorical_inks.get(i).map(|(light, dark)| {
+            if is_dark {
+                dark.as_str()
+            } else {
+                light.as_str()
+            }
+        });
+        let mark = rp.categorical_on_solids.get(i).map(String::as_str);
+        tone(css, i + 1, color, preferred, mark);
+    }
+    // A palette with fewer than six: the rest repeat it, so every token resolves.
+    let given = rp.categorical.len().clamp(1, 6);
+    for n in given + 1..=6 {
+        let from = (n - 1) % given + 1;
+        for suffix in ["", "g", "i", "o", "m"] {
+            css_var(
+                css,
+                &format!("Y{n}{suffix}"),
+                &format!("var(--Y{from}{suffix})"),
+            );
+        }
+    }
+
+    // The faint ink: the palest neutral step that still reads on every plain ground.
+    let faint_order: &[usize] = if is_dark {
+        &[5, 4, 3, 2, 1, 0]
+    } else {
+        &[6, 7, 8, 9, 10, 11]
+    };
+    // A style may name the faint ink it wants (`--j2`): kept if it reads, else
+    // the nearest that does.
+    let faint: Vec<String> = declared_color(css, "j2")
+        .map(|c| near(&c))
+        .unwrap_or_default()
+        .into_iter()
+        .chain(faint_order.iter().map(|&i| hex(&rp.neutral[i])))
+        .collect();
+    css_var(css, "j2", &first_readable(&faint, &plain));
+}
+
+/// The last value declared for `--name` in `css`, when it is a plain color
+/// (not `transparent`, not a `var(…)`), else None.
+fn declared_color(css: &str, name: &str) -> Option<String> {
+    let key = format!("--{name}:");
+    let at = css
+        .match_indices(&key)
+        .filter(|(i, _)| *i == 0 || matches!(css.as_bytes()[i - 1], b';' | b'{'))
+        .map(|(i, _)| i + key.len())
+        .last()?;
+    let value = css[at..].split(';').next()?.trim();
+    let plain = value.starts_with('#') || value.starts_with("oklch(") || value.starts_with("rgb");
+    plain.then(|| value.to_string())
 }
 
 /// Relative luminance of a hex color (0.0-1.0). Non-hex values (oklch…)
@@ -791,6 +1378,185 @@ fn soft_q_css(css: &mut String, _is_dark: bool) {
 mod tests {
     use super::*;
 
+    /// E2 criterion: `System` emits the light block on `:root` and the dark one
+    /// under `prefers-color-scheme: dark`; `Light` and `Dark` force their mode.
+    #[test]
+    fn system_emits_both_modes_and_light_dark_force_one() {
+        let light = generate_theme_css(&Theme::light());
+        let dark = generate_theme_css(&Theme::dark());
+        let system = generate_theme_css(&Theme::new().mode(ThemeMode::System));
+
+        // Forced: one block, no media query, the mode's own colors.
+        for (css, scheme) in [(&light, "light"), (&dark, "dark")] {
+            assert!(!css.contains("prefers-color-scheme"), "{css}");
+            // One color block (the touch-target rule's `:root{--Qzi}` aside).
+            assert_eq!(css.matches(":root{color-scheme").count(), 1, "{css}");
+            assert!(css.starts_with(&format!(":root{{color-scheme:{scheme};")));
+        }
+        assert_ne!(light, dark);
+
+        // System: exactly the light block, then the dark block in the media query
+        // (the mode-independent rules, such as touch targets, follow once).
+        let block = |css: &str| css.split("@media (pointer").next().unwrap().to_string();
+        let (light, dark) = (block(&light), block(&dark));
+        let (head, tail) = system
+            .split_once("@media (prefers-color-scheme:dark){")
+            .expect("a dark media block");
+        assert_eq!(head, light, "the light block, unchanged, on :root");
+        let inner = block(tail);
+        let inner = inner
+            .trim_end()
+            .strip_suffix('}')
+            .expect("closed media block");
+        assert_eq!(inner, dark.trim_end(), "the dark block, unchanged");
+
+        // The base font size rule follows both blocks, once.
+        let sized =
+            generate_theme_css(&Theme::new().mode(ThemeMode::System).base_font_size(14, 15));
+        assert_eq!(sized.matches("html{font-size:14px}").count(), 1);
+        assert!(sized.rfind("html{font-size").unwrap() > sized.find("@media (prefers").unwrap());
+    }
+
+    #[test]
+    fn fonts_feed_the_ui_read_and_mono_variables() {
+        let fonts = Fonts::new()
+            .ui("Inter, system-ui, sans-serif")
+            .read("'Source Serif 4', Georgia, serif")
+            .mono("'JetBrains Mono', ui-monospace, monospace");
+        let css = generate_theme_css(&Theme::new().fonts(fonts.clone()));
+        assert!(css.contains("--Qft:Inter, system-ui, sans-serif;"), "{css}");
+        assert!(
+            css.contains("--Qfr:'Source Serif 4', Georgia, serif;"),
+            "{css}"
+        );
+        assert!(
+            css.contains("--Qm:'JetBrains Mono', ui-monospace, monospace;"),
+            "{css}"
+        );
+        // The theme's stacks win over a style's own: flat sets a mono UI first.
+        let flat = generate_theme_css(&Theme::new().style(ThemeStyle::flat()).fonts(fonts));
+        assert!(
+            flat.rfind("--Qft:Inter").unwrap() > flat.find("--Qft:ui-monospace").unwrap(),
+            "{flat}"
+        );
+        // Unset stacks emit nothing; a stack cannot end the declaration.
+        let css = generate_theme_css(&Theme::new().fonts(Fonts::new().read("x;--a:red}")));
+        assert!(!css.contains("--Qm:") && !css.contains("--Qft:"), "{css}");
+        assert!(css.contains("--Qfr:x--a:red;"), "{css}");
+        // In System mode, both blocks carry them.
+        let sys = generate_theme_css(
+            &Theme::new()
+                .mode(ThemeMode::System)
+                .fonts(Fonts::new().ui("Inter")),
+        );
+        assert_eq!(sys.matches("--Qft:Inter;").count(), 2, "{sys}");
+    }
+
+    #[test]
+    fn font_read_reads_the_reading_stack() {
+        assert_eq!(crate::St::FontRead.css(), "font-family:var(--Qfr,inherit)");
+    }
+
+    #[test]
+    fn density_sets_the_control_hooks() {
+        // Comfortable: nothing emitted, the tokens' fallbacks apply.
+        let comfy = generate_theme_css(&Theme::new());
+        let root = comfy.split("@media (pointer").next().unwrap();
+        assert!(!root.contains("--Qz"), "{comfy}");
+        let compact = generate_theme_css(&Theme::new().density(Density::Compact));
+        assert!(compact.contains("--Qzh:2rem;"), "{compact}");
+        assert!(compact.contains("--Qzp:.38rem .55rem;"));
+        assert!(compact.contains("--Qzy:var(--S2);"));
+        // Icon buttons: 32 px squares, 18 px glyphs, no padding (`/app`).
+        assert!(
+            compact.contains("--Qzi:32px;--Qzg:18px;--Qzq:0;"),
+            "{compact}"
+        );
+        assert!(St::SqIconButton
+            .css()
+            .starts_with("width:var(--Qzi,2.25rem);"));
+        assert!(St::SqIconToggle.css().starts_with("width:var(--Qzi,auto);"));
+        // The tokens read them, with the comfortable sizes as fallbacks.
+        use crate::St;
+        assert_eq!(St::HControl.css(), "height:var(--Qzh,2.25rem)");
+        assert_eq!(St::TextControl.css(), "font-size:var(--Qzt,var(--T2))");
+        assert_eq!(St::PyTab.css(), "padding-block:var(--Qzy,var(--S3))");
+        assert_eq!(St::PxChip.css(), "padding-inline:var(--Qzcx,var(--S2))");
+        assert_eq!(St::PyChip.css(), "padding-block:var(--Qzcy,var(--S1))");
+        assert_eq!(St::PadRow.css(), "padding:var(--Qzp,var(--S2) var(--S3))");
+    }
+
+    #[test]
+    fn touch_targets_are_44px_under_a_coarse_pointer_or_below_sm() {
+        let base = generate_theme_css(&Theme::new());
+        let rule = base
+            .split_once("@media (pointer:coarse),(max-width:639.98px){")
+            .expect("the touch-target media block")
+            .1;
+        assert!(rule.contains(":where(button,select,input:not("), "{rule}");
+        assert!(
+            rule.contains("[role=tab],[role=button]){min-height:44px}"),
+            "{rule}"
+        );
+        assert!(rule.contains("{min-width:44px}"), "{rule}");
+        // Zero specificity (`:where`): an app's own min-height still wins.
+        assert!(!rule.contains("button{min-height"));
+        // Checkboxes, radios and sliders keep their size.
+        assert!(rule.contains("[type=checkbox],[type=radio],[type=range]"));
+    }
+
+    /// Whether the 44 px touch-target rule of `css` applies to a fine pointer
+    /// on a viewport `width` px wide (its `max-width` branch).
+    fn touch_rule_applies(css: &str, width: f64) -> bool {
+        let max = css
+            .split_once("@media (pointer:coarse),(max-width:")
+            .expect("the touch-target media block")
+            .1
+            .split_once("px)")
+            .unwrap()
+            .0;
+        width <= max.parse::<f64>().unwrap()
+    }
+
+    #[test]
+    fn touch_below_sets_where_the_44px_rule_starts() {
+        // Default: below `sm` (640): a fine pointer at 700 px keeps its sizes.
+        let default = generate_theme_css(&Theme::new());
+        assert!(!touch_rule_applies(&default, 700.0));
+        assert!(touch_rule_applies(&default, 639.0));
+        // mcp-agents' phone threshold: 760.
+        let app = generate_theme_css(&Theme::new().touch_below(760));
+        assert!(touch_rule_applies(&app, 700.0));
+        assert!(!touch_rule_applies(&app, 760.0));
+        assert!(!touch_rule_applies(&app, 800.0));
+        // In System mode the rule is emitted once, after both blocks.
+        let sys = generate_theme_css(&Theme::new().mode(ThemeMode::System).touch_below(760));
+        assert_eq!(sys.matches("{min-height:44px}").count(), 1, "{sys}");
+    }
+
+    #[test]
+    fn modes_cycle_parse_and_toggle() {
+        use ThemeMode::*;
+        assert_eq!(
+            [System.cycle(), Light.cycle(), Dark.cycle()],
+            [Light, Dark, System]
+        );
+        for m in [Light, Dark, System] {
+            assert_eq!(ThemeMode::parse(m.as_str()), Some(m));
+        }
+        assert_eq!(ThemeMode::parse("auto"), None);
+        assert_eq!(
+            [Light.toggle(), Dark.toggle(), System.toggle()],
+            [Dark, Light, Light]
+        );
+    }
+
+    #[test]
+    fn the_theme_style_names_its_mode() {
+        let html = theme_renderer(&Theme::new().mode(ThemeMode::System)).to_static_html();
+        assert!(html.starts_with("<style data-rw-mode=\"system\""), "{html}");
+    }
+
     #[test]
     fn flat_style_sets_the_mono_ui_font() {
         let theme = Theme::dark().style(ThemeStyle::flat());
@@ -851,7 +1617,9 @@ mod tests {
         let css = generate_base_css();
         // +~70B (2026-09): the tapped control waiting on the server (`data-busy`, set by the
         // runtime at the tap) dims after 200ms; client-set, so it can't ride STYLE_DEF.
-        assert!(css.len() < 800, "Base CSS too large: {} bytes", css.len());
+        // +~70B (R1): unstyled renderer wrappers (live `__synced_N`, static `data-rwr`)
+        // add no box, so a region never breaks a grid or a flex row.
+        assert!(css.len() < 900, "Base CSS too large: {} bytes", css.len());
     }
 
     #[test]
@@ -922,8 +1690,10 @@ mod tests {
             .style(ThemeStyle::soft())
             .radius(RadiusScale::Large);
         let css = generate_theme_css(&theme);
-        // Single block should be compact
-        assert!(css.len() < 2048, "Theme CSS too large: {} bytes", css.len());
+        // Single block should be compact.
+        // +~400B (R1): the neutral and six categorical tones (`--Y0g…--Y6o`), the faint ink.
+        // +~200B (R1): 44 px touch targets below `Theme::touch_below` (a theme setting).
+        assert!(css.len() < 2800, "Theme CSS too large: {} bytes", css.len());
     }
 
     #[test]
@@ -1065,6 +1835,41 @@ mod tests {
         ] {
             assert_eq!(oklch_luminance(value), None, "{value:?}");
             assert_eq!(on_solid_color(value, &rp), rp.white, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn mix_and_contrast_helpers() {
+        assert_eq!(mix("#ff0000", "#0000ff", 1.0), "#ff0000");
+        assert_eq!(mix("#ff0000", "#0000ff", 0.0), "#0000ff");
+        // Linear-light mixing: half white over black is #bcbcbc, not #808080.
+        assert_eq!(mix("#ffffff", "#000000", 0.5), "#bcbcbc");
+        assert!((contrast_ratio("#000000", "#ffffff") - 21.0).abs() < 1e-9);
+        let grounds = ["#ffffff".to_string()];
+        // The first readable candidate wins, in order.
+        let pick = first_readable(
+            &["#eeeeee".into(), "#595959".into(), "#000000".into()],
+            &grounds,
+        );
+        assert_eq!(pick, "#595959");
+        // None readable: the closest.
+        let pick = first_readable(&["#eeeeee".into(), "#aaaaaa".into()], &grounds);
+        assert_eq!(pick, "#aaaaaa");
+    }
+
+    #[test]
+    fn status_text_has_its_own_var_and_fills_keep_theirs() {
+        use crate::style_tokens::St;
+        assert_eq!(St::TextWarning.css(), "color:var(--p3)");
+        assert_eq!(St::BgWarning.css(), "background:var(--p)");
+        assert_eq!(St::BgAccentSubtle.css(), "background:var(--n0)");
+        for theme in [Theme::light(), Theme::dark()] {
+            let css = generate_theme_css(&theme);
+            for v in [
+                "--o3:", "--p3:", "--q3:", "--n0:", "--N:", "--N1:", "--y:", "--z:",
+            ] {
+                assert!(css.contains(v), "{v} missing");
+            }
         }
     }
 }
