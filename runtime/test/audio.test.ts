@@ -511,3 +511,19 @@ test("a jump of the audio clock realigns the capture: the next frame is timed fr
   assert.ok(Math.abs(frames[1].t - 2.02) < 1e-9);
   assert.equal(frames[1].seq, frames[0].seq + 1, "the numbering goes on");
 });
+
+test("the audio element is found inside renderer wrappers (<span data-rwr>, display:contents)", () => {
+  el.parentNode!.removeChild(el);
+  const region = doc.createElement("span");
+  region.setAttribute("data-rwr", "");
+  region.style.display = "contents";
+  const inner = doc.createElement("span");
+  inner.setAttribute("data-rwr", "");
+  inner.appendChild(el);
+  region.appendChild(inner);
+  doc.body.appendChild(region);
+  const env = fakeEnv();
+  install(doc as unknown as Document, env);
+  assert.ok(current && current.el === (el as unknown as Element), "found through the wrappers");
+  assert.equal(env.sockets.length, 1, "and its socket opened");
+});
