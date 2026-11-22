@@ -8,7 +8,9 @@
 //! - each connection hands over the next ticket: a lost socket reconnects
 //!   with it, no render needed, and the new link has the same session,
 //!   name and page connection; another tab has another connection id;
-//! - the link's task can change a shared state and the page re-renders.
+//! - the link's task can change a shared state and the page re-renders;
+//! - when the page connection ends, its audio socket is closed and the
+//!   ticket it handed over is refused.
 
 use std::time::Duration;
 
@@ -62,7 +64,7 @@ async fn start(port: u16) -> mpsc::UnboundedReceiver<Seen> {
                     connection: link.connection_id(),
                 });
                 while let Some(frame) = link.input.recv().await {
-                    link.output.pcm(&frame.samples, 16_000);
+                    link.output.pcm(&frame.samples, 16_000).unwrap();
                     link.server().update_shared::<Heard>(|h| h.frames += 1);
                 }
             }
@@ -282,5 +284,32 @@ async fn frames_echo_through_the_audio_socket_and_tickets_are_single_use() {
     assert_eq!(
         close_code(&mut audio(19301, &next, SID).await).await,
         Some(4403)
+    );
+}
+
+#[tokio::test]
+async fn the_end_of_the_page_connection_closes_its_audio_socket_and_burns_its_tickets() {
+    let _seen = start(19302).await;
+    let mut page = connect(19302, "/", SID).await;
+    let ticket = rendered_ticket(&mut page).await;
+    let mut link = audio(19302, &ticket, SID).await;
+    let Some(ToBrowser::Ticket(next)) = next_message(&mut link).await else {
+        panic!("a connection starts with the next ticket");
+    };
+    drop(page);
+    // The audio socket ends (closed or dropped) without the browser asking.
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(message)) = link.next().await {
+            if let Message::Close(_) = message {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "the audio socket outlived its page");
+    assert_eq!(
+        close_code(&mut audio(19302, &next, SID).await).await,
+        Some(4403),
+        "the handed-over ticket died with its page"
     );
 }

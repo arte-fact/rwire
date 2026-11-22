@@ -1,7 +1,10 @@
 //! The server side of a page's audio stream: [`AudioLink`].
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
+use rwire::ext_socket::tokio_tungstenite::tungstenite::Message;
 
 use rwire::{ConnectionInfo, Identity, SharedServerState};
 use tokio::sync::{mpsc, Notify};
@@ -109,52 +112,140 @@ impl AudioInput {
     }
 }
 
+/// Why [`AudioOutput`] refused something.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputError {
+    /// More than [`OUTPUT_BUDGET`] bytes wait to be sent: the browser does
+    /// not read (a stalled or half-open socket). Nothing was queued; try
+    /// again later, or `stop()`.
+    QueueFull,
+    /// The socket is gone: nothing will be played on this link.
+    Closed,
+    /// The rate is outside [`MIN_RATE`]..=[`MAX_RATE`]: refused, the
+    /// browser could not play it.
+    RateRefused,
+}
+
+impl std::fmt::Display for OutputError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::QueueFull => "the audio output queue is full",
+            Self::Closed => "the audio link is closed",
+            Self::RateRefused => "the PCM rate is outside 8000..=192000 Hz",
+        })
+    }
+}
+
+impl std::error::Error for OutputError {}
+
+/// How many bytes may wait to be sent to the browser: 30 s of 48 kHz PCM16
+/// (60 s at 24 kHz). Past it, the output refuses with
+/// [`OutputError::QueueFull`].
+pub const OUTPUT_BUDGET: usize = 30 * 48_000 * 2;
+/// The lowest PCM rate [`AudioOutput::pcm`] takes.
+pub const MIN_RATE: u32 = 8_000;
+/// The highest PCM rate [`AudioOutput::pcm`] takes.
+pub const MAX_RATE: u32 = 192_000;
+
 /// The loudspeaker side of a link. Everything is queued in call order and
 /// played without gaps; nothing waits.
 #[derive(Clone)]
 pub struct AudioOutput {
-    pub(crate) tx: mpsc::UnboundedSender<Vec<u8>>,
+    pub(crate) tx: mpsc::UnboundedSender<Message>,
+    /// Bytes queued and not yet written to the socket.
+    pub(crate) pending: Arc<AtomicUsize>,
 }
 
 impl AudioOutput {
-    fn send(&self, m: ToBrowser) {
-        let _ = self.tx.send(m.encode());
+    pub(crate) fn new(tx: mpsc::UnboundedSender<Message>) -> Self {
+        Self {
+            tx,
+            pending: Arc::default(),
+        }
+    }
+
+    fn send(&self, m: ToBrowser, budgeted: bool) -> Result<(), OutputError> {
+        if self.tx.is_closed() {
+            return Err(OutputError::Closed);
+        }
+        let bytes = m.encode();
+        let len = bytes.len();
+        if budgeted && self.pending.load(Ordering::Acquire) + len > OUTPUT_BUDGET {
+            return Err(OutputError::QueueFull);
+        }
+        self.pending.fetch_add(len, Ordering::AcqRel);
+        self.tx.send(Message::Binary(bytes)).map_err(|_| {
+            self.pending.fetch_sub(len, Ordering::AcqRel);
+            OutputError::Closed
+        })
     }
 
     /// Queue mono PCM16 at `rate` Hz (24 000 for most TTS; the browser
     /// resamples to its own rate).
-    pub fn pcm(&self, samples: &[i16], rate: u32) {
-        self.send(ToBrowser::Pcm {
-            rate,
-            samples: samples.to_vec(),
-        });
+    ///
+    /// # Errors
+    ///
+    /// [`OutputError::RateRefused`] for a rate outside
+    /// [`MIN_RATE`]..=[`MAX_RATE`], [`OutputError::QueueFull`] past
+    /// [`OUTPUT_BUDGET`], [`OutputError::Closed`] once the socket is gone.
+    /// Nothing is queued then.
+    pub fn pcm(&self, samples: &[i16], rate: u32) -> Result<(), OutputError> {
+        if !(MIN_RATE..=MAX_RATE).contains(&rate) {
+            return Err(OutputError::RateRefused);
+        }
+        self.send(
+            ToBrowser::Pcm {
+                rate,
+                samples: samples.to_vec(),
+            },
+            true,
+        )
     }
 
-    /// Queue a mark: `MarkReached(id)` is reported when everything queued
-    /// before it has been played.
-    pub fn mark(&self, id: &str) {
-        self.send(ToBrowser::Mark(id.to_string()));
+    /// Queue a mark: `MarkReached` is reported when everything queued
+    /// before it has been heard.
+    ///
+    /// # Errors
+    ///
+    /// [`OutputError::QueueFull`] or [`OutputError::Closed`], as [`Self::pcm`].
+    pub fn mark(&self, id: &str) -> Result<(), OutputError> {
+        self.send(ToBrowser::Mark(id.to_string()), true)
     }
 
     /// Queue a preloaded sound (`Audio::sounds`), after what is queued.
-    pub fn sound(&self, name: &str) {
-        self.send(ToBrowser::Sound(name.to_string()));
-    }
-
-    /// Drop the queue and stop at once (`Stopped` is reported).
-    pub fn stop(&self) {
-        self.send(ToBrowser::Stop);
+    ///
+    /// # Errors
+    ///
+    /// [`OutputError::QueueFull`] or [`OutputError::Closed`], as [`Self::pcm`].
+    pub fn sound(&self, name: &str) -> Result<(), OutputError> {
+        self.send(ToBrowser::Sound(name.to_string()), true)
     }
 
     /// Close the utterance: `PlaybackEnded` is reported once the queue is
-    /// played. An empty queue before it is an `Underrun`, not an end.
-    pub fn end(&self) {
-        self.send(ToBrowser::End);
+    /// heard. An empty queue before it is an `Underrun`, not an end.
+    ///
+    /// # Errors
+    ///
+    /// [`OutputError::QueueFull`] or [`OutputError::Closed`], as [`Self::pcm`].
+    pub fn end(&self) -> Result<(), OutputError> {
+        self.send(ToBrowser::End, true)
+    }
+
+    /// Drop the queue and stop at once (`Stopped` is reported). Never
+    /// refused for a full queue; a no-op once the socket is gone.
+    pub fn stop(&self) {
+        let _ = self.send(ToBrowser::Stop, false);
     }
 
     /// Whether the socket is still there to take what is queued.
     pub fn is_open(&self) -> bool {
         !self.tx.is_closed()
+    }
+
+    /// Resolves once the socket is gone (closed by the browser, lost, or
+    /// timed out). Then [`AudioInput::recv`] returns `None` too.
+    pub async fn closed(&self) {
+        self.tx.closed().await
     }
 }
 

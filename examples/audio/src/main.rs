@@ -22,7 +22,9 @@ use std::sync::Mutex;
 
 use rwire::theme::Theme;
 use rwire::{el, handler, renderer, theme, El, ElementBuilder, Server, St, State};
-use rwire_audio::{parse_event, Audio, AudioEvent, AudioExt, AudioLink, Frame, ServeAudio};
+use rwire_audio::{
+    parse_event, Audio, AudioEvent, AudioExt, AudioLink, Frame, OutputError, ServeAudio,
+};
 use rwire_components::{Button, Gap, Stack};
 use rwire_themes::palettes;
 use tokio::sync::mpsc;
@@ -147,8 +149,8 @@ fn level(f: &Frame) -> f32 {
 }
 
 /// Two seconds of 440 Hz at 24 kHz, half a second at a time, each followed
-/// by a mark.
-fn tone(link: &AudioLink) {
+/// by a mark. Refused (a full queue, a closed link): reported, not played.
+fn tone(link: &AudioLink) -> Result<(), OutputError> {
     const RATE: u32 = 24_000;
     for part in 0..4 {
         let pcm: Vec<i16> = (0..RATE / 2)
@@ -157,10 +159,18 @@ fn tone(link: &AudioLink) {
                 ((t * 440.0 * std::f64::consts::TAU).sin() * 16_000.0) as i16
             })
             .collect();
-        link.output.pcm(&pcm, RATE);
-        link.output.mark(&format!("t{}", part + 1));
+        link.output.pcm(&pcm, RATE)?;
+        link.output.mark(&format!("t{}", part + 1))?;
     }
-    link.output.end();
+    link.output.end()
+}
+
+/// Play back what was heard, after the ding.
+fn replay(link: &AudioLink, pcm: &[i16]) -> Result<(), OutputError> {
+    link.output.sound("ding")?;
+    link.output.pcm(pcm, 16_000)?;
+    link.output.mark("echo")?;
+    link.output.end()
 }
 
 /// A 150 ms "ding" at 880 Hz, as a WAV file.
@@ -222,12 +232,15 @@ async fn on_link(mut link: AudioLink) {
             cmd = inbox.recv() => match cmd {
                 Some(Cmd::Replay) => {
                     let pcm = std::mem::take(&mut heard);
-                    link.output.sound("ding");
-                    link.output.pcm(&pcm, 16_000);
-                    link.output.mark("echo");
-                    link.output.end();
+                    if let Err(e) = replay(&link, &pcm) {
+                        eprintln!("replay refused: {e}");
+                    }
                 }
-                Some(Cmd::Tone) => tone(&link),
+                Some(Cmd::Tone) => {
+                    if let Err(e) = tone(&link) {
+                        eprintln!("tone refused: {e}");
+                    }
+                }
                 Some(Cmd::Stop) => {
                     link.output.stop();
                     link.server().update_shared::<Studio>(move |s| s.stop_ordered = Some(last_end));
