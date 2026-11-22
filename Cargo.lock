@@ -1637,6 +1637,7 @@ name = "rwire-components"
 version = "0.1.0"
 dependencies = [
  "rwire",
+ "rwire-markdown",
  "tempfile",
 ]
 

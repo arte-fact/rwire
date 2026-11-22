@@ -2601,6 +2601,8 @@ struct GalleryMsg {
     user: bool,
     time: &'static str,
     text: &'static str,
+    /// A Markdown body (an agent's answer) instead of plain text.
+    markdown: bool,
 }
 
 impl crate::ChatItem for GalleryMsg {
@@ -2617,7 +2619,13 @@ impl crate::ChatItem for GalleryMsg {
         }
     }
     fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
-        el(El::P).st([rwire::St::M0]).text(self.text)
+        if self.markdown {
+            rwire_markdown::Markdown::new(self.text)
+                .face(rwire::ProseFace::Read)
+                .build()
+        } else {
+            el(El::P).st([rwire::St::M0]).text(self.text)
+        }
     }
     fn time(&self) -> Option<std::borrow::Cow<'_, str>> {
         Some(std::borrow::Cow::Borrowed(self.time))
@@ -2626,6 +2634,38 @@ impl crate::ChatItem for GalleryMsg {
         prev.user == self.user
     }
 }
+
+/// A long Markdown answer for the gallery: headings, lists, a quote, a table,
+/// inline code and a long fenced block (it scrolls inside its frame).
+const GALLERY_MARKDOWN: &str = "## What happens on a restart
+
+The hub keeps sessions **in memory only**, so a restart forgets them:
+
+1. the agent reconnects within a second;
+2. but the hub answers the list *before* the agent has re-registered;
+3. the session looks gone for that one round-trip.
+
+> The fix is to wait for the first heartbeat before serving the list.
+
+| Component | Keeps state? | After a restart |
+|---|---|---|
+| hub session list | no | empty until re-register |
+| agent registry | yes | intact |
+| conversation log | yes | intact |
+
+Inline `heartbeat()` calls are enough. A long block scrolls on its own:
+
+```rust
+fn serve_sessions(hub: &Hub) -> Vec<Session> {
+    hub.wait_for_heartbeat(Duration::from_secs(1));
+    hub.sessions.iter().filter(|s| s.alive).cloned().collect()
+}
+
+// A long line: the block scrolls horizontally inside its frame, the page does not.
+let re_registered = hub.wait_for(Heartbeat::First, Duration::from_secs(1)).then(|| hub.sessions.rebuild().with_timeout(Duration::from_millis(250)));
+```
+
+See [the registry docs](https://example.com/registry) for details.";
 
 /// A conversation in the avatar layout, on the reading column.
 fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
@@ -2636,18 +2676,22 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             user: true,
             time: "09:41",
             text: "Can you check why the hub drops the session after a restart?",
+            markdown: false,
         },
         GalleryMsg {
             key: "m2",
             user: false,
             time: "09:42",
-            text: "The hub keeps sessions in memory only, so a restart forgets them. The agent reconnects within a second, but the hub answers before it has re-registered its sessions.",
+            text: GALLERY_MARKDOWN,
+            markdown: true,
         },
         GalleryMsg {
             key: "m3",
             user: false,
             time: "09:42",
-            text: "I can make the hub wait for the agent's first heartbeat before it serves the list.",
+            text:
+                "I can make the hub wait for the agent's first heartbeat before it serves the list.",
+            markdown: false,
         },
     ];
     el(El::Div)

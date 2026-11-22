@@ -7,7 +7,7 @@
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use rwire::attr_tokens::At;
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder};
+use rwire::{el, El, ElementBuilder, ProseFace};
 
 use crate::prose::ProseSize;
 
@@ -31,7 +31,7 @@ pub struct TocEntry {
 }
 
 /// Options for [`parse_markdown_with_options`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParseOptions {
     /// Prose text size of the wrapper.
     pub size: ProseSize,
@@ -42,6 +42,23 @@ pub struct ParseOptions {
     /// when (a tracking pixel), so a remote image is rendered as its alt
     /// text. Same-origin images and raster `data:image/*` are always kept.
     pub remote_images: bool,
+    /// The face the wrapper is set in. `Ui` (the default): the interface face
+    /// at `size`, with the `65ch` reading cap unless `full_width`. `Read`:
+    /// the theme's reading face (`--Qfr`, 15.5 px / 15 px on a phone, line
+    /// height 1.6) spanning its container — a chat answer inside the reading
+    /// column, where the column itself is the cap.
+    pub face: ProseFace,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        Self {
+            size: ProseSize::Base,
+            full_width: false,
+            remote_images: false,
+            face: ProseFace::Ui,
+        }
+    }
 }
 
 /// Parse markdown into an ElementBuilder tree, wrapped in a default prose container
@@ -105,6 +122,8 @@ struct MarkdownBuilder {
     full_width: bool,
     /// Whether images from another origin are loaded.
     remote_images: bool,
+    /// The face the wrapper (and its code blocks) are set in.
+    face: ProseFace,
 }
 
 impl MarkdownBuilder {
@@ -113,6 +132,7 @@ impl MarkdownBuilder {
             size,
             full_width,
             remote_images,
+            face,
         } = opts;
         Self {
             stack: Vec::new(),
@@ -126,6 +146,7 @@ impl MarkdownBuilder {
             size,
             full_width,
             remote_images,
+            face,
         }
     }
 
@@ -302,7 +323,11 @@ impl MarkdownBuilder {
                 let code_content = std::mem::take(&mut self.text_buf);
                 let lang = self.code_lang.take();
                 // The shared renderer also serves standalone code files — one code path.
-                self.push_to_parent(crate::code::highlight_code(&code_content, lang.as_deref()));
+                self.push_to_parent(crate::code::highlight_code_face(
+                    &code_content,
+                    lang.as_deref(),
+                    self.face,
+                ));
             }
             TagEnd::Heading(_) => {
                 if let Some((level, text)) = self.heading_text.take() {
@@ -369,15 +394,32 @@ impl MarkdownBuilder {
     }
 
     fn finish(self) -> ParseResult {
-        // Wrap in the prose container, honouring the requested size + reading-width cap.
-        let mut prose = el(El::Div).st(prose_tokens(self.size, self.full_width));
-
-        for child in self.children {
-            prose = prose.append([child]);
-        }
+        // Wrap in the prose container, honouring the requested face, size and
+        // reading-width cap.
+        let content = match self.face {
+            ProseFace::Ui => {
+                let mut prose = el(El::Div).st(prose_tokens(self.size, self.full_width));
+                for child in self.children {
+                    prose = prose.append([child]);
+                }
+                prose
+            }
+            ProseFace::Read => {
+                // The reading face spans its container (the chat's reading
+                // column is the cap); `SpaceYMd`/`BreakWords` keep the rhythm
+                // and let long tokens wrap instead of overflowing.
+                let mut prose = ProseFace::Read
+                    .apply(el(El::Div).st([St::SpaceYMd, St::BreakWords]))
+                    .data("testid", "markdown");
+                for child in self.children {
+                    prose = prose.append([child]);
+                }
+                prose
+            }
+        };
 
         ParseResult {
-            content: prose,
+            content,
             headings: self.headings,
         }
     }
@@ -628,5 +670,52 @@ mod tests {
         assert!(fallback.headings.is_empty());
         let unknown_lang = parse_markdown("```brainfuck\n+[->+]\n```");
         assert!(unknown_lang.headings.is_empty());
+    }
+
+    #[test]
+    fn the_read_face_sets_the_wrapper_and_its_code_blocks() {
+        use rwire::ProseFace;
+        let opts = ParseOptions {
+            face: ProseFace::Read,
+            ..ParseOptions::default()
+        };
+        let out = parse_markdown_with_options(
+            "## Answer\n\nSome text.\n\n```rust\nlet x = 1;\n```",
+            opts,
+        );
+        let wrapper = out.content;
+        let utils = wrapper.get_style_utils();
+        assert!(utils.contains(&St::FontRead.as_u16()));
+        assert!(utils.contains(&St::TextProsePhone.as_u16()));
+        assert!(!utils.contains(&St::MaxWProse.as_u16()));
+        let html = wrapper.to_static_html();
+        assert!(html.contains("data-testid=\"markdown\""), "{html}");
+        assert!(html.contains("data-testid=\"markdown-code\""), "{html}");
+        // The Ui face keeps the 65ch cap and the Base size.
+        let ui = parse_markdown("```\nx\n```");
+        assert!(ui
+            .content
+            .get_style_utils()
+            .contains(&St::MaxWProse.as_u16()));
+    }
+
+    #[test]
+    fn the_read_face_keeps_the_unsafe_link_and_remote_image_neutralisation() {
+        use rwire::ProseFace;
+        let opts = ParseOptions {
+            face: ProseFace::Read,
+            ..ParseOptions::default()
+        };
+        for md in TRAPS {
+            let out = parse_markdown_with_options(md, opts)
+                .content
+                .to_static_html();
+            assert!(!out.contains("href"), "{md:?} kept an href: {out}");
+        }
+        let out = parse_markdown_with_options("![a cat](https://x.example/y.png)", opts)
+            .content
+            .to_static_html();
+        assert!(!out.contains("<img"), "{out}");
+        assert!(out.contains("a cat"), "{out}");
     }
 }

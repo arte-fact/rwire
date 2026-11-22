@@ -6,7 +6,7 @@
 //! [`crate::highlight`]); an unknown or absent language renders as flat text.
 
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder};
+use rwire::{el, El, ElementBuilder, ProseFace};
 
 use crate::highlight::{highlight, Token, TokenKind};
 
@@ -14,9 +14,21 @@ use crate::highlight::{highlight, Token, TokenKind};
 /// `yml`); `None` or an unrecognised language renders flat. A non-empty `lang` adds a small
 /// uppercase language label above the block (matching fenced-code rendering).
 pub fn highlight_code(code: &str, lang: Option<&str>) -> ElementBuilder {
+    highlight_code_face(code, lang, ProseFace::Ui)
+}
+
+/// [`highlight_code`] in a given face. In the reading face (`ProseFace::Read`, a chat
+/// answer) the block is mono 12.5 px on the theme's code ground, radius 10, scrolling
+/// horizontally inside its frame (`overflow-x:auto`) so a long line never scrolls the
+/// page; the interface face keeps the larger `TextSm`.
+pub fn highlight_code_face(code: &str, lang: Option<&str>, face: ProseFace) -> ElementBuilder {
+    let size = match face {
+        ProseFace::Read => St::Text12_5,
+        ProseFace::Ui => St::TextSm,
+    };
     let base = el(El::Code).st([
         St::FontMono,
-        St::TextSm,
+        size,
         St::WhitespacePre,
         St::DisplayBlock,
         St::LeadingRelaxed,
@@ -26,14 +38,25 @@ pub fn highlight_code(code: &str, lang: Option<&str>) -> ElementBuilder {
         Some(tokens) => base.append(tokens.iter().map(highlight_span).collect::<Vec<_>>()),
         None => base.text(code),
     };
-    let pre = el(El::Pre).st([
-        St::BgCode,
-        St::RoundedLg,
-        St::OverflowXAuto,
-        St::PMd,
-        St::BorderSubtle,
-        St::MyMd,
-    ]);
+    // In the reading face the block itself runs at 12.5 px (the /app value);
+    // the interface face inherits the wrapper's size.
+    let pre_size = match face {
+        ProseFace::Read => Some(St::Text12_5),
+        ProseFace::Ui => None,
+    };
+    let mut pre = el(El::Pre)
+        .st([
+            St::BgCode,
+            St::RoundedLg,
+            St::OverflowXAuto,
+            St::PMd,
+            St::BorderSubtle,
+            St::MyMd,
+        ])
+        .data("testid", "markdown-code");
+    if let Some(s) = pre_size {
+        pre = pre.st([s]);
+    }
     match lang {
         Some(lang) if !lang.is_empty() => {
             let label = el(El::Span)
@@ -124,6 +147,41 @@ mod tests {
         let _ = highlight_code("fn main() {}", Some("rust"));
         let _ = highlight_code("+[->+]", Some("brainfuck"));
         let _ = highlight_code("plain", None);
+    }
+
+    #[test]
+    fn the_reading_face_sets_12_5px_code_on_a_radius_10_scrolling_block() {
+        // No language: the root is the pre itself.
+        let read = highlight_code_face("let x = 1;", None, ProseFace::Read);
+        let html = read.to_static_html();
+        assert!(html.contains("data-testid=\"markdown-code\""), "{html}");
+        let pre_utils = read.get_style_utils();
+        // The pre scrolls on its own, keeps the theme's 10 px radius and runs at 12.5 px.
+        assert!(pre_utils.contains(&St::OverflowXAuto.as_u16()));
+        assert!(pre_utils.contains(&St::RoundedLg.as_u16()));
+        assert!(pre_utils.contains(&St::Text12_5.as_u16()));
+        // The code runs at 12.5 px in the mono face.
+        let code_utils = read.children().last().unwrap().get_style_utils();
+        assert!(code_utils.contains(&St::FontMono.as_u16()));
+        assert!(code_utils.contains(&St::Text12_5.as_u16()));
+        // With a language, a label sits above the same pre.
+        let labelled = highlight_code_face("let x = 1;", Some("rust"), ProseFace::Read);
+        let pre = labelled.children().last().unwrap();
+        assert!(pre.get_style_utils().contains(&St::OverflowXAuto.as_u16()));
+        assert!(pre
+            .children()
+            .last()
+            .unwrap()
+            .get_style_utils()
+            .contains(&St::Text12_5.as_u16()));
+        // The interface face keeps TextSm.
+        let ui = highlight_code("let x = 1;", None);
+        assert!(ui
+            .children()
+            .last()
+            .unwrap()
+            .get_style_utils()
+            .contains(&St::TextSm.as_u16()));
     }
 
     #[test]
