@@ -1084,8 +1084,8 @@ define_token_enum! {
         TextCat1 = 0x3A7 => "color:var(--Y1i)",
         /// Text on categorical color 1's solid fill.
         TextOnCat1 = 0x3A8 => "color:var(--Y1o)",
-        /// A 1px border in categorical color 1.
-        BorderCat1 = 0x3A9 => "border:1px solid var(--Y1)",
+        /// A 1px border in categorical color 1's ink (an outlined badge).
+        BorderCat1 = 0x3A9 => "border:1px solid var(--Y1i)",
         /// Categorical color 2 as a solid fill (`Tone::Cat(2)`).
         BgCat2 = 0x3AA => "background:var(--Y2)",
         /// Categorical color 2: tinted ground.
@@ -1094,8 +1094,8 @@ define_token_enum! {
         TextCat2 = 0x3AC => "color:var(--Y2i)",
         /// Text on categorical color 2's solid fill.
         TextOnCat2 = 0x3AD => "color:var(--Y2o)",
-        /// A 1px border in categorical color 2.
-        BorderCat2 = 0x3AE => "border:1px solid var(--Y2)",
+        /// A 1px border in categorical color 2's ink (an outlined badge).
+        BorderCat2 = 0x3AE => "border:1px solid var(--Y2i)",
         /// Categorical color 3 as a solid fill (`Tone::Cat(3)`).
         BgCat3 = 0x3AF => "background:var(--Y3)",
         /// Categorical color 3: tinted ground.
@@ -1104,8 +1104,8 @@ define_token_enum! {
         TextCat3 = 0x3B1 => "color:var(--Y3i)",
         /// Text on categorical color 3's solid fill.
         TextOnCat3 = 0x3B2 => "color:var(--Y3o)",
-        /// A 1px border in categorical color 3.
-        BorderCat3 = 0x3B3 => "border:1px solid var(--Y3)",
+        /// A 1px border in categorical color 3's ink (an outlined badge).
+        BorderCat3 = 0x3B3 => "border:1px solid var(--Y3i)",
         /// Categorical color 4 as a solid fill (`Tone::Cat(4)`).
         BgCat4 = 0x3B4 => "background:var(--Y4)",
         /// Categorical color 4: tinted ground.
@@ -1114,8 +1114,8 @@ define_token_enum! {
         TextCat4 = 0x3B6 => "color:var(--Y4i)",
         /// Text on categorical color 4's solid fill.
         TextOnCat4 = 0x3B7 => "color:var(--Y4o)",
-        /// A 1px border in categorical color 4.
-        BorderCat4 = 0x3B8 => "border:1px solid var(--Y4)",
+        /// A 1px border in categorical color 4's ink (an outlined badge).
+        BorderCat4 = 0x3B8 => "border:1px solid var(--Y4i)",
         /// Categorical color 5 as a solid fill (`Tone::Cat(5)`).
         BgCat5 = 0x3B9 => "background:var(--Y5)",
         /// Categorical color 5: tinted ground.
@@ -1124,8 +1124,8 @@ define_token_enum! {
         TextCat5 = 0x3BB => "color:var(--Y5i)",
         /// Text on categorical color 5's solid fill.
         TextOnCat5 = 0x3BC => "color:var(--Y5o)",
-        /// A 1px border in categorical color 5.
-        BorderCat5 = 0x3BD => "border:1px solid var(--Y5)",
+        /// A 1px border in categorical color 5's ink (an outlined badge).
+        BorderCat5 = 0x3BD => "border:1px solid var(--Y5i)",
         /// Categorical color 6 as a solid fill (`Tone::Cat(6)`).
         BgCat6 = 0x3BE => "background:var(--Y6)",
         /// Categorical color 6: tinted ground.
@@ -1134,8 +1134,8 @@ define_token_enum! {
         TextCat6 = 0x3C0 => "color:var(--Y6i)",
         /// Text on categorical color 6's solid fill.
         TextOnCat6 = 0x3C1 => "color:var(--Y6o)",
-        /// A 1px border in categorical color 6.
-        BorderCat6 = 0x3C2 => "border:1px solid var(--Y6)",
+        /// A 1px border in categorical color 6's ink (an outlined badge).
+        BorderCat6 = 0x3C2 => "border:1px solid var(--Y6i)",
         // Density (0x3C3-0x3C7): control dimensions a theme's `Density` sets in
         // `--Qz*`; the fallbacks are the comfortable sizes.
         /// A control's height (`Button`/`Input`/`Select` at their default size).

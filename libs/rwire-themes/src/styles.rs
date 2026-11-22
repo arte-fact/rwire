@@ -315,6 +315,11 @@ fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "w", &n[10]); // on-primary
         css_var(css, "x", &rp.accent[4]);
         css_var(css, "K", &rp.accent[5]); // focus ring
+        css_var(css, "j", &n[2]); // soft ink: nord4 (/app)
+        css_var(css, "j2", &n[5]); // faint ink wanted (kept if it reads on every ground)
+                                   // Success as a fill: the palette's bright green (nord14), dark text on it.
+        css_var(css, "o", &rp.green[6]);
+        css_var(css, "o2", &n[10]);
     } else {
         css_var(css, "a", &n[2]); // app: nord4
         css_var(css, "Qw", &n[2]); // canvas: the app ground
@@ -330,6 +335,8 @@ fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "w", &rp.white);
         css_var(css, "x", &rp.accent[10]);
         css_var(css, "K", &rp.accent[8]);
+        css_var(css, "j", &n[7]); // soft ink: nord3 (/app)
+        css_var(css, "j2", &mix(&n[6], &n[7], 0.5)); // faint ink wanted
     }
 }
 

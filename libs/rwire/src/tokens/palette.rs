@@ -154,6 +154,9 @@ pub struct ColorPalette {
     /// Categorical colors, up to 6 (see [`ColorPalette::categorical`]):
     /// identities with no meaning of state (a runtime, an author).
     pub categorical: Vec<String>,
+    /// Preferred inks of the categorical colors, `(light, dark)` per color
+    /// (see [`ColorPalette::categorical_inks`]).
+    pub categorical_inks: Vec<(String, String)>,
 }
 
 impl Default for ColorPalette {
@@ -230,6 +233,7 @@ impl Default for ColorPalette {
                 color::AMBER_12,
             ]),
             categorical: Vec::new(),
+            categorical_inks: Vec::new(),
         }
     }
 }
@@ -281,6 +285,25 @@ impl ColorPalette {
         S: Into<String>,
     {
         self.categorical = colors.into_iter().take(6).map(Into::into).collect();
+        self
+    }
+
+    /// The ink (text, outline) each categorical color should take, as
+    /// `(light, dark)`, in [`ColorPalette::categorical`]'s order. The theme
+    /// keeps it exactly when it reads at AA on the color's ground and on the
+    /// plain grounds; otherwise it takes the nearest color that does
+    /// (darkened in light mode, lightened in dark mode). A color without one
+    /// gets an ink computed from its hue.
+    pub fn categorical_inks<I, S>(mut self, inks: I) -> Self
+    where
+        I: IntoIterator<Item = (S, S)>,
+        S: Into<String>,
+    {
+        self.categorical_inks = inks
+            .into_iter()
+            .take(6)
+            .map(|(l, d)| (l.into(), d.into()))
+            .collect();
         self
     }
 }

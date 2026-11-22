@@ -257,3 +257,111 @@ fn the_ratio_matches_known_wcag_values() {
     assert!((contrast_ratio("#777777", "#ffffff") - 4.48).abs() < 0.01);
     assert!((contrast_ratio("#ffffff", "#ffffff") - 1.0).abs() < 1e-9);
 }
+
+/// studio + Nord in `mode`: the theme's variables, resolved.
+fn studio_nord(dark: bool) -> HashMap<String, String> {
+    let theme = if dark { Theme::dark() } else { Theme::light() }
+        .style(styles::studio())
+        .palette(palettes::nord());
+    vars(&generate_theme_css(&theme))
+}
+
+/// The worst contrast of `color` over the plain grounds of studio + Nord
+/// (app, subtle, surface, raised, canvas, sidebar).
+fn worst_on_grounds(v: &HashMap<String, String>, color: &str) -> f64 {
+    ["a", "b", "r", "t", "Qw", "Qs"]
+        .iter()
+        .map(|g| contrast_ratio(color, &resolve(v, g)))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Parity with mcp-agents' old front (/app), measured by its parity script:
+/// with studio + Nord, a token takes /app's exact value whenever it passes
+/// (4.5:1 for text, 3:1 for a non-text mark) on every ground it is used on.
+#[test]
+fn studio_nord_equals_app_where_contrast_allows() {
+    // (mode, variable, /app value, what it is)
+    let equal: &[(bool, &str, &str, &str)] = &[
+        (false, "a", "#d8dee9", "app ground: nord4"),
+        (true, "a", "#2e3440", "app ground: nord0"),
+        (true, "r", "#3b4252", "surface: nord1"),
+        (true, "t", "#434c5e", "raised: nord2"),
+        (false, "t", "#eceff4", "raised: nord6"),
+        (false, "Qs", "#e5e9f0", "sidebar: nord5"),
+        (true, "Qs", "#2e3440", "sidebar: nord0"),
+        (true, "h", "#4c566a", "line: nord3"),
+        (false, "j", "#4c566a", "ink-soft: nord3"),
+        (true, "j", "#d8dee9", "ink-soft: nord4"),
+        (true, "v", "#88c0d0", "accent fill: nord8"),
+        (true, "w", "#2e3440", "accent ink: nord0"),
+        (false, "Y1i", "#3b5a7f", "runtime claude"),
+        (false, "Y2i", "#6b4a66", "runtime vibe"),
+        (false, "Y3i", "#335b5a", "runtime pi"),
+        (true, "Y5i", "#ebcb8b", "permission ink: nord13"),
+        (true, "o", "#a3be8c", "generation dot: nord14"),
+    ];
+    for &(dark, var, app, what) in equal {
+        let v = studio_nord(dark);
+        let ours = resolve(&v, var);
+        let mode = if dark { "dark" } else { "light" };
+        assert!(
+            ours.eq_ignore_ascii_case(app),
+            "studio/nord/{mode} --{var} ({what}) = {ours}, /app has {app}"
+        );
+        println!("= {mode:5} --{var:4} {app}  {what}");
+    }
+}
+
+/// The gaps kept on purpose, each with its reason: /app's value fails the
+/// threshold on a ground where the token is used (app, subtle, surface,
+/// raised for a hovered row, canvas, sidebar), so rwire takes the nearest
+/// value that passes, or keeps its own for a fill that carries text.
+#[test]
+fn studio_nord_gaps_from_app_are_named() {
+    // (mode, variable, /app value, what it is)
+    let texts: &[(bool, &str, &str, &str)] = &[
+        (false, "j2", "#5d677c", "ink-faint"),
+        (true, "j2", "#a7b0c0", "ink-faint"),
+        (true, "Y1i", "#88c0d0", "runtime claude"),
+        (true, "Y2i", "#cdb0c8", "runtime vibe"),
+        (true, "Y3i", "#8fbcbb", "runtime pi"),
+        (false, "Y4i", "#9a5536", "wait ink"),
+        (true, "Y4i", "#d08770", "wait ink"),
+        (false, "Y5i", "#866417", "permission ink"),
+    ];
+    for &(dark, var, app, what) in texts {
+        let v = studio_nord(dark);
+        let ours = resolve(&v, var);
+        let mode = if dark { "dark" } else { "light" };
+        let (app_worst, ours_worst) = (worst_on_grounds(&v, app), worst_on_grounds(&v, &ours));
+        assert!(
+            app_worst < MIN_TEXT_CONTRAST,
+            "--{var} ({mode}, {what}): /app's {app} reads ({app_worst:.2}): take it"
+        );
+        assert!(
+            ours_worst >= MIN_TEXT_CONTRAST,
+            "--{var} ({mode}): {ours} = {ours_worst:.2}"
+        );
+        println!(
+            "≠ {mode:5} --{var:4} {what}: /app {app} worst {app_worst:.2}; rwire {ours} worst {ours_worst:.2}"
+        );
+    }
+
+    // The accent fill in light mode: /app's nord10 under its #f6f8fb text is
+    // 3.79:1; rwire keeps nord10 one step darker under white.
+    let v = studio_nord(false);
+    let app_fill = contrast_ratio("#5e81ac", "#f6f8fb");
+    let ours = contrast_ratio(&resolve(&v, "v"), &resolve(&v, "w"));
+    assert!(app_fill < MIN_TEXT_CONTRAST && ours >= MIN_TEXT_CONTRAST);
+    println!("≠ light --v    accent fill: /app #5e81ac/#f6f8fb {app_fill:.2}; rwire {ours:.2}");
+
+    // Success as a fill in light mode: --o carries text (a solid success
+    // button), so it stays; /app's nord14 dot fails even 3:1 on nord4, and so
+    // does rwire's (a dot variable at 3:1 is proposed for R2's StatusDot).
+    let (app_dot, ours_dot) = (
+        contrast_ratio("#a3be8c", &resolve(&v, "a")),
+        contrast_ratio(&resolve(&v, "o"), &resolve(&v, "a")),
+    );
+    assert!(app_dot < 3.0);
+    println!("≠ light --o    generation dot: /app #a3be8c {app_dot:.2} on nord4; rwire {} {ours_dot:.2} (kept: text fill)", resolve(&v, "o"));
+}

@@ -51,6 +51,17 @@ pub fn nord() -> ColorPalette {
         ]
         .map(String::from)
         .to_vec(),
+        // The inks of the old mcp-agents front (/app): runtimes claude, vibe, pi,
+        // then its "wait" and "permission" inks.
+        categorical_inks: [
+            ("#3b5a7f", "#88C0D0"),
+            ("#6b4a66", "#cdb0c8"),
+            ("#335b5a", "#8FBCBB"),
+            ("#9a5536", "#D08770"),
+            ("#866417", "#EBCB8B"),
+        ]
+        .map(|(l, d)| (l.to_string(), d.to_string()))
+        .to_vec(),
     }
 }
 
@@ -81,6 +92,7 @@ pub fn catppuccin() -> ColorPalette {
             "#F1C665", "#EDB840", "#E9AA1B", "#E59C00",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -111,6 +123,7 @@ pub fn dracula() -> ColorPalette {
             "#CFD664", "#BEC450", "#ADB23C", "#9CA028",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -142,6 +155,7 @@ pub fn solarized() -> ColorPalette {
             "#976F00", "#886200", "#795500", "#6A4800",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -173,6 +187,7 @@ pub fn gruvbox() -> ColorPalette {
             "#B97F0F", "#AA7206", "#9B6500", "#8C5800",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -203,6 +218,7 @@ pub fn tokyo_night() -> ColorPalette {
             "#C08D48", "#B07C38", "#A06B28", "#905A18",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -234,6 +250,7 @@ pub fn rose_pine() -> ColorPalette {
             "#DEA957", "#D29D47", "#C69137", "#BA8527",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -264,6 +281,7 @@ pub fn one_dark() -> ColorPalette {
             "#CBA85D", "#BE9C4E", "#B1903F", "#A48430",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -294,6 +312,7 @@ pub fn indigo() -> ColorPalette {
             "#92400E", "#78350F", "#613010", "#4A2510",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
@@ -401,6 +420,7 @@ pub fn cloth() -> ColorPalette {
             "#b97f0f", "#aa7206", "#9b6500", "#8c5800",
         ]),
         categorical: Vec::new(),
+        categorical_inks: Vec::new(),
     }
 }
 
