@@ -1294,6 +1294,48 @@ define_token_enum! {
         PxSidebarHead = 0x404 => "padding-inline:14px",
         /// A sidebar header's bottom padding: 10 px.
         PbSidebarHead = 0x405 => "padding-bottom:10px",
+        // Conversation (0x406-0x412): the avatar layout, bubbles, reading prose
+        // and the reading column (phone values; `.sm()` for the desktop ones).
+        /// A chat entry with an avatar: a 26 px column, then the body (10 px apart).
+        GridChatAvatarPhone = 0x406 => "display:grid;grid-template-columns:26px minmax(0,1fr);column-gap:10px;align-items:start",
+        /// The same from `sm`: a 30 px column, 12 px apart.
+        GridChatAvatar = 0x407 => "grid-template-columns:30px minmax(0,1fr);column-gap:12px",
+        /// A chat avatar: 26 px square.
+        SqChatAvatarPhone = 0x408 => "width:26px;height:26px;flex-shrink:0",
+        /// A chat avatar from `sm`: 30 px square.
+        SqChatAvatar = 0x409 => "width:30px;height:30px",
+        /// An 8 px radius (a chat avatar).
+        Rounded8 = 0x40A => "border-radius:8px",
+        /// A 12 px radius (a user's bubble, a decision card).
+        Rounded12 = 0x40B => "border-radius:12px",
+        /// A user's message: 14.5 px.
+        Text14_5 = 0x40C => "font-size:14.5px",
+        /// A bubble's padding (the old front's `.45rem .85rem` at its 16 px root).
+        PadBubble = 0x40D => "padding:7.2px 13.6px",
+        /// Reading prose on a phone: 15 px, line height 1.6.
+        TextProsePhone = 0x40E => "font-size:15px;line-height:1.6",
+        /// Reading prose from `sm`: 15.5 px.
+        TextProse = 0x40F => "font-size:15.5px",
+        /// The reading column: up to 760 px, centred.
+        MeasureReading = 0x410 => "width:100%;max-width:760px;margin-inline:auto",
+        /// The reading column's gutters on a phone: 16 px (`.sm()`: `PxGutter`).
+        PxGutterPhone = 0x411 => "padding-inline:16px",
+        /// The reading column's gutters from `sm`: 20 px.
+        PxGutter = 0x412 => "padding-inline:20px",
+        /// The gap between entries: 18 px.
+        GapChat = 0x413 => "gap:18px",
+        /// A chat entry's header: 13 px.
+        Text13 = 0x414 => "font-size:13px",
+        /// Weight 650 (a chat author, a page title).
+        FontW650 = 0x415 => "font-weight:650",
+        /// 11.5 px (a time, a day divider).
+        Text11_5 = 0x416 => "font-size:11.5px",
+        /// A chat avatar's initials: 12 px, bold.
+        TextChatAvatar = 0x417 => "font-size:12px;font-weight:700",
+        /// As wide as the content, at most the column (a bubble).
+        WFitMax = 0x418 => "width:fit-content;max-width:100%",
+        /// A thread's block padding: 24 px on top, 12 px below.
+        PyThread = 0x419 => "padding-block:24px 12px",
     }
 }
 

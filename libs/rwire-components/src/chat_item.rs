@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use rwire::{ElementBuilder, ItemRef};
+use rwire::{ElementBuilder, ItemRef, ProseFace, Tone};
 
 /// Tone for author rails, avatars, and tags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -24,13 +24,34 @@ pub enum ChatIntent {
     Danger,
 }
 
+/// The author's role: the local user's entries default to a bubble, an
+/// agent's to the reading face.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChatRole {
+    /// The local user (`ChatAuthor::user`).
+    User,
+    /// The counterpart (`ChatAuthor::agent`).
+    Agent,
+    /// Anything else.
+    #[default]
+    Other,
+}
+
 /// Who authored an entry — drives the rail tone, the avatar slot, and the
 /// header name.
 pub struct ChatAuthor {
     pub name: Cow<'static, str>,
     pub intent: ChatIntent,
-    /// Custom avatar/icon element; `None` renders no avatar slot.
+    /// Custom avatar/icon element; `None` renders no avatar slot (rail
+    /// layout) or an initials square (avatar layout).
     pub avatar: Option<ElementBuilder>,
+    /// The user or an agent (see [`ChatRole`]).
+    pub role: ChatRole,
+    /// The avatar square's tone in the avatar layout (`Tone::Cat(n)` for a
+    /// runtime); `None`: the raised ground for the user, the accent otherwise.
+    pub tone: Option<Tone>,
+    /// The avatar square's initials; `None`: the name's first letter.
+    pub initials: Option<Cow<'static, str>>,
 }
 
 impl ChatAuthor {
@@ -40,6 +61,9 @@ impl ChatAuthor {
             name: name.into(),
             intent: ChatIntent::Default,
             avatar: None,
+            role: ChatRole::User,
+            tone: None,
+            initials: None,
         }
     }
 
@@ -49,7 +73,23 @@ impl ChatAuthor {
             name: name.into(),
             intent: ChatIntent::Accent,
             avatar: None,
+            role: ChatRole::Agent,
+            tone: None,
+            initials: None,
         }
+    }
+
+    /// The avatar square's tone (avatar layout): `Tone::Cat(n)` for a runtime.
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = Some(tone);
+        self
+    }
+
+    /// The avatar square's initials (avatar layout); the name's first letter
+    /// otherwise.
+    pub fn initials(mut self, initials: impl Into<Cow<'static, str>>) -> Self {
+        self.initials = Some(initials.into());
+        self
     }
 
     /// De-emphasize (tool chatter and similar).
@@ -191,5 +231,16 @@ pub trait ChatItem {
     /// Group with the previous entry (suppress the repeated author header)?
     fn groups_with(&self, _prev: &Self) -> bool {
         false
+    }
+
+    /// Set the body in a bubble? `None`: yes for the user's entries.
+    fn bubble(&self) -> Option<bool> {
+        None
+    }
+
+    /// The body's face. `None`: the reading face for an agent, the interface
+    /// face otherwise.
+    fn prose(&self) -> Option<ProseFace> {
+        None
     }
 }

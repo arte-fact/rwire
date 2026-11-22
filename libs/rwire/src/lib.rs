@@ -70,6 +70,7 @@ pub mod item_ref;
 pub mod metrics;
 #[cfg(feature = "persist")]
 pub mod persist;
+pub mod prose;
 pub mod protocol;
 pub mod pwa;
 pub mod registry;
@@ -171,6 +172,7 @@ pub use style::{ScopedClass, Style};
 pub use attr_tokens::{At, Av};
 
 // Style token exports (binary-encoded styles)
+pub use prose::ProseFace;
 pub use style_tokens::{Bp, Pc, St, StyleKey, StyleProp, StyleValue};
 pub use tone::Tone;
 

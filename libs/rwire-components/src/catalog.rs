@@ -2591,6 +2591,79 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .attr("data-demo", "shell")
 }
 
+// ============================================================================
+// Conversation (R3)
+// ============================================================================
+
+/// One entry of the gallery's conversation.
+struct GalleryMsg {
+    key: &'static str,
+    user: bool,
+    time: &'static str,
+    text: &'static str,
+}
+
+impl crate::ChatItem for GalleryMsg {
+    fn key(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(self.key)
+    }
+    fn author(&self) -> crate::ChatAuthor {
+        if self.user {
+            crate::ChatAuthor::user("You")
+        } else {
+            crate::ChatAuthor::agent("claude")
+                .tone(rwire::Tone::Cat(1))
+                .initials("C")
+        }
+    }
+    fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
+        el(El::P).st([rwire::St::M0]).text(self.text)
+    }
+    fn time(&self) -> Option<std::borrow::Cow<'_, str>> {
+        Some(std::borrow::Cow::Borrowed(self.time))
+    }
+    fn groups_with(&self, prev: &Self) -> bool {
+        prev.user == self.user
+    }
+}
+
+/// A conversation in the avatar layout, on the reading column.
+fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{ChatLayout, ChatTranscript, Measure};
+    let items = [
+        GalleryMsg {
+            key: "m1",
+            user: true,
+            time: "09:41",
+            text: "Can you check why the hub drops the session after a restart?",
+        },
+        GalleryMsg {
+            key: "m2",
+            user: false,
+            time: "09:42",
+            text: "The hub keeps sessions in memory only, so a restart forgets them. The agent reconnects within a second, but the hub answers before it has re-registered its sessions.",
+        },
+        GalleryMsg {
+            key: "m3",
+            user: false,
+            time: "09:42",
+            text: "I can make the hub wait for the agent's first heartbeat before it serves the list.",
+        },
+    ];
+    el(El::Div)
+        .st([
+            rwire::St::WFull,
+            rwire::St::RoundedLg,
+            rwire::St::OverflowHidden,
+        ])
+        .attr("data-demo", "conversation")
+        .append([ChatTranscript::new()
+            .layout(ChatLayout::Avatar)
+            .max_width(Measure::Reading)
+            .items_plain(items.iter())
+            .build()])
+}
+
 fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{StatusDot, StatusDotIntent};
     let intent = match v(variants, 0) {
@@ -4460,6 +4533,16 @@ const ENTRIES: &[ComponentEntry] = &[
             },
         ],
         build_demo: shell_demo,
+    },
+    ComponentEntry {
+        name: "Conversation",
+        slug: "conversation",
+        description: "A conversation in the avatar layout: the user's bubbles, an agent's answers in the reading face, on the reading column.",
+        category: Category::DataDisplay,
+        order: 320,
+        variants: &[],
+        bool_props: &[],
+        build_demo: conversation_demo,
     },
     ComponentEntry {
         name: "Navigation",

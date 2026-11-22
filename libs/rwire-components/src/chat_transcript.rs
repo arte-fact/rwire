@@ -16,12 +16,23 @@ use std::borrow::Cow;
 use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder, HandlerSpec, ItemRef};
 
+use crate::chat_entry::ChatLayout;
 use crate::chat_item::{ChatItem, ChatItemCtx};
 use crate::{ChatEntry, Spinner, SpinnerSize, TypingIndicator};
+
+/// A transcript's measure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Measure {
+    /// The reading column: up to 760 px, centred, 20 px gutters (16 px on a
+    /// phone), 18 px between entries, on the canvas (`BgCanvas`).
+    Reading,
+}
 
 /// ChatTranscript builder.
 #[derive(Default)]
 pub struct ChatTranscript {
+    layout: ChatLayout,
+    measure: Option<Measure>,
     rows: Vec<ElementBuilder>,
     older: Option<(HandlerSpec, u32)>,
     writing: Option<Cow<'static, str>>,
@@ -32,6 +43,23 @@ pub struct ChatTranscript {
 impl ChatTranscript {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The entries' layout (`ChatLayout::Rail` by default). Set it before
+    /// `.items()`: entries are built as they are added.
+    pub fn layout(mut self, layout: ChatLayout) -> Self {
+        debug_assert!(
+            self.rows.is_empty(),
+            "ChatTranscript::layout must come before .items()"
+        );
+        self.layout = layout;
+        self
+    }
+
+    /// The column's measure (`Measure::Reading`); none: the full width.
+    pub fn max_width(mut self, measure: Measure) -> Self {
+        self.measure = Some(measure);
+        self
     }
 
     /// Render items bound with `iter_with_ref()` — bodies get the `ItemRef`
@@ -47,7 +75,8 @@ impl ChatTranscript {
                 item_ref: Some(item_ref),
             };
             let grouped = prev.is_some_and(|p| item.groups_with(p));
-            self.rows.push(ChatEntry::from_item(item, &ctx, grouped));
+            self.rows
+                .push(ChatEntry::from_item_in(item, &ctx, grouped, self.layout));
             prev = Some(item);
         }
         self
@@ -63,7 +92,8 @@ impl ChatTranscript {
         for item in items {
             let ctx = ChatItemCtx { item_ref: None };
             let grouped = prev.is_some_and(|p| item.groups_with(p));
-            self.rows.push(ChatEntry::from_item(item, &ctx, grouped));
+            self.rows
+                .push(ChatEntry::from_item_in(item, &ctx, grouped, self.layout));
             prev = Some(item);
         }
         self
@@ -129,9 +159,72 @@ impl ChatTranscript {
         if let Some(tail) = self.live_tail {
             column.push(tail);
         }
-        el(El::Div)
+        let column = el(El::Div)
             .st([St::DisplayFlex, St::FlexCol, St::GapMd, St::MinW0])
-            .append(column)
+            .append(column);
+        match self.measure {
+            None => column,
+            // The reading column on the canvas.
+            Some(Measure::Reading) => el(El::Div)
+                .st([St::BgCanvas, St::WFull, St::PyThread])
+                .data("testid", "chat-thread")
+                .append([column
+                    .st([St::MeasureReading, St::PxGutterPhone, St::GapChat])
+                    .sm([St::PxGutter])
+                    .data("testid", "chat-column")]),
+        }
+    }
+}
+
+#[cfg(test)]
+mod reading_tests {
+    use super::*;
+    use crate::chat_item::ChatAuthor;
+
+    struct M(&'static str, bool);
+    impl ChatItem for M {
+        fn key(&self) -> Cow<'_, str> {
+            Cow::Borrowed(self.0)
+        }
+        fn author(&self) -> ChatAuthor {
+            if self.1 {
+                ChatAuthor::user("You")
+            } else {
+                ChatAuthor::agent("claude")
+            }
+        }
+        fn body(&self, _: &ChatItemCtx<Self>) -> ElementBuilder {
+            el(El::P).text(self.0)
+        }
+    }
+
+    #[test]
+    fn the_reading_column_is_760_centred_on_the_canvas_in_the_avatar_layout() {
+        let items = [M("a", true), M("b", false)];
+        let built = ChatTranscript::new()
+            .layout(ChatLayout::Avatar)
+            .max_width(Measure::Reading)
+            .items_plain(items.iter())
+            .build();
+        assert!(built.get_style_utils().contains(&St::BgCanvas.as_u16()));
+        let column = &built.children()[0];
+        for st in [St::MeasureReading, St::PxGutterPhone, St::GapChat] {
+            assert!(column.get_style_utils().contains(&st.as_u16()), "{st:?}");
+        }
+        let html = built.to_static_html();
+        assert_eq!(
+            html.matches("data-testid=\"chat-entry\"").count(),
+            2,
+            "{html}"
+        );
+        assert!(
+            html.contains("chat-bubble") && html.contains("chat-prose"),
+            "{html}"
+        );
+        assert_eq!(
+            St::MeasureReading.css(),
+            "width:100%;max-width:760px;margin-inline:auto"
+        );
     }
 }
 
