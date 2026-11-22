@@ -1276,6 +1276,13 @@ define_token_enum! {
         /// Contain layout and paint: the box becomes the containing block of its
         /// fixed descendants (a demo frame that keeps a shell's drawer inside).
         ContainLayout = 0x3FD => "contain:layout paint",
+        // Old-front parity (0x3FE-0x400).
+        /// A 26 px square (a brand mark), not shrinking in a flex row.
+        Sq26 = 0x3FE => "width:26px;height:26px;flex-shrink:0",
+        /// A 7 px radius (a brand mark, a navigation row).
+        Rounded7 = 0x3FF => "border-radius:7px",
+        /// An extra-small dot: 7 px (a connection indicator).
+        SizeDotXs = 0x400 => "width:7px;height:7px",
     }
 }
 

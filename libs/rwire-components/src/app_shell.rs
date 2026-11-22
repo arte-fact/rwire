@@ -369,13 +369,8 @@ impl AppShell {
             row.push(
                 el(El::Div)
                     .attr("data-shell", "sidebar")
-                    .st([
-                        St::WShellSidebar,
-                        St::MinH0,
-                        St::DisplayFlex,
-                        St::FlexCol,
-                        St::BorderRDefault,
-                    ])
+                    // The column draws no edge: its content does (`Sidebar`).
+                    .st([St::WShellSidebar, St::MinH0, St::DisplayFlex, St::FlexCol])
                     .append([sidebar]),
             );
             if let Some(ref h) = self.on_resize {
@@ -644,6 +639,30 @@ mod tests {
     #[test]
     fn the_default_sidebar_width_is_264() {
         assert_eq!(AppShell::new().sidebar_width, 264);
+    }
+
+    /// The sidebar column leaves the edge to its content (`Sidebar` draws it):
+    /// no double hairline.
+    #[test]
+    fn the_sidebar_column_draws_no_edge_of_its_own() {
+        let built = AppShell::new()
+            .sidebar(el(El::Span))
+            .main(el(El::Span))
+            .panel(None)
+            .build();
+        let html = built.to_static_html();
+        let col = html.split("data-shell=\"sidebar\"").next().unwrap();
+        let class = col.rsplit("class=\"").next().unwrap();
+        let border = St::BorderRDefault.as_u16();
+        assert!(
+            !class
+                .split('"')
+                .next()
+                .unwrap()
+                .split(' ')
+                .any(|c| c == format!("u{border}")),
+            "{html}"
+        );
     }
 
     #[test]

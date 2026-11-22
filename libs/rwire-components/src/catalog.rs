@@ -2474,14 +2474,33 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
                     St::DisplayInlineFlex,
                     St::ItemsCenter,
                     St::JustifyCenter,
-                    St::H1_75rem,
-                    St::AspectSquare,
-                    St::RoundedMd,
+                    St::Sq26,
+                    St::Rounded7,
                     St::TextSm,
                 ])
                 .attr("aria-hidden", "true")
+                .data("demo", "brand-mark")
                 .text("m"),
             el(El::Span).text("mcp-agents"),
+            // The hub link: a 7 px dot, no halo.
+            el(El::Span)
+                .st([
+                    St::MlAuto,
+                    St::DisplayFlex,
+                    St::ItemsCenter,
+                    St::GapXs,
+                    St::TextXs,
+                    St::FontMedium,
+                    St::TextMuted,
+                ])
+                .data("demo", "hub")
+                .append([
+                    crate::StatusDot::new()
+                        .intent(crate::StatusDotIntent::Success)
+                        .size(crate::StatusDotSize::Xs)
+                        .build(),
+                    el(El::Span).text("hub"),
+                ]),
         ]);
     let sidebar = Sidebar::new()
         .header(brand)
@@ -2503,12 +2522,17 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .body(gallery_nav(false, "/s/2"))
         .footer(
             el(El::Div)
-                .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
+                .st([St::DisplayFlex, St::ItemsCenter, St::GapSm, St::TextXs])
                 .append([
-                    Button::icon_only(Icon::Settings, "Settings")
-                        .intent(crate::ButtonIntent::Ghost)
-                        .build(),
+                    el(El::Span).st([St::TextMuted]).text("Admin"),
+                    // A link that is a control: a 44 px target under a finger.
+                    rwire::router::Link::touch("/", "Old page").data("demo", "touch-link"),
+                    el(El::Span).st([St::MlAuto]),
                     ThemeToggle::new().ghost().build(),
+                    Button::icon_only(Icon::LogOut, "Sign out")
+                        .intent(crate::ButtonIntent::Ghost)
+                        .build()
+                        .data("demo", "logout"),
                 ]),
         )
         .aria_label("Sessions")

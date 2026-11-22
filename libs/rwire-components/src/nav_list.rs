@@ -394,9 +394,13 @@ impl NavRow {
         let mut cells = vec![
             leading,
             el(El::Span)
-                .st([St::Truncate, St::MinW0, St::TextNavTitle])
+                .st([St::Truncate, St::MinW0, St::TextNavTitle, St::LeadingNormal])
                 .append(title),
-            el(El::Span).append(self.trailing),
+            // A flex cell: the badge adds no line strut, so the row is as tall
+            // as its title's line.
+            el(El::Span)
+                .st([St::DisplayFlex, St::ItemsCenter])
+                .append(self.trailing),
         ];
         if let Some((text, suffix)) = &self.meta {
             let mut meta = vec![el(El::Span)
@@ -488,6 +492,29 @@ mod tests {
             assert!(rule.contains("[data-touch]"), "{rule}");
             assert!(rule.contains(":where("), "zero specificity: {rule}");
         }
+    }
+
+    /// Nothing in a one-line row is taller than its title's line (1.5): the
+    /// trailing badge sits in a flex cell (no line strut), the title sets its
+    /// line height; the compact padding is the old front's (.38rem .55rem at
+    /// its 16 px root).
+    #[test]
+    fn a_one_line_row_is_as_tall_as_its_title_line() {
+        let built = NavRow::new("/s/x")
+            .title("one", "")
+            .trailing(el(El::Span).text("claude"))
+            .build();
+        let cells = built.children();
+        let trailing = cells[2].get_style_utils();
+        assert!(trailing.contains(&St::DisplayFlex.as_u16()), "{trailing:?}");
+        assert!(trailing.contains(&St::ItemsCenter.as_u16()));
+        assert!(cells[1]
+            .get_style_utils()
+            .contains(&St::LeadingNormal.as_u16()));
+        let css = rwire::theme::generate_theme_css(
+            &rwire::theme::Theme::new().density(rwire::theme::Density::Compact),
+        );
+        assert!(css.contains("--Qzp:6.08px 8.8px;"), "{css}");
     }
 
     #[test]

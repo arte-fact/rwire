@@ -340,7 +340,7 @@ impl Density {
             // The tokens' fallbacks are the comfortable sizes.
             Density::Comfortable => "",
             Density::Compact => {
-                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzcx:var(--S2);--Qzcy:.125rem;--Qzp:.38rem .55rem;\
+                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzcx:9.6px;--Qzcy:2.4px;--Qzp:6.08px 8.8px;\
                  --Qzi:32px;--Qzg:18px;--Qzq:0;"
             }
         }
@@ -816,7 +816,7 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         let below = theme.touch_below.unwrap_or(640);
         let _ = writeln!(
             css,
-            "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}\
+            "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}:where(a[data-touch]){{display:inline-flex;align-items:center}}\
              :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button],[data-touch]){{min-height:44px}}\
              :where(button,[role=tab],[role=button]){{min-width:44px}}}}",
             below.saturating_sub(1)
@@ -1553,7 +1553,7 @@ mod tests {
         assert!(!root.contains("--Qz"), "{comfy}");
         let compact = generate_theme_css(&Theme::new().density(Density::Compact));
         assert!(compact.contains("--Qzh:2rem;"), "{compact}");
-        assert!(compact.contains("--Qzp:.38rem .55rem;"));
+        assert!(compact.contains("--Qzp:6.08px 8.8px;"));
         assert!(compact.contains("--Qzy:var(--S2);"));
         // Icon buttons: 32 px squares, 18 px glyphs, no padding (`/app`).
         assert!(

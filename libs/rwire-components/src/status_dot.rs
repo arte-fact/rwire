@@ -44,6 +44,8 @@ pub enum StatusDotIntent {
 /// StatusDot size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StatusDotSize {
+    /// 7 px, never a halo (a connection indicator).
+    Xs,
     /// 9 px (dense lists).
     #[default]
     Sm,
@@ -95,7 +97,7 @@ impl StatusDot {
         self
     }
 
-    /// Set the size (`Sm`, 9 px, by default).
+    /// Set the size (`Sm`, 9 px, by default; `Xs`, 7 px, has no halo).
     pub fn size(mut self, size: StatusDotSize) -> Self {
         self.size = size;
         self
@@ -136,6 +138,7 @@ impl StatusDot {
         let tone = self.tone_of();
         let mut tokens = vec![
             match self.size {
+                StatusDotSize::Xs => St::SizeDotXs,
                 StatusDotSize::Sm => St::SizeDotSm,
                 StatusDotSize::Md => St::SizeDotMd,
             },
@@ -149,7 +152,8 @@ impl StatusDot {
         } else {
             St::BgCurrentColor
         });
-        if self.ring {
+        // An extra-small dot never has a halo.
+        if self.ring && self.size != StatusDotSize::Xs {
             tokens.push(St::DotRing);
         }
         if self.pulse {
@@ -255,6 +259,20 @@ mod tests {
         assert!(html.contains("role=\"img\""), "{html}");
         assert!(html.contains("aria-label=\"Generating\""), "{html}");
         assert!(!html.contains("aria-hidden"), "{html}");
+    }
+
+    /// The old front's "hub" dot: 7 px, never a halo.
+    #[test]
+    fn an_extra_small_dot_is_7px_without_a_halo() {
+        let dot = StatusDot::new()
+            .intent(StatusDotIntent::Success)
+            .size(StatusDotSize::Xs)
+            .ring(true)
+            .build();
+        let utils = dot.get_style_utils();
+        assert!(utils.contains(&St::SizeDotXs.as_u16()));
+        assert!(!utils.contains(&St::DotRing.as_u16()));
+        assert_eq!(St::SizeDotXs.css(), "width:7px;height:7px");
     }
 
     #[test]

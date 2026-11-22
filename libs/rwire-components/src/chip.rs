@@ -93,7 +93,8 @@ impl Chip {
                 Tone::Accent.border(),
             ]);
         } else {
-            tokens.extend([St::BgApp, St::TextMuted]);
+            // At rest: no ground, the hairline, the soft ink.
+            tokens.extend([St::BgTransparent, St::TextMuted]);
         }
         tokens
     }
@@ -215,6 +216,20 @@ mod tests {
     fn a_counted_chip_names_itself_with_a_separator() {
         let html = Chip::new("Failed").count(3).build().to_static_html();
         assert!(html.contains("aria-label=\"Failed, 3\""), "{html}");
+    }
+
+    /// The old front's resting chip: no ground, the hairline, the soft ink.
+    #[test]
+    fn an_inactive_chip_rests_on_nothing() {
+        let tokens = Chip::new("All").compute_tokens();
+        for st in [St::BgTransparent, St::BorderDefault, St::TextMuted] {
+            assert!(tokens.contains(&st), "{st:?}");
+        }
+        assert!(!tokens.contains(&St::BgApp));
+        let css = rwire::theme::generate_theme_css(
+            &rwire::theme::Theme::new().density(rwire::theme::Density::Compact),
+        );
+        assert!(css.contains("--Qzcx:9.6px;--Qzcy:2.4px;"), "{css}");
     }
 
     #[test]

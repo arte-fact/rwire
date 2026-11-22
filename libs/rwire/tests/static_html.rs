@@ -271,3 +271,33 @@ fn style_text_is_raw_in_the_static_paint() {
     assert!(!html.contains("&gt;"), "{html}");
     assert!(!html.contains("</style><b>"), "{html}");
 }
+
+/// A link that is a control (a sidebar footer's link) gets the touch target;
+/// a link in running text does not.
+#[test]
+fn a_touch_link_carries_the_touch_marker() {
+    let html = rwire::router::Link::touch("/", "Old page").to_static_html();
+    assert!(html.contains("data-touch"), "{html}");
+    assert!(html.contains("data-route"), "{html}");
+    assert!(!rwire::router::Link::to("/", "x")
+        .to_static_html()
+        .contains("data-touch"));
+    let css = rwire::theme::generate_theme_css(&rwire::theme::Theme::new());
+    let block = css.split_once("@media (pointer:coarse)").unwrap().1;
+    assert!(
+        block.contains(":where(a[data-touch]){display:inline-flex;align-items:center}"),
+        "{block}"
+    );
+}
+
+/// The brand mark: a 26 px square with a 7 px radius; the logout arrow points
+/// into a door on the right (the old mcp-agents front's).
+#[test]
+fn brand_square_and_logout_icon() {
+    assert_eq!(St::Sq26.css(), "width:26px;height:26px;flex-shrink:0");
+    assert_eq!(St::Rounded7.css(), "border-radius:7px");
+    assert_eq!(
+        rwire::Icon::LogOut.svg_path(),
+        "M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"
+    );
+}

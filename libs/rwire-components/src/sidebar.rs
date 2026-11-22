@@ -25,6 +25,7 @@ pub struct Sidebar {
     body: Option<ElementBuilder>,
     footer: Option<ElementBuilder>,
     aria_label: Option<Cow<'static, str>>,
+    no_border: bool,
 }
 
 impl Sidebar {
@@ -63,6 +64,14 @@ impl Sidebar {
         self
     }
 
+    /// The 1 px hairline on the right edge (`St::BorderRDefault`), on by
+    /// default: the sidebar owns its edge (an `AppShell` column draws none).
+    /// Off for a sidebar that sits on another edge or in a drawer.
+    pub fn border(mut self, on: bool) -> Self {
+        self.no_border = !on;
+        self
+    }
+
     /// The landmark's accessible name (`aria-label`).
     pub fn aria_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
         self.aria_label = Some(label.into());
@@ -71,14 +80,18 @@ impl Sidebar {
 
     /// The column's own tokens.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![
+        let mut tokens = vec![
             St::DisplayFlex,
             St::FlexCol,
             St::HFull,
             St::MinH0,
             St::BgSidebar,
             St::PlSafe,
-        ]
+        ];
+        if !self.no_border {
+            tokens.push(St::BorderRDefault);
+        }
+        tokens
     }
 
     /// Build the `<aside>`.
@@ -185,6 +198,20 @@ mod tests {
             St::PbSidebarFootSafe.css(),
             "padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))"
         );
+    }
+
+    /// The old front's sidebar edge: a 1 px hairline on the right, by default;
+    /// `.border(false)` drops it.
+    #[test]
+    fn the_sidebar_draws_its_right_edge() {
+        let built = Sidebar::new().build();
+        assert!(built
+            .get_style_utils()
+            .contains(&St::BorderRDefault.as_u16()));
+        let bare = Sidebar::new().border(false).build();
+        assert!(!bare
+            .get_style_utils()
+            .contains(&St::BorderRDefault.as_u16()));
     }
 
     #[test]
