@@ -83,6 +83,7 @@ pub mod style_groups;
 pub mod style_tokens;
 pub mod theme;
 pub mod tokens;
+pub mod tone;
 pub mod url_safety;
 // Builder API exports
 pub use actions::{reflect_action, reflect_action_errors, ActionKey, Actions, Phase, Resolver};
@@ -171,6 +172,7 @@ pub use attr_tokens::{At, Av};
 
 // Style token exports (binary-encoded styles)
 pub use style_tokens::{Bp, Pc, St, StyleKey, StyleProp, StyleValue};
+pub use tone::Tone;
 
 // Token exports
 pub use tokens::css::minify_css;
@@ -179,8 +181,8 @@ pub use tokens::{ColorPalette, ColorScale};
 
 // Theme exports
 pub use theme::{
-    css_var, generate_base_css, generate_theme_css, IntoPalette, IntoStyle, RadiusScale,
-    ResolvedPalette, Theme, ThemeMode, ThemeProvider, ThemeStyle,
+    css_var, generate_base_css, generate_theme_css, Density, Fonts, IntoPalette, IntoStyle,
+    RadiusScale, ResolvedPalette, Theme, ThemeMode, ThemeProvider, ThemeStyle,
 };
 
 // Icon exports

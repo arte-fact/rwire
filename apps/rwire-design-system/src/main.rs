@@ -6,7 +6,7 @@ use rwire::capsule_gen::{CapsuleConfig, FontFace};
 use rwire::icons::{icon, Icon};
 use rwire::router::Link;
 use rwire::style_tokens::St;
-use rwire::theme::{Theme, ThemeMode, ThemeStyle};
+use rwire::theme::{Density, Fonts, Theme, ThemeMode, ThemeStyle};
 use rwire::{el, handler, renderer, theme, At, El, ElementBuilder, Ev, Server, State};
 use rwire_components::catalog::{self, Category, ComponentEntry};
 use rwire_components::*;
@@ -79,7 +79,18 @@ struct DesignSystemState {
 
 #[theme]
 fn app_theme() -> Theme {
-    Theme::default().palette(palettes::nord())
+    // Follows the OS until the visitor picks a mode (the 3-state toggle in the header).
+    // The R1 foundations: studio surfaces, the reading face, the system's mode.
+    Theme::default()
+        .mode(ThemeMode::System)
+        .palette(palettes::nord())
+        .style(styles::studio())
+        .fonts(
+            Fonts::new()
+                .ui("Inter, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif")
+                .read("\"Source Serif 4\", Georgia, \"Times New Roman\", serif")
+                .mono("\"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace"),
+        )
 }
 
 #[tokio::main]
@@ -294,10 +305,7 @@ fn build_header() -> ElementBuilder {
 #[renderer]
 fn render_theme_toggle(theme: &Theme) -> ElementBuilder {
     ThemeToggle::new()
-        .mode(match theme.mode {
-            ThemeMode::Light => ThemeToggleMode::Light,
-            ThemeMode::Dark => ThemeToggleMode::Dark,
-        })
+        .mode(theme.mode.into())
         .on_toggle(toggle_theme())
         .build()
 }
@@ -325,6 +333,12 @@ fn render_style_switcher(theme: &Theme) -> ElementBuilder {
             })
             .size(ButtonSize::Sm)
             .on_click(cycle_palette()),
+            Button::ghost(match theme.current_density() {
+                Density::Compact => "Compact",
+                Density::Comfortable => "Comfortable",
+            })
+            .size(ButtonSize::Sm)
+            .on_click(toggle_density()),
         ])
         .build()
 }
@@ -1123,7 +1137,8 @@ fn set_text_3(state: &mut DesignSystemState, ctx: &rwire::EventContext) {
 
 #[handler]
 fn toggle_theme(theme: &mut Theme) {
-    theme.mode = theme.mode.toggle();
+    // Three states: follow the OS, then force light, then dark.
+    theme.mode = theme.mode.cycle();
 }
 
 #[handler]
@@ -1132,6 +1147,15 @@ fn cycle_theme_style(theme: &mut Theme) {
     all.extend(styles::ALL.iter().map(|f| f()));
     let idx = all.iter().position(|s| *s == theme.style).unwrap_or(0);
     theme.style = all[(idx + 1) % all.len()];
+}
+
+#[handler]
+fn toggle_density(theme: &mut Theme) {
+    let next = match theme.current_density() {
+        Density::Comfortable => Density::Compact,
+        Density::Compact => Density::Comfortable,
+    };
+    *theme = theme.clone().density(next);
 }
 
 #[handler]

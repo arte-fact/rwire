@@ -151,6 +151,15 @@ pub struct ColorPalette {
     pub green: ColorScale,
     /// Warning color
     pub amber: ColorScale,
+    /// Categorical colors, up to 6 (see [`ColorPalette::categorical`]):
+    /// identities with no meaning of state (a runtime, an author).
+    pub categorical: Vec<String>,
+    /// Preferred inks of the categorical colors, `(light, dark)` per color
+    /// (see [`ColorPalette::categorical_inks`]).
+    pub categorical_inks: Vec<(String, String)>,
+    /// Preferred mark colors on each categorical solid fill (see
+    /// [`ColorPalette::categorical_on_solids`]).
+    pub categorical_on_solids: Vec<String>,
 }
 
 impl Default for ColorPalette {
@@ -226,6 +235,9 @@ impl Default for ColorPalette {
                 color::AMBER_11,
                 color::AMBER_12,
             ]),
+            categorical: Vec::new(),
+            categorical_inks: Vec::new(),
+            categorical_on_solids: Vec::new(),
         }
     }
 }
@@ -263,6 +275,53 @@ impl ColorPalette {
     /// Set the amber/warning scale.
     pub fn with_amber(mut self, scale: ColorScale) -> Self {
         self.amber = scale;
+        self
+    }
+
+    /// Set the categorical colors (`#RRGGBB` or `oklch(…)`), up to 6 (more
+    /// are dropped): identities with no meaning of state, such as a runtime or
+    /// an author. Each becomes `--Y1…--Y6`, with a tinted ground, a readable
+    /// ink and an on-solid ink computed per mode (see `Tone::Cat`). A palette
+    /// without them gets six derived from its own scales.
+    pub fn categorical<I, S>(mut self, colors: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.categorical = colors.into_iter().take(6).map(Into::into).collect();
+        self
+    }
+
+    /// The ink (text, outline) each categorical color should take, as
+    /// `(light, dark)`, in [`ColorPalette::categorical`]'s order. The theme
+    /// keeps it exactly when it reads at AA on the color's ground and on the
+    /// plain grounds; otherwise it takes the nearest color that does
+    /// (darkened in light mode, lightened in dark mode). A color without one
+    /// gets an ink computed from its hue.
+    pub fn categorical_inks<I, S>(mut self, inks: I) -> Self
+    where
+        I: IntoIterator<Item = (S, S)>,
+        S: Into<String>,
+    {
+        self.categorical_inks = inks
+            .into_iter()
+            .take(6)
+            .map(|(l, d)| (l.into(), d.into()))
+            .collect();
+        self
+    }
+
+    /// The color a logotype or a decorative `aria-hidden` glyph should take on
+    /// each categorical solid fill (`St::TextCatNMark`), in
+    /// [`ColorPalette::categorical`]'s order. Kept when it reaches 3:1 on the
+    /// fill (the WCAG threshold for graphics), else the nearest that does.
+    /// Never for read text: that is `St::TextOnCatN`, at 4.5:1.
+    pub fn categorical_on_solids<I, S>(mut self, colors: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.categorical_on_solids = colors.into_iter().take(6).map(Into::into).collect();
         self
     }
 }

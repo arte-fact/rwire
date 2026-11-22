@@ -182,6 +182,16 @@ test("CREATE_SYNCED and GET_SYNCED address __synced_N spans; GS null-guards", ()
   assert.deepEqual(errs, [], "missing region must not error");
 });
 
+test("an unstyled region wrapper is a class-less span (display:contents in the base CSS)", () => {
+  // The static paint (SSR) writes `<span data-rwr>`; the live wrapper must match the
+  // same base rule: `[id^=__synced_]:not([class]),[data-rwr]:not([class])`.
+  run([0x03, ...vint(4)], [0x20, ...vint(0xffff), ...vint(0)]);
+  const w = doc.body.children[0];
+  assert.equal(w.tagName, "SPAN");
+  assert.equal(w.id, "__synced_4");
+  assert.equal(w.getAttribute("class"), null);
+});
+
 // --- attributes, class, style ---
 
 test("SET_CLASS, SET_ATTR (A-map + symbols), SET_DATA", () => {

@@ -237,6 +237,11 @@ impl Button {
     // Token computation
     // ========================================================================
 
+    /// An icon and no text.
+    fn is_icon_only(&self) -> bool {
+        self.icon.is_some() && self.text.is_none()
+    }
+
     /// Icon edge length (px), scaled to the button size.
     fn icon_px(&self) -> u32 {
         match self.size {
@@ -267,6 +272,10 @@ impl Button {
             ButtonIntent::Secondary => {
                 tokens.extend([St::BgSecondary, St::TextOnSecondary, St::BorderDefault])
             }
+            // An icon-only ghost rests on nothing, in the soft ink (a toolbar's icons).
+            ButtonIntent::Ghost if self.is_icon_only() => {
+                tokens.extend([St::BgTransparent, St::TextMuted, St::BorderGhost])
+            }
             ButtonIntent::Ghost => tokens.extend([St::BgTransparent, St::TextHigh]),
             ButtonIntent::Outline => {
                 tokens.extend([St::BgTransparent, St::TextMuted, St::BorderDefault])
@@ -279,7 +288,11 @@ impl Button {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextXs, St::GapXs]);
             }
-            ButtonSize::Md => {} // defaults
+            // The theme's density sets the default size's text (`--Qzt`).
+            ButtonSize::Md => {
+                tokens.retain(|t| *t != St::TextSm);
+                tokens.push(St::TextControl);
+            }
             ButtonSize::Lg => {
                 tokens.retain(|t| !matches!(t, St::GapSm | St::TextSm));
                 tokens.extend([St::TextBase, St::GapMd]);
@@ -313,6 +326,10 @@ impl Button {
                 ButtonIntent::Primary => builder.hover([St::BgPrimaryHover, St::GlowTheme]),
                 ButtonIntent::Secondary => {
                     builder.hover([St::BgSecondaryHover, St::BorderEmphasis])
+                }
+                // …and on hover takes the raised ground, the hairline and the ink.
+                ButtonIntent::Ghost if self.is_icon_only() => {
+                    builder.hover([St::BgSurfaceRaised, St::BorderDefault, St::TextDefault])
                 }
                 ButtonIntent::Ghost => builder.hover([St::BgHover]),
                 ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
@@ -348,7 +365,7 @@ impl Button {
         match self.size {
             ButtonSize::Xs => vec![St::H1_5rem, St::Py0, St::PxSm],
             ButtonSize::Sm => vec![St::H1_75rem, St::Py0, St::PxSp3],
-            ButtonSize::Md => vec![St::H2_25rem, St::Py0, St::PxMd],
+            ButtonSize::Md => vec![St::HControl, St::Py0, St::PxMd],
             ButtonSize::Lg => vec![St::H2_75rem, St::Py0, St::PxLg],
         }
     }
@@ -371,6 +388,11 @@ impl Button {
             // the width to the height, centering the glyph.
             tokens.retain(|t| !matches!(t, St::PxSp3 | St::PxMd | St::PxLg));
             tokens.push(St::AspectSquare);
+            // At the default size the theme's density sizes the square (`--Qzi`).
+            if self.size == ButtonSize::Md {
+                tokens.retain(|t| *t != St::HControl);
+                tokens.push(St::SqIconButton);
+            }
         }
         let mut builder = self.apply_pseudo(el(El::Button).st(tokens));
         if !self.hover_extra.is_empty() && !self.disabled {
@@ -386,7 +408,11 @@ impl Button {
         let icon = self.icon.take();
         let text = self.text.take();
         if show_icon {
-            let icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            let mut icon_el = icons::icon_sized(icon.unwrap(), icon_px);
+            if icon_only && self.size == ButtonSize::Md {
+                // …and its glyph (`--Qzg`), 14 px otherwise.
+                icon_el = icon_el.st([St::GlyphIconButton]);
+            }
             builder = match text {
                 Some(t) => builder.append([icon_el, el(El::Span).text(&t)]),
                 None => builder.append([icon_el]),
@@ -779,6 +805,61 @@ mod tests {
     }
 
     #[test]
+    fn a_ghost_icon_button_rests_on_nothing_and_raises_on_hover() {
+        let btn = Button::icon_only(Icon::Settings, "Settings")
+            .intent(ButtonIntent::Ghost)
+            .build();
+        let rest = btn.get_style_utils();
+        for st in [St::BgTransparent, St::TextMuted, St::BorderGhost] {
+            assert!(rest.contains(&st.as_u16()), "{st:?} at rest");
+        }
+        assert!(!rest.contains(&St::TextHigh.as_u16()));
+        let hover: Vec<u16> = btn
+            .get_pseudo_groups()
+            .iter()
+            .filter(|(pc, _)| *pc == 0x00)
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        for st in [St::BgSurfaceRaised, St::BorderDefault, St::TextDefault] {
+            assert!(hover.contains(&st.as_u16()), "{st:?} on hover");
+        }
+        // A ghost button with text is unchanged.
+        let text = Button::ghost("Cancel").build();
+        assert!(text.get_style_utils().contains(&St::TextHigh.as_u16()));
+        assert!(!text.get_style_utils().contains(&St::BorderGhost.as_u16()));
+        let hover: Vec<u16> = text
+            .get_pseudo_groups()
+            .iter()
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        assert!(hover.contains(&St::BgHover.as_u16()));
+        assert!(!hover.contains(&St::BgSurfaceRaised.as_u16()));
+    }
+
+    #[test]
+    fn an_icon_button_follows_the_density_hooks_at_the_default_size() {
+        let btn = Button::icon_only(Icon::Settings, "Settings").build();
+        let utils = btn.get_style_utils();
+        assert!(utils.contains(&St::SqIconButton.as_u16()));
+        assert!(
+            !utils.contains(&St::HControl.as_u16()),
+            "the square sets the height"
+        );
+        let glyph = btn.children()[0].get_style_utils();
+        assert!(glyph.contains(&St::GlyphIconButton.as_u16()));
+        // Other sizes, and buttons with text, keep their own dimensions.
+        let sm = Button::icon_only(Icon::Settings, "Settings")
+            .size(ButtonSize::Sm)
+            .build();
+        assert!(!sm.get_style_utils().contains(&St::SqIconButton.as_u16()));
+        let text = Button::primary("Save").icon(Icon::Check).build();
+        assert!(!text.get_style_utils().contains(&St::SqIconButton.as_u16()));
+        assert!(!text.children()[0]
+            .get_style_utils()
+            .contains(&St::GlyphIconButton.as_u16()));
+    }
+
+    #[test]
     fn test_loading_hides_icon() {
         // The spinner overlay replaces the icon, so it isn't rendered while loading. The label is
         // kept — in an invisible span, not textContent — so the button's footprint never shrinks
@@ -802,7 +883,7 @@ mod tests {
 
         let btn = Button::new().size(ButtonSize::Md);
         let tokens = btn.size_tokens();
-        assert_eq!(tokens, vec![St::H2_25rem, St::Py0, St::PxMd]);
+        assert_eq!(tokens, vec![St::HControl, St::Py0, St::PxMd]);
 
         let btn = Button::new().size(ButtonSize::Lg);
         let tokens = btn.size_tokens();

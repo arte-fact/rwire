@@ -1130,12 +1130,22 @@ impl ElementBuilder {
         if let Some(keys) = keys.as_deref_mut() {
             self.insert_own_style_keys(keys);
         }
-        let tag = self.el_type.name();
+        // A synced region's wrapper is the live render's: a `<span>`, here marked
+        // `data-rwr` (the live one has `id="__synced_N"`). Without classes the
+        // base CSS makes both `display:contents`: the region adds no box, in the
+        // static paint as in the live page.
+        let region = self.synced.is_some();
+        let tag = if region { "span" } else { self.el_type.name() };
         out.push('<');
         out.push_str(tag);
+        if region {
+            out.push_str(" data-rwr");
+        }
 
         let mut classes: Vec<String> = Vec::new();
-        if let Some(c) = &self.class {
+        // A region's own `.class()` and attributes are not applied (the live
+        // wrapper never gets them, see `emit_wrapper_styles`); its tokens are.
+        if let Some(c) = self.class.as_ref().filter(|_| !region) {
             if !c.is_empty() {
                 classes.push(c.clone());
             }
@@ -1159,7 +1169,12 @@ impl ElementBuilder {
             out.push('"');
         }
 
-        for (key, value) in &self.attrs {
+        let (attrs, typed_attrs): (&[_], &[_]) = if region {
+            (&[], &[])
+        } else {
+            (&self.attrs, &self.typed_attrs)
+        };
+        for (key, value) in attrs {
             // Like the runtime: no `javascript:` (or other executable) URL.
             if crate::url_safety::is_executable_attr(key, value) {
                 continue;
@@ -1170,7 +1185,7 @@ impl ElementBuilder {
             push_attr_escaped(out, value);
             out.push('"');
         }
-        for ta in &self.typed_attrs {
+        for ta in typed_attrs {
             match ta {
                 TypedAttr::Enum(at, av) => {
                     out.push(' ');
@@ -2577,9 +2592,7 @@ impl BuildContext {
                 let ref_idx = self.buf.create_synced(synced_id);
                 // The synced element's own style tokens land on the wrapper —
                 // regions can be flex items (`render_x().st([St::Flex1, ...])`).
-                if !el.style_utils.is_empty() {
-                    self.buf.style_multi(ref_idx, &el.style_utils);
-                }
+                emit_wrapper_styles(&mut self.buf, ref_idx, el);
 
                 // Emit the rendered content as a child, tagging nested regions with this
                 // region as their parent.
@@ -2736,9 +2749,7 @@ impl BuildContext {
                 self.synced_hashes
                     .insert(synced_id, rendered.content_hash());
                 let ref_idx = self.buf.create_synced(synced_id);
-                if !el.style_utils.is_empty() {
-                    self.buf.style_multi(ref_idx, &el.style_utils);
-                }
+                emit_wrapper_styles(&mut self.buf, ref_idx, el);
                 let saved_parent = self.current_synced_parent;
                 self.current_synced_parent = Some(synced_id);
                 self.emit_element_multi(&rendered, Some(ref_idx));
@@ -3463,6 +3474,21 @@ fn wire_handler_id(spec: &HandlerSpec, handler: &HandlerFn) -> u32 {
     }
 }
 
+/// A region wrapper's own styles: its tokens, pseudo-classes and breakpoints
+/// (`render_x().st([St::Flex1]).md([…])`). Its `.class()` and attributes are
+/// not applied, live or static: a region's wrapper is the framework's.
+fn emit_wrapper_styles(buf: &mut OpcodeBuffer, wrapper: u32, el: &ElementBuilder) {
+    if !el.style_utils.is_empty() {
+        buf.style_multi(wrapper, &el.style_utils);
+    }
+    for (pc_code, st_codes) in &el.pseudo_groups {
+        buf.style_pseudo(wrapper, *pc_code, st_codes);
+    }
+    for (bp_code, st_codes) in &el.breakpoint_groups {
+        buf.style_breakpoint(wrapper, *bp_code, st_codes);
+    }
+}
+
 /// Emit an element and its children during a synced update.
 ///
 /// This creates new DOM elements and appends them to the parent.
@@ -3528,9 +3554,7 @@ fn emit_update_element(
         });
 
         let wrapper_ref = buf.create_synced(synced_id);
-        if !el.style_utils.is_empty() {
-            buf.style_multi(wrapper_ref, &el.style_utils);
-        }
+        emit_wrapper_styles(buf, wrapper_ref, el);
 
         if is_existing {
             // The region already exists on the client. Emit ONLY the wrapper as a
@@ -3910,6 +3934,71 @@ mod map_def_tests {
             frame.to_static_html(),
             format!("<iframe src=\"{src}\"></iframe>")
         );
+    }
+
+    /// `El::Time` owns its element code, is named "time" in the table, ships that
+    /// name to the client through `MAP_DEF`, and renders `<time>` at SSR.
+    #[test]
+    fn time_encodes_and_ships_its_name() {
+        let code = El::Time.as_u8();
+        assert_eq!(El::Time.name(), "time");
+        assert_eq!(El::try_from(code), Ok(El::Time));
+        let owners: Vec<_> = ELEMENT_MAPPINGS
+            .iter()
+            .filter(|(c, _)| *c == code)
+            .collect();
+        assert_eq!(owners, [&(code, "time")]);
+        assert!(
+            !SVG_ELEMENT_CODES.contains(&code),
+            "time is an HTML element"
+        );
+
+        let tree = el(El::Time).text("12:00");
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&tree, &());
+        ctx.emit(&tree, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+
+        let needle = [&[0u8, code, 4][..], b"time"].concat();
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MAP_DEF entry for time missing"
+        );
+        assert!(maps.contains(&(NAME_ELEMENT, code)));
+        assert_eq!(tree.to_static_html(), "<time>12:00</time>");
+    }
+
+    /// `El::B` owns its element code, is named "b" in the table, ships that
+    /// name to the client through `MAP_DEF`, and renders `<b>` at SSR.
+    #[test]
+    fn b_encodes_and_ships_its_name() {
+        let code = El::B.as_u8();
+        assert_eq!(El::B.name(), "b");
+        assert_eq!(El::try_from(code), Ok(El::B));
+        let owners: Vec<_> = ELEMENT_MAPPINGS
+            .iter()
+            .filter(|(c, _)| *c == code)
+            .collect();
+        assert_eq!(owners, [&(code, "b")]);
+        assert!(!SVG_ELEMENT_CODES.contains(&code), "b is an HTML element");
+
+        let tree = el(El::B).text("bold");
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&tree, &());
+        ctx.emit(&tree, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+
+        let needle = [&[0u8, code, 1][..], b"b"].concat();
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MAP_DEF entry for b missing"
+        );
+        assert!(maps.contains(&(NAME_ELEMENT, code)));
+        assert_eq!(tree.to_static_html(), "<b>bold</b>");
     }
 
     /// The single SSR pass yields what the two separate static walks do.

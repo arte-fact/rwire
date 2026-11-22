@@ -17,7 +17,7 @@ use rwire::theme::{css_var, IntoStyle, ResolvedPalette, ThemeStyle};
 /// All extended style presets (excludes built-in Soft).
 ///
 /// Useful for building UI controls that cycle through styles.
-pub const ALL: &[fn() -> ThemeStyle] = &[solid, brutalist, minimal, glass, neon, cloth];
+pub const ALL: &[fn() -> ThemeStyle] = &[solid, brutalist, minimal, glass, neon, cloth, studio];
 
 /// Solid accents, medium radius, subtle shadows (the classic default look).
 pub fn solid() -> ThemeStyle {
@@ -56,6 +56,18 @@ pub fn cloth() -> ThemeStyle {
     ThemeStyle::new("cloth", "Étoffe", cloth_color_css, cloth_q_css)
 }
 
+/// Studio: the look of apps for working with an AI. Stepped surfaces (a
+/// canvas under the reading area, lighter cards on it, a raised level), fine
+/// hairlines, one soft shadow for what floats (`--Qd`, `--Z2`), and radii of
+/// 8, 10 and 14 px (`--R2`, `--R3`, `--R4`).
+///
+/// With [`crate::palettes::nord`]: the light ground is `nord4`, the cards
+/// lighter than `nord6`, the sidebar `nord5`; the dark ground `nord0`, cards
+/// `nord1`, the raised level `nord2`, hairlines `nord3`.
+pub fn studio() -> ThemeStyle {
+    ThemeStyle::new("studio", "Studio", studio_color_css, studio_q_css)
+}
+
 /// Convenience enum for all extended styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Style {
@@ -65,6 +77,7 @@ pub enum Style {
     Glass,
     Neon,
     Cloth,
+    Studio,
 }
 
 impl Style {
@@ -76,6 +89,7 @@ impl Style {
         Style::Glass,
         Style::Neon,
         Style::Cloth,
+        Style::Studio,
     ];
 
     /// Get the human-readable label.
@@ -87,6 +101,7 @@ impl Style {
             Style::Glass => "Glass",
             Style::Neon => "Neon",
             Style::Cloth => "Étoffe",
+            Style::Studio => "Studio",
         }
     }
 }
@@ -100,6 +115,7 @@ impl IntoStyle for Style {
             Style::Glass => glass(),
             Style::Neon => neon(),
             Style::Cloth => cloth(),
+            Style::Studio => studio(),
         }
     }
 }
@@ -267,10 +283,112 @@ fn cloth_q_css(css: &mut String, _is_dark: bool) {
     css.push_str("--Qt:150ms;--Qts:none;");
 }
 
+// ============================================================================
+// Studio Style
+// ============================================================================
+
+/// `a` mixed toward `b` by `t` (0 = `a`), as `#rrggbb`.
+fn mix(a: &str, b: &str, t: f64) -> String {
+    use rwire::tokens::palette::css_color_to_hex as hex;
+    let channels = |c: &str| {
+        let h = hex(c);
+        let v = |i: usize| u8::from_str_radix(&h[1 + i..3 + i], 16).unwrap_or(0) as f64;
+        [v(0), v(2), v(4)]
+    };
+    let (a, b) = (channels(a), channels(b));
+    let c = |i: usize| (a[i] + (b[i] - a[i]) * t).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", c(0), c(1), c(2))
+}
+
+fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    let n = &rp.neutral;
+    if is_dark {
+        css_var(css, "a", &n[10]); // app: nord0
+        css_var(css, "Qw", &n[10]); // canvas: the app ground
+        css_var(css, "Qs", &n[10]); // sidebar
+        css_var(css, "b", &n[9]); // subtle
+        css_var(css, "r", &n[9]); // surface (cards): nord1
+        css_var(css, "t", &n[8]); // raised: nord2
+        css_var(css, "h", &n[7]); // hairline: nord3
+        css_var(css, "g", &n[8]);
+        css_var(css, "v", &rp.accent[5]); // primary: nord8
+        css_var(css, "w", &n[10]); // on-primary
+        css_var(css, "x", &rp.accent[4]);
+        css_var(css, "K", &rp.accent[5]); // focus ring
+        css_var(css, "j", &n[2]); // soft ink: nord4 (/app)
+        css_var(css, "j2", &n[5]); // faint ink wanted (kept if it reads on every ground)
+                                   // Success as a fill: the palette's bright green (nord14), dark text on it.
+        css_var(css, "o", &rp.green[6]);
+        css_var(css, "o2", &n[10]);
+    } else {
+        css_var(css, "a", &n[2]); // app: nord4
+        css_var(css, "Qw", &n[2]); // canvas: the app ground
+        css_var(css, "Qs", &n[1]); // sidebar: nord5
+        css_var(css, "b", &n[1]); // subtle
+        css_var(css, "r", &mix(&n[0], &rp.white, 0.45)); // surface (cards): above nord6
+        css_var(css, "t", &n[0]); // raised: nord6
+        css_var(css, "h", &mix(&n[2], &n[3], 0.5)); // hairline
+        css_var(css, "g", &n[2]);
+        // The accent one step darker than the brand step: white text on it
+        // reads at AA (nord10 itself gives 4.2:1).
+        css_var(css, "v", &rp.accent[9]);
+        css_var(css, "w", &rp.white);
+        css_var(css, "x", &rp.accent[10]);
+        css_var(css, "K", &rp.accent[8]);
+        css_var(css, "j", &n[7]); // soft ink: nord3 (/app)
+        css_var(css, "j2", &mix(&n[6], &n[7], 0.5)); // faint ink wanted
+    }
+}
+
+fn studio_q_css(css: &mut String, is_dark: bool) {
+    let shadow = if is_dark {
+        "0 10px 30px rgba(0,0,0,.35),0 1px 2px rgba(0,0,0,.3)"
+    } else {
+        "0 10px 30px rgba(46,52,64,.10),0 1px 2px rgba(46,52,64,.08)"
+    };
+    css.push_str("--Qd:");
+    css.push_str(shadow);
+    css.push_str(";--Z2:");
+    css.push_str(shadow);
+    css.push_str(";--Qgw:none;");
+    css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
+    css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
+    css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
+    css.push_str("--Qt:200ms;--Qts:none;");
+    css.push_str("--R2:8px;--R3:10px;--R4:14px;");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rwire::theme::{generate_theme_css, Theme};
+
+    #[test]
+    fn studio_steps_its_surfaces_and_rounds_8_10_14() {
+        use crate::palettes::nord;
+        let light = generate_theme_css(&Theme::light().palette(nord()).style(studio()));
+        // The light ground is nord4 (/app), the canvas too; cards lighter.
+        assert!(light.contains("--a:#D8DEE9;"), "{light}");
+        assert!(light.contains("--Qw:#D8DEE9;"), "{light}");
+        assert!(light.contains("--Qs:#E5E9F0;"), "{light}");
+        assert!(light.contains("--t:#ECEFF4;"), "{light}");
+        assert!(light.contains("--R2:8px;--R3:10px;--R4:14px;"));
+        assert!(light.contains("--Qd:0 10px 30px"));
+        let dark = generate_theme_css(&Theme::dark().palette(nord()).style(studio()));
+        assert!(dark.contains("--a:#2E3440;"), "nord0: {dark}");
+        assert!(dark.contains("--r:#3B4252;"), "nord1 cards");
+        assert!(dark.contains("--t:#434C5E;"), "nord2 raised");
+        assert!(dark.contains("--h:#4C566A;"), "nord3 hairline");
+        // The style's canvas comes after the theme's default one.
+        assert!(dark.rfind("--Qw:#2E3440").unwrap() > dark.find("--Qw:var(--a)").unwrap());
+        assert!(ALL.iter().any(|s| s().id() == "studio"));
+    }
+
+    #[test]
+    fn mix_blends_in_srgb() {
+        assert_eq!(mix("#000000", "#ffffff", 0.5), "#808080");
+        assert_eq!(mix("#D8DEE9", "#D8DEE9", 0.3), "#d8dee9");
+    }
 
     #[test]
     fn test_solid_style() {

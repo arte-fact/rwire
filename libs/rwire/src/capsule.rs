@@ -75,8 +75,9 @@ pub async fn serve_with_status(
 }
 
 /// Serve the page `body` with `status`, gzipped when `gzipped` (then with
-/// `Content-Encoding: gzip`); always with `Vary: Accept-Encoding`, since the
-/// server picks the encoding from the request. Sets the session cookie like
+/// `Content-Encoding: gzip`); always with `Vary: Accept-Encoding, Cookie`,
+/// since the server picks the encoding from the request and the theme mode
+/// from the `rw_mode` cookie. Sets the session cookie like
 /// [`serve`].
 pub(crate) async fn serve_page(
     mut stream: TcpStream,
@@ -89,7 +90,7 @@ pub(crate) async fn serve_page(
 ) -> std::io::Result<()> {
     let mut headers = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
-         Connection: close\r\nCache-Control: no-cache\r\nVary: Accept-Encoding\r\n"
+         Connection: close\r\nCache-Control: no-cache\r\nVary: Accept-Encoding, Cookie\r\n"
     );
     if gzipped {
         headers.push_str("Content-Encoding: gzip\r\n");

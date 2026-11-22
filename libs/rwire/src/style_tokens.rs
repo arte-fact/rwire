@@ -1061,6 +1061,133 @@ define_token_enum! {
         /// the cascade. Pair with a width (`Border2`) + `RoundedFull` + `AnimateSpinFast`; the
         /// element must keep a live `color` (hide a label with `FontSize0`, not `TextTransparent`).
         SpinnerRingCurrent = 0x39A => "border-style:solid;border-color:currentColor;border-right-color:transparent",
+        /// The reading face the theme names in `--Qfr` (`Theme::fonts`): long-form
+        /// text such as a reply or an article; the body face otherwise.
+        FontRead = 0x3A0 => "font-family:var(--Qfr,inherit)",
+        /// The canvas: the sunken ground of a reading area (a conversation, a
+        /// document) under cards that stay `BgSurface`. Reads `--Qw`, the app
+        /// background unless the theme style remaps it (`studio` does).
+        BgCanvas = 0x3A1 => "background:var(--Qw)",
+        // Tones (0x3A2-0x3C2): the faint ink, the neutral tone pair and the six
+        // categorical tones (`--Yn…`, see `Tone`). Grounds pair with their ink at AA.
+        /// The faint ink, below `TextDefault` and `TextMuted`: still AA on the plain grounds.
+        TextFaint = 0x3A2 => "color:var(--j2)",
+        /// The neutral tone's ground (an idle state).
+        BgNeutralSubtle = 0x3A3 => "background:var(--Y0g)",
+        /// The neutral tone's ink, readable on its ground and the plain grounds.
+        TextNeutral = 0x3A4 => "color:var(--Y0i)",
+        /// Categorical color 1 as a solid fill (`Tone::Cat(1)`).
+        BgCat1 = 0x3A5 => "background:var(--Y1)",
+        /// Categorical color 1: tinted ground.
+        BgCat1Subtle = 0x3A6 => "background:var(--Y1g)",
+        /// Categorical color 1: ink, readable on its ground and the plain grounds.
+        TextCat1 = 0x3A7 => "color:var(--Y1i)",
+        /// Text on categorical color 1's solid fill.
+        TextOnCat1 = 0x3A8 => "color:var(--Y1o)",
+        /// A 1px border in categorical color 1's ink (an outlined badge).
+        BorderCat1 = 0x3A9 => "border:1px solid var(--Y1i)",
+        /// Categorical color 2 as a solid fill (`Tone::Cat(2)`).
+        BgCat2 = 0x3AA => "background:var(--Y2)",
+        /// Categorical color 2: tinted ground.
+        BgCat2Subtle = 0x3AB => "background:var(--Y2g)",
+        /// Categorical color 2: ink, readable on its ground and the plain grounds.
+        TextCat2 = 0x3AC => "color:var(--Y2i)",
+        /// Text on categorical color 2's solid fill.
+        TextOnCat2 = 0x3AD => "color:var(--Y2o)",
+        /// A 1px border in categorical color 2's ink (an outlined badge).
+        BorderCat2 = 0x3AE => "border:1px solid var(--Y2i)",
+        /// Categorical color 3 as a solid fill (`Tone::Cat(3)`).
+        BgCat3 = 0x3AF => "background:var(--Y3)",
+        /// Categorical color 3: tinted ground.
+        BgCat3Subtle = 0x3B0 => "background:var(--Y3g)",
+        /// Categorical color 3: ink, readable on its ground and the plain grounds.
+        TextCat3 = 0x3B1 => "color:var(--Y3i)",
+        /// Text on categorical color 3's solid fill.
+        TextOnCat3 = 0x3B2 => "color:var(--Y3o)",
+        /// A 1px border in categorical color 3's ink (an outlined badge).
+        BorderCat3 = 0x3B3 => "border:1px solid var(--Y3i)",
+        /// Categorical color 4 as a solid fill (`Tone::Cat(4)`).
+        BgCat4 = 0x3B4 => "background:var(--Y4)",
+        /// Categorical color 4: tinted ground.
+        BgCat4Subtle = 0x3B5 => "background:var(--Y4g)",
+        /// Categorical color 4: ink, readable on its ground and the plain grounds.
+        TextCat4 = 0x3B6 => "color:var(--Y4i)",
+        /// Text on categorical color 4's solid fill.
+        TextOnCat4 = 0x3B7 => "color:var(--Y4o)",
+        /// A 1px border in categorical color 4's ink (an outlined badge).
+        BorderCat4 = 0x3B8 => "border:1px solid var(--Y4i)",
+        /// Categorical color 5 as a solid fill (`Tone::Cat(5)`).
+        BgCat5 = 0x3B9 => "background:var(--Y5)",
+        /// Categorical color 5: tinted ground.
+        BgCat5Subtle = 0x3BA => "background:var(--Y5g)",
+        /// Categorical color 5: ink, readable on its ground and the plain grounds.
+        TextCat5 = 0x3BB => "color:var(--Y5i)",
+        /// Text on categorical color 5's solid fill.
+        TextOnCat5 = 0x3BC => "color:var(--Y5o)",
+        /// A 1px border in categorical color 5's ink (an outlined badge).
+        BorderCat5 = 0x3BD => "border:1px solid var(--Y5i)",
+        /// Categorical color 6 as a solid fill (`Tone::Cat(6)`).
+        BgCat6 = 0x3BE => "background:var(--Y6)",
+        /// Categorical color 6: tinted ground.
+        BgCat6Subtle = 0x3BF => "background:var(--Y6g)",
+        /// Categorical color 6: ink, readable on its ground and the plain grounds.
+        TextCat6 = 0x3C0 => "color:var(--Y6i)",
+        /// Text on categorical color 6's solid fill.
+        TextOnCat6 = 0x3C1 => "color:var(--Y6o)",
+        /// A 1px border in categorical color 6's ink (an outlined badge).
+        BorderCat6 = 0x3C2 => "border:1px solid var(--Y6i)",
+        // Density (0x3C3-0x3C7): control dimensions a theme's `Density` sets in
+        // `--Qz*`; the fallbacks are the comfortable sizes.
+        /// A control's height (`Button`/`Input`/`Select` at their default size).
+        HControl = 0x3C3 => "height:var(--Qzh,2.25rem)",
+        /// A control's text size.
+        TextControl = 0x3C4 => "font-size:var(--Qzt,var(--T2))",
+        /// A tab's vertical padding.
+        PyTab = 0x3C5 => "padding-block:var(--Qzy,var(--S3))",
+        /// A chip's inline padding (split from the block one, so a caller's
+        /// `PxMd` replaces it whole).
+        PxChip = 0x3C6 => "padding-inline:var(--Qzcx,var(--S2))",
+        /// A list row's padding (dense navigation lists).
+        PadRow = 0x3C7 => "padding:var(--Qzp,var(--S2) var(--S3))",
+        // Icon buttons (0x3C8-0x3CC): a square of `--Qzi` with a glyph of `--Qzg`
+        // under a dense theme (32 and 18 px); each fallback is the component's
+        // comfortable size.
+        /// `Button::icon_only` (default size): its square.
+        SqIconButton = 0x3C8 => "width:var(--Qzi,2.25rem);min-width:var(--Qzi,2.25rem);height:var(--Qzi,2.25rem);flex-shrink:0",
+        /// `Button::icon_only` (default size): its glyph.
+        GlyphIconButton = 0x3C9 => "width:var(--Qzg,14px);height:var(--Qzg,14px)",
+        /// `ThemeToggle` (default size): its square (its padding otherwise). The
+        /// min-width and flex-shrink keep it square in a crowded flex row.
+        SqIconToggle = 0x3CA => "width:var(--Qzi,auto);min-width:var(--Qzi,auto);height:var(--Qzi,auto);flex-shrink:0",
+        /// `ThemeToggle` (default size): its inline padding.
+        PxIconToggle = 0x3CB => "padding-inline:var(--Qzq,var(--S2))",
+        /// `ThemeToggle` (default size): its glyph.
+        GlyphIconToggle = 0x3CC => "width:var(--Qzg,24px);height:var(--Qzg,24px)",
+        /// A mark on categorical color 1's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat1`).
+        TextCat1Mark = 0x3CD => "color:var(--Y1m)",
+        /// A mark on categorical color 2's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat2`).
+        TextCat2Mark = 0x3CE => "color:var(--Y2m)",
+        /// A mark on categorical color 3's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat3`).
+        TextCat3Mark = 0x3CF => "color:var(--Y3m)",
+        /// A mark on categorical color 4's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat4`).
+        TextCat4Mark = 0x3D0 => "color:var(--Y4m)",
+        /// A mark on categorical color 5's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat5`).
+        TextCat5Mark = 0x3D1 => "color:var(--Y5m)",
+        /// A mark on categorical color 6's solid fill, at 3:1: for a logotype or an
+        /// `aria-hidden` decorative glyph, never for read text (that is `TextOnCat6`).
+        TextCat6Mark = 0x3D2 => "color:var(--Y6m)",
+        /// A 1px border, transparent: a ghost control's resting stroke, so its
+        /// hover border (`BorderDefault`) does not move it.
+        BorderGhost = 0x3D3 => "border:1px solid transparent",
+        /// A chip's block padding.
+        PyChip = 0x3D4 => "padding-block:var(--Qzcy,var(--S1))",
+        /// `ThemeToggle` (default size): its block padding.
+        PyIconToggle = 0x3D5 => "padding-block:var(--Qzq,var(--S2))",
     }
 }
 

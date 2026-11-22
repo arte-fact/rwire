@@ -170,3 +170,93 @@ fn executable_urls_are_dropped() {
         "{html}"
     );
 }
+
+/// E2 criterion (renderer wrappers): a synced region is wrapped in a `<span>`
+/// in the static paint as in the live page (`CREATE_SYNCED` makes a
+/// class-less `<span id="__synced_N">`), and an unstyled wrapper is
+/// `display:contents` in both, so a region inside a grid or a flex row adds
+/// no box of its own: the two renders lay out the same boxes.
+#[test]
+fn a_region_wrapper_adds_no_box_in_the_static_paint_as_live() {
+    #[derive(Default)]
+    struct Cells;
+    let region = rwire::ElementBuilder::synced::<Cells, _>(|_| el(El::Div).text("cell"));
+    let grid = el(El::Div)
+        .st([St::DisplayGrid])
+        .append([region, el(El::Div).text("next")]);
+    let html = grid.to_static_html();
+    assert!(
+        html.contains("<span data-rwr><div>cell</div></span>"),
+        "{html}"
+    );
+    // The base CSS gives both wrappers, unstyled, no box.
+    let base = rwire::generate_base_css();
+    assert!(
+        base.contains("[id^=__synced_]:not([class]),[data-rwr]:not([class]){display:contents}"),
+        "{base}"
+    );
+    // A styled wrapper (`render_x().st([St::Flex1])`) keeps its box: it has a class.
+    let styled = rwire::ElementBuilder::synced::<Cells, _>(|_| el(El::Div)).st([St::Flex1]);
+    assert!(styled
+        .to_static_html()
+        .starts_with("<span data-rwr class=\"u"));
+}
+
+/// A region's wrapper carries the same classes in the static paint and live:
+/// its style tokens, pseudo-classes and breakpoints, applied in both; its own
+/// `.class()` and attributes in neither (the live `CREATE_SYNCED` wrapper
+/// never had them).
+#[test]
+fn a_region_wrapper_has_the_same_classes_static_and_live() {
+    use rwire::builder::BuildContext;
+    use rwire::protocol::opcodes::{CREATE_SYNCED, STYLE_BREAKPOINT, STYLE_PSEUDO};
+    use rwire::Bp;
+
+    #[derive(Default)]
+    struct Cells;
+    let region = || {
+        rwire::ElementBuilder::synced::<Cells, _>(|_| el(El::Div).text("cell"))
+            .st([St::DisplayFlex])
+            .breakpoint(Bp::Md, [St::Flex1])
+            .hover([St::BgHover])
+            .class("x")
+            .attr("data-k", "v")
+    };
+
+    // Static: the token classes, not the region's own class or attributes.
+    let html = region().to_static_html();
+    let flex1 = St::Flex1.as_u16();
+    let hover = St::BgHover.as_u16();
+    let md = Bp::Md.as_u8();
+    let open = &html[..html.find('>').unwrap()];
+    assert!(open.contains(&format!("b{md}u{flex1}")), "{html}");
+    assert!(open.contains(&format!("h0u{hover}")), "{html}");
+    assert!(!open.contains(" x") && !open.contains("\"x"), "{html}");
+    assert!(!open.contains("data-k"), "{html}");
+
+    // Live: the wrapper (ref 0, the first CREATE_SYNCED) gets the same breakpoint
+    // and pseudo groups.
+    let root = region();
+    let mut ctx = BuildContext::new();
+    let cells = Cells;
+    let mut states: std::collections::HashMap<
+        std::any::TypeId,
+        &(dyn std::any::Any + Send + Sync),
+    > = std::collections::HashMap::new();
+    states.insert(std::any::TypeId::of::<Cells>(), &cells);
+    ctx.collect_symbols_multi(&root, &states);
+    ctx.emit_multi(&root);
+    let bytes = ctx.finish();
+    assert!(bytes.contains(&CREATE_SYNCED));
+    // [op, wrapper ref 0, code, 1 token, the token's varint]
+    let has = |op: u8, code: u8, st: u16| {
+        let mut want = vec![op, 0, code, 1];
+        rwire::protocol::varint::write_varint(&mut want, u32::from(st));
+        bytes.windows(want.len()).any(|w| w == &want[..])
+    };
+    assert!(
+        has(STYLE_BREAKPOINT, md, flex1),
+        "live wrapper: no md breakpoint"
+    );
+    assert!(has(STYLE_PSEUDO, 0, hover), "live wrapper: no hover");
+}
