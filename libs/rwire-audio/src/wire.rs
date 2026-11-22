@@ -7,6 +7,11 @@
 //! |---|---|---|
 //! | `0x01` | `seq: u32`, `t: f64`, 320 × `i16` | A 20 ms frame of the microphone, 16 kHz mono PCM16; `t` in seconds on the page's audio clock |
 //!
+//! `seq` restarts at 0 at each capture start (each `capture(true)` after
+//! a stop, or the first one): within one capture it grows by 1 per frame,
+//! and a gap means frames were lost (dropped by the server's bounded queue,
+//! or not sent while the socket was down).
+//!
 //! From the server:
 //!
 //! | Byte | Rest | Meaning |
@@ -37,8 +42,11 @@ pub const FRAME_BYTES: usize = 1 + 4 + 8 + FRAME_SAMPLES * 2;
 /// 20 ms of the microphone.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
-    /// Its number, counted from 0 on each capture start of the page: a gap
-    /// says frames were dropped (see [`crate::INPUT_CAPACITY`]).
+    /// Its number within the current capture: it **restarts at 0 at each
+    /// capture start** (`capture(true)`), then grows by 1 per frame. A gap
+    /// says frames were lost: dropped by the bounded queue (see
+    /// [`crate::INPUT_CAPACITY`]) or not sent while the socket was down. A
+    /// return to 0 is a new capture, not a gap.
     pub seq: u32,
     /// When its first sample was captured, in seconds on the page's audio
     /// clock (the clock of every playback event too).

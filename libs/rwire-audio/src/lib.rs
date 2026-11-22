@@ -26,26 +26,40 @@
 //!     .await
 //! ```
 
+mod event;
 mod link;
 pub mod wire;
 
+use std::borrow::Cow;
 use std::future::Future;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
 use rwire::ext_socket::tokio_tungstenite::tungstenite::Message;
-use rwire::{ElementBuilder, ExtSocket, ServerWithRoot};
+use rwire::{El, ElementBuilder, Ev, ExtSocket, HandlerSpec, ServerWithRoot};
 use tokio::sync::mpsc;
 
+pub use event::{parse_event, AudioEvent, CaptureState, OutputState};
 pub use link::{AudioInput, AudioLink, AudioOutput, INPUT_CAPACITY};
 pub use wire::{Frame, FRAME_SAMPLES, RATE};
 
 /// The audio socket's path.
 pub const AUDIO_WS_PATH: &str = "/_rw/ext/audio/ws";
 
+/// Where the runtime loader asks for the extension once a batch hints `ext("audio")`.
+pub const AUDIO_JS_PATH: &str = "/_rw/ext/audio.js";
+/// The extension, minified: built from `runtime/src/ext/audio.ts` by `npm run sync`.
+pub const AUDIO_JS: &str = include_str!("../assets/audio.min.js");
+/// Where the extension loads its worklet module from.
+pub const WORKLET_JS_PATH: &str = "/_rw/ext/audio-worklet.js";
+/// The worklet module, minified: built from `runtime/src/ext/audio-worklet.ts`.
+pub const WORKLET_JS: &str = include_str!("../assets/audio-worklet.min.js");
+
 /// A page's audio stream, rendered with [`AudioExt::audio`]. One per page.
 pub struct Audio {
     name: String,
+    capture: bool,
+    on_event: Option<HandlerSpec>,
 }
 
 impl Audio {
@@ -53,7 +67,25 @@ impl Audio {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
+            capture: false,
+            on_event: None,
         }
+    }
+
+    /// Whether the microphone is on: each render starts or stops it. On,
+    /// the browser asks for it (echo cancellation, noise suppression,
+    /// automatic gain) and streams 20 ms frames to [`AudioLink::input`];
+    /// off, every track is stopped and the browser's indicator goes off.
+    pub fn capture(mut self, on: bool) -> Self {
+        self.capture = on;
+        self
+    }
+
+    /// The handler told what happens in the browser: decode it with
+    /// [`parse_event`] from its `EventContext`.
+    pub fn on_event(mut self, handler: HandlerSpec) -> Self {
+        self.on_event = Some(handler);
+        self
     }
 }
 
@@ -69,12 +101,23 @@ impl AudioExt for ElementBuilder {
         let mut el = self
             .ext("audio")
             .attr("data-audio", &audio.name)
-            .attr("data-audio-ws", AUDIO_WS_PATH);
+            .attr("data-audio-ws", AUDIO_WS_PATH)
+            .attr("data-audio-capture", if audio.capture { "1" } else { "0" });
         if let Some(ticket) = rwire::ext_socket::ticket(AUDIO_WS_PATH, &audio.name) {
             el = el.attr("data-audio-ticket", &ticket);
         }
+        if let Some(handler) = audio.on_event {
+            el = el.append([el_input()
+                .attr("data-audio-report", "1")
+                .attr("type", "hidden")
+                .on(Ev::Input, handler)]);
+        }
         el
     }
+}
+
+fn el_input() -> ElementBuilder {
+    rwire::el(El::Input)
 }
 
 /// Registers the audio socket on a server.
@@ -98,7 +141,17 @@ where
         Fut: Future<Output = ()> + Send + 'static,
     {
         let on_audio = Arc::new(on_audio);
-        self.ext_socket(AUDIO_WS_PATH, move |socket| {
+        self.asset(
+            AUDIO_JS_PATH,
+            "text/javascript; charset=utf-8",
+            Cow::Borrowed(AUDIO_JS.as_bytes()),
+        )
+        .asset(
+            WORKLET_JS_PATH,
+            "text/javascript; charset=utf-8",
+            Cow::Borrowed(WORKLET_JS.as_bytes()),
+        )
+        .ext_socket(AUDIO_WS_PATH, move |socket| {
             let on_audio = Arc::clone(&on_audio);
             async move { run_link(socket, move |link| on_audio(link)).await }
         })
@@ -164,4 +217,42 @@ where
     // The task ends on its own once its input is over; a panic in it is
     // its own business, not the socket's.
     drop(app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rwire::{el, handler, State};
+
+    #[derive(State, Default)]
+    #[storage(memory)]
+    struct Me {
+        last: Option<AudioEvent>,
+    }
+
+    #[handler]
+    fn heard(me: &mut Me, ctx: &rwire::EventContext) {
+        me.last = parse_event(ctx);
+    }
+
+    #[test]
+    fn the_render_drives_capture_and_carries_the_report_input() {
+        let on = el(El::Div)
+            .audio(Audio::new("voice").capture(true).on_event(heard()))
+            .to_static_html();
+        assert!(on.contains(r#"data-audio="voice""#), "{on}");
+        assert!(on.contains(r#"data-audio-capture="1""#), "{on}");
+        assert!(on.contains(r#"data-audio-ws="/_rw/ext/audio/ws""#), "{on}");
+        assert!(on.contains("data-audio-report"), "{on}");
+        assert!(
+            !on.contains("data-audio-ticket"),
+            "no ticket outside a page connection"
+        );
+        let off = el(El::Div).audio(Audio::new("voice")).to_static_html();
+        assert!(off.contains(r#"data-audio-capture="0""#), "{off}");
+        assert!(
+            !off.contains("data-audio-report"),
+            "no handler, no report input"
+        );
+    }
 }
