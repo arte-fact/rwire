@@ -3912,6 +3912,71 @@ mod map_def_tests {
         );
     }
 
+    /// `El::Time` owns its element code, is named "time" in the table, ships that
+    /// name to the client through `MAP_DEF`, and renders `<time>` at SSR.
+    #[test]
+    fn time_encodes_and_ships_its_name() {
+        let code = El::Time.as_u8();
+        assert_eq!(El::Time.name(), "time");
+        assert_eq!(El::try_from(code), Ok(El::Time));
+        let owners: Vec<_> = ELEMENT_MAPPINGS
+            .iter()
+            .filter(|(c, _)| *c == code)
+            .collect();
+        assert_eq!(owners, [&(code, "time")]);
+        assert!(
+            !SVG_ELEMENT_CODES.contains(&code),
+            "time is an HTML element"
+        );
+
+        let tree = el(El::Time).text("12:00");
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&tree, &());
+        ctx.emit(&tree, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+
+        let needle = [&[0u8, code, 4][..], b"time"].concat();
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MAP_DEF entry for time missing"
+        );
+        assert!(maps.contains(&(NAME_ELEMENT, code)));
+        assert_eq!(tree.to_static_html(), "<time>12:00</time>");
+    }
+
+    /// `El::B` owns its element code, is named "b" in the table, ships that
+    /// name to the client through `MAP_DEF`, and renders `<b>` at SSR.
+    #[test]
+    fn b_encodes_and_ships_its_name() {
+        let code = El::B.as_u8();
+        assert_eq!(El::B.name(), "b");
+        assert_eq!(El::try_from(code), Ok(El::B));
+        let owners: Vec<_> = ELEMENT_MAPPINGS
+            .iter()
+            .filter(|(c, _)| *c == code)
+            .collect();
+        assert_eq!(owners, [&(code, "b")]);
+        assert!(!SVG_ELEMENT_CODES.contains(&code), "b is an HTML element");
+
+        let tree = el(El::B).text("bold");
+        let mut ctx = BuildContext::new();
+        ctx.collect_symbols(&tree, &());
+        ctx.emit(&tree, &());
+        let mut css = HashSet::new();
+        let mut maps = HashSet::new();
+        let bytes = ctx.finish_with_style_defs(&mut css, &mut maps);
+
+        let needle = [&[0u8, code, 1][..], b"b"].concat();
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "MAP_DEF entry for b missing"
+        );
+        assert!(maps.contains(&(NAME_ELEMENT, code)));
+        assert_eq!(tree.to_static_html(), "<b>bold</b>");
+    }
+
     /// The single SSR pass yields what the two separate static walks do.
     #[test]
     fn static_html_and_styles_match_the_separate_walks() {

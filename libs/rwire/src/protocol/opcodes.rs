@@ -394,6 +394,9 @@ define_token_enum! {
         Small = 0x45 => "small",
         // Embedded content (0x46): a framed page (e.g. a self-hosted player).
         Iframe = 0x46 => "iframe",
+        // Semantic inline (0x47-0x48): a timestamp and bold text.
+        Time = 0x47 => "time",
+        B = 0x48 => "b",
     }
 }
 
