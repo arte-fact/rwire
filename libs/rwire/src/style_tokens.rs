@@ -1222,6 +1222,27 @@ define_token_enum! {
         SizeDotSm = 0x3E4 => "width:9px;height:9px",
         /// A medium dot: 12 px.
         SizeDotMd = 0x3E5 => "width:12px;height:12px",
+        // Dense navigation lists (0x3E6-0x3EF): NavList / NavGroup / NavRow.
+        /// A navigation row's grid: a 14 px leading cell, the title, a trailing cell.
+        GridNavRow = 0x3E6 => "display:grid;grid-template-columns:14px minmax(0,1fr) auto;align-items:center;column-gap:.5rem",
+        /// A navigation row's radius: 7 px.
+        RoundedNavRow = 0x3E7 => "border-radius:7px",
+        /// A navigation row's title: 13.5 px.
+        TextNavTitle = 0x3E8 => "font-size:13.5px",
+        /// A navigation row's meta line: 12 px.
+        TextNavMeta = 0x3E9 => "font-size:12px",
+        /// A short mono suffix (a hash): 10 px.
+        TextNavHash = 0x3EA => "font-size:10px",
+        /// A group header: 11 px, 600, uppercase, spaced .06em.
+        NavGroupHead = 0x3EB => "font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase",
+        /// The current row's hairline in the accent (inset, 45 %).
+        NavCurrent = 0x3EC => "box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--v) 45%,transparent)",
+        /// A fold chevron's turn (none under `prefers-reduced-motion`).
+        ChevronFold = 0x3ED => "transition:transform .15s ease;@media (prefers-reduced-motion:reduce){transition:none}",
+        /// A quarter turn back: a folded group's chevron.
+        RotateNeg90 = 0x3EE => "transform:rotate(-90deg)",
+        /// A navigation row's meta line, under the title and the trailing cell.
+        ColNavMeta = 0x3EF => "grid-column:2/4",
     }
 }
 
