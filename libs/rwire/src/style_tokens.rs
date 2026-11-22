@@ -1188,6 +1188,40 @@ define_token_enum! {
         PyChip = 0x3D4 => "padding-block:var(--Qzcy,var(--S1))",
         /// `ThemeToggle` (default size): its block padding.
         PyIconToggle = 0x3D5 => "padding-block:var(--Qzq,var(--S2))",
+        // Status dots (0x3D6-0x3E5): each tone's dot color (`--Y?d`, 3:1 on the
+        // grounds a dot sits on) as `color`, drawn with `currentColor`.
+        /// The idle / neutral dot color (3:1 on the grounds).
+        TextDotNeutral = 0x3D6 => "color:var(--Y0d)",
+        /// The accent dot color (3:1 on the grounds).
+        TextDotAccent = 0x3D7 => "color:var(--Yad)",
+        /// The info dot color (3:1 on the grounds).
+        TextDotInfo = 0x3D8 => "color:var(--Yid)",
+        /// The success (live) dot color (3:1 on the grounds).
+        TextDotSuccess = 0x3D9 => "color:var(--Ysd)",
+        /// The warning dot color (3:1 on the grounds).
+        TextDotWarning = 0x3DA => "color:var(--Ywd)",
+        /// The danger dot color (3:1 on the grounds).
+        TextDotDanger = 0x3DB => "color:var(--Yxd)",
+        /// Categorical color 1's dot color (3:1 on the grounds).
+        TextDotCat1 = 0x3DC => "color:var(--Y1d)",
+        /// Categorical color 2's dot color (3:1 on the grounds).
+        TextDotCat2 = 0x3DD => "color:var(--Y2d)",
+        /// Categorical color 3's dot color (3:1 on the grounds).
+        TextDotCat3 = 0x3DE => "color:var(--Y3d)",
+        /// Categorical color 4's dot color (3:1 on the grounds).
+        TextDotCat4 = 0x3DF => "color:var(--Y4d)",
+        /// Categorical color 5's dot color (3:1 on the grounds).
+        TextDotCat5 = 0x3E0 => "color:var(--Y5d)",
+        /// Categorical color 6's dot color (3:1 on the grounds).
+        TextDotCat6 = 0x3E1 => "color:var(--Y6d)",
+        /// A 3 px halo at 22 % of the dot's color.
+        DotRing = 0x3E2 => "box-shadow:0 0 0 3px color-mix(in srgb,currentColor 22%,transparent)",
+        /// A hollow dot: a 1.5 px circle in the dot's color.
+        DotHollow = 0x3E3 => "border:1.5px solid currentColor;background:transparent",
+        /// A small dot: 9 px.
+        SizeDotSm = 0x3E4 => "width:9px;height:9px",
+        /// A medium dot: 12 px.
+        SizeDotMd = 0x3E5 => "width:12px;height:12px",
     }
 }
 
@@ -1636,7 +1670,7 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@counter-style rw-sep{system:additive;additive-symbols:1 \"\\202F\",0 \"\"}",
     "@counter-style rw-sign{system:additive;additive-symbols:1 \"-\",0 \"\"}",
     ".u860::after{content:counter(s,rw-sign) counter(m,rw-lead) counter(ms,rw-sep) counter(kp,rw-pad3) counter(kl,rw-lead) counter(ks,rw-sep) counter(up,rw-pad3) counter(ul,rw-plain)}",
-    "@media(prefers-reduced-motion:reduce){.u850,.u851,.u860,.u868,.u874,.u875,.u891,.u892,.u893,.u894,.u896,.u897,.u911{animation-duration:0s!important;animation-delay:0s!important}}"
+    "@media(prefers-reduced-motion:reduce){.u466,.u850,.u851,.u860,.u868,.u874,.u875,.u891,.u892,.u893,.u894,.u896,.u897,.u911{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
 /// Whether a utility declaration references one of the shared `rw-*` keyframes.

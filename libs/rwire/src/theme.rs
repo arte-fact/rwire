@@ -892,6 +892,7 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
     // (`a`, `b`, `r`, `t`) as the style finally sets them.
     subtle_pairs(&mut css, &rp, is_dark);
     tone_pairs(&mut css, &rp, is_dark);
+    dot_colors(&mut css, &rp, is_dark);
 
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
@@ -1247,6 +1248,59 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         .chain(faint_order.iter().map(|&i| hex(&rp.neutral[i])))
         .collect();
     css_var(css, "j2", &first_readable(&faint, &plain));
+}
+
+/// The status dots' colors (`--Y?d`), one per tone, each reaching
+/// [`MIN_MARK_CONTRAST`] (a dot is a graphic) on every ground a dot sits on:
+/// app, subtle, surface, raised (a hovered row), the selected row (`--n0`) and
+/// the sidebar (`--Qs`, when the style sets one). Each starts from the tone's
+/// own color (a style may name the neutral one it wants in `--Y0d`) and, when
+/// that does not reach 3:1, takes the nearest that does (darkened in light
+/// mode, lightened in dark mode). Called after the style and the tones.
+fn dot_colors(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let grounds: Vec<String> = ["a", "b", "r", "t", "n0", "Qs"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let dot = |preferred: &str| -> String {
+        let p = hex(preferred);
+        std::iter::once(p.clone())
+            .chain((1..=100).map(|i| mix(toward, &p, f64::from(i) * 0.01)))
+            .find(|c| {
+                grounds
+                    .iter()
+                    .all(|g| contrast_ratio(c, g) >= MIN_MARK_CONTRAST)
+            })
+            .unwrap_or_else(|| toward.to_string())
+    };
+    let declared = |name: &str, fallback: &str| {
+        declared_color(css, name).unwrap_or_else(|| fallback.to_string())
+    };
+    let neutral = declared("Y0d", &rp.neutral[6]);
+    let wanted = [
+        ("Y0d", neutral),
+        ("Yad", declared("v", &rp.accent[8])),
+        ("Yid", rp.accent[8].clone()),
+        ("Ysd", declared("o", &rp.green[8])),
+        ("Ywd", declared("p", &rp.amber[8])),
+        ("Yxd", declared("q", &rp.red[8])),
+    ];
+    for (name, color) in wanted {
+        css_var(css, name, &dot(&color));
+    }
+    let given = rp.categorical.len().clamp(1, 6);
+    for n in 1..=6 {
+        match rp.categorical.get(n - 1).filter(|_| n <= given) {
+            Some(color) => css_var(css, &format!("Y{n}d"), &dot(color)),
+            None => {
+                let from = (n - 1) % given + 1;
+                css_var(css, &format!("Y{n}d"), &format!("var(--Y{from}d)"));
+            }
+        }
+    }
 }
 
 /// The last value declared for `--name` in `css`, when it is a plain color

@@ -2017,6 +2017,10 @@ const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
             label: "Error",
             rust_expr: "StatusDotIntent::Error",
         },
+        VariantValue {
+            label: "Hollow",
+            rust_expr: "StatusDotIntent::Hollow",
+        },
     ],
 }];
 
@@ -2212,9 +2216,13 @@ fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
         2 => StatusDotIntent::Success,
         3 => StatusDotIntent::Warning,
         4 => StatusDotIntent::Error,
+        5 => StatusDotIntent::Hollow,
         _ => StatusDotIntent::Muted,
     };
-    let mut dot = StatusDot::new().intent(intent).pulse(b(bools, 0));
+    let mut dot = StatusDot::new()
+        .intent(intent)
+        .pulse(b(bools, 0))
+        .ring(b(bools, 2));
     if b(bools, 1) {
         dot = dot.label("running");
     }
@@ -4342,6 +4350,11 @@ const ENTRIES: &[ComponentEntry] = &[
             BoolProp {
                 name: "label",
                 description: "Show an inline label",
+                default: false,
+            },
+            BoolProp {
+                name: "ring",
+                description: "A 3 px halo (generating, waiting)",
                 default: false,
             },
         ],

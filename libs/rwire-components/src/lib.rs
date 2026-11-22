@@ -190,7 +190,7 @@ pub use spinner::{Spinner, SpinnerSize};
 pub use split_pane::SplitPane;
 pub use stack::{Gap, Stack, StackAlign, StackDirection, StackJustify};
 pub use stat::{Stat, StatSize, StatTone, StatTrend};
-pub use status_dot::{StatusDot, StatusDotIntent};
+pub use status_dot::{StatusDot, StatusDotIntent, StatusDotSize};
 pub use stepper::Stepper;
 pub use streamed_content::StreamedContent;
 pub use switch::Switch;

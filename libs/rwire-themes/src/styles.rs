@@ -317,7 +317,8 @@ fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "K", &rp.accent[5]); // focus ring
         css_var(css, "j", &n[2]); // soft ink: nord4 (/app)
         css_var(css, "j2", &n[5]); // faint ink wanted (kept if it reads on every ground)
-                                   // Success as a fill: the palette's bright green (nord14), dark text on it.
+        css_var(css, "Y0d", &n[7]); // idle dot wanted: nord3 (/app)
+                                    // Success as a fill: the palette's bright green (nord14), dark text on it.
         css_var(css, "o", &rp.green[6]);
         css_var(css, "o2", &n[10]);
     } else {
@@ -337,6 +338,7 @@ fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "K", &rp.accent[8]);
         css_var(css, "j", &n[7]); // soft ink: nord3 (/app)
         css_var(css, "j2", &mix(&n[6], &n[7], 0.5)); // faint ink wanted
+        css_var(css, "Y0d", &n[5]); // idle dot wanted: near /app's #9aa3b5
     }
 }
 

@@ -419,3 +419,88 @@ fn the_nord_brand_mark_is_nord6_on_cat_1() {
         assert!(contrast_ratio(&resolve(&v, "Y1o"), &resolve(&v, "Y1")) >= MIN_TEXT_CONTRAST);
     }
 }
+
+/// Status dots (`Tone::dot`, `--Y?d`) reach 3:1, the WCAG threshold for
+/// graphics, on every ground a dot sits on: app, subtle, surface, raised (a
+/// hovered row), the selected row and the sidebar, in every built-in theme.
+#[test]
+fn status_dots_reach_3_to_1_on_every_ground() {
+    use rwire::theme::MIN_MARK_CONTRAST;
+    let dots = [
+        "Y0d", "Yad", "Yid", "Ysd", "Ywd", "Yxd", "Y1d", "Y2d", "Y3d", "Y4d", "Y5d", "Y6d",
+    ];
+    let mut out = Vec::new();
+    for (palette_name, palette) in palettes() {
+        for (style_name, style) in styles() {
+            for dark in [false, true] {
+                let mut theme = if dark { Theme::dark() } else { Theme::light() }.style(style);
+                if let Some(p) = palette.clone() {
+                    theme = theme.palette(p);
+                }
+                let v = vars(&generate_theme_css(&theme));
+                for dot in dots {
+                    let d = resolve(&v, dot);
+                    for g in ["a", "b", "r", "t", "n0", "Qs"] {
+                        if !v.contains_key(g) {
+                            continue;
+                        }
+                        let r = contrast_ratio(&d, &resolve(&v, g));
+                        if r < MIN_MARK_CONTRAST {
+                            out.push(format!(
+                                "{palette_name}/{style_name}/{dark}: --{dot} {d} on --{g} = {r:.2}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        out.is_empty(),
+        "{} below 3:1:\n{}",
+        out.len(),
+        out.join("\n")
+    );
+}
+
+/// studio + Nord dots against the old front's (/app): equal where /app's
+/// passes 3:1 on every dot ground, else the nearest that does (named gaps).
+#[test]
+fn studio_nord_dots_match_app_where_contrast_allows() {
+    use rwire::theme::MIN_MARK_CONTRAST;
+    let worst = |v: &HashMap<String, String>, c: &str| {
+        ["a", "b", "r", "t", "n0", "Qs"]
+            .iter()
+            .map(|g| contrast_ratio(c, &resolve(v, g)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    // (dark, var, /app value, what)
+    let cases: &[(bool, &str, &str, &str)] = &[
+        (true, "Ysd", "#a3be8c", "generating: nord14"),
+        (true, "Y5d", "#ebcb8b", "validation: nord13"),
+        (false, "Ysd", "#a3be8c", "generating: nord14"),
+        (false, "Y5d", "#ebcb8b", "validation: nord13"),
+        (false, "Y0d", "#9aa3b5", "idle / inactive"),
+        (true, "Y0d", "#4c566a", "idle / inactive: nord3"),
+    ];
+    for &(dark, var, app, what) in cases {
+        let v = studio_nord(dark);
+        let ours = resolve(&v, var);
+        let mode = if dark { "dark" } else { "light" };
+        let (app_w, ours_w) = (worst(&v, app), worst(&v, &ours));
+        assert!(
+            ours_w >= MIN_MARK_CONTRAST,
+            "--{var} {mode}: {ours} = {ours_w:.2}"
+        );
+        if app_w >= MIN_MARK_CONTRAST {
+            assert!(
+                ours.eq_ignore_ascii_case(app),
+                "--{var} {mode} ({what}): /app's {app} passes ({app_w:.2}), rwire has {ours}"
+            );
+            println!("= {mode:5} --{var:4} {app}  {what}");
+        } else {
+            assert!(!ours.eq_ignore_ascii_case(app));
+            println!("≠ {mode:5} --{var:4} {what}: /app {app} worst {app_w:.2}; rwire {ours} worst {ours_w:.2}");
+        }
+    }
+}
