@@ -16,5 +16,7 @@
   text is unchanged.
 - **Square icon buttons:** `--Qzi` now sets width, min-width and height, and
   the square does not shrink in a flex row (`flex-shrink:0`): a compact
-  `ThemeToggle` measured 20 × 32 in a crowded row, it is 32 × 32 (44 × 44
-  under a finger).
+  `ThemeToggle` measured 20 × 32 in a crowded row, it is 32 × 32. Under a
+  finger (or below `touch_below`) the touch-target rule sets `--Qzi:44px`,
+  so the squares become 44 × 44 (their own min-width would otherwise beat
+  the rule's zero-specificity `min-width`).

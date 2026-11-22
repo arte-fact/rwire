@@ -6,7 +6,8 @@ use rwire::theme::{generate_theme_css, Density, Theme};
 use rwire::St;
 
 /// The value `prop` resolves to in `token`'s CSS, given the theme `css`:
-/// `var(--x,fallback)` takes `--x` when the theme declares it.
+/// `var(--x,fallback)` takes `--x` when the theme declares it (on a desktop:
+/// a fine pointer above `touch_below`).
 fn resolve(token: St, prop: &str, css: &str) -> String {
     let decl = token
         .css()
@@ -20,6 +21,8 @@ fn resolve(token: St, prop: &str, css: &str) -> String {
         return decl.to_string();
     };
     let (name, fallback) = inner.split_once(',').unwrap_or((inner, ""));
+    // The desktop value: the theme's block, before the touch-target media rule.
+    let css = css.split("@media (pointer").next().unwrap();
     match css.split(&format!("--{name}:")).nth(1) {
         Some(rest) => rest.split(';').next().unwrap().to_string(),
         None => fallback.to_string(),
@@ -61,6 +64,11 @@ fn icon_buttons_are_square_from_qzi_and_do_not_shrink() {
         let block = css.split_once("@media (pointer:coarse)").unwrap().1;
         assert!(block.contains("{min-height:44px}"));
         assert!(block.contains(":where(button,[role=tab],[role=button]){min-width:44px}"));
+        // The icon squares follow through their variable: 44 × 44, not 32 wide.
+        assert!(
+            block.starts_with(",(max-width:") && block.contains("{:root{--Qzi:44px}"),
+            "{block}"
+        );
     }
 }
 

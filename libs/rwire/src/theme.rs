@@ -775,14 +775,16 @@ pub fn generate_theme_css(theme: &Theme) -> String {
     }
     // 44 px touch targets under a coarse pointer, or below `touch_below` (the
     // `sm` breakpoint by default), for every interactive control whatever its
-    // classes. Zero specificity (`:where`): an app's own min-height wins.
+    // classes. Zero specificity (`:where`): an app's own min-height wins. Icon
+    // buttons sized by `--Qzi` (whose min-width would beat `:where`) get 44 px
+    // squares through the variable itself.
     // Checkboxes, radios and sliders keep their size.
     {
         use std::fmt::Write;
         let below = theme.touch_below.unwrap_or(640);
         let _ = writeln!(
             css,
-            "@media (pointer:coarse),(max-width:{}.98px){{\
+            "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}\
              :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){{min-height:44px}}\
              :where(button,[role=tab],[role=button]){{min-width:44px}}}}",
             below.saturating_sub(1)
@@ -1391,7 +1393,8 @@ mod tests {
         // Forced: one block, no media query, the mode's own colors.
         for (css, scheme) in [(&light, "light"), (&dark, "dark")] {
             assert!(!css.contains("prefers-color-scheme"), "{css}");
-            assert_eq!(css.matches(":root{").count(), 1, "{css}");
+            // One color block (the touch-target rule's `:root{--Qzi}` aside).
+            assert_eq!(css.matches(":root{color-scheme").count(), 1, "{css}");
             assert!(css.starts_with(&format!(":root{{color-scheme:{scheme};")));
         }
         assert_ne!(light, dark);
@@ -1462,7 +1465,8 @@ mod tests {
     fn density_sets_the_control_hooks() {
         // Comfortable: nothing emitted, the tokens' fallbacks apply.
         let comfy = generate_theme_css(&Theme::new());
-        assert!(!comfy.contains("--Qz"), "{comfy}");
+        let root = comfy.split("@media (pointer").next().unwrap();
+        assert!(!root.contains("--Qz"), "{comfy}");
         let compact = generate_theme_css(&Theme::new().density(Density::Compact));
         assert!(compact.contains("--Qzh:2rem;"), "{compact}");
         assert!(compact.contains("--Qzp:.38rem .55rem;"));
