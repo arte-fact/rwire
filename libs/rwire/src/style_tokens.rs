@@ -1345,6 +1345,11 @@ define_token_enum! {
         MaxH320 = 0x41C => "max-height:320px",
         /// A tool call's summary padding: 8 px by 12 px.
         PadToolSummary = 0x41D => "padding:8px 12px",
+        // Decision card (0x41E-0x41F).
+        /// The warning ground at 12% (a decision card): the theme's amber, tinted.
+        BgWarning12 = 0x41E => "background:color-mix(in srgb,var(--p) 12%,transparent)",
+        /// A decision card's padding: 14 px by 16 px.
+        PadDecision = 0x41F => "padding:14px 16px",
     }
 }
 

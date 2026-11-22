@@ -2715,10 +2715,58 @@ let re_registered = hub.wait_for(Heartbeat::First, Duration::from_secs(1)).then(
 
 See [the registry docs](https://example.com/registry) for details.";
 
-/// One row of the gallery's conversation: a message or a tool call.
+/// A validation card row of the gallery's conversation.
+struct GalleryDecision {
+    key: &'static str,
+    resolved: bool,
+}
+
+impl crate::ChatItem for GalleryDecision {
+    fn key(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(self.key)
+    }
+    fn author(&self) -> crate::ChatAuthor {
+        crate::ChatAuthor::agent("claude").muted()
+    }
+    fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
+        el(El::Div)
+    }
+    fn row(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<ElementBuilder> {
+        let mut card = crate::DecisionCard::new(if self.resolved {
+            "Validation handled"
+        } else {
+            "Validation requested"
+        })
+        .tag("bash")
+        .body(el(El::Span).text("rm -rf /tmp/rwire-build && cargo build --release"))
+        .reason("The agent wants to clean the build directory before compiling.")
+        .details(
+            "Dialogue shown in the terminal",
+            el(El::Pre).text("Allow this command? [1] yes  [2] yes, don't ask again  [3] no"),
+        );
+        if self.resolved {
+            card = card.resolved(Some("Allowed once (option 1)"));
+        } else {
+            card = card
+                .action(crate::DecisionAction::new("Allow").hint("option 1 · run once"))
+                .action(
+                    crate::DecisionAction::new("Don't ask again").hint("option 2 · always allow"),
+                )
+                .action(
+                    crate::DecisionAction::new("Refuse")
+                        .hint("option 3 · deny")
+                        .intent(crate::ButtonIntent::Destructive),
+                );
+        }
+        Some(card.build())
+    }
+}
+
+/// One row of the gallery's conversation: a message, a tool call or a validation.
 enum GalleryItem {
     Msg(GalleryMsg),
     Tool(GalleryTool),
+    Decision(GalleryDecision),
 }
 
 impl crate::ChatItem for GalleryItem {
@@ -2726,24 +2774,29 @@ impl crate::ChatItem for GalleryItem {
         match self {
             GalleryItem::Msg(m) => m.key(),
             GalleryItem::Tool(t) => t.key(),
+            GalleryItem::Decision(d) => d.key(),
         }
     }
     fn author(&self) -> crate::ChatAuthor {
         match self {
             GalleryItem::Msg(m) => m.author(),
             GalleryItem::Tool(t) => t.author(),
+            GalleryItem::Decision(d) => d.author(),
         }
     }
     fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
         match self {
             GalleryItem::Msg(m) => m.body(&crate::ChatItemCtx::<GalleryMsg> { item_ref: None }),
             GalleryItem::Tool(t) => t.body(&crate::ChatItemCtx::<GalleryTool> { item_ref: None }),
+            GalleryItem::Decision(d) => {
+                d.body(&crate::ChatItemCtx::<GalleryDecision> { item_ref: None })
+            }
         }
     }
     fn time(&self) -> Option<std::borrow::Cow<'_, str>> {
         match self {
             GalleryItem::Msg(m) => m.time(),
-            GalleryItem::Tool(_) => None,
+            GalleryItem::Tool(_) | GalleryItem::Decision(_) => None,
         }
     }
     fn groups_with(&self, prev: &Self) -> bool {
@@ -2755,13 +2808,16 @@ impl crate::ChatItem for GalleryItem {
     fn delivery(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<crate::ChatDelivery> {
         match self {
             GalleryItem::Msg(m) => m.delivery(&crate::ChatItemCtx::<GalleryMsg> { item_ref: None }),
-            GalleryItem::Tool(_) => None,
+            GalleryItem::Tool(_) | GalleryItem::Decision(_) => None,
         }
     }
     fn row(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<ElementBuilder> {
         match self {
             GalleryItem::Msg(_) => None,
             GalleryItem::Tool(t) => t.row(&crate::ChatItemCtx::<GalleryTool> { item_ref: None }),
+            GalleryItem::Decision(d) => {
+                d.row(&crate::ChatItemCtx::<GalleryDecision> { item_ref: None })
+            }
         }
     }
 }
@@ -2806,6 +2862,71 @@ fn tool_call_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             .status(status)
             .output(output)
             .build()])
+}
+
+const DECISION_VARIANTS: &[VariantAxis] = &[VariantAxis {
+    name: "state",
+    display_name: "State",
+    rust_type: "&str",
+    default_index: 0,
+    values: &[
+        VariantValue {
+            label: "Pending",
+            rust_expr: "\"pending\"",
+        },
+        VariantValue {
+            label: "Resolved",
+            rust_expr: "\"resolved\"",
+        },
+        VariantValue {
+            label: "Refused",
+            rust_expr: "\"refused\"",
+        },
+    ],
+}];
+
+/// A validation card: pending, resolved, or refused by the hub.
+fn decision_card_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{ButtonIntent, DecisionAction, DecisionCard};
+    let state = v(variants, 0);
+    let mut card = DecisionCard::new(if state == 1 {
+        "Validation handled"
+    } else {
+        "Validation requested"
+    })
+    .tag("bash")
+    .body(el(El::Span).text("rm -rf /tmp/rwire-build && cargo build --release"))
+    .details(
+        "Dialogue shown in the terminal",
+        el(El::Pre).text("Allow this command? [1] yes  [2] yes, don't ask again  [3] no"),
+    );
+    match state {
+        1 => card = card.resolved(Some("Allowed once (option 1)")),
+        2 => {
+            card = card
+                .error(Some("Response refused: a session is generating"))
+                .action(DecisionAction::new("Allow").hint("option 1 · run once"))
+                .action(
+                    DecisionAction::new("Refuse")
+                        .hint("option 3 · deny")
+                        .intent(ButtonIntent::Destructive),
+                );
+        }
+        _ => {
+            card = card
+                .action(DecisionAction::new("Allow").hint("option 1 · run once"))
+                .action(DecisionAction::new("Don't ask again").hint("option 2 · always allow"))
+                .action(
+                    DecisionAction::new("Refuse")
+                        .hint("option 3 · deny")
+                        .intent(ButtonIntent::Destructive),
+                );
+        }
+    }
+    el(El::Div)
+        .st([rwire::St::WFull, rwire::St::MaxWProse])
+        .attr("data-demo", "decision-card")
+        .append([card.build()])
 }
 
 /// A conversation in the avatar layout, on the reading column.
@@ -2876,7 +2997,15 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             name: "bash",
             command: "cargo build --release --target x86_64-unknown-linux-gnu",
             status: crate::ToolStatus::Err,
-            output: "error: could not compile `rwire` (bin) due to 1 previous error\n\nlong output line that must scroll inside the 320 px cap, not the page — aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            output: "error: could not compile `rwire` (bin) due to 1 previous error\n\nlong output line that must scroll inside the 320 px cap, not the page — aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }),
+        GalleryItem::Decision(GalleryDecision {
+            key: "d1",
+            resolved: false,
+        }),
+        GalleryItem::Decision(GalleryDecision {
+            key: "d2",
+            resolved: true,
         }),
     ];
     el(El::Div)
@@ -4782,6 +4911,16 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: TOOL_CALL_VARIANTS,
         bool_props: &[],
         build_demo: tool_call_demo,
+    },
+    ComponentEntry {
+        name: "DecisionCard",
+        slug: "decision-card",
+        description: "A validation request: amber 12% card (radius 12, padding 14x16), mono tool tag, preformatted command, collapsible dialogue, two-line action buttons; resolved shows a status line.",
+        category: Category::DataDisplay,
+        order: 324,
+        variants: DECISION_VARIANTS,
+        bool_props: &[],
+        build_demo: decision_card_demo,
     },
     ComponentEntry {
         name: "Navigation",
