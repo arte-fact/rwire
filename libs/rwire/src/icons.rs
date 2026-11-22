@@ -35,6 +35,10 @@ pub enum Icon {
     ArrowDown,
     Menu,
     Close,
+    Stop,
+    PanelLeft,
+    PanelRight,
+    SidebarCollapse,
 
     // Actions
     Check,
@@ -155,6 +159,10 @@ impl Icon {
             Icon::ArrowDown => "M12 5v14M19 12l-7 7-7-7",
             Icon::Menu => "M3 12h18M3 6h18M3 18h18",
             Icon::Close => "M18 6L6 18M6 6l12 12",
+            Icon::Stop => "M5 5h14v14H5z",
+            Icon::PanelLeft => "M3 3h18v18H3z M9 3v18",
+            Icon::PanelRight => "M3 3h18v18H3z M15 3v18",
+            Icon::SidebarCollapse => "M3 3h18v18H3z M15 3v18 M12 12H7 M10 9l-3 3 3 3",
 
             // Actions
             Icon::Check => "M20 6L9 17l-5-5",
@@ -403,6 +411,10 @@ mod tests {
             Icon::ArrowDown,
             Icon::Menu,
             Icon::Close,
+            Icon::Stop,
+            Icon::PanelLeft,
+            Icon::PanelRight,
+            Icon::SidebarCollapse,
             Icon::Check,
             Icon::Plus,
             Icon::FilePlus,
@@ -500,5 +512,36 @@ mod tests {
 
         let builder = icon_sized(Icon::Menu, 48);
         drop(builder);
+    }
+
+    #[test]
+    fn stop_icon_renders_a_square() {
+        let html = icon(Icon::Stop).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(html.contains("d=\"M5 5h14v14H5z\""), "{html}");
+    }
+
+    #[test]
+    fn panel_left_icon_renders_a_left_panel() {
+        let html = icon(Icon::PanelLeft).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(html.contains("d=\"M3 3h18v18H3z M9 3v18\""), "{html}");
+    }
+
+    #[test]
+    fn panel_right_icon_renders_a_right_panel() {
+        let html = icon(Icon::PanelRight).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(html.contains("d=\"M3 3h18v18H3z M15 3v18\""), "{html}");
+    }
+
+    #[test]
+    fn sidebar_collapse_icon_renders_a_collapse_arrow() {
+        let html = icon(Icon::SidebarCollapse).to_static_html();
+        assert!(html.contains("<svg"), "{html}");
+        assert!(
+            html.contains("d=\"M3 3h18v18H3z M15 3v18 M12 12H7 M10 9l-3 3 3 3\""),
+            "{html}"
+        );
     }
 }
