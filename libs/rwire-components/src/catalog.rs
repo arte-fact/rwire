@@ -2658,6 +2658,25 @@ fn chat_entry_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     .build()
 }
 
+fn chat_calls_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{ChatCall, ChatCallState, ChatCalls};
+    let mut calls = ChatCalls::new()
+        .call(
+            ChatCall::new("Bash", "cargo test --workspace")
+                .state(ChatCallState::Ok)
+                .detail(el(El::Pre).text("743 passed, 0 failed")),
+        )
+        .call(ChatCall::new("Read", "crates/web/src/lib.rs").state(ChatCallState::Ok));
+    if b(bools, 0) {
+        calls = calls.call(
+            ChatCall::new("Edit", "crates/web/src/lib.rs")
+                .state(ChatCallState::Error)
+                .detail(el(El::Pre).text("no such file or directory")),
+        );
+    }
+    calls.build()
+}
+
 fn chat_transcript_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{ChatAuthor, ChatEntry};
     use rwire::St;
@@ -5158,6 +5177,21 @@ const ENTRIES: &[ComponentEntry] = &[
             default: false,
         }],
         build_demo: chat_entry_demo,
+    },
+    ComponentEntry {
+        name: "ChatCalls",
+        slug: "chat-calls",
+        description:
+            "A run of tool calls collapsed into one block, each call's input and output behind a disclosure.",
+        category: Category::DataDisplay,
+        order: 3145,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "failed",
+            description: "Add a failed call (opens the block)",
+            default: false,
+        }],
+        build_demo: chat_calls_demo,
     },
     ComponentEntry {
         name: "ChatTranscript",
