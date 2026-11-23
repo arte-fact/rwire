@@ -62,8 +62,11 @@ avoids: `references/recipes.md`.
 
 Start here before debugging anything that "should work": stacking of `St` tokens, chat scroll
 pinning, async POSTs without a timeout, process-global state shared across connections, tables
-that are never pruned, shared-state renderers nested in memory-state ones, and the 64-field
-`State` ceiling. `references/pitfalls.md`.
+that are never pruned, wrappers that have no box (`display: contents`), one state per
+handler/renderer, the 64-field `State` ceiling, fold state that re-closes when a neighbour
+updates, re-keyed synced fields losing the caret, `<select>` read through `ctx.text()`, a drawer
+that owns its deps as a renderer, remote URLs in Markdown, and the 375 px / keyboard pass every
+pane owes before a merge. `references/pitfalls.md` — each entry ends with where it was seen.
 
 ## Verify, then pin
 
