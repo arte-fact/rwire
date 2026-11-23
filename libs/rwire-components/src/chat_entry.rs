@@ -6,7 +6,7 @@
 //! claw-rwire's thread widgets (`MinW0`/`BreakWords` so bodies wrap at the
 //! column edge; rail via a hairline flex strip).
 //!
-//! Use it à la carte, or let [`ChatTranscript`](crate::ChatTranscript) build
+//! Use it on its own, or let [`ChatTranscript`](crate::ChatTranscript) build
 //! entries from a [`ChatItem`](crate::ChatItem) implementation.
 
 use std::borrow::Cow;
@@ -158,7 +158,7 @@ impl ChatEntry {
 
         // Header: author · tag · time (suppressed when grouped). In a bubble the
         // author is implied by the side the block sits on: no name inside it.
-        // What the app still wants to say about the turn (« terminal ») and the
+        // What the app still wants to say about the turn ("terminal") and the
         // time go **under** the bubble, muted.
         let mut column: Vec<ElementBuilder> = Vec::new();
         let mut bubble_meta: Vec<ElementBuilder> = Vec::new();
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn the_name_can_be_a_node_with_a_muted_suffix() {
         // A multi-author thread links the name to the author's own session and
-        // qualifies it (« terminal », « via MCP »).
+        // qualifies it ("terminal", "via MCP").
         let link = el(El::A)
             .attr("href", "/s/office/flambeau")
             .text("flambeau@office");
@@ -377,33 +377,33 @@ mod tests {
         assert_eq!(header_texts(&entry), vec!["via MCP"]);
     }
 
-    /// A bubble shows no author name: the suffix (« terminal ») and the time
+    /// A bubble shows no author name: the suffix ("terminal") and the time
     /// sit **under** the block, muted.
     #[test]
     fn a_bubble_puts_its_time_under_the_block() {
         let entry = ChatEntry::new(
             ChatAuthor::user("Vous").suffix("terminal"),
-            el(El::P).text("tapé dans le pane"),
+            el(El::P).text("typed in the pane"),
         )
         .bubble(true)
         .time("10:02")
         .build();
         let html = entry.to_static_html();
         // Le bloc de texte, puis la ligne d'informations en dessous.
-        assert!(html.contains("tapé dans le pane"), "{html}");
+        assert!(html.contains("typed in the pane"), "{html}");
         assert!(html.contains("terminal"), "{html}");
         assert!(html.contains("10:02"), "{html}");
-        // Le nom n'est plus un texte visible : il reste l'étiquette accessible
+        // The name is no longer visible text: it stays the accessible label
         // du tour.
         assert!(html.contains("aria-label=\"Vous\""), "{html}");
-        // L'heure vient après le bloc de texte, pas dedans.
-        let apres_le_bloc = html.split("tapé dans le pane").nth(1).unwrap_or_default();
+        // The time comes after the text block, not inside it.
+        let after_block = html.split("typed in the pane").nth(1).unwrap_or_default();
         assert!(
-            apres_le_bloc.contains("10:02"),
+            after_block.contains("10:02"),
             "l'heure vient sous la bulle : {html}"
         );
         assert!(
-            !apres_le_bloc.contains("bg-muted"),
+            !after_block.contains("bg-muted"),
             "le bloc ne se rouvre pas sous la bulle : {html}"
         );
     }

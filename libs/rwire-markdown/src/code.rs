@@ -191,13 +191,13 @@ mod tests {
         let html = highlight_code("let x = 1;", Some("rust")).to_static_html();
         assert!(html.contains("data-copy=\"let x = 1;\""), "{html}");
         assert!(html.contains("aria-label=\"Copier le code\""), "{html}");
-        assert!(html.contains("rust"), "langue affichée : {html}");
+        assert!(html.contains("rust"), "language shown: {html}");
         // The clipboard glyph swaps to a check on click (client state, 2 s).
         assert!(html.contains("<svg"), "{html}");
         // The code area is a `<pre><code>` under the header, not a bare label.
-        let head = html.find("data-copy").expect("en-tête");
+        let head = html.find("data-copy").expect("header");
         let pre = html.find("<pre").expect("bloc");
-        assert!(head < pre, "en-tête au-dessus du code : {html}");
+        assert!(head < pre, "header above the code: {html}");
         // Without a language the strip still holds the copy button.
         let bare = highlight_code("ok", None).to_static_html();
         assert!(bare.contains("data-copy=\"ok\""), "{bare}");

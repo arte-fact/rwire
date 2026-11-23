@@ -450,13 +450,13 @@ mod tests {
         let field = html.find("<textarea").expect("champ");
         let button = html.find("<button").expect("bouton");
         assert!(field < button, "{html}");
-        assert!(!html.contains("hint"), "pas de rangée d'actions : {html}");
+        assert!(!html.contains("hint"), "no actions row: {html}");
         // The label is not written, only named.
         assert!(html.contains("aria-label=\"Envoyer\""), "{html}");
         assert!(html.contains("title=\"Envoyer\""), "{html}");
         assert!(
             !html.contains(">Envoyer<"),
-            "libellé retiré du bouton : {html}"
+            "label taken off the button: {html}"
         );
         // The glyph is there (default ArrowUp).
         assert!(html.contains("M12 19V5M5 12l7-7 7 7"), "{html}");

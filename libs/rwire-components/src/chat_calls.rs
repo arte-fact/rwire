@@ -1,7 +1,7 @@
 //! ChatCalls component.
 //!
 //! A run of tool calls collapsed into **one** transcript block: a summary line
-//! ("4 appels d'outils · Bash, Read, Edit") and, behind a native `<details>`,
+//! ("4 tool calls · Bash, Read, Edit") and, behind a native `<details>`,
 //! each call with its argument summary, its state and its own disclosure for the
 //! full input and output. Native `<details>` means the toggle costs no server
 //! round-trip and keeps keyboard and screen-reader semantics.
@@ -9,7 +9,7 @@
 //! It fits where a chat surface would otherwise interleave dozens of one-line
 //! tool rows with the actual conversation: the prose stays readable, and the
 //! machinery is one click away. The run stays **closed** by default (the native
-//! `<summary>` triangle is the only affordance, no « détails » label), and the
+//! `<summary>` triangle is the only affordance, no "details" label), and the
 //! expanded calls are indented under their summary.
 //!
 //! The run carries no chrome of its own — no background, no rounding, no
@@ -52,11 +52,12 @@ pub enum ChatCallState {
 }
 
 impl ChatCallState {
-    fn label(self) -> &'static str {
+    /// The state's word, from the run's text table (English by default).
+    fn label(self, text: &ChatCallsText) -> &'static str {
         match self {
-            Self::Running => "en cours",
-            Self::Ok => "ok",
-            Self::Error => "erreur",
+            Self::Running => text.running,
+            Self::Ok => text.ok,
+            Self::Error => text.error,
         }
     }
 
@@ -65,6 +66,46 @@ impl ChatCallState {
             Self::Running => St::TextAccent,
             Self::Ok => St::TextMuted,
             Self::Error => St::TextError,
+        }
+    }
+}
+
+/// The words a run of tool calls shows. English by default: a library speaks its
+/// own language, the app brings its strings in with [`ChatCalls::text`].
+///
+/// `{n}` (the count) and `{tools}` (up to three tool names) are substituted in the
+/// summary templates.
+#[derive(Clone, Debug)]
+pub struct ChatCallsText {
+    /// No call in the run.
+    pub none: &'static str,
+    /// Exactly one call; `{tools}` is its tool name.
+    pub one: &'static str,
+    /// Several calls; `{n}` is the count and `{tools}` the names.
+    pub many: &'static str,
+    /// Exactly one failed call.
+    pub failure_one: &'static str,
+    /// Several failed calls; `{n}` is the count.
+    pub failure_many: &'static str,
+    /// A call still in flight.
+    pub running: &'static str,
+    /// A call that returned.
+    pub ok: &'static str,
+    /// A call that failed.
+    pub error: &'static str,
+}
+
+impl Default for ChatCallsText {
+    fn default() -> Self {
+        Self {
+            none: "No tool call",
+            one: "1 tool call · {tools}",
+            many: "{n} tool calls · {tools}",
+            failure_one: "1 failure",
+            failure_many: "{n} failures",
+            running: "running",
+            ok: "ok",
+            error: "error",
         }
     }
 }
@@ -107,6 +148,7 @@ impl ChatCall {
 pub struct ChatCalls {
     calls: Vec<ChatCall>,
     open: Option<bool>,
+    text: ChatCallsText,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -125,6 +167,13 @@ impl ChatCalls {
     /// line of the transcript, expanded on demand by the reader.
     pub fn open(mut self, open: bool) -> Self {
         self.open = Some(open);
+        self
+    }
+
+    /// Replace the words the run shows (see [`ChatCallsText`]): a French app
+    /// passes French, the library stays English.
+    pub fn text(mut self, text: ChatCallsText) -> Self {
+        self.text = text;
         self
     }
 
@@ -156,11 +205,14 @@ impl ChatCalls {
         } else {
             shown
         };
-        match n {
-            0 => "Aucun appel d'outil".to_string(),
-            1 => format!("1 appel d'outil · {tools}"),
-            n => format!("{n} appels d'outils · {tools}"),
-        }
+        let template = match n {
+            0 => return self.text.none.to_string(),
+            1 => self.text.one,
+            _ => self.text.many,
+        };
+        template
+            .replace("{n}", &n.to_string())
+            .replace("{tools}", &tools)
     }
 
     /// Build the block into an ElementBuilder.
@@ -178,10 +230,11 @@ impl ChatCalls {
             summary.push(
                 el(El::Span)
                     .st([St::TextXs, St::TextError, St::WhitespaceNowrap])
-                    .text(&format!(
-                        "{errors} échec{}",
-                        if errors > 1 { "s" } else { "" }
-                    )),
+                    .text(&if errors > 1 {
+                        self.text.failure_many.replace("{n}", &errors.to_string())
+                    } else {
+                        self.text.failure_one.to_string()
+                    }),
             );
         }
 
@@ -203,7 +256,7 @@ impl ChatCalls {
                     .text(call.summary.as_ref()),
                 el(El::Span)
                     .st([St::TextXs, St::WhitespaceNowrap, call.state.ink()])
-                    .text(call.state.label()),
+                    .text(call.state.label(&self.text)),
             ];
             let mut rows: Vec<ElementBuilder> = Vec::new();
             match call.detail {
@@ -291,10 +344,7 @@ mod tests {
     #[test]
     fn the_summary_counts_the_calls_and_names_the_tools_once() {
         let html = run().build().to_static_html();
-        assert!(
-            html.contains("3 appels d&#39;outils") || html.contains("3 appels d'outils"),
-            "{html}"
-        );
+        assert!(html.contains("3 tool calls"), "{html}");
         assert!(html.contains("Bash, Read"), "{html}");
     }
 
@@ -319,7 +369,10 @@ mod tests {
     #[test]
     fn the_block_stays_closed_even_while_running_or_after_a_failure() {
         let running = ChatCalls::new().call(ChatCall::new("Bash", "cargo test"));
-        assert!(!running.starts_open(), "fermé par défaut, même en cours");
+        assert!(
+            !running.starts_open(),
+            "closed by default, even while running"
+        );
         let failed = run().call(
             ChatCall::new("Edit", "src/lib.rs")
                 .state(ChatCallState::Error)
@@ -327,34 +380,35 @@ mod tests {
         );
         assert!(
             !failed.starts_open(),
-            "fermé par défaut, même après un échec"
+            "closed by default, even after a failure"
         );
         let html = failed.build().to_static_html();
-        // L'échec se lit dans le résumé, sans ouvrir le bloc : seule l'entrée en
-        // échec s'ouvre, pas la série.
-        assert!(html.contains("1 échec"), "{html}");
+        // The failure reads in the summary without opening the block: the
+        // failing call opens, not the run.
+        assert!(html.contains("1 failure"), "{html}");
         let outer = html.split('>').next().unwrap_or_default();
-        assert!(!outer.contains("open"), "série ouverte : {outer}");
+        assert!(!outer.contains("open"), "run open: {outer}");
     }
 
-    /// Le résumé porte le triangle natif (pas de libellé « détails »), et les
-    /// appels dépliés sont indentés sous lui.
+    /// The summary carries the native triangle (no "details" label) and the
+    /// expanded calls are indented under it.
     #[test]
     fn the_summary_keeps_its_triangle_and_the_calls_are_indented() {
         let html = run().build().to_static_html();
         assert!(html.contains("<summary"), "{html}");
-        assert!(!html.contains("détails"), "{html}");
-        // Un `<summary>` en flex perdrait son marqueur : la ligne est un span.
-        let summary = html
+        // No "details" word in the summary: the native triangle is the whole
+        // affordance, the count and the tool names are the label.
+        let line = html
             .split("<summary")
             .nth(1)
-            .and_then(|r| r.split('>').next())
+            .and_then(|r| r.split("</summary>").next())
             .unwrap_or_default();
-        assert!(
-            !summary.contains("display:flex"),
-            "summary flex : {summary}"
-        );
-        // Les appels sont indentés sous le résumé (`PlMd`).
+        assert!(!line.contains("details"), "{line}");
+        assert!(line.contains("3 tool calls"), "{line}");
+        // A flex `<summary>` would lose its marker: the line is a span.
+        let summary = line.split('>').next().unwrap_or_default();
+        assert!(!summary.contains("display:flex"), "summary flex: {summary}");
+        // The calls are indented under the summary (`PlMd`).
         assert!(
             html.contains(&format!("u{}", rwire::style_tokens::St::PlMd.as_u16())),
             "{html}"
@@ -364,7 +418,7 @@ mod tests {
     #[test]
     fn a_single_call_reads_in_the_singular() {
         let one = ChatCalls::new().call(ChatCall::new("Bash", "ls"));
-        assert_eq!(one.summary_text(), "1 appel d'outil · Bash");
+        assert_eq!(one.summary_text(), "1 tool call · Bash");
     }
 
     #[test]
@@ -374,10 +428,41 @@ mod tests {
             .call(ChatCall::new("Read", "b"))
             .call(ChatCall::new("Edit", "c"))
             .call(ChatCall::new("Grep", "d"));
+        assert_eq!(many.summary_text(), "4 tool calls · Bash, Read, Edit +1");
+    }
+
+    #[test]
+    fn the_app_brings_its_own_words() {
+        let text = ChatCallsText {
+            none: "Nothing ran",
+            one: "1 call ({tools})",
+            many: "{n} calls ({tools})",
+            failure_one: "1 failed",
+            failure_many: "{n} failed",
+            running: "in flight",
+            ..ChatCallsText::default()
+        };
         assert_eq!(
-            many.summary_text(),
-            "4 appels d'outils · Bash, Read, Edit +1"
+            ChatCalls::new().text(text.clone()).summary_text(),
+            "Nothing ran"
         );
+        assert_eq!(
+            ChatCalls::new()
+                .call(ChatCall::new("Bash", "ls"))
+                .text(text.clone())
+                .summary_text(),
+            "1 call (Bash)"
+        );
+        let html = run()
+            .text(text)
+            .call(ChatCall::new("Read", "src/lib.rs").state(ChatCallState::Running))
+            .call(ChatCall::new("Edit", "src/a.rs").state(ChatCallState::Error))
+            .call(ChatCall::new("Write", "src/b.rs").state(ChatCallState::Error))
+            .build()
+            .to_static_html();
+        assert!(html.contains("6 calls (Bash, Read, Edit +1)"), "{html}");
+        assert!(html.contains("2 failed"), "{html}");
+        assert!(html.contains("in flight"), "{html}");
     }
 
     #[test]

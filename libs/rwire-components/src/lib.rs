@@ -153,7 +153,7 @@ pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonIntent, ButtonSize};
 pub use card::{Card, CardPadding, CardShadow};
 pub use chat::Chat;
-pub use chat_calls::{ChatCall, ChatCallState, ChatCalls};
+pub use chat_calls::{ChatCall, ChatCallState, ChatCalls, ChatCallsText};
 pub use chat_entry::ChatEntry;
 pub use chat_item::{ChatAuthor, ChatDetail, ChatIntent, ChatItem, ChatItemCtx, ChatTag};
 pub use chat_scroll::ChatScroll;

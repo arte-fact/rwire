@@ -225,7 +225,7 @@ impl AppShell {
         Self::toggle_label(
             "rw-panel-toggle",
             "panel-toggle-label",
-            "Afficher ou masquer le détail",
+            "Show or hide the details panel",
         )
         .append([rwire::icon(rwire::Icon::PanelRight)])
     }
@@ -438,7 +438,7 @@ impl AppShell {
                     .attr("type", "checkbox")
                     .attr("id", "rw-panel-toggle")
                     .attr("data-shell", "panel-toggle")
-                    .attr("aria-label", "Afficher le détail")
+                    .attr("aria-label", "Show the details panel")
                     .st([St::SrOnly]),
                 el(El::Style).text(
                     "[data-shell-root]:has(> [data-shell=panel-toggle]:checked)>div>[data-shell=panel],\
@@ -561,13 +561,13 @@ mod tests {
         assert!(html.contains("id=\"rw-side-toggle\""), "{html}");
         assert!(
             html.contains(">div>[data-shell=sidebar]") && html.contains("{display:none}"),
-            "les règles de repli manquent : {html}"
+            "the fold rules are missing: {html}"
         );
         assert!(
             html.contains(":has(> [data-shell=side-toggle]:checked)"),
             "{html}"
         );
-        // Le contrôle vit dans un en-tête de l'application, pas en flottant.
+        // The control lives in an app header, not floating.
         let toggle = AppShell::sidebar_toggle().to_static_html();
         assert!(toggle.contains("for=\"rw-side-toggle\""), "{toggle}");
         assert!(!toggle.contains("position:absolute"), "{toggle}");
@@ -578,7 +578,7 @@ mod tests {
         let html = AppShell::new()
             .sidebar(el(El::Div).text("liste"))
             .main(el(El::Div).text("fil"))
-            .panel(Some(el(El::Div).text("détail")))
+            .panel(Some(el(El::Div).text("details")))
             .collapsible_panel(true)
             .build()
             .to_static_html();
@@ -590,7 +590,7 @@ mod tests {
         );
         assert!(
             html.contains(">div>[data-shell=panel]"),
-            "la colonne de détail doit disparaître : {html}"
+            "the details column must disappear: {html}"
         );
         let toggle = AppShell::panel_toggle().to_static_html();
         assert!(toggle.contains("for=\"rw-panel-toggle\""), "{toggle}");

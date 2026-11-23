@@ -29,7 +29,7 @@ pub enum ChatIntent {
 ///
 /// Multi-author surfaces need more than a label: the name may have to be a
 /// **link** (jump to the author's own session) and carry a small **suffix**
-/// (« terminal », « via MCP »). Both stay optional; the plain `name` remains the
+/// ("terminal", "via MCP"). Both stay optional; the plain `name` remains the
 /// accessible label either way.
 pub struct ChatAuthor {
     pub name: Cow<'static, str>,
@@ -39,8 +39,8 @@ pub struct ChatAuthor {
     /// Custom node rendered in place of the plain name (a link to the author's
     /// session, a badge…). `name` is still used for the entry's accessible name.
     pub name_node: Option<ElementBuilder>,
-    /// Small muted qualifier shown right after the name (« terminal », « via
-    /// MCP », « via horloge »).
+    /// Small muted qualifier shown right after the name ("terminal", "via
+    /// MCP", "via the clock").
     pub suffix: Option<Cow<'static, str>>,
 }
 
@@ -74,7 +74,7 @@ impl ChatAuthor {
         self
     }
 
-    /// Add a small muted qualifier after the name (« terminal », « via MCP »).
+    /// Add a small muted qualifier after the name ("terminal", "via MCP").
     pub fn suffix(mut self, suffix: impl Into<Cow<'static, str>>) -> Self {
         self.suffix = Some(suffix.into());
         self
