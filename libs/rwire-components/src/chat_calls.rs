@@ -11,6 +11,9 @@
 //! machinery is one click away. The block opens by itself while a call is still
 //! running or when one failed, and stays closed once everything succeeded.
 //!
+//! The run carries no chrome of its own — no background, no rounding, no
+//! padding: it reads as one line of the transcript, not as a message bubble.
+//!
 //! # Example
 //!
 //! ```ignore
@@ -171,9 +174,7 @@ impl ChatCalls {
 
         let text = self.summary_text();
         let mut summary = vec![
-            el(El::Span)
-                .st([St::TextSm, St::FontSemibold, St::TextHigh])
-                .text(&text),
+            el(El::Span).st([St::TextSm, St::TextMuted]).text(&text),
             el(El::Span)
                 .st([St::TextXs, St::TextMuted, St::WhitespaceNowrap])
                 .text("détails"),
@@ -250,15 +251,15 @@ impl ChatCalls {
             );
         }
 
+        // No chrome of its own: the run sits on the transcript like a line of
+        // text, never in a filled rounded block that would read as a message
+        // bubble of its own.
         let mut block = el(El::Details)
             .st([
                 St::DisplayFlex,
                 St::FlexCol,
                 St::GapXs,
                 St::MinW0,
-                St::PSm,
-                St::BgMuted,
-                St::RoundedMd,
                 St::TextSm,
             ])
             .append([
@@ -311,6 +312,17 @@ mod tests {
         let calls = run();
         assert!(!calls.starts_open());
         assert!(!calls.build().to_static_html().contains("open"));
+    }
+
+    #[test]
+    fn the_run_carries_no_bubble_chrome() {
+        // A filled rounded block would pass for a message bubble: the run is a
+        // plain line of the transcript, so its own box paints nothing.
+        let html = run().build().to_static_html();
+        let head = html.split("<summary").next().unwrap_or(&html).to_string();
+        assert!(!head.contains("background"), "{head}");
+        assert!(!head.contains("border-radius"), "{head}");
+        assert!(!head.contains("padding"), "{head}");
     }
 
     #[test]
