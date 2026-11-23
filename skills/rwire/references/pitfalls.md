@@ -109,7 +109,7 @@ error, not a design discussion.
 Read the second state through a nested closure region:
 
 ```rust
-el(El::Div).synced_with_storage::<Room, _>(
+ElementBuilder::synced_with_storage::<Room, _>(
     move |room| view(room, token),
     rwire::RendererDeps::always(),
 )
@@ -176,15 +176,15 @@ Seen in: rwire `e4fcc73` "fix(runtime): stale value/caret stamped onto re-keyed 
 
 ## 13. `<select>` values are not read uniformly
 
-Read every `<select>` change through `ctx.text()`. Other event payload shapes work for text
-inputs but not reliably here, and the failure is silent: the handler runs with an empty value.
+Read every `<select>` change through `ctx.text()` — one contract for every select, rather than
+a payload shape per call site.
 
 Seen in: claw-rwire `6d20b19` (2026-07-07).
 
 ## 14. A drawer that must remember its state is a renderer
 
-A drawer, panel or popover wired outside a `#[renderer]` loses its state silently: opening it
-triggers a render of something else, and it comes back closed.
+A drawer, panel or popover wired outside a `#[renderer]` can stop responding: it does not
+re-render when the state it shows changes.
 
 Rule: the component owns its dependencies as a renderer — it is re-rendered because what it
 shows changed, not because the page did.
@@ -215,7 +215,8 @@ neither shows up in a unit test.
 Before a merge, for each drawer, panel and modal:
 
 - at 375 px: it opens, it is reachable, it does not push a horizontal scrollbar, and its close
-  control is tappable (≥ 44 × 44 px — `parity.mjs` already fails below that);
+  control is tappable (≥ 44 × 44 px — `parity.mjs` fails below that unless the `/app`
+  reference is just as small);
 - from the keyboard: Escape closes it, focus enters it and comes back where it was, and the close
   control is in the tab order.
 
