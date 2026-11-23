@@ -102,7 +102,7 @@ impl Sidebar {
         };
         let mut children = Vec::new();
         if let Some(header) = self.header {
-            // The old front's brand row: 14 px 14 px 10 px, the top safe area included.
+            // The default brand row: 14 px 14 px 10 px, the top safe area included.
             children.push(slot(
                 header,
                 &[St::PxSidebarHead, St::PtSidebarHeadSafe, St::PbSidebarHead],
@@ -187,7 +187,7 @@ mod tests {
         }
     }
 
-    /// The old front's footer: 10 px 12 px, the bottom safe area added.
+    /// The default footer: 10 px 12 px, the bottom safe area added.
     #[test]
     fn the_footer_is_padded_like_the_old_front() {
         let built = Sidebar::new().footer(el(El::Span)).build();
@@ -207,7 +207,7 @@ mod tests {
         );
     }
 
-    /// The old front's sidebar edge: a 1 px hairline on the right, by default;
+    /// The default sidebar edge: a 1 px hairline on the right, by default;
     /// `.border(false)` drops it.
     #[test]
     fn the_sidebar_draws_its_right_edge() {
@@ -221,7 +221,7 @@ mod tests {
             .contains(&St::BorderRDefault.as_u16()));
     }
 
-    /// The old front's header slot: 14 px 14 px 10 px, the top safe area
+    /// The default header slot: 14 px 14 px 10 px, the top safe area
     /// included; its footer text: 12.5 px.
     #[test]
     fn the_header_and_footer_text_match_the_old_front() {

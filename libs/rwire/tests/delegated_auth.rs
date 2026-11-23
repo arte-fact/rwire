@@ -1,6 +1,6 @@
 //! Delegated authentication end to end, against a fake identity hub: a tiny local
 //! HTTP server answering `GET /admin/session` with `200 <user>` for a known
-//! Bearer token and `401` otherwise — the shape of the mcp-agents hub.
+//! Bearer token and `401` otherwise — the shape of a hub.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};

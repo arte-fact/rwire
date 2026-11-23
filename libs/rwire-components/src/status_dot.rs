@@ -14,7 +14,7 @@
 //! use rwire_components::{StatusDot, StatusDotIntent};
 //!
 //! StatusDot::new().intent(StatusDotIntent::Success).ring(true).pulse(true).build() // generating
-//! StatusDot::new().tone(Tone::Cat(5)).ring(true).build()                         // waiting for a decision
+//! StatusDot::new().intent(StatusDotIntent::Warning).ring(true).build()            // waiting for a decision
 //! StatusDot::new().intent(StatusDotIntent::Hollow).build()                       // inactive
 //! StatusDot::new().build()                                                       // idle
 //! ```
@@ -261,7 +261,7 @@ mod tests {
         assert!(!html.contains("aria-hidden"), "{html}");
     }
 
-    /// The old front's "hub" dot: 7 px, never a halo.
+    /// An extra-small dot: 7 px, whatever the intent asks for.
     #[test]
     fn an_extra_small_dot_is_7px_without_a_halo() {
         let dot = StatusDot::new()

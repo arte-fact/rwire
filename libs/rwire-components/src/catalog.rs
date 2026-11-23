@@ -2310,11 +2310,11 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
             vec![
                 (
                     "/s/1",
-                    "mcp-agents",
+                    "Studio",
                     "@home",
                     generating,
                     claude,
-                    "Refactoring the hub",
+                    "Refactoring the parser",
                     "a1b2",
                     false,
                 ),
@@ -2351,13 +2351,13 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
             ],
         ),
         (
-            "raptors",
+            "lab",
             || StatusDot::new().intent(StatusDotIntent::Success).build(),
             vec![
                 (
                     "/s/5",
                     "rapports",
-                    "@raptors",
+                    "@lab",
                     generating,
                     vibe,
                     "Writing the weekly report",
@@ -2367,7 +2367,7 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
                 (
                     "/s/6",
                     "parity",
-                    "@raptors",
+                    "@lab",
                     typing,
                     claude,
                     "Measuring screen 1",
@@ -2375,7 +2375,7 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
                     false,
                 ),
                 (
-                    "/s/7", "docs", "@raptors", inactive, pi, "Done", "a3b4", false,
+                    "/s/7", "docs", "@lab", inactive, pi, "Done", "a3b4", false,
                 ),
             ],
         ),
@@ -2481,8 +2481,8 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
                 .attr("aria-hidden", "true")
                 .data("demo", "brand-mark")
                 .text("m"),
-            el(El::Span).text("mcp-agents"),
-            // The hub link: a 7 px dot, no halo.
+            el(El::Span).text("Studio"),
+            // A connection link: a 7 px dot, no halo.
             el(El::Span)
                 .st([
                     St::MlAuto,
@@ -2493,13 +2493,13 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
                     St::FontMedium,
                     St::TextMuted,
                 ])
-                .data("demo", "hub")
+                .data("demo", "connection")
                 .append([
                     crate::StatusDot::new()
                         .intent(crate::StatusDotIntent::Success)
                         .size(crate::StatusDotSize::Xs)
                         .build(),
-                    el(El::Span).text("hub"),
+                    el(El::Span).text("live"),
                 ]),
             Button::icon_only(Icon::SidebarCollapse, "Hide the list")
                 .intent(crate::ButtonIntent::Ghost)
@@ -2578,7 +2578,7 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         .mobile(if b(bools, 2) {
             MobilePane::Main
         } else {
-            MobilePane::List
+            MobilePane::Sidebar
         })
         .build()
         // A frame in the gallery, not the whole viewport; its drawer stays inside.

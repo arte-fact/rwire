@@ -19,9 +19,9 @@
 //!             .rows([
 //!                 NavRow::new("/s/abc")
 //!                     .leading(StatusDot::new().intent(StatusDotIntent::Success).ring(true).build())
-//!                     .title("mcp-agents", "@home")
+//!                     .title("Studio", "@home")
 //!                     .trailing(runtime_badge)
-//!                     .meta("Refactoring the hub…", "a1b2")
+//!                     .meta("Refactoring the parser…", "a1b2")
 //!                     .current(true),
 //!             ]),
 //!     )
@@ -452,7 +452,7 @@ mod tests {
     fn row() -> NavRow {
         NavRow::new("/s/abc")
             .leading(StatusDot::new().build())
-            .title("mcp-agents", "@home")
+            .title("Studio", "@home")
             .meta("Refactoring the hub", "a1b2")
     }
 
@@ -496,7 +496,7 @@ mod tests {
 
     /// Nothing in a one-line row is taller than its title's line (1.5): the
     /// trailing badge sits in a flex cell (no line strut), the title sets its
-    /// line height; the compact padding is the old front's (.38rem .55rem at
+    /// line height; the compact padding is the dense one (.38rem .55rem at
     /// its 16 px root).
     #[test]
     fn a_one_line_row_is_as_tall_as_its_title_line() {

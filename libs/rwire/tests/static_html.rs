@@ -291,7 +291,7 @@ fn a_touch_link_carries_the_touch_marker() {
 }
 
 /// The brand mark: a 26 px square with a 7 px radius; the logout arrow points
-/// into a door on the right (the old mcp-agents front's).
+/// into a door on the right (the previous front's).
 #[test]
 fn brand_square_and_logout_icon() {
     assert_eq!(St::Sq26.css(), "width:26px;height:26px;flex-shrink:0");

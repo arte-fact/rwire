@@ -472,7 +472,7 @@ impl Theme {
     /// The viewport width (px) below which interactive controls get 44 px touch
     /// targets, even under a fine pointer (a coarse pointer gets them at any
     /// width). The default is the `sm` breakpoint, 640; an app whose "phone"
-    /// layout starts wider sets its own (mcp-agents: 760). The `sm`
+    /// layout starts wider sets its own (a dashboard: 760). The `sm`
     /// breakpoint itself does not move.
     pub fn touch_below(mut self, px: u16) -> Self {
         self.touch_below = Some(px);
@@ -1640,7 +1640,7 @@ mod tests {
         let default = generate_theme_css(&Theme::new());
         assert!(!touch_rule_applies(&default, 700.0));
         assert!(touch_rule_applies(&default, 639.0));
-        // mcp-agents' phone threshold: 760.
+        // A dashboard's phone threshold: 760.
         let app = generate_theme_css(&Theme::new().touch_below(760));
         assert!(touch_rule_applies(&app, 700.0));
         assert!(!touch_rule_applies(&app, 760.0));

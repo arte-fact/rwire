@@ -279,7 +279,7 @@ impl Input {
         // padding. The 44 px touch target comes from the theme's coarse-pointer
         // rule (`min-height:44px` on inputs), not from the input itself.
         // The radius stays `RoundedMd` (`--R2`: 8 px with studio).
-        // On the surface, in the ordinary ink (the old front's sidebar search).
+        // On the surface, in the ordinary ink (the dense sidebar search).
         if self.input_type == InputType::Search && self.size == InputSize::Sm {
             tokens.retain(|t| !matches!(t, St::TextXs | St::TextHigh | St::BgApp));
             tokens.extend([St::TextSearchSm, St::TextDefault, St::BgSurface]);
@@ -473,7 +473,7 @@ mod tests {
         );
     }
 
-    /// The old front's sidebar search: its height comes from its padding (no
+    /// The dense sidebar search: its height comes from its padding (no
     /// fixed height), on the surface, in the ordinary ink.
     #[test]
     fn the_small_search_matches_the_old_front() {

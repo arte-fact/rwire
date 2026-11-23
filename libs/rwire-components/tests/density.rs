@@ -44,7 +44,7 @@ fn compact_icon_buttons_are_32px_with_an_18px_glyph() {
 }
 
 /// Square, not just tall: width, min-width and height all come from `--Qzi`,
-/// and the square does not shrink in a flex row (mcp-agents measured a
+/// and the square does not shrink in a flex row (a dashboard measured a
 /// 20 × 32 toggle in its sidebar footer).
 #[test]
 fn icon_buttons_are_square_from_qzi_and_do_not_shrink() {

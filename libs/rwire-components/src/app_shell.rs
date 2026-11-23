@@ -58,9 +58,9 @@ use std::borrow::Cow;
 /// Which column a one-column (phone) layout shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MobilePane {
-    /// The sidebar (the list).
+    /// The sidebar column.
     #[default]
-    List,
+    Sidebar,
     /// The main column.
     Main,
 }
@@ -327,7 +327,8 @@ impl AppShell {
             .attr(
                 "data-mobile",
                 match pane {
-                    MobilePane::List => "list",
+                    // Wire value stays `list`: neutral, and existing markup selectors use it.
+                    MobilePane::Sidebar => "list",
                     MobilePane::Main => "main",
                 },
             )
@@ -547,7 +548,7 @@ mod tests {
         // No sidebar at all.
         let html = AppShell::new()
             .main(el(El::Span))
-            .mobile(MobilePane::List)
+            .mobile(MobilePane::Sidebar)
             .build()
             .to_static_html();
         assert!(html.contains("data-mobile=\"main\""), "{html}");

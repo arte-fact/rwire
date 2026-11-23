@@ -218,7 +218,7 @@ mod tests {
         assert!(html.contains("aria-label=\"Failed, 3\""), "{html}");
     }
 
-    /// The old front's resting chip: no ground, the hairline, the soft ink.
+    /// The default resting chip: no ground, the hairline, the soft ink.
     #[test]
     fn an_inactive_chip_rests_on_nothing() {
         let tokens = Chip::new("All").compute_tokens();

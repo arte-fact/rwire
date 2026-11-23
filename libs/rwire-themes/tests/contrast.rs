@@ -199,7 +199,7 @@ fn every_subtle_pair_reads_at_aa_in_every_builtin_theme() {
     );
 }
 
-/// E2 criterion: the studio style with the Nord palette (mcp-agents' theme),
+/// E2 criterion: the studio style with the Nord palette (the reference dashboard's theme),
 /// in light and dark, reads at AA on every pair, the canvas and the primary
 /// button included.
 #[test]
@@ -210,7 +210,7 @@ fn studio_with_nord_reads_at_aa() {
             .palette(palettes::nord());
         let v = vars(&generate_theme_css(&theme));
         // Beyond the shared pairs: the primary button, and the soft ink (`/app`'s
-        // `ink-soft`, `TextMuted`) on every ground mcp-agents sets text on.
+        // `ink-soft`, `TextMuted`) on every ground the dashboard sets text on.
         let pairs = PAIRS.iter().chain(&[
             (St::TextOnPrimary, St::BgPrimary),
             (St::TextMuted, St::BgApp),
@@ -275,7 +275,7 @@ fn worst_on_grounds(v: &HashMap<String, String>, color: &str) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-/// Parity with mcp-agents' old front (/app), measured by its parity script:
+/// Parity with the previous front (/app), measured by its parity script:
 /// with studio + Nord, a token takes /app's exact value whenever it passes
 /// (4.5:1 for text, 3:1 for a non-text mark) on every ground it is used on.
 #[test]
@@ -405,8 +405,8 @@ fn categorical_marks_reach_3_to_1_on_their_fill() {
     assert!(out.is_empty(), "{}", out.join("\n"));
 }
 
-/// The brand mark of mcp-agents: an "m" in nord6 on `Cat(1)` (nord10), as the
-/// old front draws it (3.6:1, a logotype).
+/// The brand mark of a dashboard: an "m" in nord6 on `Cat(1)` (nord10), as the
+/// previous front draws it (3.6:1, a logotype).
 #[test]
 fn the_nord_brand_mark_is_nord6_on_cat_1() {
     for dark in [false, true] {
@@ -463,7 +463,7 @@ fn status_dots_reach_3_to_1_on_every_ground() {
     );
 }
 
-/// studio + Nord dots against the old front's (/app): equal where /app's
+/// studio + Nord dots against the previous front's (/app): equal where /app's
 /// passes 3:1 on every dot ground, else the nearest that does (named gaps).
 #[test]
 fn studio_nord_dots_match_app_where_contrast_allows() {
@@ -542,8 +542,8 @@ fn links_read_at_aa_on_every_ground() {
     );
 }
 
-/// studio + Nord links against the old front's `--link`: nord8 in dark mode
-/// (equal); in light mode the old front's `#4b6d96`, like the accent's step 11
+/// studio + Nord links against the previous front's `--link`: nord8 in dark mode
+/// (equal); in light mode the previous front's `#4b6d96`, like the accent's step 11
 /// `#4c6b94`, is under AA on nord4 (the app ground), so rwire takes the nearest
 /// that reads (a named gap).
 #[test]
