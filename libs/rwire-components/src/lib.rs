@@ -165,7 +165,7 @@ pub use checkbox::Checkbox;
 pub use chip::{Chip, ChipGroup};
 pub use code::{Code, CodeMode};
 pub use code_editor::CodeEditor;
-pub use composer::Composer;
+pub use composer::{Composer, ComposerDock};
 pub use container::{Container, ContainerSize};
 pub use copy_button::CopyButton;
 pub use decision_card::{DecisionAction, DecisionCard};

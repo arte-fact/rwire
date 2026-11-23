@@ -1350,6 +1350,15 @@ define_token_enum! {
         BgWarning12 = 0x41E => "background:color-mix(in srgb,var(--p) 12%,transparent)",
         /// A decision card's padding: 14 px by 16 px.
         PadDecision = 0x41F => "padding:14px 16px",
+        // Composer (0x420-0x421): the icon-only send button.
+        /// A 34 px square (the theme's touch rule lifts it to 44 px under a finger).
+        Sq34 = 0x420 => "width:34px;height:34px;flex-shrink:0",
+        /// A 9 px radius (the send button).
+        Rounded9 = 0x421 => "border-radius:9px",
+        /// The composer field's default auto-grow cap: 40vh.
+        MaxH40vh = 0x422 => "max-height:40vh",
+        /// The pill composer field's padding: 0.25 rem.
+        PadField = 0x423 => "padding:0.25rem",
     }
 }
 

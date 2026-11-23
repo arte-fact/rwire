@@ -250,7 +250,10 @@ impl SyncedRenderer for ActionReflector {
         let actions = state.downcast_ref::<Actions>()?;
         Some(match actions.any_phase(self.handler_id, &self.param) {
             Some(Phase::Loading) => (self.loading)(),
-            Some(Phase::Errored(msg)) => (self.errored)(msg),
+            // The errored phase carries a `data-action-error` marker so the runtime
+            // can tell a failed action from a successful one (e.g. a composer's
+            // `data-reset-on-ack` field is cleared only on a successful send's ack).
+            Some(Phase::Errored(msg)) => (self.errored)(msg).data("action-error", msg),
             None => (self.idle)(),
         })
     }

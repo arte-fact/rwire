@@ -29,6 +29,7 @@ const installed = new Set<string>();
  * page never does). */
 export function resetDelegation(): void {
   installed.clear();
+  pendingReset.length = 0;
 }
 
 /** Register a binding and lazily install the type's document dispatcher. */
@@ -54,6 +55,7 @@ function dispatch(type: string, e: Event): void {
       // A control still waiting on the server is not sent a second time.
       if (!c || !c.hasAttribute(BUSY)) {
         for (const r of recs) fire(r, e, n);
+        if (tap && e.type === "submit") noteResetOnAck(n);
         if (c) busy(c);
       }
     }
@@ -96,7 +98,33 @@ export function release(): void {
  * controls are released once every event sent is. */
 export function ack(): void {
   if (st.pe > 0) st.pe--;
-  if (!st.pe) release();
+  if (!st.pe) {
+    release();
+    flushResetOnAck();
+  }
+}
+
+/** Fields whose submit is waiting for its EVENT_ACK to be cleared
+ * (`data-reset-on-ack`, set by `Composer::reset_on_ack`). */
+const pendingReset: { form: Element; field: { value: string } }[] = [];
+
+/** Record the form's reset-on-ack fields when a submit goes out. */
+function noteResetOnAck(form: RwEl): void {
+  if ((form as unknown as Element).tagName !== "FORM") return;
+  for (const f of form.querySelectorAll("[data-reset-on-ack]")) {
+    pendingReset.push({ form: form as unknown as Element, field: f as unknown as { value: string } });
+  }
+}
+
+/** The EVENT_ACK of a successful send empties its `data-reset-on-ack` field.
+ * A send whose action came back errored (`[data-action-error]` on the form's
+ * reflected control) keeps its text. */
+function flushResetOnAck(): void {
+  for (const { form, field } of pendingReset.splice(0)) {
+    if (form.isConnected && !form.querySelector("[data-action-error]")) {
+      field.value = "";
+    }
+  }
 }
 
 /** The control a tap presses: a submit's submit button, else the bound element. */

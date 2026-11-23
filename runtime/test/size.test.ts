@@ -26,8 +26,11 @@ import { gzipSync } from "node:zlib";
 // +250B raw / +120B gzip (R2 review): a handle reports through its own binding (no
 // bubbling to an ancestor's handler), swallows native clicks, handles pointercancel and
 // bounds the width; a correctness fix of the same opcode.
-const MAX_RAW = 21_250;
-const MAX_GZIP = 8_040;
+// +250B raw / +120B gzip (R3 conversation): reset_on_ack — the EVENT_ACK flush that
+// empties a data-reset-on-ack field on a successful submit (and keeps it on an
+// errored one). It runs synchronously in the ack path, so it cannot be lazy.
+const MAX_RAW = 21_500;
+const MAX_GZIP = 8_160;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;

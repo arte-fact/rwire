@@ -48,6 +48,7 @@ export interface MockEl {
   focus(): void;
   setSelectionRange(a: number, b: number): void;
   closest(sel: string): MockEl | null;
+  matches(sel: string): boolean;
   click(): void;
   querySelector(sel: string): MockEl | null;
   querySelectorAll(sel: string): MockEl[];
@@ -236,7 +237,27 @@ export function makeDom(): { document: MockDoc } {
         (node as any).selectionStart = a;
         (node as any).selectionEnd = b;
       },
-      closest: () => null,
+      matches(sel: string) {
+        if (sel.startsWith("[")) {
+          const inner = sel.slice(1, -1);
+          const eq = inner.indexOf("=");
+          if (eq >= 0) {
+            const want = inner.slice(eq + 1).replace(/^"|"$/g, "");
+            return node.getAttribute(inner.slice(0, eq)) === want;
+          }
+          return node.hasAttribute(inner);
+        }
+        if (/^[a-z]+$/i.test(sel)) return node.tagName === sel.toUpperCase();
+        return false;
+      },
+      closest(sel: string) {
+        let n: MockEl | null = node;
+        while (n) {
+          if (n.matches(sel)) return n;
+          n = n.parentNode;
+        }
+        return null;
+      },
       click() {
         node.fire("click", { target: node });
       },

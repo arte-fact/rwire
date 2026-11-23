@@ -3008,18 +3008,35 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             resolved: true,
         }),
     ];
+    use crate::{Composer, ComposerDock};
+    use rwire::{icons::Icon, Bp};
     el(El::Div)
         .st([
             rwire::St::WFull,
             rwire::St::RoundedLg,
             rwire::St::OverflowHidden,
+            rwire::St::DisplayFlex,
+            rwire::St::FlexCol,
         ])
         .attr("data-demo", "conversation")
-        .append([ChatTranscript::new()
-            .layout(ChatLayout::Avatar)
-            .max_width(Measure::Reading)
-            .items_plain(items.iter())
-            .build()])
+        .append([
+            ChatTranscript::new()
+                .layout(ChatLayout::Avatar)
+                .max_width(Measure::Reading)
+                .items_plain(items.iter())
+                .build(),
+            ComposerDock::new(
+                Composer::new()
+                    .placeholder("Write to claude…")
+                    .hint("⏎ send · ⇧⏎ newline")
+                    .hint_hidden_below(Bp::Md)
+                    .send_label("Send")
+                    .send_icon(Icon::ArrowUp)
+                    .min_rows(2)
+                    .reset_on_ack(true),
+            )
+            .build(),
+        ])
 }
 
 fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
@@ -3058,6 +3075,31 @@ fn composer_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
         composer = composer.disabled(COMPOSER_DISABLED_REASON);
     }
     composer.build()
+}
+
+/// The docked composer of the conversation screen: icon-only send, 2 rows,
+/// hint hidden under `md`, reset on ack.
+fn composer_dock_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::{Composer, ComposerDock};
+    use rwire::{icons::Icon, Bp};
+    el(El::Div)
+        .st([
+            rwire::St::WFull,
+            rwire::St::MinH0,
+            rwire::St::PositionRelative,
+        ])
+        .attr("data-demo", "composer-dock")
+        .append([ComposerDock::new(
+            Composer::new()
+                .placeholder("Write to claude…")
+                .hint("⏎ send · ⇧⏎ newline")
+                .hint_hidden_below(Bp::Md)
+                .send_label("Send")
+                .send_icon(Icon::ArrowUp)
+                .min_rows(2)
+                .reset_on_ack(true),
+        )
+        .build()])
 }
 
 fn typing_indicator_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
@@ -5202,6 +5244,16 @@ const ENTRIES: &[ComponentEntry] = &[
             },
         ],
         build_demo: composer_demo,
+    },
+    ComponentEntry {
+        name: "ComposerDock",
+        slug: "composer-dock",
+        description: "The conversation's bottom-anchored composer: full-width sticky bar, card centred at the 760 px reading measure, radius 14, soft shadow, safe-area; icon-only 34 px send button, 2-row field, hint hidden under md, reset on ack.",
+        category: Category::Forms,
+        order: 213,
+        variants: &[],
+        bool_props: &[],
+        build_demo: composer_dock_demo,
     },
     ComponentEntry {
         name: "FormField",
