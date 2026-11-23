@@ -195,6 +195,42 @@ impl AppShell {
         self
     }
 
+    /// The control for [`Self::collapsible_sidebar`], for the app to place in a
+    /// header of its own: a label bound to the shell's checkbox, drawn as a
+    /// compact icon button. It stays in the flow of that header, so it never
+    /// floats over a column and never covers content.
+    ///
+    /// ```ignore
+    /// AppShell::new().collapsible_sidebar(true).main(header_row([
+    ///     rwire_components::sidebar_toggle(),
+    ///     title("Session"),
+    /// ]));
+    /// ```
+    pub fn sidebar_toggle() -> ElementBuilder {
+        el(El::Label)
+            .attr("for", "rw-side-toggle")
+            .attr("data-shell", "side-toggle-label")
+            .attr("title", "Afficher ou masquer la liste")
+            .attr("aria-label", "Afficher ou masquer la liste")
+            .attr("role", "button")
+            .attr("tabindex", "0")
+            .st([
+                St::DisplayInlineFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::RoundedSm,
+                St::TextMuted,
+                St::CursorPointer,
+                St::FlexShrink0,
+            ])
+            .style(
+                Style::new()
+                    .set("width", "1.75rem")
+                    .set("height", "1.75rem"),
+            )
+            .append([rwire::icon(rwire::Icon::Menu)])
+    }
+
     /// Add custom class.
     pub fn class(mut self, class: impl Into<Cow<'static, str>>) -> Self {
         self.extra_class = Some(class.into());
@@ -319,47 +355,6 @@ impl AppShell {
         h
     }
 
-    /// A fold/unfold label for [`Self::collapsible_sidebar`]: same checkbox,
-    /// absolutely placed in the column's top corner.
-    fn fold_label(marker: &'static str, title: &'static str, fold: bool) -> ElementBuilder {
-        let corner = if fold {
-            ["right", "0.4rem"]
-        } else {
-            ["left", "0.4rem"]
-        };
-        el(El::Label)
-            .attr("for", "rw-side-toggle")
-            .attr("data-shell", marker)
-            .attr("title", title)
-            .attr("aria-label", title)
-            .attr("role", "button")
-            .attr("tabindex", "0")
-            .st([
-                St::PositionAbsolute,
-                St::Z50,
-                St::DisplayInlineFlex,
-                St::ItemsCenter,
-                St::JustifyCenter,
-                St::RoundedSm,
-                St::TextMuted,
-                St::CursorPointer,
-                St::BgApp,
-                St::BorderDefault,
-            ])
-            .style(
-                Style::new()
-                    .set("top", "0.35rem")
-                    .set(corner[0], corner[1])
-                    .set("width", "1.6rem")
-                    .set("height", "1.6rem"),
-            )
-            .append([rwire::icon(if fold {
-                rwire::Icon::SidebarCollapse
-            } else {
-                rwire::Icon::PanelRight
-            })])
-    }
-
     /// The three-column layout (see the module docs).
     fn build_three_columns(self) -> ElementBuilder {
         let mut vars = format!("--Qsw:{}px", self.sidebar_width);
@@ -402,22 +397,19 @@ impl AppShell {
             root = root.class(extra.as_ref());
         }
         if self.collapsible {
-            // Fold control, pure CSS: the checkbox lives on the root, the two
-            // labels flip it, and `:has` hides the column, its handle and the
-            // fold label, while revealing the unfold one.
+            // Fold control, pure CSS: the checkbox lives on the root, the app's
+            // own label (`sidebar_toggle`) flips it, and `:has` hides the column
+            // and its handle.
             root = root.append([
                 el(El::Input)
                     .attr("type", "checkbox")
                     .attr("id", "rw-side-toggle")
                     .attr("data-shell", "side-toggle")
-                    .attr("aria-label", "Replier la liste des sessions")
+                    .attr("aria-label", "Afficher la liste")
                     .st([St::SrOnly]),
                 el(El::Style).text(
                     "[data-shell-root]:has(> [data-shell=side-toggle]:checked)>div>[data-shell=sidebar],\
-                     [data-shell-root]:has(> [data-shell=side-toggle]:checked)>div>[data-shell=handle][data-pane=sidebar],\
-                     [data-shell-root]:has(> [data-shell=side-toggle]:checked) [data-shell=side-collapse]{display:none}\
-                     [data-shell-root] [data-shell=side-expand]{display:none}\
-                     [data-shell-root]:has(> [data-shell=side-toggle]:checked) [data-shell=side-expand]{display:inline-flex}",
+                     [data-shell-root]:has(> [data-shell=side-toggle]:checked)>div>[data-shell=handle][data-pane=sidebar]{display:none}",
                 ),
             ]);
         }
@@ -444,36 +436,24 @@ impl AppShell {
         }
         let mut row = vec![];
         if let (Some(sidebar), false) = (self.sidebar, self.collapsed) {
-            let mut column = el(El::Div)
-                .attr("data-shell", "sidebar")
-                // The column draws no edge: its content does (`Sidebar`).
-                .st([St::WShellSidebar, St::MinH0, St::DisplayFlex, St::FlexCol]);
-            if self.collapsible {
-                column = column.st([St::PositionRelative]).append([Self::fold_label(
-                    "side-collapse",
-                    "Replier la liste",
-                    true,
-                )]);
-            }
-            row.push(column.append([sidebar]));
+            row.push(
+                el(El::Div)
+                    .attr("data-shell", "sidebar")
+                    // The column draws no edge: its content does (`Sidebar`).
+                    .st([St::WShellSidebar, St::MinH0, St::DisplayFlex, St::FlexCol])
+                    .append([sidebar]),
+            );
             if let Some(ref h) = self.on_resize {
                 row.push(Self::handle("sidebar", h));
             }
         }
-        let mut main_column = el(main_el).attr("data-shell", "main").st([
-            St::Flex1,
-            St::MinW0,
-            St::MinH0,
-            St::OverflowYAuto,
-        ]);
-        if self.collapsible {
-            main_column = main_column.st([St::PositionRelative]).append([
-                // The unfold control sits above the main column while the list is
-                // folded; the app leaves that corner free (its top bar is padded).
-                Self::fold_label("side-expand", "Déplier la liste", false),
-            ]);
-        }
-        row.push(main_column.append(self.main_content));
+        row.push(
+            el(main_el)
+                .attr("data-shell", "main")
+                .st([St::Flex1, St::MinW0, St::MinH0, St::OverflowYAuto])
+                .append(self.main_content),
+        );
+
         if let Some(panel) = self.panel {
             if let Some(ref h) = self.on_resize {
                 row.push(Self::handle("panel", h));
@@ -529,16 +509,18 @@ mod tests {
             .to_static_html();
         assert!(html.contains("data-shell=\"side-toggle\""), "{html}");
         assert!(html.contains("id=\"rw-side-toggle\""), "{html}");
-        assert!(html.contains("data-shell=\"side-collapse\""), "{html}");
-        assert!(html.contains("data-shell=\"side-expand\""), "{html}");
+        assert!(
+            html.contains(">div>[data-shell=sidebar]") && html.contains("{display:none}"),
+            "les règles de repli manquent : {html}"
+        );
         assert!(
             html.contains(":has(> [data-shell=side-toggle]:checked)"),
             "{html}"
         );
-        assert!(
-            html.contains("for=\"rw-side-toggle\""),
-            "les deux libellés visent la même case : {html}"
-        );
+        // Le contrôle vit dans un en-tête de l'application, pas en flottant.
+        let toggle = AppShell::sidebar_toggle().to_static_html();
+        assert!(toggle.contains("for=\"rw-side-toggle\""), "{toggle}");
+        assert!(!toggle.contains("position:absolute"), "{toggle}");
     }
 
     #[test]
