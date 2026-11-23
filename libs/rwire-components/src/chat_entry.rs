@@ -161,16 +161,29 @@ impl ChatEntry {
         // only the time and the name for screen readers.
         let mut column: Vec<ElementBuilder> = Vec::new();
         if bubble {
+            // In a bubble the author is implied by the side the block sits on,
+            // but the app may still qualify it (« terminal ») — that suffix
+            // stays visible next to the time.
+            let mut meta: Vec<ElementBuilder> = Vec::new();
+            if let Some(suffix) = &self.author.suffix {
+                meta.push(
+                    el(El::Span)
+                        .st([St::TextXs, St::TextMuted])
+                        .text(suffix.as_ref()),
+                );
+            }
             if let Some(time) = &self.time {
+                meta.push(
+                    el(El::Span)
+                        .st([St::TextLow, St::TextXs])
+                        .text(time.as_ref()),
+                );
+            }
+            if !meta.is_empty() {
                 column.push(
                     el(El::Div)
-                        .st([
-                            St::DisplayFlex,
-                            St::JustifyEnd,
-                            St::ItemsCenter,
-                            St::TextLow,
-                        ])
-                        .append([el(El::Span).st([St::TextXs]).text(time.as_ref())]),
+                        .st([St::DisplayFlex, St::JustifyEnd, St::ItemsCenter, St::GapSm])
+                        .append(meta),
                 );
             }
         } else if !self.grouped {
@@ -357,6 +370,22 @@ mod tests {
         assert!(html.contains("via MCP"), "{html}");
         // The suffix follows the name, inside the same header row.
         assert_eq!(header_texts(&entry), vec!["via MCP"]);
+    }
+
+    /// A bubble keeps the author implied, but a suffix the app set (« terminal »)
+    /// stays visible next to the time.
+    #[test]
+    fn a_bubble_still_shows_the_author_suffix() {
+        let entry = ChatEntry::new(
+            ChatAuthor::user("Vous").suffix("terminal"),
+            el(El::P).text("tapé dans le pane"),
+        )
+        .bubble(true)
+        .time("10:02")
+        .build();
+        let html = entry.to_static_html();
+        assert!(html.contains("terminal"), "{html}");
+        assert!(html.contains("10:02"), "{html}");
     }
 
     #[test]

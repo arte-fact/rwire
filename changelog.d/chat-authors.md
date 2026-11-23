@@ -9,3 +9,5 @@
 
 Both are optional and default to the previous rendering (plain text, no suffix),
 so existing transcripts are unchanged.
+- A **bubble** keeps its author implied by the side it sits on, but the suffix
+  the app set (« terminal ») stays visible next to the time.
