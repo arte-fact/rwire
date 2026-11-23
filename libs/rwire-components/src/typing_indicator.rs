@@ -50,6 +50,7 @@ impl TypingIndicator {
     pub fn build(self) -> ElementBuilder {
         let mut row = el(El::Div)
             .st([St::DisplayFlex, St::ItemsCenter, St::GapXs])
+            .data("testid", "typing-indicator")
             .append([
                 Self::dot(self.tone),
                 Self::dot(self.tone),
@@ -102,5 +103,8 @@ mod tests {
         assert_eq!(plain.children().len(), 3);
         let labeled = TypingIndicator::new().label("claw is typing…").build();
         assert_eq!(labeled.children().len(), 4);
+        assert!(labeled
+            .to_static_html()
+            .contains("data-testid=\"typing-indicator\""));
     }
 }
