@@ -163,6 +163,28 @@ pub async fn serve_login(
     Ok(())
 }
 
+/// Serve an application-provided page as a full capsule (theme, tokens and
+/// classes inlined), for pages the app draws itself — a login form, typically.
+pub async fn serve_app_page(
+    mut stream: TcpStream,
+    page: &ElementBuilder,
+    title: &str,
+    config: &CapsuleConfig,
+) -> std::io::Result<()> {
+    let html = render_static_page(config, title, page);
+    let resp = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\
+         Cache-Control: no-store\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n{html}",
+        html.len()
+    );
+    stream.write_all(resp.as_bytes()).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 /// Send a `303 See Other` redirect, optionally with a `Set-Cookie` header.
 pub async fn serve_redirect(
     mut stream: TcpStream,
