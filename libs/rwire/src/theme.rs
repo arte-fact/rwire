@@ -1182,7 +1182,7 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         |css: &mut String, n: usize, color: &str, preferred: Option<&str>, mark: Option<&str>| {
             let c = hex(color);
             let inks: Vec<String> = preferred
-                .map(&near)
+                .map(near)
                 .unwrap_or_default()
                 .into_iter()
                 .chain(std::iter::once(c.clone()))

@@ -48,8 +48,15 @@ fn the_libraries_never_name_an_application() {
     let mut files = Vec::new();
     rust_sources(&libs(), &mut files);
     // The guard itself holds the word list: it is the one file it cannot scan.
-    files.retain(|file| file.file_name().is_some_and(|name| name != "generic_api.rs"));
-    assert!(!files.is_empty(), "no library source found under {:?}", libs());
+    files.retain(|file| {
+        file.file_name()
+            .is_some_and(|name| name != "generic_api.rs")
+    });
+    assert!(
+        !files.is_empty(),
+        "no library source found under {:?}",
+        libs()
+    );
 
     let mut hits = Vec::new();
     for file in &files {
@@ -78,10 +85,22 @@ fn the_libraries_never_name_an_application() {
 
 /// Modules with no gallery entry of their own, and why.
 const NO_DEMO: &[(&str, &str)] = &[
-    ("action_errors", "behaviour on a failing action, rendered through ActionToasts"),
-    ("action_toasts", "behaviour on a submitted action, no markup of its own"),
-    ("chat_item", "parts of ChatTranscript, demonstrated through it"),
-    ("fs_source", "data source for FileTree, demonstrated through it"),
+    (
+        "action_errors",
+        "behaviour on a failing action, rendered through ActionToasts",
+    ),
+    (
+        "action_toasts",
+        "behaviour on a submitted action, no markup of its own",
+    ),
+    (
+        "chat_item",
+        "parts of ChatTranscript, demonstrated through it",
+    ),
+    (
+        "fs_source",
+        "data source for FileTree, demonstrated through it",
+    ),
 ];
 
 #[test]

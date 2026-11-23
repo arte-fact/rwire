@@ -2374,9 +2374,7 @@ fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
                     "e1f2",
                     false,
                 ),
-                (
-                    "/s/7", "docs", "@lab", inactive, pi, "Done", "a3b4", false,
-                ),
+                ("/s/7", "docs", "@lab", inactive, pi, "Done", "a3b4", false),
             ],
         ),
         (
