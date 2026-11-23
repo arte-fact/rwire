@@ -30,6 +30,7 @@ pub struct ChatEntry {
     grouped: bool,
     streaming: bool,
     bubble: bool,
+    rail: bool,
 }
 
 impl ChatEntry {
@@ -46,6 +47,7 @@ impl ChatEntry {
             grouped: false,
             streaming: false,
             bubble: false,
+            rail: true,
         }
     }
 
@@ -63,6 +65,7 @@ impl ChatEntry {
         entry.grouped = grouped;
         entry.streaming = item.streaming();
         entry.bubble = item.bubble();
+        entry.rail = item.rail();
         entry.build()
     }
 
@@ -116,6 +119,14 @@ impl ChatEntry {
         self
     }
 
+    /// The hairline tone rail down the left edge (default on). Turn it off for a
+    /// surface that wants the body flush with the column: no lateral border, the
+    /// text sitting on the page.
+    pub fn rail(mut self, rail: bool) -> Self {
+        self.rail = rail;
+        self
+    }
+
     fn intent_text(intent: ChatIntent) -> St {
         match intent {
             ChatIntent::Default => St::TextHigh,
@@ -134,7 +145,7 @@ impl ChatEntry {
     }
 
     /// The hairline accent rail (claw's proven 2px flex strip).
-    fn rail(intent: ChatIntent) -> ElementBuilder {
+    fn rail_strip(intent: ChatIntent) -> ElementBuilder {
         el(El::Span)
             .style(Style::new().width("2px").set("flex", "0 0 2px"))
             .st([St::SelfStretch, Self::intent_rail(intent)])
@@ -255,7 +266,10 @@ impl ChatEntry {
             ])
             .append(column);
 
-        let mut row: Vec<ElementBuilder> = vec![Self::rail(intent)];
+        let mut row: Vec<ElementBuilder> = Vec::new();
+        if self.rail {
+            row.push(Self::rail_strip(intent));
+        }
         if let Some(avatar) = self.author.avatar {
             row.push(
                 el(El::Span)
