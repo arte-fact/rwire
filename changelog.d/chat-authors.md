@@ -24,3 +24,15 @@ so existing transcripts are unchanged.
   rules, no round-trip, address untouched); the two toggles now share one shape.
 - **`Composer::focus_ring(false)`** — opt out of the card's focus highlight when
   the field is invisible and the surrounding surface already shows the focus.
+
+### Added: a compact composer with the send button in the row
+
+- **`Composer::compact(true)`** is now **one box**: the field and the send
+  button share the same rounded shell (border, shadow and focus highlight on
+  the box, not on the field), so a thread's steer bar no longer looks like a
+  card inside a card. No actions row, no hint.
+- **`Composer::send_icon(Icon)`** — the glyph on the send button is the app's
+  to choose (default `ArrowUp`).
+- **`Composer::send_icon_only(bool)`** — drop the written label and keep it as
+  the accessible name and tooltip. Defaults to the form factor: icon-only in
+  the compact box, label beside the glyph in the pill.

@@ -7,8 +7,10 @@
 //! Two form factors:
 //! - the default **pill** — a bordered, shadowed card with the field above an actions row
 //!   (an optional hint or tools on the left, Send on the right);
-//! - **compact** — a single row (field beside the send button) for inline composers like a
-//!   thread's steer bar.
+//! - **compact** — **one box**: the field and the send button on a single row, the box
+//!   carrying the border and the rounding (no card inside a card, no actions row). The send
+//!   button is icon-only there, its label kept as the accessible name; `.send_icon(…)` picks
+//!   the glyph and `.send_icon_only(false)` restores the label.
 //!
 //! Key the composer by something that changes when a message lands (`.id(...)`) — a fresh
 //! element is an empty element, which clears the field without a client opcode.
@@ -33,7 +35,7 @@
 use crate::tooltip::Tooltip;
 use crate::{Spinner, SpinnerSize};
 use rwire::style_tokens::St;
-use rwire::{el, icons, reflect_action, At, Av, El, ElementBuilder, Ev, HandlerSpec, Pc};
+use rwire::{el, icons, reflect_action, At, Av, El, ElementBuilder, Ev, HandlerSpec, Icon, Pc};
 use std::borrow::Cow;
 
 /// Composer builder.
@@ -54,6 +56,11 @@ pub struct Composer {
     reflect_off: bool,
     /// Why the composer cannot send, when it cannot (see [`Composer::disabled`]).
     disabled: Option<Cow<'static, str>>,
+    /// Glyph on the send button (default `Icon::ArrowUp`).
+    send_icon: Option<Icon>,
+    /// Icon-only send button. `None` follows the form factor: icon-only in the
+    /// compact box, label beside the glyph in the pill.
+    icon_only: Option<bool>,
     /// Skip the card's focus highlight. Inverted so the derived `Default`
     /// (false) keeps the highlight **on**, like [`crate::Button`]'s reflection:
     /// the card lights up while the field is focused unless the app says the
@@ -97,6 +104,26 @@ impl Composer {
     pub fn send_label(mut self, label: impl Into<Cow<'static, str>>) -> Self {
         self.send_label = Some(label.into());
         self
+    }
+
+    /// Glyph on the send button (default `Icon::ArrowUp`). Any icon works —
+    /// `ArrowRight` for a classic send, `Check` for a confirm-and-close bar.
+    pub fn send_icon(mut self, icon: Icon) -> Self {
+        self.send_icon = Some(icon);
+        self
+    }
+
+    /// Keep the send button to its icon, the label moving to `aria-label` and
+    /// `title`. Defaults to the form factor: icon-only in the compact box, label
+    /// beside the glyph in the pill.
+    pub fn send_icon_only(mut self, on: bool) -> Self {
+        self.icon_only = Some(on);
+        self
+    }
+
+    /// Whether this composer draws an icon-only send button.
+    fn sends_icon_only(&self) -> bool {
+        self.icon_only.unwrap_or(self.compact)
     }
 
     /// The form's submit handler — read the message with `ctx.field(name)`.
@@ -203,8 +230,13 @@ impl Composer {
 
     fn send_button(&self) -> ElementBuilder {
         let label = self.send_label.as_deref().unwrap_or("Send").to_owned();
+        let (icon, icon_only) = (
+            self.send_icon.unwrap_or(Icon::ArrowUp),
+            self.sends_icon_only(),
+        );
         if let Some(reason) = &self.disabled {
-            return send_button_el(&label, SendPhase::Disabled).at_str(At::Title, reason.as_ref());
+            return send_button_el(&label, SendPhase::Disabled, icon, icon_only)
+                .at_str(At::Title, reason.as_ref());
         }
         match &self.on_submit {
             // Reflect the submit action on the send button — same contract as `Button`.
@@ -215,16 +247,16 @@ impl Composer {
                 reflect_action(
                     handler_id,
                     param,
-                    move || send_button_el(&l_idle, SendPhase::Idle),
-                    move || send_button_el(&l_load, SendPhase::Loading),
+                    move || send_button_el(&l_idle, SendPhase::Idle, icon, icon_only),
+                    move || send_button_el(&l_load, SendPhase::Loading, icon, icon_only),
                     move |message| {
                         Tooltip::new(message.to_string())
-                            .child(send_button_el(&l_err, SendPhase::Errored))
+                            .child(send_button_el(&l_err, SendPhase::Errored, icon, icon_only))
                             .build()
                     },
                 )
             }
-            _ => send_button_el(&label, SendPhase::Idle),
+            _ => send_button_el(&label, SendPhase::Idle, icon, icon_only),
         }
     }
 
@@ -241,14 +273,26 @@ impl Composer {
                 .at_str(At::Value, value.as_ref())]);
         }
         if self.compact {
-            return form
-                .st([St::DisplayFlex, St::ItemsCenter, St::GapSm])
-                .append([
-                    self.field()
-                        .st([St::Flex1, St::PSm, St::BorderDefault, St::RoundedMd])
-                        .focus([St::BorderAccent]),
-                    self.send_button(),
-                ]);
+            // One box: the field and the send button share it, and the box — not
+            // the field — carries the border, the rounding and the shadow. The
+            // field keeps a transparent background and no border of its own, so
+            // the row reads as a single control.
+            let mut shell = form.st([
+                St::DisplayFlex,
+                St::ItemsEnd,
+                St::GapSm,
+                St::MinW0,
+                St::BgSurface,
+                St::BorderDefault,
+                St::RoundedLg,
+                St::PSm,
+                St::ShadowSm,
+            ]);
+            if !self.quiet_focus {
+                shell = shell.pseudo(Pc::FocusWithin, [St::BorderAccent]);
+            }
+            let field = self.field().st([St::Flex1, St::MinW0, St::PyXs]);
+            return shell.append([field, self.send_button()]);
         }
         let hint = el(El::Div)
             .st([
@@ -302,16 +346,20 @@ enum SendPhase {
 /// Render the send button in one phase. Constant footprint across all three: `Loading` swaps the
 /// arrow for a spinner and blocks pointer events; `Errored` recolours destructive (still a submit,
 /// so it retries) — matching `Button`'s reflection.
-fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
+fn send_button_el(label: &str, phase: SendPhase, icon: Icon, icon_only: bool) -> ElementBuilder {
     let mut tokens = vec![
         St::BorderNone,
         St::DisplayFlex,
         St::ItemsCenter,
-        St::GapSm,
-        St::PxMd,
-        St::PySm,
-        St::RoundedMd,
+        St::JustifyCenter,
+        St::FlexShrink0,
     ];
+    if icon_only {
+        // A round square that reads as a button on its own.
+        tokens.extend([St::SqIconButton, St::RoundedFull]);
+    } else {
+        tokens.extend([St::GapSm, St::PxMd, St::PySm, St::RoundedMd]);
+    }
     tokens.push(match phase {
         SendPhase::Disabled => St::CursorNotAllowed,
         _ => St::CursorPointer,
@@ -329,13 +377,18 @@ fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
     }
     let trailing = match phase {
         SendPhase::Loading => Spinner::new().size(SpinnerSize::Sm).build(),
-        _ => icons::icon_sized(icons::Icon::ArrowUp, 16),
+        _ => icons::icon_sized(icon, if icon_only { 18 } else { 16 }),
     };
-    let button = el(El::Button)
+    let mut button = el(El::Button)
         .at(At::Type, Av::Submit)
         .at_str(At::AriaLabel, label)
-        .st(tokens)
-        .append([el(El::Span).text(label), trailing]);
+        .at_str(At::Title, label)
+        .st(tokens);
+    // Icon-only: the label stays the accessible name, nothing is written.
+    if !icon_only {
+        button = button.append([el(El::Span).text(label)]);
+    }
+    button = button.append([trailing]);
     match phase {
         SendPhase::Idle => button.hover([St::BgAccentHover]),
         SendPhase::Disabled => button.bool_attr(At::Disabled),
@@ -359,6 +412,76 @@ mod tests {
         let quiet = Composer::new().focus_ring(false).build().to_static_html();
         assert!(!quiet.contains("h14"), "{quiet}");
     }
+    /// Compact is one box, not a field beside a labelled button: the field and
+    /// the send button live in the same rounded shell, and the button is
+    /// icon-only — its label survives as the accessible name and the tooltip.
+    #[test]
+    fn a_compact_composer_is_one_box_with_an_inline_icon_button() {
+        let html = Composer::new()
+            .placeholder("Message…")
+            .send_label("Envoyer")
+            .compact(true)
+            .build()
+            .to_static_html();
+        // Same form: the textarea comes before the button, no actions row.
+        let field = html.find("<textarea").expect("champ");
+        let button = html.find("<button").expect("bouton");
+        assert!(field < button, "{html}");
+        assert!(!html.contains("hint"), "pas de rangée d'actions : {html}");
+        // The label is not written, only named.
+        assert!(html.contains("aria-label=\"Envoyer\""), "{html}");
+        assert!(html.contains("title=\"Envoyer\""), "{html}");
+        assert!(
+            !html.contains(">Envoyer<"),
+            "libellé retiré du bouton : {html}"
+        );
+        // The glyph is there (default ArrowUp).
+        assert!(html.contains("M12 19V5M5 12l7-7 7 7"), "{html}");
+        // The pill, by contrast, writes its label.
+        let pill = Composer::new()
+            .send_label("Envoyer")
+            .build()
+            .to_static_html();
+        assert!(pill.contains(">Envoyer<"), "{pill}");
+    }
+
+    /// The glyph is the app's to choose, and the label can be restored in the
+    /// compact box when the surface has room for it.
+    #[test]
+    fn the_send_glyph_and_its_label_are_the_app_s() {
+        let html = Composer::new()
+            .send_icon(Icon::ArrowRight)
+            .compact(true)
+            .build()
+            .to_static_html();
+        assert!(html.contains("M5 12h14M12 5l7 7-7 7"), "{html}");
+        assert!(!html.contains("M12 19V5M5 12l7-7 7 7"), "{html}");
+        let labelled = Composer::new()
+            .send_label("Envoyer")
+            .send_icon_only(false)
+            .compact(true)
+            .build()
+            .to_static_html();
+        assert!(labelled.contains(">Envoyer<"), "{labelled}");
+    }
+
+    /// The compact box lights up as a whole while the field is focused — unless
+    /// the app asks for silence there too.
+    #[test]
+    fn the_compact_box_can_light_up_or_stay_quiet() {
+        let lit = Composer::new().compact(true).build().to_static_html();
+        assert!(
+            lit.contains(":focus-within") || lit.contains("h14"),
+            "{lit}"
+        );
+        let quiet = Composer::new()
+            .compact(true)
+            .focus_ring(false)
+            .build()
+            .to_static_html();
+        assert!(!quiet.contains("h14"), "{quiet}");
+    }
+
     use rwire::MemoryState;
 
     #[derive(Default)]
