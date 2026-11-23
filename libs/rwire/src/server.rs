@@ -2411,7 +2411,16 @@ async fn handle_client<F>(
                 return;
             }
             if (method == "GET" || method == "POST") && bare == "/logout" {
+                // The cookie's value goes to the app before it is cleared: the
+                // authority can retire the session it handed out (a hub
+                // deleting it) instead of leaving it valid until it expires.
+                let value = crate::delegated_auth::AuthRequest::from_head(&peek_str)
+                    .cookie(delegated.cookie_name())
+                    .map(str::to_string);
                 let _ = read_request(&mut stream, &peek_str, n).await;
+                if let Some(value) = value.filter(|v| !v.is_empty()) {
+                    delegated.sign_out(&value).await;
+                }
                 let expired = format!(
                     "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
                     delegated.cookie_name()
