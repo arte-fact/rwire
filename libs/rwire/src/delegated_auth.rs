@@ -198,6 +198,11 @@ pub const DEFAULT_MAX_CONCURRENT_VALIDATIONS: usize = 16;
 /// Default time an open WebSocket survives an unreachable validator.
 pub const DEFAULT_OUTAGE_GRACE: Duration = Duration::from_secs(300);
 
+/// How long a logout may spend telling the authority to retire the session
+/// (default 3 s): the visitor's cookie is cleared whatever happens, so the page
+/// never waits longer than this.
+pub const LOGOUT_HOOK_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// A cache key: the SHA-256 of the credential, never the credential itself,
 /// so a memory dump or a stray `Debug` of the cache shows no token.
 type Key = [u8; 32];
@@ -372,6 +377,10 @@ pub(crate) type LoginFuture =
 /// Builds the login page; `error` is the message to show after a refused
 /// attempt (`None` on a first visit).
 pub(crate) type LoginPageFn = Arc<dyn Fn(Option<&str>) -> crate::ElementBuilder + Send + Sync>;
+/// Called with the session value when the visitor logs out, so the authority can
+/// retire it; rwire clears its cookie either way.
+pub(crate) type LogoutFn = Arc<dyn Fn(String) -> LogoutFuture + Send + Sync>;
+pub(crate) type LogoutFuture = std::pin::Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Delegated authentication settings and cache. See the [module docs](self).
 pub struct DelegatedAuth {
@@ -380,6 +389,7 @@ pub struct DelegatedAuth {
     login_url: Option<String>,
     login: Option<LoginFn>,
     login_page: Option<LoginPageFn>,
+    logout: Option<LogoutFn>,
     cache_ttl: Duration,
     cache_capacity: usize,
     timeout: Duration,
@@ -425,6 +435,7 @@ impl DelegatedAuth {
             login_url: None,
             login: None,
             login_page: None,
+            logout: None,
             cache_ttl: DEFAULT_CACHE_TTL,
             cache_capacity: DEFAULT_CACHE_CAPACITY,
             timeout: DEFAULT_VALIDATE_TIMEOUT,
@@ -490,6 +501,21 @@ impl DelegatedAuth {
         self
     }
 
+    /// Told the session value when the visitor logs out: the authority retires
+    /// it (a hub deleting its own session), instead of leaving it valid until
+    /// it expires. rwire clears its cookie whether the hook answers or not, and
+    /// waits for it at most [`LOGOUT_HOOK_TIMEOUT`].
+    pub fn on_logout<F, Fut>(mut self, retire: F) -> Self
+    where
+        F: Fn(String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.logout = Some(Arc::new(move |value| {
+            Box::pin(retire(value)) as LogoutFuture
+        }));
+        self
+    }
+
     /// Whether [`Self::login_form`] is configured.
     pub(crate) fn serves_login_form(&self) -> bool {
         self.login.is_some()
@@ -503,6 +529,17 @@ impl DelegatedAuth {
     /// The application's login page for `error` (`None`: the built-in one).
     pub(crate) fn login_page_for(&self, error: Option<&str>) -> Option<crate::ElementBuilder> {
         self.login_page.as_ref().map(|render| render(error))
+    }
+
+    /// Tell the authority that `value` is being retired, if a hook is set.
+    pub(crate) async fn sign_out(&self, value: &str) {
+        let Some(retire) = self.logout.as_ref() else {
+            return;
+        };
+        match tokio::time::timeout(LOGOUT_HOOK_TIMEOUT, retire(value.to_string())).await {
+            Ok(()) => {}
+            Err(_) => eprintln!("logout hook timed out after {LOGOUT_HOOK_TIMEOUT:?}"),
+        }
     }
 
     /// Judge a submitted form: the cookie value to store, or the refusal.

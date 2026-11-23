@@ -19,6 +19,9 @@ const ADDR: &str = "127.0.0.1:19351";
 const COOKIE: &str = "mcpa_session";
 const SECRET: &str = "s3cret";
 
+/// The session values the app was told to retire, in order.
+static RETIRED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 fn page() -> ElementBuilder {
     el(El::Div).text("contenu protégé")
 }
@@ -59,6 +62,9 @@ fn auth() -> DelegatedAuth {
         }
     })
     .login_page(login_page)
+    .on_logout(|value| async move {
+        RETIRED.lock().unwrap().push(value);
+    })
 }
 
 async fn start() {
@@ -191,5 +197,23 @@ async fn the_login_form_stores_the_authority_token_and_logout_clears_it() {
     assert!(
         out.contains(&format!("Set-Cookie: {COOKIE}=;")) && out.contains("Max-Age=0"),
         "the cookie must be expired: {out}"
+    );
+
+    // 8. The app was told which session to retire, before the cookie went.
+    let retired = RETIRED.lock().unwrap().clone();
+    assert_eq!(
+        retired,
+        vec!["jeton".to_string()],
+        "the logout hook must receive the session value once"
+    );
+
+    // A visitor without the cookie retires nothing.
+    let anonymous =
+        send("GET /logout HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await;
+    assert!(anonymous.starts_with("HTTP/1.1 303"), "{anonymous}");
+    assert_eq!(
+        RETIRED.lock().unwrap().len(),
+        1,
+        "an anonymous logout retires no session"
     );
 }
