@@ -4,11 +4,52 @@
 //! is public so an app can render a **plain code file** (e.g. a file viewer) the same way, without
 //! routing through markdown. Highlighting is best-effort over a handful of languages (see
 //! [`crate::highlight`]); an unknown or absent language renders as flat text.
+//!
+//! The block is one card: a header strip (language, if known, and a copy button) above the code,
+//! on the theme's code ground (`--Qc`, darker than the page). The copy button rides the runtime's
+//! `data-copy` affordance and its own click state for the checkmark, so it costs no server
+//! round-trip.
 
+use rwire::icons::{icon_sized, Icon};
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder};
+use rwire::{el, El, ElementBuilder, Ev, Target};
 
 use crate::highlight::{highlight, Token, TokenKind};
+
+/// Client-side state of one block's copy button (swaps the glyph for 2 s).
+#[derive(Target)]
+struct CopiedCode;
+
+/// The copy button of a code block: clipboard glyph, then a check for two
+/// seconds. `data-copy` does the clipboard write; the toggle is local state.
+fn copy_button(code: &str) -> ElementBuilder {
+    el(El::Button)
+        .attr("type", "button")
+        .data("copy", code)
+        .attr("aria-label", "Copier le code")
+        .attr("title", "Copier le code")
+        .st([
+            St::DisplayInlineFlex,
+            St::ItemsCenter,
+            St::JustifyCenter,
+            St::BgTransparent,
+            St::BorderNone,
+            St::RoundedSm,
+            St::TextMuted,
+            St::CursorPointer,
+            St::TransitionColors,
+        ])
+        .hover([St::TextHigh, St::BgSubtle])
+        .toggle_timed::<CopiedCode>(Ev::Click, 2000)
+        .append([
+            el(El::Span)
+                .when::<CopiedCode>(St::DisplayNone)
+                .append([icon_sized(Icon::Clipboard, 16)]),
+            el(El::Span)
+                .unless::<CopiedCode>(St::DisplayNone)
+                .append([icon_sized(Icon::ClipboardCheck, 16)]),
+        ])
+}
 
 /// Render `code` as a highlighted block. `lang` is a language name or alias (e.g. `rs`, `sql`,
 /// `yml`); `None` or an unrecognised language renders flat. A non-empty `lang` adds a small
@@ -26,33 +67,50 @@ pub fn highlight_code(code: &str, lang: Option<&str>) -> ElementBuilder {
         Some(tokens) => base.append(tokens.iter().map(highlight_span).collect::<Vec<_>>()),
         None => base.text(code),
     };
-    let pre = el(El::Pre).st([
-        St::BgCode,
-        St::RoundedLg,
-        St::OverflowXAuto,
-        St::PMd,
-        St::BorderSubtle,
-        St::MyMd,
+    // The code area itself: no chrome of its own, the card around it carries
+    // the ground, the rounding and the border.
+    let pre = el(El::Pre)
+        .st([St::OverflowXAuto, St::PMd, St::M0, St::BgCode])
+        .append([code_el]);
+    // Header strip: the language (uppercase, muted) and the copy button.
+    let mut head = el(El::Div).st([
+        St::DisplayFlex,
+        St::ItemsCenter,
+        St::JustifyBetween,
+        St::GapSm,
+        St::PxSm,
+        St::PyXs,
+        St::BgSubtle,
+        St::BorderB,
+        St::MinW0,
     ]);
-    match lang {
-        Some(lang) if !lang.is_empty() => {
-            let label = el(El::Span)
-                .st([
-                    St::TextXs,
-                    St::TextMuted,
-                    St::DisplayBlock,
-                    St::MbSm,
-                    St::TextUppercase,
-                    St::TrackingWider,
-                    St::FontMedium,
-                ])
-                .text(lang);
-            el(El::Div)
-                .st([St::PositionRelative])
-                .append([label, pre.append([code_el])])
-        }
-        _ => pre.append([code_el]),
-    }
+    head = head.append([match lang.filter(|l| !l.is_empty()) {
+        Some(lang) => el(El::Span)
+            .st([
+                St::TextXs,
+                St::TextMuted,
+                St::TextUppercase,
+                St::TrackingWider,
+                St::FontMedium,
+                St::Truncate,
+                St::MinW0,
+            ])
+            .text(lang),
+        None => el(El::Span),
+    }]);
+    head = head.append([copy_button(code)]);
+    el(El::Div)
+        .st([
+            St::DisplayFlex,
+            St::FlexCol,
+            St::MinW0,
+            St::OverflowHidden,
+            St::RoundedLg,
+            St::BorderSubtle,
+            St::BgCode,
+            St::MyMd,
+        ])
+        .append([head, pre])
 }
 
 /// Render one highlighted token as a coloured `<span>`. Keyword→accent, string→success (green),
@@ -124,6 +182,25 @@ mod tests {
         let _ = highlight_code("fn main() {}", Some("rust"));
         let _ = highlight_code("+[->+]", Some("brainfuck"));
         let _ = highlight_code("plain", None);
+    }
+
+    /// A fenced block is one card: a header strip with the language and a copy
+    /// button (`data-copy`, runtime clipboard) above the `<pre><code>`.
+    #[test]
+    fn a_block_carries_its_language_and_a_copy_button() {
+        let html = highlight_code("let x = 1;", Some("rust")).to_static_html();
+        assert!(html.contains("data-copy=\"let x = 1;\""), "{html}");
+        assert!(html.contains("aria-label=\"Copier le code\""), "{html}");
+        assert!(html.contains("rust"), "langue affichée : {html}");
+        // The clipboard glyph swaps to a check on click (client state, 2 s).
+        assert!(html.contains("<svg"), "{html}");
+        // The code area is a `<pre><code>` under the header, not a bare label.
+        let head = html.find("data-copy").expect("en-tête");
+        let pre = html.find("<pre").expect("bloc");
+        assert!(head < pre, "en-tête au-dessus du code : {html}");
+        // Without a language the strip still holds the copy button.
+        let bare = highlight_code("ok", None).to_static_html();
+        assert!(bare.contains("data-copy=\"ok\""), "{bare}");
     }
 
     #[test]

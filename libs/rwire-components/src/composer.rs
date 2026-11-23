@@ -12,6 +12,11 @@
 //!   button is icon-only there, its label kept as the accessible name; `.send_icon(…)` picks
 //!   the glyph and `.send_icon_only(false)` restores the label.
 //!
+//! An empty field (one showing its placeholder) dims the send button and takes it out
+//! of the click path: `[data-send-guard]` plus `:has(:placeholder-shown)`, in pure CSS —
+//! no round-trip, no runtime change. A composer with no placeholder cannot be read for
+//! emptiness, so the guard needs one.
+//!
 //! Key the composer by something that changes when a message lands (`.id(...)`) — a fresh
 //! element is an empty element, which clears the field without a client opcode.
 //!
@@ -263,6 +268,11 @@ impl Composer {
     /// Build the composer into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         let mut form = el(El::Form);
+        // Empty field → dimmed, unclickable send button (see `guard_css`). The
+        // disabled composer already has its own reason and a `disabled` button.
+        if self.disabled.is_none() {
+            form = form.data("send-guard", "");
+        }
         if let Some(handler) = self.on_submit.clone().filter(|_| self.disabled.is_none()) {
             form = form.on(Ev::Submit, handler);
         }
@@ -291,8 +301,10 @@ impl Composer {
             if !self.quiet_focus {
                 shell = shell.pseudo(Pc::FocusWithin, [St::BorderAccent]);
             }
-            let field = self.field().st([St::Flex1, St::MinW0, St::PyXs]);
-            return shell.append([field, self.send_button()]);
+            // `PySm` gives the field the same height as the 36 px button on one
+            // line, so the two centres line up; the row grows from the bottom.
+            let field = self.field().st([St::Flex1, St::MinW0, St::PySm]);
+            return shell.append([field, self.send_button(), guard_style()]);
         }
         let hint = el(El::Div)
             .st([
@@ -330,8 +342,19 @@ impl Composer {
         if !self.quiet_focus {
             form = form.pseudo(Pc::FocusWithin, [St::BorderAccent]);
         }
-        form.append([field, actions])
+        form.append([field, actions, guard_style()])
     }
+}
+
+/// The empty-field guard: the submit button dims and stops taking clicks while the
+/// field shows its placeholder (i.e. holds nothing). Pure CSS — `:has` on the form,
+/// no runtime behaviour, no round-trip. The reflection wrapper (`span[data-rwr]`)
+/// sits between the form and the button, hence the descendant combinator.
+fn guard_style() -> ElementBuilder {
+    el(El::Style).text(
+        "form[data-send-guard]:has(textarea:placeholder-shown) button[type=submit]{\
+opacity:.45;pointer-events:none;cursor:not-allowed}",
+    )
 }
 
 /// The send button's phases: the three reflected ones, and disabled.
@@ -480,6 +503,33 @@ mod tests {
             .build()
             .to_static_html();
         assert!(!quiet.contains("h14"), "{quiet}");
+    }
+
+    /// An empty field dims the send button and takes it out of the click path,
+    /// in pure CSS (`:placeholder-shown`); a disabled composer has no guard (its
+    /// button is already `disabled` and explains itself).
+    #[test]
+    fn an_empty_field_guards_the_send_button() {
+        for compact in [false, true] {
+            let html = Composer::new()
+                .placeholder("Message…")
+                .compact(compact)
+                .build()
+                .to_static_html();
+            assert!(html.contains("data-send-guard"), "{html}");
+            assert!(
+                html.contains(":has(textarea:placeholder-shown) button[type=submit]"),
+                "{html}"
+            );
+            assert!(html.contains("pointer-events:none"), "{html}");
+        }
+        let disabled = Composer::new()
+            .placeholder("Message…")
+            .disabled("lecture seule")
+            .build()
+            .to_static_html();
+        // The style text mentions the attribute; the *form* must not carry it.
+        assert!(!disabled.contains("data-send-guard="), "{disabled}");
     }
 
     use rwire::MemoryState;

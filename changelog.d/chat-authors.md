@@ -36,3 +36,23 @@ so existing transcripts are unchanged.
 - **`Composer::send_icon_only(bool)`** — drop the written label and keep it as
   the accessible name and tooltip. Defaults to the form factor: icon-only in
   the compact box, label beside the glyph in the pill.
+
+### Changed: code blocks are one card with a copy button
+
+- A fenced block (and `rwire_markdown::highlight_code`) is now **one card**: a
+  header strip with the language (uppercase, muted) and a **copy button**
+  (`data-copy`, so the runtime's clipboard affordance does it; the glyph turns
+  into a check for two seconds), above the `<pre><code>`.
+- The code ground `--Qc` is a step **darker than the page** in both modes
+  (`color-mix(in srgb, var(--a) 86%, #000)`), in the `solid` and `studio`
+  styles: a dark panel on the light grey page, a deeper panel on nord0.
+
+### Added: an empty composer guards its send button
+
+- `Composer` marks its form `data-send-guard` and ships a one-rule sheet: while
+  the field shows its **placeholder** (i.e. holds nothing) the submit button is
+  dimmed and out of the click path. Pure CSS (`:has(:placeholder-shown)`) — no
+  round-trip, no runtime change; a composer without a placeholder cannot be read
+  for emptiness, so the guard needs one.
+- The compact row's field takes `PySm`, which gives it the height of the 36 px
+  send button on one line: text and button share a centre line.

@@ -138,6 +138,10 @@ fn solid_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
 
 fn solid_q_css(css: &mut String, _is_dark: bool) {
     css.push_str("--Qd:var(--Z1);--Qgw:none;");
+    // Code ground (`BgCode` reads it): a step **darker** than the page, in both
+    // modes — mixing the app ground with black darkens a light grey as well as
+    // nord0.
+    css.push_str("--Qc:color-mix(in srgb,var(--a) 86%,#000);");
     css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
     css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
@@ -353,6 +357,10 @@ fn studio_q_css(css: &mut String, is_dark: bool) {
     css.push_str(";--Z2:");
     css.push_str(shadow);
     css.push_str(";--Qgw:none;");
+    // Code ground (`BgCode` reads it): a step **darker** than the page, in both
+    // modes — mixing the app ground with black darkens a light grey as well as
+    // nord0.
+    css.push_str("--Qc:color-mix(in srgb,var(--a) 86%,#000);");
     css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
     css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
@@ -376,7 +384,16 @@ mod tests {
         assert!(light.contains("--t:#ECEFF4;"), "{light}");
         assert!(light.contains("--R2:8px;--R3:10px;--R4:14px;"));
         assert!(light.contains("--Qd:0 10px 30px"));
+        // The code ground is darker than the page (same expression both modes).
+        assert!(
+            light.contains("--Qc:color-mix(in srgb,var(--a) 86%,#000)"),
+            "{light}"
+        );
         let dark = generate_theme_css(&Theme::dark().palette(nord()).style(studio()));
+        assert!(
+            dark.contains("--Qc:color-mix(in srgb,var(--a) 86%,#000)"),
+            "{dark}"
+        );
         assert!(dark.contains("--a:#2E3440;"), "nord0: {dark}");
         assert!(dark.contains("--r:#3B4252;"), "nord1 cards");
         assert!(dark.contains("--t:#434C5E;"), "nord2 raised");
