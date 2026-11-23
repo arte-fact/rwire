@@ -19,6 +19,9 @@ so existing transcripts are unchanged.
 - **`ChatCalls`** stays closed by default (even while a call runs or after a
   failure), drops the "details" label for the native `<summary>` triangle, and
   indents the expanded calls under their summary.
+- **`AppShell::sidebar_collapsed(bool)`** / **`AppShell::panel_collapsed(bool)`** —
+  the fold starts **checked**, so an app that remembers the visitor's layout
+  passes it back and a reload or a navigation keeps the columns as they were.
 - **`AppShell::collapsible_panel(true)`** + **`AppShell::panel_toggle()`** — the
   detail column folds away exactly like the sidebar (native checkbox, `:has`
   rules, no round-trip, address untouched); the two toggles now share one shape.
