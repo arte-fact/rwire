@@ -609,7 +609,6 @@ mod tests {
         assert!(!toggle.contains("position:absolute"), "{toggle}");
     }
 
-    #[test]
     /// A remembered layout comes back folded: the checkbox is checked on the
     /// first paint, so the CSS `:has` rule applies without a round-trip.
     #[test]
@@ -641,6 +640,7 @@ mod tests {
         assert!(!plain.contains(" checked>"), "{plain}");
     }
 
+    #[test]
     fn a_collapsible_panel_ships_its_checkbox_and_rules() {
         let html = AppShell::new()
             .sidebar(el(El::Div).text("list"))
