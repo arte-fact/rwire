@@ -29,9 +29,9 @@ Two rules are not negotiable:
 | State | `#[derive(State)]` + `#[storage(memory \| persisted \| shared)]` — per-connection, SQLite-backed, or process-global |
 | Page | A `Router` route returning an `ElementBuilder`; one routing model per page tree |
 | Handler | `#[handler] fn h(state: &mut S, ctx: &EventContext)` — mutates state, never renders |
-| Renderer | `#[renderer] fn r(state: &S) -> ElementBuilder` — re-run after every handler; only diffs go on the wire |
+| Renderer | `#[renderer] fn r(state: &S) -> ElementBuilder` — re-run when a field it reads changes; only diffs go on the wire |
 | Async work | `ctx.defer()` → `Resolver`, resolved later with `ok()` / `err(msg)`; the control spins in place |
-| Navigation | `ctx.navigate(url)` pushes history, `ctx.replace_route(url)` does not; both flush after the handler's DOM update. In markup: `Link::route(…)` |
+| Navigation | `ctx.navigate(url)` pushes history, `ctx.replace_route(url)` does not; both flush after the handler's DOM update. In markup: `rwire::Link::to(href, text)` |
 | Wire | One-byte opcodes + a per-message symbol table + varint lengths; runtime shipped by the same binary, so no compatibility matrix |
 | SSR | Optional static first paint (`ssr(true)`): default-state content, replaced once the socket connects |
 
@@ -49,7 +49,7 @@ prose.
 Quick index by need, full table and the theming API in `references/components-theme.md`.
 
 ⚠️ Do not quote a component count from memory: the README says "90+", `catalog.rs` holds 69
-records (five of them guide pages), `lib.rs` exports 71 names. Count in the code if the number
+records (five of them guide pages), `lib.rs` has 71 `pub use` lines. Count in the code if the number
 matters.
 
 ## Recipes

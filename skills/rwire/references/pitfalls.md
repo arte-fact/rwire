@@ -3,39 +3,25 @@
 Each of these has already cost a debugging session somewhere. Read this before debugging
 anything that "should work".
 
-## 1. An outbound POST with no timeout
+## 1. An outbound call with no timeout
 
-Found in review of `games/mcp-agents` MR !29 (`feat/visual-parity-e3`), in
-`crates/web-rwire/src/ui.rs`.
+A handler (or the task it defers to) that calls out over HTTP without an explicit timeout can
+hang: the `Resolver` never resolves and the control spins until the 30 s action backstop
+(`LOADING_TIMEOUT`) fails it — or forever if the call was not deferred at all.
 
-The file has a helper `post_json(…)` that takes a `timeout` and applies `.timeout(…)`. Next to
-it, `post_raw(…)` and the local `post(…)` build the same request — `.post(url).bearer_auth(token)
-.json(&body).send().await` — **without** `.timeout(…)`. So the prompt relay, the interrupt relay
-and the permission relay can hang indefinitely: the handler waits, the `Resolver` never
-resolves, and the UI sits there until the 30 s action backstop fires or forever if the call is
-not deferred.
+Rule: **every outbound HTTP call gets an explicit timeout**, and a bound on the response you are
+willing to read. Map the outcome to `Resolver::err(msg)`: a hung request is an error you report,
+not a state you leave the UI in. Do not count on a client library's default.
 
-Rule: **every outbound HTTP call gets an explicit timeout**, and a size for the response you are
-willing to read. Then map the outcome to `Resolver::err` — a hung request is an error you must
-report, not a state you leave the UI in. `reqwest`'s per-client default is not a safety net you
-should rely on.
+Seen in: the mcp-agents web front (`crates/web-rwire/src/ui.rs`, review of MR !29, November
+2026) — `post_raw` and `post` lacked the `.timeout(…)` that `post_json` had; the MR branch has
+since added one.
 
 ## 2. Process-global state shared between connections
 
-Same review. `crates/web-rwire` keeps its per-user data in process globals:
-
-| Where | What |
-|---|---|
-| `outbox.rs` | `static BOXES: Mutex<Option<Boxes>>` — pending prompts and stop requests |
-| `conv.rs` | `static CONVS: Mutex<Option<HashMap<String, Conv>>>` — conversations |
-| `conv.rs` | `static OLDER: Mutex<Option<HashMap<u32, String>>>` — pagination tickets |
-| `pane.rs` | `static PANES: Mutex<Option<HashMap<String, Pane>>>` — open panes |
-| `fleet.rs` | `static FLEET: RwLock<Option<Fleet>>` — fleet snapshot |
-
-Keyed by *agent session*, not by *web connection*. Two browsers looking at the same session share
-the same outbox: a message typed by one shows "envoi…" in the other, and "Renvoyer" / "Retirer"
-act on someone else's pending send. It is not a leak of credentials, but it is one visitor's
-state rendered for another.
+A `static` table keyed by something other than the web connection (an agent session, a
+document id…) is shared by every browser that looks at the same thing: one visitor's pending
+send, draft or open pane shows up — and can be acted on — in another visitor's page.
 
 The framework already models this correctly — imitate it:
 
@@ -49,22 +35,21 @@ The framework already models this correctly — imitate it:
 Rule: a hand-rolled side table is keyed by `ctx.session_id()` and purged when that session
 disconnects. If you cannot purge it, it does not go in a `static`.
 
+Seen in: the mcp-agents web front, same review — `static BOXES` (`outbox.rs`), `CONVS`
+(`conv.rs`), `PANES` (`pane.rs`), keyed by agent session, not by connection.
+
 ## 3. Tables that are never pruned
 
-Same review. `OLDER` grows one entry per pagination ticket, with `TICKET` an ever-increasing
-`AtomicU32`; nothing ever removes an entry. `BOXES.out` accumulates one `Vec<Out>` per session
-name and is only emptied one message at a time, never per departing session. Same shape for
-`CONVS` and `PANES`. The process is long-lived, so this is unbounded memory growth driven by
-uptime and traffic.
+A long-lived process plus a table that only grows (one entry per ticket, per session name, per
+page opened) is unbounded memory growth driven by uptime and traffic.
 
 The framework's own bounded tables show the pattern:
 
-- the disconnected-session state cache has a **cap** on how many it retains and a **TTL**
-  (`server.rs`: the retained-session bound, `evict_expired_sessions`, and the background
-  eviction task, 300 s by default);
+- the disconnected-session state cache: a **cap** (`MAX_CACHED_SESSIONS`, 10 000) and a **TTL**
+  (one day, enforced by `session_eviction_task` → `evict_expired_sessions` in `server.rs`);
 - `Actions` holds only in-flight loads and unacknowledged errors, removes entries on success, and
   fails a stuck load after 30 s (`LOADING_TIMEOUT`) — bounded by design, not by hope;
-- auth tokens are retained only within `AUTH_TTL`.
+- login tokens are retained only within `AUTH_TTL` (`server.rs`).
 
 Rule: every table a handler can grow needs three things — a **key you can delete**, a **cap or
 TTL**, and the **hook that fires** (session drop, TTL sweep). If you can only answer two of the
@@ -95,10 +80,14 @@ A width-spanning child of a flex-*centered* parent needs `St::WFull`, or it shri
 which is ~0 for an empty div. Symptom: an element that renders fine once it has text and
 vanishes while loading.
 
-## 7. Shared-state renderers inside memory-state ones
+## 7. Shared-state regions inside memory-state renderers
 
-A renderer on `#[storage(shared)]` nested under a parent on `#[storage(memory)]` does not receive
-the shared cache. Keep shared renderers nested under shared parents.
+To show shared state inside a per-connection view, nest a **closure region** the documented way:
+`ElementBuilder::synced_with_storage::<Room, _>(move |room| view(room, token), RendererDeps::always())`
+(`CLAUDE.md`, "Multiplayer"; `../empire`'s `empire-web` is the reference). An older note in this
+repository said a shared `#[renderer]` nested under a memory one "does not receive the shared
+cache"; it was not re-verified on current `main` — prefer the closure region, and test the nesting
+if you rely on anything else.
 
 ## 8. The 64-field `State` ceiling
 
@@ -124,5 +113,5 @@ subjects and leaving stale spans.
 ## 11. Numbers in the docs drift
 
 Measured on `main`: `README.md` says "90+ components", `libs/rwire-components/src/catalog.rs`
-holds 69 catalogue records (five of them guide pages), `lib.rs` exports 71 names. The older
+holds 69 catalogue records (five of them guide pages), `lib.rs` has 71 `pub use` lines (151 exported names). The older
 in-repo skill says "~55". Recount in the code before repeating any of them.

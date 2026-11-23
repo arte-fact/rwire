@@ -44,8 +44,10 @@ by assuming the SSR pass knew who you are.
 
 ## 3. The binary protocol
 
-Each frame is a batch: an optional symbol-table header, then opcodes, then `END`. Strings are
-interned once per message and referenced by index.
+Each frame is a batch: an optional symbol-table header, then opcodes, then `BATCH_END`. Strings
+are interned in a per-connection symbol table — `SYMBOLS` defines it, `SYMBOLS_EXTEND` appends
+to it in later batches, indices from `0x80` up are session-specific (`SYMBOL_SESSION_START`) —
+and referenced by index.
 
 | Opcode | Name | Format |
 |---|---|---|
@@ -62,12 +64,16 @@ interned once per message and referenced by index.
 | `0x34` | BIND_REMOTE_PARAM | `[ref, event, handler, len, params…]` |
 | `0x42` | DEF_HANDLER | declare a handler index |
 | `0x47`–`0x4E` | targets / selectors | client-side toggle and exclusive-select classes |
-| `0x50` | BIND_RESIZE | resize observation |
+| `0x50` | BIND_RESIZE | pointer-drag handle that resizes the previous sibling (SplitPane) |
 | `0x60`–`0x63` | form validation | set validation, show/clear error, set required |
 | `0x70`–`0x73` | route | push / replace / inline variants |
 | `0x81`–`0x86` | styles | set, utility, property, multi, composite, table |
+| `0x87` | STYLE_DEF | lazy delivery of utility/pseudo/breakpoint CSS rules |
+| `0x88` | MAP_DEF | lazy delivery of element/event/attribute/token names |
 | `0xF0` | SYMBOLS | `[count, …strings]` |
-| `0xFF` | END | end of batch |
+| `0xF1` | SYMBOLS_EXTEND | `[count, start_index, …strings]` |
+| `0xF3` | EVENT_ACK | the server handled one client event |
+| `0xFF` | BATCH_END | end of batch |
 
 Full list: `libs/rwire/src/protocol/opcodes.rs`. Integers use varint
 (`protocol/varint.rs`), which is why indices and lengths stay cheap.
@@ -101,10 +107,11 @@ one bit per field; the derive macro rejects more (`MAX_STATE_FIELDS` in
 `libs/rwire-macros/src/lib.rs`, with the explicit diagnostic). Split the view model instead of
 fighting it.
 
-Reconnection: the server keeps disconnected-session states for a TTL (300 s by default) and
-caps how many it retains; a background task evicts the expired ones
-(`server.rs`: the eviction task, `evict_expired_sessions`, `session_eviction_task`). So
-"reconnect and find your page" works within the TTL, and memory stays bounded.
+Reconnection: the server keeps disconnected-session states for a day (`session_eviction_task`
+spawned with `Duration::from_secs(86_400)` in `server.rs`; the comment above it still says
+"5-minute", ignore it) and retains at most `MAX_CACHED_SESSIONS` (10 000) of them;
+`evict_expired_sessions` drops the expired ones. So a phone that switches apps comes back to the
+same state, and memory stays bounded.
 
 ## 5. Pages and handlers
 
@@ -131,8 +138,8 @@ only queue the navigation: it is flushed to that connection **after** the handle
 lands, so the page you navigate to is already rendered from the state you just changed.
 
 Use them when a handler creates or selects a resource whose URL is only known server-side — a new
-item, a picked session. For a plain link in markup, use `Link::route(…)`; a raw `<a href>` is a
-full reload and loses the socket.
+item, a picked session. For a plain link in markup, use `rwire::Link::to(href, text)`; a raw `<a href>` (or
+`rwire_components::Link`) is a full reload and loses the socket.
 
 Handlers mutate, renderers render:
 
@@ -146,9 +153,10 @@ fn render_count(state: &Counter) -> ElementBuilder {
 }
 ```
 
-After any handler returns, every renderer is re-evaluated and only the changed elements go on
-the wire. Keep re-rendered regions small: a renderer around a whole board repaints the board for
-one token.
+After a handler returns, the renderers that read a changed field re-run (`RendererDeps`: one
+bit per field in a `u64` mask, or `RendererDeps::always()`), and only the changed elements go
+on the wire. Keep re-rendered regions small: a renderer around a whole board repaints the board
+for one token.
 
 `EventContext` (`state.rs`) is what a handler uses to reach out:
 

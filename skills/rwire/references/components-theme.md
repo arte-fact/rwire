@@ -3,8 +3,9 @@
 ## 1. The gallery decides, not your memory
 
 `libs/rwire-components/src/catalog.rs` is a catalogue of `ComponentEntry` (name, slug, category,
-variants, bool props, and a `build_demo` closure). `apps/rwire-design-system` renders that
-catalogue into a live gallery: sidebar grouped by category, a preview per variant combination.
+variants, bool props, and a `build_demo` function pointer). `apps/rwire-design-system` renders
+that catalogue into a live gallery: sidebar grouped by category, and per component a playground —
+pick the variants and bool props, see the live demo, the generated code and the props table.
 
 Run it and look:
 
@@ -18,7 +19,8 @@ answer is a new component in `rwire-components`, not a hand-rolled `el()` tree.
 **Catalogue size, measured on `main`, not quoted:** 69 `ComponentEntry` records — Layout 11,
 Forms 13, Data Display 20, Feedback 8, Navigation 10, Overlay 7 — of which five are guide pages
 rather than components (`Three-column shell`, `Navigation`, `Tones`, `Density`, `Canvas & fonts`).
-`libs/rwire-components/src/lib.rs` exports 71 names, and the directory holds 73 `.rs` files.
+`libs/rwire-components/src/lib.rs` has 71 `pub use` lines (151 exported names), and the
+directory holds 73 `.rs` files.
 `README.md` advertises "90+ components", which no count in the tree supports. Count in
 `catalog.rs` before writing a number anywhere.
 
@@ -60,7 +62,8 @@ Data display
 | prose | `Text` |
 | short status word | `Badge` (`intent`, `shape`, `fill`, `tone`, `mono`, `size`) |
 | presence / activity dot | `StatusDot` (`intent`, `pulse`, `ring`, `size`, `label`) |
-| removable / counted label | `Tag` |
+| removable label | `Tag` (`intent`, `removable`, `on_remove`) |
+| label with a count | `Chip` (`count`) |
 | code snippet | `Code` |
 | keyboard hint | `Kbd` |
 | tabular data | `Table` (`headers`, `row`, `striped`) |
@@ -88,7 +91,7 @@ Navigation
 
 | Need | Use |
 |---|---|
-| internal link | `Link::route(…)` — never a raw `<a href>`, that is a full reload |
+| internal link | `rwire::Link::to(href, text)` (or `Link::to_with_content(href, el)`, or the bare `Link::route(href)` you fill yourself) — these carry `data-route`, which the runtime intercepts. Not `rwire_components::Link`: it renders a plain `<a href>`, a full reload |
 | menu | `NavMenu` |
 | path | `Breadcrumb` |
 | tabbed views | `Tabs` |
@@ -138,10 +141,12 @@ Theme::dark()
   `.error(…)`, `.success(…)`, `.warning(…)`, `.radius(…)`, `.style(…)`
   (`libs/rwire/src/theme.rs`).
 - Palettes shipped by `rwire-themes`: `nord`, `indigo`, `catppuccin`, `dracula`, `solarized`,
-  `gruvbox`, `tokyo_night`, `rose_pine`, `one_dark`.
+  `gruvbox`, `tokyo_night`, `rose_pine`, `one_dark`, `cloth`.
 - `ThemeStyle::soft()` (default, tinted and rounded) / `ThemeStyle::flat()` (mono UI font,
   hairline borders, no shadows). Custom presets implement `IntoStyle`.
-- `RadiusScale` scales every `Rounded*` token except `RoundedFull` — circles stay circles.
+- `RadiusScale` overrides `--R2`, `--R3` and `--R4` only (`theme.rs`, radius overrides): the
+  tokens built on them follow; `RoundedSm` (`--R1`), `RoundedFull` and the fixed-pixel
+  `Rounded*` tokens do not.
 - **The theme is state, not config.** Handlers take `&mut Theme` and mutate it
   (`theme.mode = theme.mode.toggle()`); a built-in renderer turns it into CSS variables, so
   mode/accent changes are reactive with no reload.
@@ -156,7 +161,7 @@ Theme::dark()
 
 ```rust
 el(El::Div)
-    .st([St::BgApp, St::Px4, St::Py2])
+    .st([St::BgApp, St::PxMd, St::PySm])
     .hover([St::BgSubtle])
     .md([St::DisplayFlex])
 ```
@@ -179,7 +184,8 @@ literal `#rgb` / `#rrggbb` / `rgb()` / `rgba()` / `oklch()` are all bypasses.
 
 The consuming app enforces it with a test, `no_free_css`, in `crates/web-rwire/src/garde.rs`
 (mcp-agents; spec in `docs/roadmap-front-rwire-composants.md` §4.4, "outil 1"). It reads the
-sources of `src/`, strips line comments, and counts per file:
+sources of `src/`, skips lines that start with `//` (a trailing comment after code is still
+counted), and counts per file:
 
 | Counter | Pattern |
 |---|---|
@@ -189,7 +195,7 @@ sources of `src/`, strips line comments, and counts per file:
 | `style_new` | `Style::new` |
 | `at_style` | `At::Style` |
 | `feuille` | `const …_CSS` declarations |
-| `couleur` | `#rgb`, `#rrggbb`, `rgb(`, `rgba(`, `oklch(` (not counted in `main.rs`) |
+| `couleur` | hex colours of 3, 4, 6 or 8 digits, `rgb(`, `rgba(`, `oklch(` (not counted in `main.rs`) |
 | `filter_css` | `fn filter_css(` |
 
 Each counter has a **budget** in the same file. The test fails when a counter goes **above** its

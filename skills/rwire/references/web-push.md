@@ -22,10 +22,11 @@ This page is kept from the in-repo skill and re-checked against `libs/rwire-push
 - Optionally `.push_unsubscribe()`.
 - One `report_input("push-report", on_report())` per page, **outside** re-rendered regions. Its
   handler does `me.push = push.handle_report(ctx.text().unwrap_or(""))` and renders from the
-  returned `PushState` (Subscribed / Unsubscribed / Denied / Unsupported / Failed). It also fires
+  returned `PushState` (Unknown — the default, nothing reported yet — / Subscribed /
+  Unsubscribed / Denied / Unsupported / Failed). It also fires
   once on load with the current state.
-- The moment to send, e.g. publishing a post. Send from a task (`tokio::spawn`, or `ctx.defer()`
-  so a button spins) — never block a handler on it.
+- The moment to send, e.g. publishing a post. Send from a task (`tokio::spawn`; add `ctx.defer()` before it
+  so the button spins until the task resolves) — never block a handler on it.
 - The `Push` handle: handlers take only their state, so keep it in a `static OnceLock<Push>`.
 
 ## Limits

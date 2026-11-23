@@ -9,7 +9,8 @@ crate**. You rarely touch it; when you do, there is exactly one write path.
 runtime/
 ├── src/            TypeScript sources (connect.ts, executor.ts, morph.ts, router.ts, …)
 ├── test/           node --test suites
-├── build.mjs       esbuild bundle → dist/runtime.min.js (+ dist/ext/<name>.min.js)
+├── build.mjs       regenerates src/opcodes.ts from protocol/opcodes.rs, then esbuild
+│                   → dist/runtime.js, dist/runtime.min.js (+ dist/ext/<name>.min.js)
 ├── sync.mjs        copies dist/ into the crates' assets
 └── package.json
 ```
@@ -25,14 +26,20 @@ runtime/
 
 ## The rule
 
-**`libs/rwire/assets/runtime.min.js` and the `ext/*.min.js` files are build output. Edit
-`runtime/src/`, then `npm run build && npm run sync`.** `sync.mjs` states it: it is *the only write
-path* for the embedded artifact, and CI rebuilds and fails on `git diff`. A hand-edited asset is
-therefore a red pipeline, not a shortcut.
+**`libs/rwire/assets/runtime.min.js`, the extension assets and `runtime/src/opcodes.ts` are
+build output.** Edit the other files of `runtime/src/` (never `opcodes.ts`: `build.mjs`
+regenerates it from `libs/rwire/src/protocol/opcodes.rs` and stamps it "DO NOT EDIT"), then
+`npm run build && npm run sync`. `sync.mjs` is *the only write path* for the embedded artifacts.
 
-So a runtime change is at least three files in one commit: the `src/*.ts` you changed, and the
-regenerated `assets/runtime.min.js` the server will actually ship. Forgetting the second gives you
-a change that compiles and does nothing.
+CI rebuilds and fails on `git diff` for `libs/rwire/assets/runtime.min.js` and
+`runtime/src/opcodes.ts` only (`.github/workflows/ci.yml`, last step). The extension assets
+(`libs/rwire/assets/ext/vim.min.js`, `libs/rwire-map/assets/map.min.js`,
+`libs/rwire-push/assets/push.min.js`) are **not** diffed: a stale one passes CI silently, so
+check `git status` after `npm run sync` yourself.
+
+So a runtime change commits together: the `src/*.ts` you changed, the regenerated
+`assets/runtime.min.js`, `src/opcodes.ts` if an opcode changed, and any extension asset that
+moved. Forgetting the artifact gives you a change that compiles and does nothing.
 
 ## When to go there
 

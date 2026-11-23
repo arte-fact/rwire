@@ -2,16 +2,22 @@
 
 ## 1. Before you claim it works
 
-`CLAUDE.md` ("Before Committing") lists the gates; this is the full set, run from the repository
-root:
+These are the CI gates (`.github/workflows/ci.yml`, job `rust`) — stricter than the
+`CLAUDE.md` "Before Committing" list, which has no `--check` / `-D warnings` — plus the
+out-of-tree smoke check from `CLAUDE.md`. Run from the repository root:
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+# rwire without its default `persist` feature (no rusqlite) must build clean too:
+cargo clippy -p rwire --no-default-features --all-targets -- -D warnings
 cargo test --workspace
 # after a framework change, the out-of-tree consumer must still build:
 [ -d ../claw-rwire ] && cargo check --manifest-path ../claw-rwire/Cargo.toml
 ```
+
+`claw-rwire` depends on rwire **by path** (`../rwire/libs/…` in its `Cargo.toml`): the check
+builds against the checkout at `../rwire`, not against a worktree you may be editing elsewhere.
 
 "Zero warnings" is the rule in `CLAUDE.md`: a clippy warning is fixed, not `#[allow]`ed away.
 `-- -D warnings` makes clippy fail instead of printing, which is what you want in a gate.
@@ -22,16 +28,18 @@ If you touched `runtime/src/`:
 cd runtime && npm run check && npm test && npm run build && npm run sync
 ```
 
-`npm run sync` regenerates `libs/rwire/assets/runtime.min.js` — commit it, or CI fails on
-`git diff` (see `runtime.md`).
+`npm run sync` regenerates `libs/rwire/assets/runtime.min.js` and the extension assets —
+commit them, or CI fails on `git diff` (for `runtime.min.js` and `src/opcodes.ts`; see
+`runtime.md` for the extension assets CI does not check).
 
 The claw-rwire check is the real smoke test: it is the large out-of-tree app that consumes these
 crates, so a breaking signature change shows up there and nowhere else.
 
-In a consuming front (mcp-agents `crates/web-rwire`):
+In a consuming front (mcp-agents `crates/web-rwire`, its own workspace, excluded from the
+mcp-agents root one):
 
 ```bash
-cargo test -p web-rwire            # includes the no_free_css guard
+cargo test --manifest-path crates/web-rwire/Cargo.toml   # includes the no_free_css guard
 ```
 
 The `no_free_css` guard is a normal test: it reads `src/`, counts the bypass markers per file and
@@ -52,7 +60,8 @@ node tools/essai-rwire/capture.mjs <pile> <screen|all> [--ref]
 `parity.mjs` measures each mapped element at 1280/375 × light/dark and compares width, height,
 padding, gap, radius (±1 px), font size/weight/family, and background/text/border colours (equal
 in sRGB8, or ΔE2000 < 2). At 375 px it also checks there is no horizontal scroll and that every
-visible interactive target is **≥ 44 × 44 px**. Exit code 0 means zero gaps and zero failed
+visible interactive target is **≥ 44 × 44 px** (a smaller target that is no smaller than its
+`/app` equivalent is reported separately, not failed). Exit code 0 means zero gaps and zero failed
 checks — that is the only acceptable "done".
 
 `capture.mjs` renders the side-by-side images (or `/app` alone with `--ref`) with
@@ -87,14 +96,16 @@ Rules:
   busy afternoon;
 - bump the rev in its own commit, and say which rwire commit came in, so a bisect has somewhere
   to land;
-- after a bump, re-run `cargo test -p web-rwire` (the guard counts source, so it sees the bump)
-  and `parity.mjs` on at least one screen.
+- after a bump, re-run the front's tests (`cargo test --manifest-path
+  crates/web-rwire/Cargo.toml`: it compiles against the new rev; the `no_free_css` guard only
+  counts the front's own `src/`, so it does not see the bump itself) and `parity.mjs` on at
+  least one screen.
 
 Check what a tree actually resolved to:
 
 ```bash
 cargo tree -p rwire --depth 0        # sha of the checked-out rwire
-cargo metadata --format-version 1 | grep -o '"rev":"[0-9a-f]*"' | sort -u
+cargo metadata --format-version 1 | grep -o 'rwire?rev=[0-9a-f]*' | sort -u
 ```
 
 ## 3. Where this skill comes from
