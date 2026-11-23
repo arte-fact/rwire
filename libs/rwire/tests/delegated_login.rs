@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 const ADDR: &str = "127.0.0.1:19351";
-const COOKIE: &str = "mcpa_session";
+const COOKIE: &str = "session";
 const SECRET: &str = "s3cret";
 
 /// The session values the app was told to retire, in order.
@@ -182,7 +182,7 @@ async fn the_login_form_stores_the_authority_token_and_logout_clears_it() {
     let mut anon_ws = format!("ws://{ADDR}/").into_client_request().unwrap();
     anon_ws
         .headers_mut()
-        .insert("cookie", "mcpa_session=faux".parse().unwrap());
+        .insert("cookie", "session=faux".parse().unwrap());
     let refused_ws = tokio_tungstenite::connect_async(anon_ws).await;
     assert!(refused_ws.is_err(), "a refused session must not upgrade");
 
