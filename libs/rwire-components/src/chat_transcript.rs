@@ -154,7 +154,13 @@ impl ChatTranscript {
         }
         column.extend(self.rows);
         if let Some(label) = self.writing {
-            column.push(TypingIndicator::new().label(label).build());
+            // The generation cue reads in the success tone.
+            column.push(
+                TypingIndicator::new()
+                    .label(label)
+                    .tone(rwire::Tone::Success)
+                    .build(),
+            );
         }
         if let Some(tail) = self.live_tail {
             column.push(tail);

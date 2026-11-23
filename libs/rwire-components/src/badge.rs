@@ -76,6 +76,11 @@ pub struct Badge {
     size: BadgeSize,
     text: Option<Cow<'static, str>>,
     extra_class: Option<Cow<'static, str>>,
+    /// A status badge: a [`StatusDot`](crate::StatusDot) in this tone followed
+    /// by the label, on the raised ground with the tone's ink.
+    status_dot: Option<Tone>,
+    /// Below this breakpoint the label is sr-only (the dot stays visible).
+    label_below: Option<rwire::style_tokens::Bp>,
 }
 
 #[rwire::component]
@@ -153,6 +158,26 @@ impl Badge {
         Self::new().intent(BadgeIntent::Error).text(text)
     }
 
+    /// A status badge: a dot in `tone` followed by `label`, on the raised
+    /// ground with the tone's ink, 12 px, weight 600, fully rounded (the top
+    /// bar's state pill).
+    pub fn status(tone: Tone, label: impl Into<Cow<'static, str>>) -> Self {
+        Self::new().status_dot(tone).text(label)
+    }
+
+    /// The status badge's dot tone (see [`Badge::status`]).
+    pub fn status_dot(mut self, tone: Tone) -> Self {
+        self.status_dot = Some(tone);
+        self
+    }
+
+    /// Below `bp`, the label is only read by screen readers (sr-only, not
+    /// `display:none`); the dot stays visible alone.
+    pub fn label_hidden_below(mut self, bp: rwire::style_tokens::Bp) -> Self {
+        self.label_below = Some(bp);
+        self
+    }
+
     /// Add custom class.
     pub fn class(mut self, class: impl Into<Cow<'static, str>>) -> Self {
         self.extra_class = Some(class.into());
@@ -190,6 +215,15 @@ impl Badge {
                 tokens.push(St::BgTransparent);
                 tokens.push(tone.border());
             }
+            return tokens;
+        }
+
+        // A status badge: raised ground, the tone's ink, weight 600, hairline.
+        if let Some(tone) = self.status_dot {
+            tokens.push(St::BgSurfaceRaised);
+            tokens.push(tone.ink());
+            tokens.push(St::FontSemibold);
+            tokens.push(St::BorderSubtle);
             return tokens;
         }
 
@@ -252,6 +286,22 @@ impl Badge {
 
         if let Some(ref extra) = self.extra_class {
             builder = builder.class(extra.as_ref());
+        }
+
+        if let Some(tone) = self.status_dot {
+            // The status pill: a dot, then the label (sr-only below `label_below`).
+            let dot = crate::StatusDot::new().tone(tone).build();
+            let label = match self.text {
+                Some(text) => {
+                    let span = el(El::Span).text(&text);
+                    match self.label_below {
+                        Some(bp) => span.st([St::sr_only_below(bp)]),
+                        None => span,
+                    }
+                }
+                None => el(El::Span),
+            };
+            return builder.data("testid", "badge-status").append([dot, label]);
         }
 
         if let Some(text) = self.text {
@@ -323,5 +373,30 @@ mod tests {
         assert!(tokens.contains(&St::TextBadgeXs), "{tokens:?}");
         assert!(tokens.contains(&St::RoundedBadgeXs), "{tokens:?}");
         assert!(!tokens.contains(&St::TextXs) && !tokens.contains(&St::RoundedFull));
+    }
+
+    #[test]
+    fn a_status_badge_is_a_toned_dot_plus_label_on_the_raised_ground() {
+        let badge = Badge::status(Tone::Success, "Travaille")
+            .label_hidden_below(rwire::style_tokens::Bp::Sm)
+            .build();
+        let html = badge.to_static_html();
+        assert!(html.contains("data-testid=\"badge-status\""), "{html}");
+        assert!(html.contains("Travaille"), "{html}");
+        let utils = badge.get_style_utils();
+        for st in [
+            St::BgSurfaceRaised,
+            Tone::Success.ink(),
+            St::FontSemibold,
+            St::RoundedFull,
+        ] {
+            assert!(utils.contains(&st.as_u16()), "{st:?}");
+        }
+        // The label span is sr-only below sm (kept for screen readers).
+        let label = &badge.children()[1];
+        assert!(label
+            .get_style_utils()
+            .contains(&St::sr_only_below(rwire::style_tokens::Bp::Sm).as_u16()));
+        assert!(!html.contains("style="), "no inline style: {html}");
     }
 }

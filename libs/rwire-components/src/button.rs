@@ -53,6 +53,9 @@ pub enum ButtonIntent {
     Outline,
     /// Destructive action (red)
     Destructive,
+    /// Danger text on a neutral hairline, the border turning danger on hover
+    /// (an "Interrupt" button in a top bar).
+    DangerGhost,
 }
 
 /// Button size.
@@ -97,6 +100,9 @@ pub struct Button {
     /// When set, `on_click` skips action reflection and binds a plain click. Inverted so the
     /// derived `Default` (false) keeps reflection **on** — the intended default.
     reflect_off: bool,
+    /// Below this breakpoint the text label becomes screen-reader-only (the
+    /// icon stays visible alone).
+    label_hidden_below: Option<rwire::style_tokens::Bp>,
 }
 
 #[rwire::component]
@@ -166,6 +172,13 @@ impl Button {
     /// Set disabled state.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Below `bp`, the text label is only read by screen readers (sr-only
+    /// class, not `display:none`); the icon stays visible alone.
+    pub fn label_hidden_below(mut self, bp: rwire::style_tokens::Bp) -> Self {
+        self.label_hidden_below = Some(bp);
         self
     }
 
@@ -281,6 +294,10 @@ impl Button {
                 tokens.extend([St::BgTransparent, St::TextMuted, St::BorderDefault])
             }
             ButtonIntent::Destructive => tokens.extend([St::BgDestructive, St::TextOnDestructive]),
+            // Danger text on a neutral hairline; the border turns danger on hover.
+            ButtonIntent::DangerGhost => {
+                tokens.extend([St::BgTransparent, St::TextError, St::BorderDefault])
+            }
         }
 
         match self.size {
@@ -334,6 +351,7 @@ impl Button {
                 ButtonIntent::Ghost => builder.hover([St::BgHover]),
                 ButtonIntent::Outline => builder.hover([St::TextHigh, St::BorderEmphasis]),
                 ButtonIntent::Destructive => builder.hover([St::BgDestructiveHover]),
+                ButtonIntent::DangerGhost => builder.hover([St::BorderError]),
             }
         };
 
@@ -414,7 +432,14 @@ impl Button {
                 icon_el = icon_el.st([St::GlyphIconButton]);
             }
             builder = match text {
-                Some(t) => builder.append([icon_el, el(El::Span).text(&t)]),
+                Some(t) => {
+                    let label = el(El::Span).text(&t);
+                    let label = match self.label_hidden_below {
+                        Some(bp) => label.st([St::sr_only_below(bp)]),
+                        None => label,
+                    };
+                    builder.append([icon_el, label])
+                }
                 None => builder.append([icon_el]),
             };
         } else if let Some(t) = text {
@@ -422,6 +447,9 @@ impl Button {
                 // Keep the label's box (constant footprint) but invisible, so the centred spinner
                 // reads over it and the button doesn't shrink to the ring.
                 builder = builder.append([el(El::Span).st([St::Opacity0]).text(&t)]);
+            } else if let Some(bp) = self.label_hidden_below {
+                // Label sr-only below `bp` (the icon stays visible alone).
+                builder = builder.append([el(El::Span).st([St::sr_only_below(bp)]).text(&t)]);
             } else {
                 builder = builder.text(&t);
             }
@@ -560,6 +588,55 @@ impl Button {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn danger_ghost_is_danger_text_on_a_neutral_hairline_turning_danger_on_hover() {
+        let btn = Button::new()
+            .intent(ButtonIntent::DangerGhost)
+            .text("Interrompre");
+        let tokens = btn.compute_tokens();
+        assert!(tokens.contains(&St::BgTransparent), "{tokens:?}");
+        assert!(tokens.contains(&St::TextError), "{tokens:?}");
+        assert!(tokens.contains(&St::BorderDefault), "{tokens:?}");
+        let built = btn.build();
+        let html = built.to_static_html();
+        assert!(!html.contains("style="), "{html}");
+        // The hover treatment turns the border danger.
+        let hover: Vec<u16> = built
+            .get_pseudo_groups()
+            .iter()
+            .filter(|(pc, _)| *pc == rwire::style_tokens::Pc::Hover.as_u8())
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        assert!(hover.contains(&St::BorderError.as_u16()), "{hover:?}");
+    }
+
+    #[test]
+    fn label_hidden_below_makes_the_label_sr_only_below_the_breakpoint() {
+        let btn = Button::new()
+            .icon(Icon::Stop)
+            .text("Interrompre")
+            .label_hidden_below(rwire::style_tokens::Bp::Sm)
+            .build();
+        let html = btn.to_static_html();
+        assert!(
+            html.contains("Interrompre"),
+            "the label stays in the DOM: {html}"
+        );
+        // The label span carries the sr-only-below-sm token (not display:none).
+        let label = btn
+            .children()
+            .iter()
+            .find(|c| c.text_content() == Some("Interrompre"))
+            .expect("label span");
+        assert!(label
+            .get_style_utils()
+            .contains(&St::sr_only_below(rwire::style_tokens::Bp::Sm).as_u16()));
+        assert!(
+            !html.contains("display:none"),
+            "sr-only, not display:none: {html}"
+        );
+    }
 
     #[test]
     fn test_button_defaults() {

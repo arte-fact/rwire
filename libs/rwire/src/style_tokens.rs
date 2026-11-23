@@ -1359,6 +1359,32 @@ define_token_enum! {
         MaxH40vh = 0x422 => "max-height:40vh",
         /// The pill composer field's padding: 0.25 rem.
         PadField = 0x423 => "padding:0.25rem",
+        // Below/above threshold helpers (0x424-0x42B), the theme's `{bp-1}.98px`
+        // convention for "below" and `min-width:{bp}px` for "from".
+        /// Visually hidden (sr-only) below the `sm` breakpoint; visible from it up.
+        SrOnlyBelowSm = 0x424 => "@media (max-width:639.98px){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;white-space:nowrap}",
+        /// Sr-only below the `md` breakpoint.
+        SrOnlyBelowMd = 0x425 => "@media (max-width:767.98px){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;white-space:nowrap}",
+        /// Sr-only below the `lg` breakpoint.
+        SrOnlyBelowLg = 0x426 => "@media (max-width:1023.98px){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;white-space:nowrap}",
+        /// Sr-only below the `xl` breakpoint.
+        SrOnlyBelowXl = 0x427 => "@media (max-width:1279.98px){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;white-space:nowrap}",
+        /// Hidden (display:none) from the `sm` breakpoint up; visible below it.
+        HiddenFromSm = 0x428 => "@media (min-width:640px){display:none}",
+        /// Hidden from the `md` breakpoint up.
+        HiddenFromMd = 0x429 => "@media (min-width:768px){display:none}",
+        /// Hidden from the `lg` breakpoint up.
+        HiddenFromLg = 0x42A => "@media (min-width:1024px){display:none}",
+        /// Hidden from the `xl` breakpoint up.
+        HiddenFromXl = 0x42B => "@media (min-width:1280px){display:none}",
+        /// 15 px (a page title).
+        Text15 = 0x42C => "font-size:15px",
+        /// At least the header height (`--Qh`, 56 px by default).
+        MinHHeader = 0x42D => "min-height:var(--Qh,3.5rem)",
+        /// 0.04 em letter spacing (a day divider).
+        Tracking04em = 0x42E => "letter-spacing:0.04em",
+        /// A typing-indicator dot: 0.4 rem square.
+        SqDot04 = 0x42F => "width:0.4rem;height:0.4rem",
     }
 }
 
@@ -1508,6 +1534,28 @@ fn token_longhands(css: &'static str) -> Vec<&'static str> {
 }
 
 impl St {
+    /// The sr-only-below token for `bp`: visually hidden below the breakpoint,
+    /// readable normally from it up (the label stays for screen readers).
+    pub fn sr_only_below(bp: Bp) -> St {
+        match bp {
+            Bp::Sm => St::SrOnlyBelowSm,
+            Bp::Md => St::SrOnlyBelowMd,
+            Bp::Lg => St::SrOnlyBelowLg,
+            Bp::Xl => St::SrOnlyBelowXl,
+        }
+    }
+
+    /// The hidden-from token for `bp`: `display:none` from the breakpoint up,
+    /// visible below it (a menu button that only exists on mobile).
+    pub fn hidden_from(bp: Bp) -> St {
+        match bp {
+            Bp::Sm => St::HiddenFromSm,
+            Bp::Md => St::HiddenFromMd,
+            Bp::Lg => St::HiddenFromLg,
+            Bp::Xl => St::HiddenFromXl,
+        }
+    }
+
     /// The longhand CSS properties this token sets (shorthands expanded),
     /// computed once per token. Empty for a token with nested rules.
     pub fn longhands(self) -> &'static [&'static str] {

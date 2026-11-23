@@ -2595,6 +2595,34 @@ fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
 // Conversation (R3)
 // ============================================================================
 
+/// The top bar of the conversation screen.
+fn page_header_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
+    use crate::ButtonIntent;
+    use crate::{Badge, Button, PageHeader};
+    use rwire::{Icon, Tone};
+    el(El::Div)
+        .st([rwire::St::WFull])
+        .attr("data-demo", "page-header")
+        .append([PageHeader::new("projet@threadripper")
+            .title_suffix("#12")
+            .title_suffix_title("claude-flambeau-inference")
+            .subtitle("claude · /home/benoit/Workspace")
+            .subtitle_mono(true)
+            .actions([
+                Badge::status(Tone::Success, "Travaille")
+                    .label_hidden_below(rwire::Bp::Sm)
+                    .build(),
+                Button::new()
+                    .intent(ButtonIntent::DangerGhost)
+                    .icon(Icon::Stop)
+                    .text("Interrompre")
+                    .label_hidden_below(rwire::Bp::Sm)
+                    .build(),
+            ])
+            .menu_button(rwire::HandlerSpec::memory::<GalleryShell>(gallery_noop))
+            .build()])
+}
+
 /// One entry of the gallery's conversation.
 struct GalleryMsg {
     key: &'static str,
@@ -2762,11 +2790,13 @@ impl crate::ChatItem for GalleryDecision {
     }
 }
 
-/// One row of the gallery's conversation: a message, a tool call or a validation.
+/// One row of the gallery's conversation: a message, a tool call, a
+/// validation, or a chrome row (divider / note).
 enum GalleryItem {
     Msg(GalleryMsg),
     Tool(GalleryTool),
     Decision(GalleryDecision),
+    Chrome(&'static str, Box<ElementBuilder>),
 }
 
 impl crate::ChatItem for GalleryItem {
@@ -2775,6 +2805,7 @@ impl crate::ChatItem for GalleryItem {
             GalleryItem::Msg(m) => m.key(),
             GalleryItem::Tool(t) => t.key(),
             GalleryItem::Decision(d) => d.key(),
+            GalleryItem::Chrome(key, _) => std::borrow::Cow::Borrowed(key),
         }
     }
     fn author(&self) -> crate::ChatAuthor {
@@ -2782,6 +2813,7 @@ impl crate::ChatItem for GalleryItem {
             GalleryItem::Msg(m) => m.author(),
             GalleryItem::Tool(t) => t.author(),
             GalleryItem::Decision(d) => d.author(),
+            GalleryItem::Chrome(_, _) => crate::ChatAuthor::agent("claude").muted(),
         }
     }
     fn body(&self, _ctx: &crate::ChatItemCtx<Self>) -> ElementBuilder {
@@ -2791,12 +2823,13 @@ impl crate::ChatItem for GalleryItem {
             GalleryItem::Decision(d) => {
                 d.body(&crate::ChatItemCtx::<GalleryDecision> { item_ref: None })
             }
+            GalleryItem::Chrome(_, b) => (**b).clone(),
         }
     }
     fn time(&self) -> Option<std::borrow::Cow<'_, str>> {
         match self {
             GalleryItem::Msg(m) => m.time(),
-            GalleryItem::Tool(_) | GalleryItem::Decision(_) => None,
+            GalleryItem::Tool(_) | GalleryItem::Decision(_) | GalleryItem::Chrome(_, _) => None,
         }
     }
     fn groups_with(&self, prev: &Self) -> bool {
@@ -2808,7 +2841,7 @@ impl crate::ChatItem for GalleryItem {
     fn delivery(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<crate::ChatDelivery> {
         match self {
             GalleryItem::Msg(m) => m.delivery(&crate::ChatItemCtx::<GalleryMsg> { item_ref: None }),
-            GalleryItem::Tool(_) | GalleryItem::Decision(_) => None,
+            GalleryItem::Tool(_) | GalleryItem::Decision(_) | GalleryItem::Chrome(_, _) => None,
         }
     }
     fn row(&self, _ctx: &crate::ChatItemCtx<Self>) -> Option<ElementBuilder> {
@@ -2818,6 +2851,7 @@ impl crate::ChatItem for GalleryItem {
             GalleryItem::Decision(d) => {
                 d.row(&crate::ChatItemCtx::<GalleryDecision> { item_ref: None })
             }
+            GalleryItem::Chrome(_, b) => Some((**b).clone()),
         }
     }
 }
@@ -2933,6 +2967,7 @@ fn decision_card_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
 fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
     use crate::{ChatLayout, ChatTranscript, Measure};
     let items = [
+        GalleryItem::Chrome("div1", Box::new(crate::ChatDivider::day("Aujourd'hui"))),
         GalleryItem::Msg(GalleryMsg {
             key: "m1",
             user: true,
@@ -3007,6 +3042,10 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
             key: "d2",
             resolved: true,
         }),
+        GalleryItem::Chrome(
+            "note1",
+            Box::new(crate::ChatNote::note("Début de la conversation")),
+        ),
     ];
     use crate::{Composer, ComposerDock};
     use rwire::{icons::Icon, Bp};
@@ -3024,6 +3063,7 @@ fn conversation_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
                 .layout(ChatLayout::Avatar)
                 .max_width(Measure::Reading)
                 .items_plain(items.iter())
+                .writing(Some("claude travaille…".into()))
                 .build(),
             ComposerDock::new(
                 Composer::new()
@@ -5254,6 +5294,16 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: &[],
         bool_props: &[],
         build_demo: composer_dock_demo,
+    },
+    ComponentEntry {
+        name: "PageHeader",
+        slug: "page-header",
+        description: "The top bar: <header> at least --Qh (56px) with a hairline bottom, h1 title + mono suffix, one-line subtitle, actions on the right, and a menu button on mobile only.",
+        category: Category::Layout,
+        order: 112,
+        variants: &[],
+        bool_props: &[],
+        build_demo: page_header_demo,
     },
     ComponentEntry {
         name: "FormField",

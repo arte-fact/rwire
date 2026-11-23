@@ -83,6 +83,9 @@ impl DecisionAction {
                 vec![St::BgTransparent, St::TextMuted, St::BorderDefault]
             }
             ButtonIntent::Destructive => vec![St::BgDestructive, St::TextOnDestructive],
+            ButtonIntent::DangerGhost => {
+                vec![St::BgTransparent, St::TextError, St::BorderDefault]
+            }
         }
     }
 
