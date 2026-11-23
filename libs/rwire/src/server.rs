@@ -1775,7 +1775,7 @@ fn cookie_value(request: &str, name: &str) -> Option<String> {
 }
 
 /// Percent-decode an `application/x-www-form-urlencoded` field value.
-fn url_decode(input: &str) -> String {
+pub(crate) fn url_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -1964,6 +1964,54 @@ fn rewrite_proxy_head(head: &[u8], prefix: &str) -> Vec<u8> {
     let mut out = format!("{method} {new_path} {version}").into_bytes();
     out.extend_from_slice(&head[eol..]);
     out
+}
+
+/// Read the rest of a request (head + declared body), given the bytes already
+/// peeked. Used by the gates that must judge a submitted form.
+async fn read_request(stream: &mut TcpStream, peeked: &str, n: usize) -> String {
+    let mut request = peeked.to_string();
+    let mut buf = vec![0u8; n];
+    if stream.read_exact(&mut buf).await.is_ok() {
+        // `read_exact` only succeeds on `n` bytes; the peeked slice is the same
+        // prefix, so keep the longer of the two.
+    }
+    let mut chunk = [0u8; 4096];
+    loop {
+        let complete = request
+            .split_once("\r\n\r\n")
+            .map(|(head, body)| {
+                let want = header_value(head, "content-length")
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                body.len() >= want
+            })
+            .unwrap_or(false);
+        if complete {
+            break;
+        }
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(k) => request.push_str(&String::from_utf8_lossy(&chunk[..k])),
+        }
+    }
+    request
+}
+
+/// Where a successful login sends the browser: `next` from the query string,
+/// else from the form, when it is a path on this app (never an absolute or
+/// protocol-relative URL); `/` otherwise.
+fn login_target(query: &str, form: Option<&str>) -> String {
+    let from_query = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("next="))
+        .map(url_decode);
+    for candidate in [from_query.as_deref(), form].into_iter().flatten() {
+        let path = url_decode(candidate);
+        if path.starts_with('/') && !path.starts_with("//") {
+            return path;
+        }
+    }
+    "/".to_string()
 }
 
 /// Return the body that follows the header terminator, if present.
@@ -2322,6 +2370,56 @@ async fn handle_client<F>(
     // login URL and a handshake gets 401. The cookie is never logged.
     let mut identity = None;
     if let Some(delegated) = delegated.as_ref() {
+        // rwire's own login form, when the app configured one: the app judges
+        // the submitted fields, rwire stores the session value it returns.
+        if delegated.serves_login_form() {
+            let (method, path) = request_line(&peek_str);
+            let (bare, query) = path.split_once('?').unwrap_or((path, ""));
+            if method == "POST" && bare == "/login" {
+                let request = read_request(&mut stream, &peek_str, n).await;
+                let config = login_capsule_config(&initial_theme, &composite_table);
+                let body = request_body(&request).to_string();
+                // `next` comes from the query string, or from a hidden form
+                // field (what a form posting to `/login` can carry).
+                let wanted = crate::delegated_auth::LoginForm::parse(&body)
+                    .field("next")
+                    .map(str::to_string);
+                match delegated.submit_login(&body).await {
+                    Ok(value) => {
+                        println!("[{peer_addr}] login OK");
+                        let cookie = format!(
+                            "{}={value}; Path=/; HttpOnly; SameSite=Lax",
+                            delegated.cookie_name()
+                        );
+                        let next = login_target(query, wanted.as_deref());
+                        let _ = capsule::serve_redirect(stream, &next, Some(&cookie)).await;
+                    }
+                    Err(message) => {
+                        println!("[{peer_addr}] login failed");
+                        match delegated.login_page_for(Some(&message)) {
+                            Some(page) => {
+                                let _ =
+                                    capsule::serve_app_page(stream, &page, "Connexion", &config)
+                                        .await;
+                            }
+                            None => {
+                                let _ = capsule::serve_login(stream, true, None, &config).await;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            if (method == "GET" || method == "POST") && bare == "/logout" {
+                let _ = read_request(&mut stream, &peek_str, n).await;
+                let expired = format!(
+                    "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+                    delegated.cookie_name()
+                );
+                let _ = capsule::serve_redirect(stream, "/login", Some(&expired)).await;
+                return;
+            }
+        }
         // A handshake the admission caps would refuse is refused before its
         // credential costs a validation (the caps are checked again, and the
         // connection registered, after the gate).
@@ -2347,6 +2445,20 @@ async fn handle_client<F>(
                     // As with the form gate, a stale tab's reconnects are expected:
                     // the client reloads after repeated rejects and lands on the login.
                     let _ = capsule::serve_unauthorized(stream).await;
+                } else if delegated.serves_login_form() {
+                    // The app's login form is rwire's page: show it in place (200),
+                    // never a redirect loop through it.
+                    let _ = read_request(&mut stream, &peek_str, n).await;
+                    let config = login_capsule_config(&initial_theme, &composite_table);
+                    match delegated.login_page_for(None) {
+                        Some(page) => {
+                            let _ =
+                                capsule::serve_app_page(stream, &page, "Connexion", &config).await;
+                        }
+                        None => {
+                            let _ = capsule::serve_login(stream, false, None, &config).await;
+                        }
+                    }
                 } else {
                     let (_, path) = request_line(&peek_str);
                     let host = header_value(&peek_str, "host");
