@@ -27,24 +27,31 @@ so existing transcripts are unchanged.
 
 ### Added: the app's own words for a run of tool calls
 
-- **`ChatCallsText`** + **`ChatCalls::text(ChatCallsText)`** — the summary line
-  (none / one / many, `{n}` calls, `{tools}` names, the failure count) and the
-  three call states (`running`, `ok`, `error`) are now the app's strings. A
-  library speaks its own language: the defaults are English, and an app that
-  shows another one passes its table in.
+- **`ChatCallsLabels`** + **`ChatCalls::labels(ChatCallsLabels)`** — the summary
+  line (none / one / many, `{n}` calls, `{tools}` names, the failure count) and
+  the three call states (`running`, `ok`, `error`) are now the app's strings, as
+  `Cow<'static, str>` like every other label table. A library speaks its own
+  language: the defaults are English, and an app that shows another one passes
+  its table in.
+- **`highlight_code_with(code, lang, CodeLabels)`** — the copy button's words
+  (default "Copy code").
+- **`AppShell::sidebar_toggle_with(label)`** /
+  **`AppShell::panel_toggle_with(label)`** — the two fold controls keep the
+  library's English defaults, and take the app's words when it has its own.
 
   ```rust
-  ChatCallsText { running: "in flight", ..ChatCallsText::default() }
+  ChatCallsLabels { running: "in flight".into(), ..ChatCallsLabels::default() }
   ```
 
 ### Changed: the libraries speak English
 
-- Every user-facing word still shipped by `rwire-components` and
+- Every user-facing word still shipped by `rwire`, `rwire-components` and
   `rwire-markdown` — the `ChatCalls` summary and states, the sample
-  `ChatAuthor` suffixes, the `AppShell` details controls — is **English**. The
-  words an app owns (author names, tool names, content) are untouched: an app
-  brings its own language through the new `*Text` tables rather than inheriting
-  the library's.
+  `ChatAuthor` suffixes, the `AppShell` fold controls, the code block's copy
+  button, the app-drawn login page title — is **English**. The words an app owns
+  (author names, tool names, content) are untouched: an app brings its own
+  language through the label tables (`ChatCallsLabels`, `CodeLabels`, the
+  `*_with` fold controls) rather than inheriting the library's.
 
 ### Added: a compact composer with the send button in the row
 
@@ -65,8 +72,10 @@ so existing transcripts are unchanged.
   (`data-copy`, so the runtime's clipboard affordance does it; the glyph turns
   into a check for two seconds), above the `<pre><code>`.
 - The code ground `--Qc` is a step **darker than the page** in both modes
-  (`color-mix(in srgb, var(--a) 86%, #000)`), in the `solid` and `studio`
-  styles: a dark panel on the light grey page, a deeper panel on nord0.
+  (`color-mix(in srgb, var(--a) 86%, #000)`), declared by **every** style: a dark
+  panel on the light grey page, a deeper panel on nord0.
+- A call's own `<summary>` keeps the native marker too: the row is a span inside
+  it, never a flex `<summary>`.
 
 ### Added: an empty composer guards its send button
 

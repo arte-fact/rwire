@@ -2398,9 +2398,8 @@ async fn handle_client<F>(
                         println!("[{peer_addr}] login failed");
                         match delegated.login_page_for(Some(&message)) {
                             Some(page) => {
-                                let _ =
-                                    capsule::serve_app_page(stream, &page, "Connexion", &config)
-                                        .await;
+                                let _ = capsule::serve_app_page(stream, &page, "Sign in", &config)
+                                    .await;
                             }
                             None => {
                                 let _ = capsule::serve_login(stream, true, None, &config).await;
@@ -2462,7 +2461,7 @@ async fn handle_client<F>(
                     match delegated.login_page_for(None) {
                         Some(page) => {
                             let _ =
-                                capsule::serve_app_page(stream, &page, "Connexion", &config).await;
+                                capsule::serve_app_page(stream, &page, "Sign in", &config).await;
                         }
                         None => {
                             let _ = capsule::serve_login(stream, false, None, &config).await;

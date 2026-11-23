@@ -222,22 +222,29 @@ impl AppShell {
     /// to the shell's panel checkbox, for the app to place in the header of its
     /// middle column. It stays in the flow of that header.
     pub fn panel_toggle() -> ElementBuilder {
-        Self::toggle_label(
-            "rw-panel-toggle",
-            "panel-toggle-label",
-            "Show or hide the details panel",
-        )
-        .append([rwire::icon(rwire::Icon::PanelRight)])
+        Self::panel_toggle_with("Show or hide the details panel")
+    }
+
+    /// [`Self::panel_toggle`] with the app's own words, for the tooltip and the
+    /// accessible name.
+    pub fn panel_toggle_with(label: impl Into<Cow<'static, str>>) -> ElementBuilder {
+        Self::toggle_label("rw-panel-toggle", "panel-toggle-label", label)
+            .append([rwire::icon(rwire::Icon::PanelRight)])
     }
 
     /// The shared shape of a fold label (sidebar, panel): a compact icon button
     /// that stays in the flow of the header hosting it.
-    fn toggle_label(id: &'static str, role: &'static str, label: &'static str) -> ElementBuilder {
+    fn toggle_label(
+        id: &'static str,
+        role: &'static str,
+        label: impl Into<Cow<'static, str>>,
+    ) -> ElementBuilder {
+        let label = label.into();
         el(El::Label)
             .attr("for", id)
             .attr("data-shell", role)
-            .attr("title", label)
-            .attr("aria-label", label)
+            .attr("title", &label)
+            .attr("aria-label", &label)
             .attr("role", "button")
             .attr("tabindex", "0")
             .st([
@@ -256,13 +263,17 @@ impl AppShell {
             )
     }
 
+    /// The control for [`Self::collapsible_sidebar`], with the library's
+    /// English words.
     pub fn sidebar_toggle() -> ElementBuilder {
-        Self::toggle_label(
-            "rw-side-toggle",
-            "side-toggle-label",
-            "Afficher ou masquer la liste",
-        )
-        .append([rwire::icon(rwire::Icon::Menu)])
+        Self::sidebar_toggle_with("Show or hide the list")
+    }
+
+    /// [`Self::sidebar_toggle`] with the app's own words, for the tooltip and
+    /// the accessible name.
+    pub fn sidebar_toggle_with(label: impl Into<Cow<'static, str>>) -> ElementBuilder {
+        Self::toggle_label("rw-side-toggle", "side-toggle-label", label)
+            .append([rwire::icon(rwire::Icon::Menu)])
     }
 
     /// Add custom class.
@@ -455,7 +466,7 @@ impl AppShell {
                     .attr("type", "checkbox")
                     .attr("id", "rw-side-toggle")
                     .attr("data-shell", "side-toggle")
-                    .attr("aria-label", "Afficher la liste")
+                    .attr("aria-label", "Show the list")
                     .st([St::SrOnly]),
                 el(El::Style).text(
                     "[data-shell-root]:has(> [data-shell=side-toggle]:checked)>div>[data-shell=sidebar],\
@@ -552,8 +563,8 @@ mod tests {
     #[test]
     fn a_collapsible_shell_ships_the_checkbox_the_two_labels_and_the_rules() {
         let html = AppShell::new()
-            .sidebar(el(El::Div).text("liste"))
-            .main(el(El::Div).text("fil"))
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
             .collapsible_sidebar(true)
             .build()
             .to_static_html();
@@ -576,8 +587,8 @@ mod tests {
     #[test]
     fn a_collapsible_panel_ships_its_checkbox_and_rules() {
         let html = AppShell::new()
-            .sidebar(el(El::Div).text("liste"))
-            .main(el(El::Div).text("fil"))
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
             .panel(Some(el(El::Div).text("details")))
             .collapsible_panel(true)
             .build()
@@ -600,8 +611,8 @@ mod tests {
     #[test]
     fn a_plain_shell_has_no_fold_control() {
         let html = AppShell::new()
-            .sidebar(el(El::Div).text("liste"))
-            .main(el(El::Div).text("fil"))
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
             .build()
             .to_static_html();
         assert!(!html.contains("side-toggle"), "{html}");

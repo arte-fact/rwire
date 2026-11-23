@@ -8,10 +8,10 @@
   rail (a 2px tone strip) is optional: off, the body runs flush with the column,
   no lateral border, the text sitting on the page.
 - **`ChatCalls`** (new component) — a run of tool calls collapsed into one
-  transcript block: a summary line ("4 appels d'outils · Bash, Read, Edit"),
-  each call with its state (`ChatCallState::Running|Ok|Error`) and its own native
-  disclosure for input and output. Opens by itself while a call runs or after a
-  failure, stays closed once everything succeeded; pure `<details>`, no round-trip.
+  transcript block: a summary line ("4 tool calls · Bash, Read, Edit"), each
+  call with its state (`ChatCallState::Running|Ok|Error`) and its own native
+  disclosure for input and output. The run stays closed by default; a call in
+  flight or in error opens by itself, pure `<details>`, no round-trip.
   The run carries no chrome of its own (no background, no rounding, no padding):
   it reads as a line of the transcript, never as a message bubble.
 - **`AppShell::collapsible_sidebar(true)`** + **`AppShell::sidebar_toggle()`** —

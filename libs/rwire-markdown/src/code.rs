@@ -10,6 +10,8 @@
 //! `data-copy` affordance and its own click state for the checkmark, so it costs no server
 //! round-trip.
 
+use std::borrow::Cow;
+
 use rwire::icons::{icon_sized, Icon};
 use rwire::style_tokens::St;
 use rwire::{el, El, ElementBuilder, Ev, Target};
@@ -20,14 +22,30 @@ use crate::highlight::{highlight, Token, TokenKind};
 #[derive(Target)]
 struct CopiedCode;
 
+/// The words of a code block. English by default: a library speaks its own
+/// language, the app brings its strings in with [`highlight_code_with`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeLabels {
+    /// The copy button's accessible name and tooltip.
+    pub copy: Cow<'static, str>,
+}
+
+impl Default for CodeLabels {
+    fn default() -> Self {
+        Self {
+            copy: "Copy code".into(),
+        }
+    }
+}
+
 /// The copy button of a code block: clipboard glyph, then a check for two
 /// seconds. `data-copy` does the clipboard write; the toggle is local state.
-fn copy_button(code: &str) -> ElementBuilder {
+fn copy_button(code: &str, labels: &CodeLabels) -> ElementBuilder {
     el(El::Button)
         .attr("type", "button")
         .data("copy", code)
-        .attr("aria-label", "Copier le code")
-        .attr("title", "Copier le code")
+        .attr("aria-label", labels.copy.as_ref())
+        .attr("title", labels.copy.as_ref())
         .st([
             St::DisplayInlineFlex,
             St::ItemsCenter,
@@ -55,6 +73,11 @@ fn copy_button(code: &str) -> ElementBuilder {
 /// `yml`); `None` or an unrecognised language renders flat. A non-empty `lang` adds a small
 /// uppercase language label above the block (matching fenced-code rendering).
 pub fn highlight_code(code: &str, lang: Option<&str>) -> ElementBuilder {
+    highlight_code_with(code, lang, &CodeLabels::default())
+}
+
+/// [`highlight_code`] with the app's own words (see [`CodeLabels`]).
+pub fn highlight_code_with(code: &str, lang: Option<&str>, labels: &CodeLabels) -> ElementBuilder {
     let base = el(El::Code).st([
         St::FontMono,
         St::TextSm,
@@ -98,7 +121,7 @@ pub fn highlight_code(code: &str, lang: Option<&str>) -> ElementBuilder {
             .text(lang),
         None => el(El::Span),
     }]);
-    head = head.append([copy_button(code)]);
+    head = head.append([copy_button(code, labels)]);
     el(El::Div)
         .st([
             St::DisplayFlex,
@@ -190,13 +213,13 @@ mod tests {
     fn a_block_carries_its_language_and_a_copy_button() {
         let html = highlight_code("let x = 1;", Some("rust")).to_static_html();
         assert!(html.contains("data-copy=\"let x = 1;\""), "{html}");
-        assert!(html.contains("aria-label=\"Copier le code\""), "{html}");
+        assert!(html.contains("aria-label=\"Copy code\""), "{html}");
         assert!(html.contains("rust"), "language shown: {html}");
         // The clipboard glyph swaps to a check on click (client state, 2 s).
         assert!(html.contains("<svg"), "{html}");
         // The code area is a `<pre><code>` under the header, not a bare label.
         let head = html.find("data-copy").expect("header");
-        let pre = html.find("<pre").expect("bloc");
+        let pre = html.find("<pre").expect("code block");
         assert!(head < pre, "header above the code: {html}");
         // Without a language the strip still holds the copy button.
         let bare = highlight_code("ok", None).to_static_html();

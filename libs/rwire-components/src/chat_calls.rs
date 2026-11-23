@@ -53,11 +53,11 @@ pub enum ChatCallState {
 
 impl ChatCallState {
     /// The state's word, from the run's text table (English by default).
-    fn label(self, text: &ChatCallsText) -> &'static str {
+    fn label(self, labels: &ChatCallsLabels) -> &str {
         match self {
-            Self::Running => text.running,
-            Self::Ok => text.ok,
-            Self::Error => text.error,
+            Self::Running => labels.running.as_ref(),
+            Self::Ok => labels.ok.as_ref(),
+            Self::Error => labels.error.as_ref(),
         }
     }
 
@@ -71,41 +71,41 @@ impl ChatCallState {
 }
 
 /// The words a run of tool calls shows. English by default: a library speaks its
-/// own language, the app brings its strings in with [`ChatCalls::text`].
+/// own language, the app brings its strings in with [`ChatCalls::labels`].
 ///
 /// `{n}` (the count) and `{tools}` (up to three tool names) are substituted in the
 /// summary templates.
-#[derive(Clone, Debug)]
-pub struct ChatCallsText {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatCallsLabels {
     /// No call in the run.
-    pub none: &'static str,
+    pub none: Cow<'static, str>,
     /// Exactly one call; `{tools}` is its tool name.
-    pub one: &'static str,
+    pub one: Cow<'static, str>,
     /// Several calls; `{n}` is the count and `{tools}` the names.
-    pub many: &'static str,
+    pub many: Cow<'static, str>,
     /// Exactly one failed call.
-    pub failure_one: &'static str,
+    pub failure_one: Cow<'static, str>,
     /// Several failed calls; `{n}` is the count.
-    pub failure_many: &'static str,
+    pub failure_many: Cow<'static, str>,
     /// A call still in flight.
-    pub running: &'static str,
+    pub running: Cow<'static, str>,
     /// A call that returned.
-    pub ok: &'static str,
+    pub ok: Cow<'static, str>,
     /// A call that failed.
-    pub error: &'static str,
+    pub error: Cow<'static, str>,
 }
 
-impl Default for ChatCallsText {
+impl Default for ChatCallsLabels {
     fn default() -> Self {
         Self {
-            none: "No tool call",
-            one: "1 tool call · {tools}",
-            many: "{n} tool calls · {tools}",
-            failure_one: "1 failure",
-            failure_many: "{n} failures",
-            running: "running",
-            ok: "ok",
-            error: "error",
+            none: "No tool call".into(),
+            one: "1 tool call · {tools}".into(),
+            many: "{n} tool calls · {tools}".into(),
+            failure_one: "1 failure".into(),
+            failure_many: "{n} failures".into(),
+            running: "running".into(),
+            ok: "ok".into(),
+            error: "error".into(),
         }
     }
 }
@@ -147,8 +147,8 @@ impl ChatCall {
 #[derive(Default)]
 pub struct ChatCalls {
     calls: Vec<ChatCall>,
-    open: Option<bool>,
-    text: ChatCallsText,
+    open: bool,
+    labels: ChatCallsLabels,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -166,14 +166,14 @@ impl ChatCalls {
     /// Force the block open or closed. Closed by default: the run is a single
     /// line of the transcript, expanded on demand by the reader.
     pub fn open(mut self, open: bool) -> Self {
-        self.open = Some(open);
+        self.open = open;
         self
     }
 
-    /// Replace the words the run shows (see [`ChatCallsText`]): a French app
-    /// passes French, the library stays English.
-    pub fn text(mut self, text: ChatCallsText) -> Self {
-        self.text = text;
+    /// Replace the words the run shows (see [`ChatCallsLabels`]): an app in
+    /// another language passes its own, the library stays English.
+    pub fn labels(mut self, labels: ChatCallsLabels) -> Self {
+        self.labels = labels;
         self
     }
 
@@ -185,7 +185,7 @@ impl ChatCalls {
 
     /// Whether the block starts expanded: never, unless the app asked.
     pub fn starts_open(&self) -> bool {
-        self.open.unwrap_or(false)
+        self.open
     }
 
     /// The summary line: how many calls, and which tools (three names at most).
@@ -206,13 +206,21 @@ impl ChatCalls {
             shown
         };
         let template = match n {
-            0 => return self.text.none.to_string(),
-            1 => self.text.one,
-            _ => self.text.many,
+            0 => return self.labels.none.to_string(),
+            1 => self.labels.one.as_ref(),
+            _ => self.labels.many.as_ref(),
         };
         template
             .replace("{n}", &n.to_string())
             .replace("{tools}", &tools)
+    }
+
+    /// One call's line — name, argument summary, state — as a flex row. It is a
+    /// `<span>`, never the `<summary>`: a flex `<summary>` drops its marker.
+    fn line_row(line: Vec<ElementBuilder>) -> ElementBuilder {
+        el(El::Span)
+            .st([St::DisplayFlex, St::ItemsCenter, St::GapSm, St::MinW0])
+            .append(line)
     }
 
     /// Build the block into an ElementBuilder.
@@ -231,9 +239,9 @@ impl ChatCalls {
                 el(El::Span)
                     .st([St::TextXs, St::TextError, St::WhitespaceNowrap])
                     .text(&if errors > 1 {
-                        self.text.failure_many.replace("{n}", &errors.to_string())
+                        self.labels.failure_many.replace("{n}", &errors.to_string())
                     } else {
-                        self.text.failure_one.to_string()
+                        self.labels.failure_one.to_string()
                     }),
             );
         }
@@ -256,21 +264,17 @@ impl ChatCalls {
                     .text(call.summary.as_ref()),
                 el(El::Span)
                     .st([St::TextXs, St::WhitespaceNowrap, call.state.ink()])
-                    .text(call.state.label(&self.text)),
+                    .text(call.state.label(&self.labels)),
             ];
             let mut rows: Vec<ElementBuilder> = Vec::new();
             match call.detail {
                 Some(detail) => {
+                    // No flex on a `<summary>`: it would lose its native marker,
+                    // the only affordance of the call. The row is a span inside.
                     let mut inner = el(El::Details).st([St::TextSm]).append([
                         el(El::Summary)
-                            .st([
-                                St::DisplayFlex,
-                                St::ItemsCenter,
-                                St::GapSm,
-                                St::MinW0,
-                                St::CursorPointer,
-                            ])
-                            .append(line),
+                            .st([St::CursorPointer, St::PxXs])
+                            .append([Self::line_row(line)]),
                         detail,
                     ]);
                     if call.state != ChatCallState::Ok {
@@ -281,14 +285,8 @@ impl ChatCalls {
                 None => {
                     rows.push(
                         el(El::Div)
-                            .st([
-                                St::DisplayFlex,
-                                St::ItemsCenter,
-                                St::GapSm,
-                                St::MinW0,
-                                St::PyXs,
-                            ])
-                            .append(line),
+                            .st([St::PyXs, St::PlSm])
+                            .append([Self::line_row(line)]),
                     );
                 }
             }
@@ -433,28 +431,28 @@ mod tests {
 
     #[test]
     fn the_app_brings_its_own_words() {
-        let text = ChatCallsText {
-            none: "Nothing ran",
-            one: "1 call ({tools})",
-            many: "{n} calls ({tools})",
-            failure_one: "1 failed",
-            failure_many: "{n} failed",
-            running: "in flight",
-            ..ChatCallsText::default()
+        let labels = ChatCallsLabels {
+            none: "Nothing ran".into(),
+            one: "1 call ({tools})".into(),
+            many: "{n} calls ({tools})".into(),
+            failure_one: "1 failed".into(),
+            failure_many: "{n} failed".into(),
+            running: "in flight".into(),
+            ..ChatCallsLabels::default()
         };
         assert_eq!(
-            ChatCalls::new().text(text.clone()).summary_text(),
+            ChatCalls::new().labels(labels.clone()).summary_text(),
             "Nothing ran"
         );
         assert_eq!(
             ChatCalls::new()
                 .call(ChatCall::new("Bash", "ls"))
-                .text(text.clone())
+                .labels(labels.clone())
                 .summary_text(),
             "1 call (Bash)"
         );
         let html = run()
-            .text(text)
+            .labels(labels)
             .call(ChatCall::new("Read", "src/lib.rs").state(ChatCallState::Running))
             .call(ChatCall::new("Edit", "src/a.rs").state(ChatCallState::Error))
             .call(ChatCall::new("Write", "src/b.rs").state(ChatCallState::Error))
