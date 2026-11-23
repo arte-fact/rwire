@@ -29,6 +29,8 @@ pub struct ChatEntry {
     detail: Option<ChatDetail>,
     grouped: bool,
     streaming: bool,
+    bubble: bool,
+    rail: bool,
 }
 
 impl ChatEntry {
@@ -44,6 +46,8 @@ impl ChatEntry {
             detail: None,
             grouped: false,
             streaming: false,
+            bubble: false,
+            rail: true,
         }
     }
 
@@ -60,6 +64,8 @@ impl ChatEntry {
         entry.detail = item.detail(ctx);
         entry.grouped = grouped;
         entry.streaming = item.streaming();
+        entry.bubble = item.bubble();
+        entry.rail = item.rail();
         entry.build()
     }
 
@@ -106,6 +112,21 @@ impl ChatEntry {
         self
     }
 
+    /// Render as a bubble: the local user's turn, right-aligned on a tinted
+    /// rounded block instead of the accent rail of a full-width entry.
+    pub fn bubble(mut self, bubble: bool) -> Self {
+        self.bubble = bubble;
+        self
+    }
+
+    /// The hairline tone rail down the left edge (default on). Turn it off for a
+    /// surface that wants the body flush with the column: no lateral border, the
+    /// text sitting on the page.
+    pub fn rail(mut self, rail: bool) -> Self {
+        self.rail = rail;
+        self
+    }
+
     fn intent_text(intent: ChatIntent) -> St {
         match intent {
             ChatIntent::Default => St::TextHigh,
@@ -124,7 +145,7 @@ impl ChatEntry {
     }
 
     /// The hairline accent rail (claw's proven 2px flex strip).
-    fn rail(intent: ChatIntent) -> ElementBuilder {
+    fn rail_strip(intent: ChatIntent) -> ElementBuilder {
         el(El::Span)
             .style(Style::new().width("2px").set("flex", "0 0 2px"))
             .st([St::SelfStretch, Self::intent_rail(intent)])
@@ -133,10 +154,26 @@ impl ChatEntry {
     /// Build into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         let intent = self.author.intent;
+        let bubble = self.bubble;
 
-        // Header: author · tag · time (suppressed when grouped).
+        // Header: author · tag · time (suppressed when grouped). In a bubble the
+        // author is implied by the side the block sits on, so the header keeps
+        // only the time and the name for screen readers.
         let mut column: Vec<ElementBuilder> = Vec::new();
-        if !self.grouped {
+        if bubble {
+            if let Some(time) = &self.time {
+                column.push(
+                    el(El::Div)
+                        .st([
+                            St::DisplayFlex,
+                            St::JustifyEnd,
+                            St::ItemsCenter,
+                            St::TextLow,
+                        ])
+                        .append([el(El::Span).st([St::TextXs]).text(time.as_ref())]),
+                );
+            }
+        } else if !self.grouped {
             let mut header = vec![el(El::Span)
                 .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
                 .text(self.author.name.as_ref())];
@@ -189,6 +226,34 @@ impl ChatEntry {
                 .append(body_col),
         );
 
+        if bubble {
+            // The user's turn: tinted rounded block on the right, width follows
+            // the content up to a share of the column — the model's own output
+            // stays plain and full width.
+            let content = el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::FlexCol,
+                    St::GapXs,
+                    St::MinW0,
+                    St::BgMuted,
+                    St::RoundedLg,
+                    St::PxMd,
+                    St::PySm,
+                    St::TextSm,
+                ])
+                .style(Style::new().set("max-width", "min(85%, 46rem)"))
+                .append([el(El::Span)
+                    .st([St::SrOnly])
+                    .text(self.author.name.as_ref())])
+                .append(column);
+            let mut root = el(El::Div).st([St::DisplayFlex, St::JustifyEnd, St::MinW0]);
+            if let Some(key) = self.key {
+                root = root.id(format!("ce-{key}").as_str());
+            }
+            return root.append([content]);
+        }
+
         // MinW0 + BreakWords: wrap at the column edge instead of overflowing.
         let block = el(El::Div)
             .st([
@@ -201,7 +266,10 @@ impl ChatEntry {
             ])
             .append(column);
 
-        let mut row: Vec<ElementBuilder> = vec![Self::rail(intent)];
+        let mut row: Vec<ElementBuilder> = Vec::new();
+        if self.rail {
+            row.push(Self::rail_strip(intent));
+        }
         if let Some(avatar) = self.author.avatar {
             row.push(
                 el(El::Span)

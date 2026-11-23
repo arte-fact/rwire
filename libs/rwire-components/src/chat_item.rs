@@ -188,6 +188,20 @@ pub trait ChatItem {
         false
     }
 
+    /// Draw the accent rail down the entry's left edge? `false` for a body that
+    /// must run flush with the column (no lateral border).
+    fn rail(&self) -> bool {
+        true
+    }
+
+    /// Render this entry as a **bubble** (the local user's turn in a chat
+    /// surface): no rail, pushed to the right edge, the body in a tinted,
+    /// rounded block whose width follows its content up to a share of the
+    /// column. Model output stays plain and full width.
+    fn bubble(&self) -> bool {
+        false
+    }
+
     /// Group with the previous entry (suppress the repeated author header)?
     fn groups_with(&self, _prev: &Self) -> bool {
         false
