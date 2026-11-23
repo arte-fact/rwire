@@ -1188,6 +1188,112 @@ define_token_enum! {
         PyChip = 0x3D4 => "padding-block:var(--Qzcy,var(--S1))",
         /// `ThemeToggle` (default size): its block padding.
         PyIconToggle = 0x3D5 => "padding-block:var(--Qzq,var(--S2))",
+        // Status dots (0x3D6-0x3E5): each tone's dot color (`--Y?d`, 3:1 on the
+        // grounds a dot sits on) as `color`, drawn with `currentColor`.
+        /// The idle / neutral dot color (3:1 on the grounds).
+        TextDotNeutral = 0x3D6 => "color:var(--Y0d)",
+        /// The accent dot color (3:1 on the grounds).
+        TextDotAccent = 0x3D7 => "color:var(--Yad)",
+        /// The info dot color (3:1 on the grounds).
+        TextDotInfo = 0x3D8 => "color:var(--Yid)",
+        /// The success (live) dot color (3:1 on the grounds).
+        TextDotSuccess = 0x3D9 => "color:var(--Ysd)",
+        /// The warning dot color (3:1 on the grounds).
+        TextDotWarning = 0x3DA => "color:var(--Ywd)",
+        /// The danger dot color (3:1 on the grounds).
+        TextDotDanger = 0x3DB => "color:var(--Yxd)",
+        /// Categorical color 1's dot color (3:1 on the grounds).
+        TextDotCat1 = 0x3DC => "color:var(--Y1d)",
+        /// Categorical color 2's dot color (3:1 on the grounds).
+        TextDotCat2 = 0x3DD => "color:var(--Y2d)",
+        /// Categorical color 3's dot color (3:1 on the grounds).
+        TextDotCat3 = 0x3DE => "color:var(--Y3d)",
+        /// Categorical color 4's dot color (3:1 on the grounds).
+        TextDotCat4 = 0x3DF => "color:var(--Y4d)",
+        /// Categorical color 5's dot color (3:1 on the grounds).
+        TextDotCat5 = 0x3E0 => "color:var(--Y5d)",
+        /// Categorical color 6's dot color (3:1 on the grounds).
+        TextDotCat6 = 0x3E1 => "color:var(--Y6d)",
+        /// A 3 px halo at 22 % of the dot's color.
+        DotRing = 0x3E2 => "box-shadow:0 0 0 3px color-mix(in srgb,currentColor 22%,transparent)",
+        /// A hollow dot: a 1.5 px circle in the dot's color.
+        DotHollow = 0x3E3 => "border:1.5px solid currentColor;background:transparent",
+        /// A small dot: 9 px.
+        SizeDotSm = 0x3E4 => "width:9px;height:9px",
+        /// A medium dot: 12 px.
+        SizeDotMd = 0x3E5 => "width:12px;height:12px",
+        // Dense navigation lists (0x3E6-0x3EF): NavList / NavGroup / NavRow.
+        /// A navigation row's grid: a 14 px leading cell, the title, a trailing cell.
+        GridNavRow = 0x3E6 => "display:grid;grid-template-columns:14px minmax(0,1fr) auto;align-items:center;column-gap:.5rem",
+        /// A navigation row's radius: 7 px.
+        RoundedNavRow = 0x3E7 => "border-radius:7px",
+        /// A navigation row's title: 13.5 px.
+        TextNavTitle = 0x3E8 => "font-size:13.5px",
+        /// A navigation row's meta line: 12 px.
+        TextNavMeta = 0x3E9 => "font-size:12px",
+        /// A short mono suffix (a hash): 10 px.
+        TextNavHash = 0x3EA => "font-size:10px",
+        /// A group header: 11 px, 600, uppercase, spaced .06em.
+        NavGroupHead = 0x3EB => "font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase",
+        /// The current row's hairline in the accent (inset, 45 %).
+        NavCurrent = 0x3EC => "box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--v) 45%,transparent)",
+        /// A fold chevron's turn (none under `prefers-reduced-motion`).
+        ChevronFold = 0x3ED => "transition:transform .15s ease;@media (prefers-reduced-motion:reduce){transition:none}",
+        /// A quarter turn back: a folded group's chevron.
+        RotateNeg90 = 0x3EE => "transform:rotate(-90deg)",
+        /// A navigation row's meta line, under the title and the trailing cell.
+        ColNavMeta = 0x3EF => "grid-column:2/4",
+        // Safe areas (0x3F0-0x3F1): a sidebar under a notch or a rounded corner.
+        /// Padding left: at least the safe-area inset (0 elsewhere).
+        PlSafe = 0x3F0 => "padding-left:env(safe-area-inset-left,0px)",
+        /// Padding top: `--S3`, or the safe-area inset when larger.
+        PtSafe = 0x3F1 => "padding-top:max(var(--S3),env(safe-area-inset-top,0px))",
+        // Three-column shell (0x3F2-0x3F5): AppShell's columns and resize handles.
+        /// The shell's sidebar column: `--Qsw` wide (264 px by default).
+        WShellSidebar = 0x3F2 => "width:var(--Qsw,264px);flex-shrink:0",
+        /// The shell's panel column: `--Qpw` wide (340 px by default).
+        WShellPanel = 0x3F3 => "width:var(--Qpw,340px);flex-shrink:0",
+        /// A column resize handle: a 10 px strip over the column edge.
+        ShellHandle = 0x3F4 => "width:10px;margin-inline:-5px;position:relative;z-index:1;flex-shrink:0;cursor:col-resize;touch-action:none",
+        /// A resize handle's 2 px accent line (on hover or focus).
+        ShellHandleLine = 0x3F5 => "background:linear-gradient(var(--v),var(--v)) center/2px 100% no-repeat",
+        // Dense search and runtime badges (0x3F6-0x3FA).
+        /// A small search field's text: 13 px.
+        TextSearchSm = 0x3F6 => "font-size:13px",
+        /// A small search field's inline padding: .7rem.
+        PxSearchSm = 0x3F7 => "padding-inline:.7rem",
+        /// A small search field's block padding: .45rem.
+        PySearchSm = 0x3F8 => "padding-block:.45rem",
+        /// An extra-small badge's text: 10.5 px.
+        TextBadgeXs = 0x3F9 => "font-size:10.5px",
+        /// An extra-small badge's radius: 5 px.
+        RoundedBadgeXs = 0x3FA => "border-radius:5px",
+        // Sidebar footer (0x3FB-0x3FC): the default 10 px 12 px.
+        /// A sidebar footer's top padding: 10 px.
+        PtSidebarFoot = 0x3FB => "padding-top:10px",
+        /// A sidebar footer's bottom padding: 10 px plus the bottom safe area.
+        PbSidebarFootSafe = 0x3FC => "padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))",
+        /// Contain layout and paint: the box becomes the containing block of its
+        /// fixed descendants (a demo frame that keeps a shell's drawer inside).
+        ContainLayout = 0x3FD => "contain:layout paint",
+        // Old-front parity (0x3FE-0x400).
+        /// A 26 px square (a brand mark), not shrinking in a flex row.
+        Sq26 = 0x3FE => "width:26px;height:26px;flex-shrink:0",
+        /// A 7 px radius (a brand mark, a navigation row).
+        Rounded7 = 0x3FF => "border-radius:7px",
+        /// An extra-small dot: 7 px (a connection indicator).
+        SizeDotXs = 0x400 => "width:7px;height:7px",
+        // Old-front parity, second pass (0x401-0x405).
+        /// A link's color (`--lk`): AA on the app, surface and sidebar grounds.
+        TextLink = 0x401 => "color:var(--lk)",
+        /// 12.5 px text (a sidebar footer).
+        Text12_5 = 0x402 => "font-size:12.5px",
+        /// A sidebar header's top padding: 14 px, or the top safe area when larger.
+        PtSidebarHeadSafe = 0x403 => "padding-top:max(14px,env(safe-area-inset-top,0px))",
+        /// A sidebar header's inline padding: 14 px.
+        PxSidebarHead = 0x404 => "padding-inline:14px",
+        /// A sidebar header's bottom padding: 10 px.
+        PbSidebarHead = 0x405 => "padding-bottom:10px",
     }
 }
 
@@ -1636,7 +1742,7 @@ pub const PSEUDO_GLOBAL_CSS: &str = concat!(
     "@counter-style rw-sep{system:additive;additive-symbols:1 \"\\202F\",0 \"\"}",
     "@counter-style rw-sign{system:additive;additive-symbols:1 \"-\",0 \"\"}",
     ".u860::after{content:counter(s,rw-sign) counter(m,rw-lead) counter(ms,rw-sep) counter(kp,rw-pad3) counter(kl,rw-lead) counter(ks,rw-sep) counter(up,rw-pad3) counter(ul,rw-plain)}",
-    "@media(prefers-reduced-motion:reduce){.u850,.u851,.u860,.u868,.u874,.u875,.u891,.u892,.u893,.u894,.u896,.u897,.u911{animation-duration:0s!important;animation-delay:0s!important}}"
+    "@media(prefers-reduced-motion:reduce){.u466,.u850,.u851,.u860,.u868,.u874,.u875,.u891,.u892,.u893,.u894,.u896,.u897,.u911{animation-duration:0s!important;animation-delay:0s!important}}"
 );
 
 /// Whether a utility declaration references one of the shared `rw-*` keyframes.

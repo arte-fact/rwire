@@ -314,7 +314,16 @@ impl Link {
         el(El::A)
             .attr("href", href)
             .attr("data-route", "")
+            .st([crate::style_tokens::St::TextLink])
             .text(text)
+    }
+
+    /// A navigation link that is a control (a sidebar footer's "Old page"):
+    /// like [`Link::to`], with `data-touch`, so under a coarse pointer or
+    /// below `Theme::touch_below` it becomes an `inline-flex` 44 px target. A
+    /// link in running text stays `Link::to` and does not grow.
+    pub fn touch(href: &str, text: &str) -> ElementBuilder {
+        Self::to(href, text).attr("data-touch", "")
     }
 
     /// Create a navigation link with custom content.

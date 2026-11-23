@@ -211,10 +211,23 @@ export function makeDom(): { document: MockDoc } {
         (node.listeners[t] || (node.listeners[t] = [])).push(fn);
       },
       fire(type, e = {}) {
-        const ev = { type, preventDefault() {}, target: node, ...e };
+        let stopped = false;
+        const ev = {
+          type,
+          isTrusted: true,
+          preventDefault() {},
+          stopPropagation() {
+            stopped = true;
+          },
+          stopImmediatePropagation() {
+            stopped = true;
+          },
+          target: node,
+          ...e,
+        };
         for (const fn of node.listeners[type] || []) fn(ev);
-        // Bubble to the document-level delegated dispatchers.
-        for (const fn of doc.listeners[type] || []) fn(ev);
+        // Bubble to the document-level delegated dispatchers (unless stopped).
+        if (!stopped) for (const fn of doc.listeners[type] || []) fn(ev);
       },
       focus() {
         doc.activeElement = node;

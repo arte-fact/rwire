@@ -147,6 +147,28 @@ impl Tone {
         }
     }
 
+    /// The tone's status-dot color, as `color` (draw the dot with
+    /// `St::BgCurrentColor`, or `St::DotHollow`; `St::DotRing` adds a halo):
+    /// it reaches 3:1 on every ground a dot sits on.
+    pub fn dot(self) -> St {
+        match self {
+            Tone::Neutral => St::TextDotNeutral,
+            Tone::Accent => St::TextDotAccent,
+            Tone::Info => St::TextDotInfo,
+            Tone::Success => St::TextDotSuccess,
+            Tone::Warning => St::TextDotWarning,
+            Tone::Danger => St::TextDotDanger,
+            Tone::Cat(n) => [
+                St::TextDotCat1,
+                St::TextDotCat2,
+                St::TextDotCat3,
+                St::TextDotCat4,
+                St::TextDotCat5,
+                St::TextDotCat6,
+            ][Self::cat(n) - 1],
+        }
+    }
+
     /// A 1px border in the tone (an outlined badge).
     pub fn border(self) -> St {
         match self {
@@ -205,6 +227,7 @@ mod tests {
                 tone.solid(),
                 tone.on_solid(),
                 tone.on_solid_mark(),
+                tone.dot(),
                 tone.border(),
             ] {
                 let css = st.css();

@@ -51,9 +51,9 @@ pub fn nord() -> ColorPalette {
         ]
         .map(String::from)
         .to_vec(),
-        // The inks of the old mcp-agents front (/app): runtimes claude, vibe, pi,
-        // then its "wait" and "permission" inks. The sixth (cyan) has none in
-        // /app: its ink is derived from the color.
+        // Categorical inks: one per runtime kind, then the "wait" and
+        // "permission" inks. The sixth (cyan) has no reference ink: it is
+        // derived from the color.
         categorical_inks: [
             ("#3b5a7f", "#88C0D0"),
             ("#6b4a66", "#cdb0c8"),
@@ -64,7 +64,7 @@ pub fn nord() -> ColorPalette {
         .map(|(l, d)| (l.to_string(), d.to_string()))
         .to_vec(),
         // Marks (a logotype, a decorative glyph) on the solid fills: nord6, as the
-        // old front's brand "m" on nord10.
+        // brand "m" on nord10.
         categorical_on_solids: vec!["#ECEFF4".to_string(); 6],
     }
 }

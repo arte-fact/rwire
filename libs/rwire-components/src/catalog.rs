@@ -333,7 +333,7 @@ const BADGE_TEXT: &[TextProp] = &[TextProp {
     default: "Badge",
 }];
 fn badge_rich(p: &DemoParams) -> ElementBuilder {
-    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape, BadgeSize};
     let intent = match v(p.variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -349,10 +349,16 @@ fn badge_rich(p: &DemoParams) -> ElementBuilder {
         1 => BadgeFill::Outline,
         _ => BadgeFill::Solid,
     };
+    let size = match v(p.variants, 3) {
+        1 => BadgeSize::Xs,
+        _ => BadgeSize::Md,
+    };
     Badge::new()
         .intent(intent)
         .shape(shape)
         .fill(fill)
+        .size(size)
+        .mono(b(p.bools, 0))
         .text(p.texts.first().copied().unwrap_or("Badge").to_string())
         .build()
 }
@@ -1966,8 +1972,9 @@ fn text_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         .build()
 }
 
-fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
-    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape};
+fn badge_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{Badge, BadgeFill, BadgeIntent, BadgeShape, BadgeSize};
+    use rwire::Tone;
     let intent = match v(variants, 0) {
         1 => BadgeIntent::Primary,
         2 => BadgeIntent::Success,
@@ -1983,12 +1990,43 @@ fn badge_demo(variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         1 => BadgeFill::Outline,
         _ => BadgeFill::Solid,
     };
-    Badge::new()
+    let size = match v(variants, 3) {
+        1 => BadgeSize::Xs,
+        _ => BadgeSize::Md,
+    };
+    let mono = b(bools, 0);
+    let main = Badge::new()
         .intent(intent)
         .shape(shape)
         .fill(fill)
+        .size(size)
+        .mono(mono)
         .text("Badge")
-        .build()
+        .build();
+    let tones = el(El::Div)
+        .st([
+            rwire::St::DisplayFlex,
+            rwire::St::GapSm,
+            rwire::St::ItemsCenter,
+            rwire::St::FlexWrap,
+        ])
+        .append([
+            Badge::new().tone(Tone::Accent).text("accent").build(),
+            Badge::new().tone(Tone::Success).text("live").build(),
+            Badge::new()
+                .tone(Tone::Danger)
+                .fill(BadgeFill::Outline)
+                .text("error")
+                .build(),
+            Badge::new()
+                .tone(Tone::Cat(2))
+                .size(BadgeSize::Xs)
+                .text("42")
+                .build(),
+        ]);
+    el(El::Div)
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol, rwire::St::GapSm])
+        .append([main, tones])
 }
 
 const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
@@ -2016,6 +2054,10 @@ const STATUS_DOT_VARIANTS: &[VariantAxis] = &[VariantAxis {
         VariantValue {
             label: "Error",
             rust_expr: "StatusDotIntent::Error",
+        },
+        VariantValue {
+            label: "Hollow",
+            rust_expr: "StatusDotIntent::Hollow",
         },
     ],
 }];
@@ -2205,6 +2247,348 @@ fn density_demo(_variants: &[usize], _bools: &[bool]) -> ElementBuilder {
         .build()
 }
 
+// ============================================================================
+// Shell and navigation (R2): NavList, three-column AppShell
+// ============================================================================
+
+/// The gallery's sessions: 3 machines, 10 rows, every dot state.
+fn gallery_nav(folded: bool, current: &str) -> ElementBuilder {
+    use crate::{
+        Badge, BadgeFill, BadgeSize, NavGroup, NavList, NavRow, StatusDot, StatusDotIntent,
+    };
+    use rwire::Tone;
+    let runtime = |name: &'static str, tone: Tone| {
+        Badge::new()
+            .tone(tone)
+            .fill(BadgeFill::Outline)
+            .size(BadgeSize::Xs)
+            .text(name)
+            .build()
+    };
+    // The dot is the row's only sign of its state: it carries its name.
+    let generating = || {
+        StatusDot::new()
+            .intent(StatusDotIntent::Success)
+            .ring(true)
+            .pulse(true)
+            .aria_label("Generating")
+            .build()
+    };
+    let validating = || {
+        StatusDot::new()
+            .tone(Tone::Cat(5))
+            .ring(true)
+            .aria_label("Waiting for approval")
+            .build()
+    };
+    let typing = || StatusDot::new().aria_label("Waiting for input").build();
+    let inactive = || {
+        StatusDot::new()
+            .intent(StatusDotIntent::Hollow)
+            .aria_label("Inactive")
+            .build()
+    };
+    // (href, project, machine, dot, runtime, gist, hash, attention)
+    type Row = (
+        &'static str,
+        &'static str,
+        &'static str,
+        fn() -> ElementBuilder,
+        (&'static str, Tone),
+        &'static str,
+        &'static str,
+        bool,
+    );
+    let claude = ("claude", Tone::Cat(1));
+    let vibe = ("vibe", Tone::Cat(2));
+    let pi = ("pi", Tone::Cat(3));
+    type Group = (&'static str, fn() -> ElementBuilder, Vec<Row>);
+    let groups: [Group; 3] = [
+        (
+            "home",
+            || StatusDot::new().intent(StatusDotIntent::Success).build(),
+            vec![
+                (
+                    "/s/1",
+                    "Studio",
+                    "@home",
+                    generating,
+                    claude,
+                    "Refactoring the parser",
+                    "a1b2",
+                    false,
+                ),
+                (
+                    "/s/2",
+                    "rwire",
+                    "@home",
+                    validating,
+                    claude,
+                    "Run cargo test --workspace?",
+                    "c3d4",
+                    true,
+                ),
+                (
+                    "/s/3",
+                    "games",
+                    "@home",
+                    typing,
+                    vibe,
+                    "Waiting for input",
+                    "e5f6",
+                    false,
+                ),
+                (
+                    "/s/4",
+                    "notes",
+                    "@home",
+                    inactive,
+                    pi,
+                    "Idle since yesterday",
+                    "a7b8",
+                    false,
+                ),
+            ],
+        ),
+        (
+            "lab",
+            || StatusDot::new().intent(StatusDotIntent::Success).build(),
+            vec![
+                (
+                    "/s/5",
+                    "rapports",
+                    "@lab",
+                    generating,
+                    vibe,
+                    "Writing the weekly report",
+                    "c9d0",
+                    false,
+                ),
+                (
+                    "/s/6",
+                    "parity",
+                    "@lab",
+                    typing,
+                    claude,
+                    "Measuring screen 1",
+                    "e1f2",
+                    false,
+                ),
+                ("/s/7", "docs", "@lab", inactive, pi, "Done", "a3b4", false),
+            ],
+        ),
+        (
+            "laptop",
+            || StatusDot::new().intent(StatusDotIntent::Hollow).build(),
+            vec![
+                (
+                    "/s/8", "sandbox", "@laptop", inactive, claude, "Offline", "c5d6", false,
+                ),
+                (
+                    "/s/9", "scratch", "@laptop", inactive, vibe, "Offline", "e7f8", false,
+                ),
+                ("/s/10", "drafts", "@laptop", inactive, pi, "", "", false),
+            ],
+        ),
+    ];
+    NavList::new()
+        .aria_label("Sessions")
+        .groups(
+            groups
+                .into_iter()
+                .enumerate()
+                .map(|(i, (machine, dot, rows))| {
+                    let count = rows.len() as u32;
+                    let mut group = NavGroup::new(machine)
+                        .on_toggle(rwire::HandlerSpec::memory::<GalleryShell>(gallery_noop))
+                        .count(count)
+                        .leading(dot())
+                        .folded(folded && i == 2);
+                    if i == 0 {
+                        group = group.badge(
+                            Badge::new()
+                                .tone(Tone::Cat(5))
+                                .size(BadgeSize::Xs)
+                                .text("1")
+                                .build(),
+                        );
+                    }
+                    group.rows(rows.into_iter().map(
+                        |(href, project, at, dot, (rt, tone), gist, hash, attention)| {
+                            let row = NavRow::new(href)
+                                .leading(dot())
+                                .title(project, at)
+                                .trailing(runtime(rt, tone))
+                                .current(href == current)
+                                .attention(attention);
+                            // One row without a meta line: a one-line row.
+                            if gist.is_empty() {
+                                row
+                            } else {
+                                row.meta(gist, hash)
+                            }
+                        },
+                    ))
+                }),
+        )
+        .build()
+}
+
+/// Dense grouped navigation: 3 groups, 10 rows, every dot state, the current
+/// row, a folded group (`folded`).
+fn navigation_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    el(El::Div)
+        .st([
+            rwire::St::WFull,
+            rwire::St::BgSidebar,
+            rwire::St::PSm,
+            rwire::St::RoundedLg,
+        ])
+        .attr("data-demo", "navigation")
+        .append([gallery_nav(b(bools, 0), "/s/1")])
+}
+
+/// The handler the gallery's resize handles and group headers call: a no-op
+/// (widths and folds stay as they are in the gallery).
+#[derive(Default)]
+struct GalleryShell;
+impl rwire::MemoryState for GalleryShell {}
+fn gallery_noop(_: &mut GalleryShell) {}
+
+/// A three-column shell: sidebar (brand, search, chips, sessions, footer),
+/// main, panel; resize handles; `collapsed`, `no_panel`, `mobile_main`.
+fn shell_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
+    use crate::{
+        AppShell, Button, Chip, ChipGroup, Input, InputSize, MobilePane, Sidebar, ThemeToggle,
+    };
+    use rwire::{HandlerSpec, St, Tone};
+    let brand = el(El::Div)
+        .st([St::DisplayFlex, St::ItemsCenter, St::GapSm, St::FontBold])
+        .append([
+            el(El::Span)
+                .st([
+                    Tone::Cat(1).solid(),
+                    Tone::Cat(1).on_solid_mark(),
+                    St::DisplayInlineFlex,
+                    St::ItemsCenter,
+                    St::JustifyCenter,
+                    St::Sq26,
+                    St::Rounded7,
+                    St::TextSm,
+                ])
+                .attr("aria-hidden", "true")
+                .data("demo", "brand-mark")
+                .text("m"),
+            el(El::Span).text("Studio"),
+            // A connection link: a 7 px dot, no halo.
+            el(El::Span)
+                .st([
+                    St::MlAuto,
+                    St::DisplayFlex,
+                    St::ItemsCenter,
+                    St::GapXs,
+                    St::TextXs,
+                    St::FontMedium,
+                    St::TextMuted,
+                ])
+                .data("demo", "connection")
+                .append([
+                    crate::StatusDot::new()
+                        .intent(crate::StatusDotIntent::Success)
+                        .size(crate::StatusDotSize::Xs)
+                        .build(),
+                    el(El::Span).text("live"),
+                ]),
+            Button::icon_only(Icon::SidebarCollapse, "Hide the list")
+                .intent(crate::ButtonIntent::Ghost)
+                .build(),
+        ]);
+    let sidebar = Sidebar::new()
+        .header(brand)
+        .search(
+            Input::search()
+                .size(InputSize::Sm)
+                .placeholder("Search")
+                .build(),
+        )
+        .filters(
+            ChipGroup::new("Filters")
+                .chips([
+                    Chip::new("All").active(true).count(10).build(),
+                    Chip::new("To approve").count(1).build(),
+                    Chip::new("Working").count(2).build(),
+                ])
+                .build(),
+        )
+        .body(gallery_nav(false, "/s/2"))
+        .footer(
+            el(El::Div)
+                .st([St::DisplayFlex, St::ItemsCenter, St::GapSm])
+                .append([
+                    el(El::Span).st([St::TextMuted]).text("Admin"),
+                    // A link that is a control: a 44 px target under a finger.
+                    rwire::router::Link::touch("/", "Old page").data("demo", "touch-link"),
+                    el(El::Span).st([St::MlAuto]),
+                    ThemeToggle::new().ghost().build(),
+                    Button::icon_only(Icon::LogOut, "Sign out")
+                        .intent(crate::ButtonIntent::Ghost)
+                        .build()
+                        .data("demo", "logout"),
+                ]),
+        )
+        .aria_label("Sessions")
+        .build();
+    let main = el(El::Div)
+        .st([
+            St::BgCanvas,
+            St::HFull,
+            St::PLg,
+            St::DisplayFlex,
+            St::FlexCol,
+            St::GapSm,
+        ])
+        .append([
+            el(El::H2).st([St::M0, St::TextBase]).text("rwire @home"),
+            el(El::P)
+                .st([St::M0, St::FontRead, St::TextDefault])
+                .text("The main column: a conversation reads here, on the canvas."),
+        ]);
+    let panel = el(El::Div)
+        .st([St::PMd, St::DisplayFlex, St::FlexCol, St::GapSm])
+        .append([
+            el(El::P)
+                .st([St::M0, St::NavGroupHead, St::TextMuted])
+                .text("Terminal"),
+            el(El::Code)
+                .st([St::FontMono, St::TextXs, St::TextMuted])
+                .text("$ cargo test --workspace"),
+        ]);
+    AppShell::new()
+        .sidebar(sidebar)
+        .main(main)
+        .panel((!b(bools, 1)).then_some(panel))
+        .sidebar_width(264)
+        .panel_width(340)
+        .collapsed(b(bools, 0))
+        .resizable(HandlerSpec::memory::<GalleryShell>(gallery_noop))
+        // Inside the gallery page's own <main>: no second landmark.
+        .landmarks(false)
+        .mobile(if b(bools, 2) {
+            MobilePane::Main
+        } else {
+            MobilePane::Sidebar
+        })
+        .build()
+        // A frame in the gallery, not the whole viewport; its drawer stays inside.
+        .st([
+            St::MaxH60Dvh,
+            St::BorderDefault,
+            St::RoundedLg,
+            St::ContainLayout,
+        ])
+        .attr("data-demo", "shell")
+}
+
 fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
     use crate::{StatusDot, StatusDotIntent};
     let intent = match v(variants, 0) {
@@ -2212,9 +2596,13 @@ fn status_dot_demo(variants: &[usize], bools: &[bool]) -> ElementBuilder {
         2 => StatusDotIntent::Success,
         3 => StatusDotIntent::Warning,
         4 => StatusDotIntent::Error,
+        5 => StatusDotIntent::Hollow,
         _ => StatusDotIntent::Muted,
     };
-    let mut dot = StatusDot::new().intent(intent).pulse(b(bools, 0));
+    let mut dot = StatusDot::new()
+        .intent(intent)
+        .pulse(b(bools, 0))
+        .ring(b(bools, 2));
     if b(bools, 1) {
         dot = dot.label("running");
     }
@@ -2448,17 +2836,29 @@ fn streamed_content_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder 
 }
 
 fn chip_demo(_variants: &[usize], bools: &[bool]) -> ElementBuilder {
-    use crate::Chip;
+    use crate::{Chip, ChipGroup};
     el(El::Div)
-        .st([
-            rwire::St::DisplayFlex,
-            rwire::St::GapSm,
-            rwire::St::ItemsCenter,
-        ])
+        .st([rwire::St::DisplayFlex, rwire::St::FlexCol, rwire::St::GapSm])
         .append([
-            Chip::new("All").active(b(bools, 0)).build(),
-            Chip::new("Running").build(),
-            Chip::new("Failed").build(),
+            el(El::Div)
+                .st([
+                    rwire::St::DisplayFlex,
+                    rwire::St::GapSm,
+                    rwire::St::ItemsCenter,
+                ])
+                .append([
+                    Chip::new("All").active(b(bools, 0)).build(),
+                    Chip::new("Running").build(),
+                    Chip::new("Failed").count(3).build(),
+                    Chip::new("Docs").href("/docs").active(b(bools, 0)).build(),
+                ]),
+            ChipGroup::new("Filters")
+                .chips([
+                    Chip::new("All").active(true).build(),
+                    Chip::new("Running").count(5).build(),
+                    Chip::new("Failed").count(2).build(),
+                ])
+                .build(),
         ])
 }
 
@@ -3459,6 +3859,22 @@ const BADGE_VARIANTS: &[VariantAxis] = &[
             },
         ],
     },
+    VariantAxis {
+        name: "size",
+        display_name: "Size",
+        rust_type: "BadgeSize",
+        default_index: 0,
+        values: &[
+            VariantValue {
+                label: "Md",
+                rust_expr: "BadgeSize::Md",
+            },
+            VariantValue {
+                label: "Xs (10.5 px mono, r 5)",
+                rust_expr: "BadgeSize::Xs",
+            },
+        ],
+    },
 ];
 
 const TAG_VARIANTS: &[VariantAxis] = &[VariantAxis {
@@ -4018,6 +4434,46 @@ const ENTRIES: &[ComponentEntry] = &[
         build_demo: app_shell_demo,
     },
     ComponentEntry {
+        name: "Three-column shell",
+        slug: "shell",
+        description: "AppShell with a sidebar, a main column and a panel: resize handles (double-click resets), a drawer below 1100 px, one column below 760 px.",
+        category: Category::Layout,
+        order: 105,
+        variants: &[],
+        bool_props: &[
+            BoolProp {
+                name: "collapsed",
+                description: "Hide the sidebar",
+                default: false,
+            },
+            BoolProp {
+                name: "no_panel",
+                description: "No right-hand panel",
+                default: false,
+            },
+            BoolProp {
+                name: "mobile_main",
+                description: "On a phone, show the main column (else the list)",
+                default: false,
+            },
+        ],
+        build_demo: shell_demo,
+    },
+    ComponentEntry {
+        name: "Navigation",
+        slug: "navigation",
+        description: "NavList, NavGroup, NavRow: machines and sessions, dense, with status dots, runtime badges and the current row.",
+        category: Category::Navigation,
+        order: 405,
+        variants: &[],
+        bool_props: &[BoolProp {
+            name: "folded",
+            description: "Fold the last group",
+            default: false,
+        }],
+        build_demo: navigation_demo,
+    },
+    ComponentEntry {
         name: "Spacer",
         slug: "spacer",
         description: "Creates space between elements.",
@@ -4323,7 +4779,11 @@ const ENTRIES: &[ComponentEntry] = &[
         category: Category::DataDisplay,
         order: 301,
         variants: BADGE_VARIANTS,
-        bool_props: &[],
+        bool_props: &[BoolProp {
+            name: "mono",
+            description: "Mono font",
+            default: false,
+        }],
         build_demo: badge_demo,
     },
     ComponentEntry {
@@ -4342,6 +4802,11 @@ const ENTRIES: &[ComponentEntry] = &[
             BoolProp {
                 name: "label",
                 description: "Show an inline label",
+                default: false,
+            },
+            BoolProp {
+                name: "ring",
+                description: "A 3 px halo (generating, waiting)",
                 default: false,
             },
         ],

@@ -12,7 +12,7 @@ import { sep } from "./events.ts";
 import { fm } from "./morph.ts";
 import { BL, xi } from "./bind.ts";
 import { fl2, fb2, sl2, sb2, uf2, us2 } from "./actions.ts";
-import { bind, ack } from "./delegate.ts";
+import { bind, ack, own } from "./delegate.ts";
 import { ls, ul, lv, lb, type LiveBind, type LiveEl, type LiveSum } from "./live.ts";
 
 /** Extensions already imported (once per page). */
@@ -478,28 +478,53 @@ export function x(d: Uint8Array): void {
         ob.observe(sel);
       } else if (o === OP.BIND_RESIZE) {
         // Pointer-drag resize handle: dragging resizes the PREVIOUS element
-        // sibling's width (client-side only; min 8rem). Adjacency pairing
-        // keeps the wire format to a single ref.
+        // sibling's width (the NEXT one with data-rz="n", a right-hand panel;
+        // client-side; from 8rem to the parent's width minus 256). On release
+        // (or cancel) the width goes to the server through the handle's own
+        // click binding with data-w, once; a double-click restores the default
+        // width (data-w=""). Native clicks on the handle never reach the server
+        // (or an ancestor's handler). Adjacency pairing keeps the wire format
+        // to a single ref.
         const [f, fl] = rv(d, i);
         i += fl;
         const h = r[f];
-        h.__hk = "z";
+        const n = h.dataset.rz == "n";
+        h.__hk = n ? "zn" : "z";
+        const tg = () => (n ? h.nextElementSibling : h.previousElementSibling) as HTMLElement | null;
+        const tell = (w: string) => {
+          h.dataset.w = w;
+          own(h, "click");
+        };
+        h.addEventListener("click", (e) => e.stopImmediatePropagation(), true);
         h.addEventListener("pointerdown", (e) => {
-          const tgt = h.previousElementSibling as HTMLElement | null;
+          const tgt = tg();
           if (!tgt) return;
           e.preventDefault();
           const sx = (e as PointerEvent).clientX,
-            sw = tgt.getBoundingClientRect().width;
+            sw = tgt.getBoundingClientRect().width,
+            pw = tgt.parentElement?.getBoundingClientRect().width;
+          const max = pw ? Math.max(128, pw - 256) : 1e9;
+          let w = 0;
           const mv = (ev: PointerEvent) => {
-            tgt.style.width = Math.max(128, sw + ev.clientX - sx) + "px";
+            w = Math.min(max, Math.max(128, sw + (n ? sx - ev.clientX : ev.clientX - sx)));
+            tgt.style.width = w + "px";
             tgt.style.flex = "0 0 auto";
           };
           const up = () => {
             removeEventListener("pointermove", mv as EventListener);
             removeEventListener("pointerup", up);
+            removeEventListener("pointercancel", up);
+            if (w) tell("" + Math.round(w));
           };
           addEventListener("pointermove", mv as EventListener);
           addEventListener("pointerup", up);
+          addEventListener("pointercancel", up);
+        });
+        h.addEventListener("dblclick", () => {
+          const tgt = tg();
+          if (!tgt) return;
+          tgt.style.width = tgt.style.flex = "";
+          tell("");
         });
       } else if (o === OP.LIVE_SOURCE) {
         const [f, fl] = rv(d, i);

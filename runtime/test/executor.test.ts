@@ -665,6 +665,101 @@ test("BIND_RESIZE drags the previous sibling's width", () => {
   assert.equal(pane.style.flex, "0 0 auto");
 });
 
+test("BIND_RESIZE reports the width on release and resets it on double-click", () => {
+  const pane = doc.createElement("div");
+  (pane as any).getBoundingClientRect = () => ({ width: 264 });
+  const handle = doc.createElement("div");
+  handle.id = "rz2";
+  (handle as any).previousElementSibling = pane;
+  const winListeners: Record<string, ((e: unknown) => void)[]> = {};
+  (globalThis as any).addEventListener = (t: string, fn: (e: unknown) => void) => {
+    (winListeners[t] || (winListeners[t] = [])).push(fn);
+  };
+  (globalThis as any).removeEventListener = () => {};
+  run(syms("rz2"), [0x01, ...vint(0x80)], [0x50, ...vint(0)], [0x31, 0, 1, ...vint(5)]);
+  sent.length = 0;
+  handle.fire("pointerdown", { clientX: 100 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 140 });
+  for (const fn of winListeners["pointerup"] || []) fn({});
+  assert.equal(pane.style.width, "304px");
+  assert.equal(handle.dataset.w, "304", "the width rides data-w");
+  assert.equal(sent.length, 1, "sent through the handle's own click binding");
+  handle.fire("dblclick", {});
+  assert.equal(pane.style.width, "", "double-click: back to the default width");
+  assert.equal(pane.style.flex, "");
+  assert.equal(handle.dataset.w, "");
+  assert.equal(sent.length, 2, "and the reset is sent too");
+});
+
+test("BIND_RESIZE: native clicks never reach the server; a drag or a double-click reports once", () => {
+  const pane = doc.createElement("div");
+  (pane as any).getBoundingClientRect = () => ({ width: 264 });
+  const parent = doc.createElement("div");
+  parent.id = "rzp";
+  (parent as any).getBoundingClientRect = () => ({ width: 1200 });
+  const handle = doc.createElement("div");
+  handle.id = "rz4";
+  parent.appendChild(pane);
+  parent.appendChild(handle);
+  (handle as any).previousElementSibling = pane;
+  (pane as any).parentElement = parent;
+  const winListeners: Record<string, ((e: unknown) => void)[]> = {};
+  (globalThis as any).addEventListener = (t: string, fn: (e: unknown) => void) => {
+    (winListeners[t] || (winListeners[t] = [])).push(fn);
+  };
+  (globalThis as any).removeEventListener = (t: string, fn: (e: unknown) => void) => {
+    winListeners[t] = (winListeners[t] || []).filter((f) => f !== fn);
+  };
+  // A click handler on an ancestor (SplitPane's container, say) and on the handle.
+  run(syms("rzp"), [0x01, ...vint(0x80)], [0x31, 0, 1, ...vint(7)]);
+  run(syms("rz4"), [0x01, ...vint(0x80)], [0x50, ...vint(0)], [0x31, 0, 1, ...vint(5)]);
+  sent.length = 0;
+
+  handle.fire("click"); // a plain native click
+  assert.equal(sent.length, 0, "a native click on a handle sends nothing");
+
+  handle.fire("pointerdown", { clientX: 100 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 150 });
+  for (const fn of [...(winListeners["pointerup"] || [])]) fn({});
+  handle.fire("click"); // the browser's click after the release
+  assert.equal(sent.length, 1, "a drag reports once");
+  assert.equal(pane.style.width, "314px");
+
+  handle.fire("click");
+  handle.fire("click");
+  handle.fire("dblclick");
+  assert.equal(sent.length, 2, "a double-click reports one reset");
+  assert.equal(pane.style.width, "");
+
+  // Bounded by the parent's width minus 256.
+  handle.fire("pointerdown", { clientX: 100 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 2000 });
+  assert.equal(pane.style.width, "944px", "at most the parent's width minus 256");
+  for (const fn of [...(winListeners["pointercancel"] || [])]) fn({});
+  assert.equal(sent.length, 3, "a cancelled drag reports where it stopped");
+  assert.equal((winListeners["pointermove"] || []).length, 0, "listeners removed on cancel");
+});
+
+test("BIND_RESIZE with data-rz=n resizes the next sibling, the other way", () => {
+  const panel = doc.createElement("div");
+  (panel as any).getBoundingClientRect = () => ({ width: 340 });
+  const handle = doc.createElement("div");
+  handle.id = "rz3";
+  handle.setAttribute("data-rz", "n");
+  handle.dataset.rz = "n";
+  (handle as any).nextElementSibling = panel;
+  handle.click = () => {};
+  const winListeners: Record<string, ((e: unknown) => void)[]> = {};
+  (globalThis as any).addEventListener = (t: string, fn: (e: unknown) => void) => {
+    (winListeners[t] || (winListeners[t] = [])).push(fn);
+  };
+  (globalThis as any).removeEventListener = () => {};
+  run(syms("rz3"), [0x01, ...vint(0x80)], [0x50, ...vint(0)]);
+  handle.fire("pointerdown", { clientX: 500 });
+  for (const fn of winListeners["pointermove"] || []) fn({ clientX: 460 });
+  assert.equal(panel.style.width, "380px", "dragging left widens a right-hand panel");
+});
+
 test("data-kbd: combos click their element; bare keys guarded in fields", async () => {
   const { installRouter } = await import("../src/router.ts");
   (globalThis as any).window = { addEventListener: () => {} };

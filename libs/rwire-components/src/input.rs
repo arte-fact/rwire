@@ -275,6 +275,16 @@ impl Input {
             }
         }
 
+        // Search field density (/app target): 13 px text, 8 px radius, .45rem .7rem
+        // padding. The 44 px touch target comes from the theme's coarse-pointer
+        // rule (`min-height:44px` on inputs), not from the input itself.
+        // The radius stays `RoundedMd` (`--R2`: 8 px with studio).
+        // On the surface, in the ordinary ink (the dense sidebar search).
+        if self.input_type == InputType::Search && self.size == InputSize::Sm {
+            tokens.retain(|t| !matches!(t, St::TextXs | St::TextHigh | St::BgApp));
+            tokens.extend([St::TextSearchSm, St::TextDefault, St::BgSurface]);
+        }
+
         if self.invalid {
             tokens.push(St::BorderRed8);
         }
@@ -299,12 +309,26 @@ impl Input {
     pub fn build(self) -> ElementBuilder {
         let mut tokens = self.compute_tokens();
         tokens.extend(self.size_tokens());
+        if self.input_type == InputType::Search && self.size == InputSize::Sm {
+            // Its padding, inline and block apart so an app's `.st([St::PxMd])` wins;
+            // its height comes from it (13 px × 1.5 + .45rem × 2 + the border:
+            // 35.9 px), not from a fixed height.
+            tokens.retain(|t| !matches!(t, St::PxSm | St::Py0 | St::H1_75rem));
+            tokens.extend([St::PxSearchSm, St::PySearchSm]);
+        }
         let mut builder = el(El::Input)
             .st(tokens)
-            .placeholder_style([St::TextMuted])
+            // The search placeholder is the faint ink (AA in both modes), apart
+            // from the typed text; other inputs keep the soft ink.
+            .placeholder_style([if self.input_type == InputType::Search {
+                St::TextFaint
+            } else {
+                St::TextMuted
+            }])
             .hover([St::BorderEmphasis])
             .focus([St::BorderPrimary, St::OutlineTheme])
             .at(At::Type, self.input_type.av());
+
         if self.disabled {
             builder = builder.disabled_style([
                 St::Opacity50,
@@ -420,6 +444,75 @@ mod tests {
         let tokens = input.compute_tokens();
         assert!(tokens.contains(&St::TextXs));
         assert!(!tokens.contains(&St::TextSm));
+    }
+
+    #[test]
+    fn test_search_small_follows_the_app_density() {
+        let input = Input::search().size(InputSize::Sm);
+        let tokens = input.compute_tokens();
+        assert!(
+            tokens.contains(&St::RoundedMd),
+            "radius 8 with studio (--R2): {tokens:?}"
+        );
+        assert!(tokens.contains(&St::TextSearchSm), "13 px: {tokens:?}");
+        let html = input.build().to_static_html();
+        assert!(html.contains("type=\"search\""), "{html}");
+        // Tokens only: no inline style (an app can still override with `.st()`).
+        assert!(!html.contains(" style="), "{html}");
+        let built = Input::search().size(InputSize::Sm).build();
+        let utils = built.get_style_utils();
+        for st in [St::PxSearchSm, St::PySearchSm, St::TextSearchSm] {
+            assert!(utils.contains(&st.as_u16()), "{st:?}");
+        }
+        assert_eq!(St::PySearchSm.css(), "padding-block:.45rem");
+        let over = built.st([St::PxMd]);
+        assert!(over.get_style_utils().contains(&St::PxMd.as_u16()));
+        assert!(
+            !over.get_style_utils().contains(&St::PxSearchSm.as_u16()),
+            "PxMd replaces it"
+        );
+    }
+
+    /// The dense sidebar search: its height comes from its padding (no
+    /// fixed height), on the surface, in the ordinary ink.
+    #[test]
+    fn the_small_search_matches_the_old_front() {
+        let built = Input::search().size(InputSize::Sm).build();
+        let utils = built.get_style_utils();
+        for st in [
+            St::BgSurface,
+            St::TextDefault,
+            St::LeadingNormal,
+            St::BorderDefault,
+        ] {
+            assert!(utils.contains(&st.as_u16()), "{st:?}");
+        }
+        for st in [St::H1_75rem, St::HControl, St::BgApp, St::TextHigh] {
+            assert!(!utils.contains(&st.as_u16()), "{st:?} must go");
+        }
+        // Other inputs keep theirs.
+        let text = Input::text().size(InputSize::Sm).build();
+        assert!(text.get_style_utils().contains(&St::H1_75rem.as_u16()));
+    }
+
+    /// The search placeholder is the faint ink (AA in both modes), not the
+    /// soft ink, which is too close to the typed text in dark mode.
+    #[test]
+    fn the_search_placeholder_is_the_faint_ink() {
+        let built = Input::search().size(InputSize::Sm).build();
+        let placeholder: Vec<u16> = built
+            .get_pseudo_groups()
+            .iter()
+            .flat_map(|(_, c)| c.iter().copied())
+            .collect();
+        assert!(
+            placeholder.contains(&St::TextFaint.as_u16()),
+            "{placeholder:?}"
+        );
+        assert!(
+            !placeholder.contains(&St::TextMuted.as_u16()),
+            "{placeholder:?}"
+        );
     }
 
     #[test]
