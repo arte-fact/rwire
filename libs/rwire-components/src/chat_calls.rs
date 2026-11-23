@@ -8,8 +8,9 @@
 //!
 //! It fits where a chat surface would otherwise interleave dozens of one-line
 //! tool rows with the actual conversation: the prose stays readable, and the
-//! machinery is one click away. The block opens by itself while a call is still
-//! running or when one failed, and stays closed once everything succeeded.
+//! machinery is one click away. The run stays **closed** by default (the native
+//! `<summary>` triangle is the only affordance, no « détails » label), and the
+//! expanded calls are indented under their summary.
 //!
 //! The run carries no chrome of its own — no background, no rounding, no
 //! padding: it reads as one line of the transcript, not as a message bubble.
@@ -120,8 +121,8 @@ impl ChatCalls {
         self
     }
 
-    /// Force the block open or closed. By default it opens while a call runs or
-    /// after a failure, and stays closed once every call succeeded.
+    /// Force the block open or closed. Closed by default: the run is a single
+    /// line of the transcript, expanded on demand by the reader.
     pub fn open(mut self, open: bool) -> Self {
         self.open = Some(open);
         self
@@ -133,10 +134,9 @@ impl ChatCalls {
         self
     }
 
-    /// Whether the block starts expanded.
+    /// Whether the block starts expanded: never, unless the app asked.
     pub fn starts_open(&self) -> bool {
-        self.open
-            .unwrap_or_else(|| self.calls.iter().any(|c| c.state != ChatCallState::Ok))
+        self.open.unwrap_or(false)
     }
 
     /// The summary line: how many calls, and which tools (three names at most).
@@ -173,12 +173,7 @@ impl ChatCalls {
             .count();
 
         let text = self.summary_text();
-        let mut summary = vec![
-            el(El::Span).st([St::TextSm, St::TextMuted]).text(&text),
-            el(El::Span)
-                .st([St::TextXs, St::TextMuted, St::WhitespaceNowrap])
-                .text("détails"),
-        ];
+        let mut summary = vec![el(El::Span).st([St::TextSm, St::TextMuted]).text(&text)];
         if errors > 0 {
             summary.push(
                 el(El::Span)
@@ -253,29 +248,25 @@ impl ChatCalls {
 
         // No chrome of its own: the run sits on the transcript like a line of
         // text, never in a filled rounded block that would read as a message
-        // bubble of its own.
-        let mut block = el(El::Details)
-            .st([
-                St::DisplayFlex,
-                St::FlexCol,
-                St::GapXs,
-                St::MinW0,
-                St::TextSm,
-            ])
-            .append([
-                el(El::Summary)
+        // bubble of its own. The `<summary>` stays a list item (a flex one
+        // would lose the native triangle), and the expanded calls are indented
+        // under it.
+        let mut block = el(El::Details).st([St::MinW0, St::TextSm]).append([
+            el(El::Summary)
+                .st([St::CursorPointer, St::MinW0])
+                .append([el(El::Span)
                     .st([
-                        St::DisplayFlex,
+                        St::DisplayInlineFlex,
                         St::ItemsCenter,
                         St::GapSm,
                         St::FlexWrap,
-                        St::CursorPointer,
+                        St::MinW0,
                     ])
-                    .append(summary),
-                el(El::Div)
-                    .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::MinW0, St::MtXs])
-                    .append(calls),
-            ]);
+                    .append(summary)]),
+            el(El::Div)
+                .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::MinW0, St::PlMd])
+                .append(calls),
+        ]);
         if open {
             block = block.bool_attr(At::Open);
         }
@@ -326,18 +317,48 @@ mod tests {
     }
 
     #[test]
-    fn a_running_or_failed_call_opens_the_block() {
+    fn the_block_stays_closed_even_while_running_or_after_a_failure() {
         let running = ChatCalls::new().call(ChatCall::new("Bash", "cargo test"));
-        assert!(running.starts_open());
+        assert!(!running.starts_open(), "fermé par défaut, même en cours");
         let failed = run().call(
             ChatCall::new("Edit", "src/lib.rs")
                 .state(ChatCallState::Error)
                 .detail(el(El::Pre).text("permission denied")),
         );
-        assert!(failed.starts_open());
+        assert!(
+            !failed.starts_open(),
+            "fermé par défaut, même après un échec"
+        );
         let html = failed.build().to_static_html();
+        // L'échec se lit dans le résumé, sans ouvrir le bloc : seule l'entrée en
+        // échec s'ouvre, pas la série.
         assert!(html.contains("1 échec"), "{html}");
-        assert!(html.contains("permission denied"), "{html}");
+        let outer = html.split('>').next().unwrap_or_default();
+        assert!(!outer.contains("open"), "série ouverte : {outer}");
+    }
+
+    /// Le résumé porte le triangle natif (pas de libellé « détails »), et les
+    /// appels dépliés sont indentés sous lui.
+    #[test]
+    fn the_summary_keeps_its_triangle_and_the_calls_are_indented() {
+        let html = run().build().to_static_html();
+        assert!(html.contains("<summary"), "{html}");
+        assert!(!html.contains("détails"), "{html}");
+        // Un `<summary>` en flex perdrait son marqueur : la ligne est un span.
+        let summary = html
+            .split("<summary")
+            .nth(1)
+            .and_then(|r| r.split('>').next())
+            .unwrap_or_default();
+        assert!(
+            !summary.contains("display:flex"),
+            "summary flex : {summary}"
+        );
+        // Les appels sont indentés sous le résumé (`PlMd`).
+        assert!(
+            html.contains(&format!("u{}", rwire::style_tokens::St::PlMd.as_u16())),
+            "{html}"
+        );
     }
 
     #[test]

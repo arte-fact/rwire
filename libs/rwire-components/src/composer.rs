@@ -54,6 +54,11 @@ pub struct Composer {
     reflect_off: bool,
     /// Why the composer cannot send, when it cannot (see [`Composer::disabled`]).
     disabled: Option<Cow<'static, str>>,
+    /// Skip the card's focus highlight. Inverted so the derived `Default`
+    /// (false) keeps the highlight **on**, like [`crate::Button`]'s reflection:
+    /// the card lights up while the field is focused unless the app says the
+    /// surrounding surface already shows it.
+    quiet_focus: bool,
 }
 
 impl Composer {
@@ -132,6 +137,14 @@ impl Composer {
     /// and as the tooltip of both, and no submit or draft handler is bound.
     pub fn disabled(mut self, reason: impl Into<Cow<'static, str>>) -> Self {
         self.disabled = Some(reason.into());
+        self
+    }
+
+    /// Light the card up while the field is focused (on by default). Pass
+    /// `false` when the field is invisible and the surrounding surface already
+    /// says where the focus is: no ring then appears around an empty input.
+    pub fn focus_ring(mut self, enabled: bool) -> Self {
+        self.quiet_focus = !enabled;
         self
     }
 
@@ -260,7 +273,7 @@ impl Composer {
         let field = self
             .field()
             .style(rwire::style::Style::new().set("padding", "0.25rem"));
-        form.st([
+        form = form.st([
             St::DisplayFlex,
             St::FlexCol,
             St::GapSm,
@@ -269,9 +282,11 @@ impl Composer {
             St::RoundedLg,
             St::PMd,
             St::ShadowLg,
-        ])
-        .pseudo(Pc::FocusWithin, [St::BorderAccent])
-        .append([field, actions])
+        ]);
+        if !self.quiet_focus {
+            form = form.pseudo(Pc::FocusWithin, [St::BorderAccent]);
+        }
+        form.append([field, actions])
     }
 }
 
@@ -331,6 +346,19 @@ fn send_button_el(label: &str, phase: SendPhase) -> ElementBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The card lights up while the field is focused, unless the app asks for a
+    /// quiet field: the app's prompt block shows its own focus.
+    #[test]
+    fn the_focus_ring_is_opt_out() {
+        let lit = Composer::new().build().to_static_html();
+        assert!(
+            lit.contains(":focus-within") || lit.contains("h14"),
+            "{lit}"
+        );
+        let quiet = Composer::new().focus_ring(false).build().to_static_html();
+        assert!(!quiet.contains("h14"), "{quiet}");
+    }
     use rwire::MemoryState;
 
     #[derive(Default)]

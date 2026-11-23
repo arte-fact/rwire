@@ -157,33 +157,24 @@ impl ChatEntry {
         let bubble = self.bubble;
 
         // Header: author · tag · time (suppressed when grouped). In a bubble the
-        // author is implied by the side the block sits on, so the header keeps
-        // only the time and the name for screen readers.
+        // author is implied by the side the block sits on: no name inside it.
+        // What the app still wants to say about the turn (« terminal ») and the
+        // time go **under** the bubble, muted.
         let mut column: Vec<ElementBuilder> = Vec::new();
+        let mut bubble_meta: Vec<ElementBuilder> = Vec::new();
         if bubble {
-            // In a bubble the author is implied by the side the block sits on,
-            // but the app may still qualify it (« terminal ») — that suffix
-            // stays visible next to the time.
-            let mut meta: Vec<ElementBuilder> = Vec::new();
             if let Some(suffix) = &self.author.suffix {
-                meta.push(
+                bubble_meta.push(
                     el(El::Span)
                         .st([St::TextXs, St::TextMuted])
                         .text(suffix.as_ref()),
                 );
             }
             if let Some(time) = &self.time {
-                meta.push(
+                bubble_meta.push(
                     el(El::Span)
                         .st([St::TextLow, St::TextXs])
                         .text(time.as_ref()),
-                );
-            }
-            if !meta.is_empty() {
-                column.push(
-                    el(El::Div)
-                        .st([St::DisplayFlex, St::JustifyEnd, St::ItemsCenter, St::GapSm])
-                        .append(meta),
                 );
             }
         } else if !self.grouped {
@@ -256,8 +247,8 @@ impl ChatEntry {
 
         if bubble {
             // The user's turn: tinted rounded block on the right, width follows
-            // the content up to a share of the column — the model's own output
-            // stays plain and full width.
+            // the content up to a share of the column, and a muted line under
+            // it (suffix, time) — the model's output stays plain, full width.
             let content = el(El::Div)
                 .st([
                     St::DisplayFlex,
@@ -275,11 +266,25 @@ impl ChatEntry {
                     .st([St::SrOnly])
                     .text(self.author.name.as_ref())])
                 .append(column);
-            let mut root = el(El::Div).st([St::DisplayFlex, St::JustifyEnd, St::MinW0]);
+            let mut root = el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::FlexCol,
+                    St::ItemsEnd,
+                    St::GapXs,
+                    St::MinW0,
+                ])
+                .attr("aria-label", self.author.name.as_ref());
+            root = root.append([content]);
+            if !bubble_meta.is_empty() {
+                root = root.append([el(El::Div)
+                    .st([St::DisplayFlex, St::ItemsCenter, St::GapSm])
+                    .append(bubble_meta)]);
+            }
             if let Some(key) = self.key {
                 root = root.id(format!("ce-{key}").as_str());
             }
-            return root.append([content]);
+            return root;
         }
 
         // MinW0 + BreakWords: wrap at the column edge instead of overflowing.
@@ -372,10 +377,10 @@ mod tests {
         assert_eq!(header_texts(&entry), vec!["via MCP"]);
     }
 
-    /// A bubble keeps the author implied, but a suffix the app set (« terminal »)
-    /// stays visible next to the time.
+    /// A bubble shows no author name: the suffix (« terminal ») and the time
+    /// sit **under** the block, muted.
     #[test]
-    fn a_bubble_still_shows_the_author_suffix() {
+    fn a_bubble_puts_its_time_under_the_block() {
         let entry = ChatEntry::new(
             ChatAuthor::user("Vous").suffix("terminal"),
             el(El::P).text("tapé dans le pane"),
@@ -384,8 +389,23 @@ mod tests {
         .time("10:02")
         .build();
         let html = entry.to_static_html();
+        // Le bloc de texte, puis la ligne d'informations en dessous.
+        assert!(html.contains("tapé dans le pane"), "{html}");
         assert!(html.contains("terminal"), "{html}");
         assert!(html.contains("10:02"), "{html}");
+        // Le nom n'est plus un texte visible : il reste l'étiquette accessible
+        // du tour.
+        assert!(html.contains("aria-label=\"Vous\""), "{html}");
+        // L'heure vient après le bloc de texte, pas dedans.
+        let apres_le_bloc = html.split("tapé dans le pane").nth(1).unwrap_or_default();
+        assert!(
+            apres_le_bloc.contains("10:02"),
+            "l'heure vient sous la bulle : {html}"
+        );
+        assert!(
+            !apres_le_bloc.contains("bg-muted"),
+            "le bloc ne se rouvre pas sous la bulle : {html}"
+        );
     }
 
     #[test]
