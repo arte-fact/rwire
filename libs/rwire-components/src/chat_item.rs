@@ -26,11 +26,22 @@ pub enum ChatIntent {
 
 /// Who authored an entry — drives the rail tone, the avatar slot, and the
 /// header name.
+///
+/// Multi-author surfaces need more than a label: the name may have to be a
+/// **link** (jump to the author's own session) and carry a small **suffix**
+/// (« terminal », « via MCP »). Both stay optional; the plain `name` remains the
+/// accessible label either way.
 pub struct ChatAuthor {
     pub name: Cow<'static, str>,
     pub intent: ChatIntent,
     /// Custom avatar/icon element; `None` renders no avatar slot.
     pub avatar: Option<ElementBuilder>,
+    /// Custom node rendered in place of the plain name (a link to the author's
+    /// session, a badge…). `name` is still used for the entry's accessible name.
+    pub name_node: Option<ElementBuilder>,
+    /// Small muted qualifier shown right after the name (« terminal », « via
+    /// MCP », « via horloge »).
+    pub suffix: Option<Cow<'static, str>>,
 }
 
 impl ChatAuthor {
@@ -40,6 +51,8 @@ impl ChatAuthor {
             name: name.into(),
             intent: ChatIntent::Default,
             avatar: None,
+            name_node: None,
+            suffix: None,
         }
     }
 
@@ -49,7 +62,22 @@ impl ChatAuthor {
             name: name.into(),
             intent: ChatIntent::Accent,
             avatar: None,
+            name_node: None,
+            suffix: None,
         }
+    }
+
+    /// Render the name as a custom node (typically a link to the author's
+    /// session). The plain `name` stays the accessible label.
+    pub fn name_node(mut self, node: ElementBuilder) -> Self {
+        self.name_node = Some(node);
+        self
+    }
+
+    /// Add a small muted qualifier after the name (« terminal », « via MCP »).
+    pub fn suffix(mut self, suffix: impl Into<Cow<'static, str>>) -> Self {
+        self.suffix = Some(suffix.into());
+        self
     }
 
     /// De-emphasize (tool chatter and similar).

@@ -174,9 +174,24 @@ impl ChatEntry {
                 );
             }
         } else if !self.grouped {
-            let mut header = vec![el(El::Span)
-                .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
-                .text(self.author.name.as_ref())];
+            // The name is plain text unless the app supplied a node (a link to
+            // the author's own session); the suffix then qualifies it.
+            let name = match self.author.name_node {
+                Some(node) => el(El::Span)
+                    .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
+                    .append([node]),
+                None => el(El::Span)
+                    .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
+                    .text(self.author.name.as_ref()),
+            };
+            let mut header = vec![name];
+            if let Some(suffix) = &self.author.suffix {
+                header.push(
+                    el(El::Span)
+                        .st([St::TextXs, St::TextMuted])
+                        .text(suffix.as_ref()),
+                );
+            }
             if let Some(tag) = self.tag {
                 header.push(
                     el(El::Span)
@@ -320,5 +335,39 @@ mod tests {
     fn no_trailing_by_default() {
         let entry = ChatEntry::new(ChatAuthor::agent("claw"), el(El::P).text("hi")).build();
         assert_eq!(header_texts(&entry), vec!["claw"]);
+    }
+
+    #[test]
+    fn the_name_can_be_a_node_with_a_muted_suffix() {
+        // A multi-author thread links the name to the author's own session and
+        // qualifies it (« terminal », « via MCP »).
+        let link = el(El::A)
+            .attr("href", "/s/office/flambeau")
+            .text("flambeau@office");
+        let entry = ChatEntry::new(
+            ChatAuthor::agent("flambeau@office")
+                .name_node(link)
+                .suffix("via MCP"),
+            el(El::P).text("fais le lint"),
+        )
+        .build();
+        let html = entry.to_static_html();
+        assert!(html.contains("href=\"/s/office/flambeau\""), "{html}");
+        assert!(html.contains("flambeau@office"), "{html}");
+        assert!(html.contains("via MCP"), "{html}");
+        // The suffix follows the name, inside the same header row.
+        assert_eq!(header_texts(&entry), vec!["via MCP"]);
+    }
+
+    #[test]
+    fn without_a_node_the_name_stays_plain_text() {
+        let entry = ChatEntry::new(
+            ChatAuthor::user("Vous").suffix("terminal"),
+            el(El::P).text("hi"),
+        )
+        .build();
+        let html = entry.to_static_html();
+        assert!(!html.contains("<a "), "{html}");
+        assert_eq!(header_texts(&entry), vec!["Vous", "terminal"]);
     }
 }
