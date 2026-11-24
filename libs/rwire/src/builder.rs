@@ -1920,9 +1920,13 @@ impl ElementBuilder {
     /// Bind a one-shot visibility sentinel to this element (infinite scroll /
     /// content streaming). When the element nears the viewport, `handler`
     /// fires once with `next` as its param — read it via `ctx.item_index()`
-    /// and ignore stale values. Each render must pass the new `next`, which
-    /// re-keys the binding so the morph installs a fresh observer; one
-    /// request in flight is therefore structural, not a convention.
+    /// and ignore stale values. Each render must pass the new `next`: params
+    /// are part of the content hash, so that change alone re-emits the
+    /// binding, which re-keys it (`__hk`) and the morph installs a fresh
+    /// observer — one request in flight is therefore structural, not a
+    /// convention, and no extra attribute is needed to re-arm the sentinel.
+    /// `next` must be a deterministic function of the state (see
+    /// [`HandlerSpec::with_param_bytes`]).
     ///
     /// ```ignore
     /// el(El::Div).on_visible(load_more(), state.delivered as u32)
@@ -2016,8 +2020,15 @@ impl ElementBuilder {
     /// Compute a content hash of the element tree for render dedup.
     ///
     /// Hashes the deterministic visual content: element type, class, text,
-    /// attributes, style tokens, event types, and children (recursive).
-    /// Skips: synced renderer boxes, handler closures.
+    /// attributes, style tokens, morph key, events (type + handler id + param
+    /// bytes), and children (recursive). Skips: synced renderer boxes, handler
+    /// closures.
+    ///
+    /// Event params are hashed so that a re-render changing only a binding's
+    /// params is re-emitted (the client re-keys the binding, e.g. re-arming a
+    /// one-shot sentinel). Anti-loop contract: params must be a deterministic
+    /// function of the state — never of a clock, an RNG or a hidden counter,
+    /// or every render would re-emit.
     pub fn content_hash(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.hash_content(&mut hasher);
@@ -2053,8 +2064,23 @@ impl ElementBuilder {
         self.style_props.hash(hasher);
         self.pseudo_groups.hash(hasher);
         self.breakpoint_groups.hash(hasher);
-        for (ev, _) in &self.events {
+        // Morph key: part of the element's identity for later reconciliations.
+        self.key.hash(hasher);
+        // Events: type, handler identity and param bytes. Params are hashed on
+        // purpose — a re-render that changes only a binding's params (e.g. a
+        // sentinel's cursor) must be re-emitted, or the client never re-keys
+        // the binding. Anti-loop contract: params must be a deterministic
+        // function of the state (see `HandlerSpec::with_param_bytes`).
+        for (ev, spec) in &self.events {
             ev.as_u8().hash(hasher);
+            let id = spec.handler_id();
+            if id != 0 {
+                id.hash(hasher);
+            } else if let Some(h) = &spec.remote_handler {
+                // Same fallback the wire id uses at registration (wire_handler_id).
+                h.fn_id().hash(hasher);
+            }
+            spec.param_bytes.hash(hasher);
         }
         // Hash target/selector bindings
         for tb in &self.target_bindings {
@@ -4353,5 +4379,58 @@ mod raw_text_tests {
         let mut out = String::new();
         push_raw_text(&mut out, "style", "a>b{c:d}</style>");
         assert_eq!(out, "a>b{c:d}<\\/style>");
+    }
+}
+
+#[cfg(test)]
+mod content_hash_tests {
+    use super::*;
+
+    fn spec_with(handler_id: u32, params: Option<Vec<u8>>) -> HandlerSpec {
+        HandlerSpec {
+            storage_type: StorageType::Memory,
+            state_type_id: None,
+            remote_handler: None,
+            param_bytes: params,
+            changes: ChangeSet::all(),
+            debounce_ms: 0,
+            handler_id,
+        }
+    }
+
+    #[test]
+    fn event_handler_id_and_params_are_hashed() {
+        let a = el(El::Div).on(Ev::Click, spec_with(7, Some(vec![1])));
+        let same = el(El::Div).on(Ev::Click, spec_with(7, Some(vec![1])));
+        let other_param = el(El::Div).on(Ev::Click, spec_with(7, Some(vec![2])));
+        let other_handler = el(El::Div).on(Ev::Click, spec_with(8, Some(vec![1])));
+        let no_params = el(El::Div).on(Ev::Click, spec_with(7, None));
+        assert_eq!(a.content_hash(), same.content_hash());
+        assert_ne!(
+            a.content_hash(),
+            other_param.content_hash(),
+            "a param change alone must change the hash (sentinel re-arm)"
+        );
+        assert_ne!(
+            a.content_hash(),
+            other_handler.content_hash(),
+            "the handler id must change the hash"
+        );
+        assert_ne!(
+            a.content_hash(),
+            no_params.content_hash(),
+            "present vs absent params must differ"
+        );
+    }
+
+    #[test]
+    fn morph_key_is_hashed() {
+        let a = el(El::Div).key(1u32);
+        let same = el(El::Div).key(1u32);
+        let other = el(El::Div).key(2u32);
+        let none = el(El::Div);
+        assert_eq!(a.content_hash(), same.content_hash());
+        assert_ne!(a.content_hash(), other.content_hash());
+        assert_ne!(a.content_hash(), none.content_hash());
     }
 }
