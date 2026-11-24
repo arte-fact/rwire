@@ -31,7 +31,11 @@ fn block_region(key: u64, keyed: bool) -> ElementBuilder {
         move |_| el(El::Div).class("block").text(&format!("block {key}")),
         RendererDeps::always(),
     );
-    if keyed { region.with_identity(key) } else { region }
+    if keyed {
+        region.with_identity(key)
+    } else {
+        region
+    }
 }
 
 /// The parent region: a div holding one placeholder per key, oldest first.

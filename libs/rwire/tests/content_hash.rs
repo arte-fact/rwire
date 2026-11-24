@@ -12,7 +12,7 @@ use rwire::builder::{
 };
 use rwire::protocol::opcodes::GET_SYNCED;
 use rwire::state::{ChangeSet, RendererDeps};
-use rwire::{el, El, Ev, HandlerFn, HandlerSpec, State, stable_handler_id};
+use rwire::{el, stable_handler_id, El, Ev, HandlerFn, HandlerSpec, State};
 
 #[derive(State, Default)]
 #[storage(memory)]
@@ -40,8 +40,9 @@ fn sentinel_region() -> ElementBuilder {
 /// Returns the update bytes (empty when deduplicated).
 fn render_then_update(cursor: u8, update_cursor: u8) -> Vec<u8> {
     let b1: Box<dyn std::any::Any + Send + Sync> = Box::new(SentinelState { cursor });
-    let b2: Box<dyn std::any::Any + Send + Sync> =
-        Box::new(SentinelState { cursor: update_cursor });
+    let b2: Box<dyn std::any::Any + Send + Sync> = Box::new(SentinelState {
+        cursor: update_cursor,
+    });
 
     let mut ctx = BuildContext::new();
     let mut states: HashMap<TypeId, &(dyn std::any::Any + Send + Sync)> = HashMap::new();
