@@ -31,6 +31,11 @@
 //!   a handle sends nothing.
 //! - Without a visible sidebar (none, or `collapsed`), a phone shows the main
 //!   column whatever `mobile(…)` says.
+//! - With `.collapsible_sidebar(true)` the visitor can fold the sidebar away:
+//!   a native checkbox (visually hidden, still keyboard reachable) plus two
+//!   labels — "fold" on the sidebar's top-right corner, "unfold" on the main
+//!   column's top-left, shown only once folded. Pure CSS (`:has`), so folding
+//!   costs no server round-trip and the shell keeps its own layout rules.
 //! - **The drawer is the app's to manage.** Below the drawer threshold the
 //!   panel overlays the main column; the app closes it by passing
 //!   `panel(None)` (a close button in the panel, Escape) and moves the focus
@@ -51,8 +56,9 @@
 //!     .build()
 //! ```
 
+use rwire::style::Style;
 use rwire::style_tokens::St;
-use rwire::{el, El, ElementBuilder, Ev, HandlerSpec};
+use rwire::{el, At, El, ElementBuilder, Ev, HandlerSpec};
 use std::borrow::Cow;
 
 /// Which column a one-column (phone) layout shows.
@@ -82,6 +88,10 @@ pub struct AppShell {
     breakpoints: Option<(u16, u16)>,
     three_columns: bool,
     no_landmarks: bool,
+    collapsible: bool,
+    collapsible_panel: bool,
+    sidebar_collapsed: bool,
+    panel_collapsed: bool,
 }
 
 #[rwire::component]
@@ -177,6 +187,110 @@ impl AppShell {
         self.no_landmarks = !on;
         self.three_columns = true;
         self
+    }
+
+    /// Let the visitor fold the sidebar away (see the module docs). The shell
+    /// renders the checkbox and both labels; the app's own sidebar content is
+    /// untouched.
+    pub fn collapsible_sidebar(mut self, on: bool) -> Self {
+        self.collapsible = on;
+        self.three_columns = true;
+        self
+    }
+
+    /// The control for [`Self::collapsible_sidebar`], for the app to place in a
+    /// header of its own: a label bound to the shell's checkbox, drawn as a
+    /// compact icon button. It stays in the flow of that header, so it never
+    /// floats over a column and never covers content.
+    ///
+    /// ```ignore
+    /// AppShell::new().collapsible_sidebar(true).main(header_row([
+    ///     rwire_components::sidebar_toggle(),
+    ///     title("Session"),
+    /// ]));
+    /// ```
+    /// Let the visitor fold the **detail panel** away, the twin of
+    /// [`Self::collapsible_sidebar`]: a native checkbox plus the
+    /// [`Self::panel_toggle`] label, hidden in pure CSS (`:has`) — the main
+    /// column takes the freed width back, with no server round-trip and no
+    /// change of address.
+    pub fn collapsible_panel(mut self, on: bool) -> Self {
+        self.collapsible_panel = on;
+        self.three_columns = true;
+        self
+    }
+
+    /// Start with the **sidebar folded** (the checkbox is checked on the first
+    /// paint): an app that remembers the visitor's layout passes it back here,
+    /// so a reload or a navigation keeps the fold.
+    pub fn sidebar_collapsed(mut self, folded: bool) -> Self {
+        self.sidebar_collapsed = folded;
+        self
+    }
+
+    /// Start with the **detail panel folded**, the twin of
+    /// [`Self::sidebar_collapsed`].
+    pub fn panel_collapsed(mut self, folded: bool) -> Self {
+        self.panel_collapsed = folded;
+        self
+    }
+
+    /// The control for [`Self::collapsible_panel`]: a compact icon label bound
+    /// to the shell's panel checkbox, for the app to place in the header of its
+    /// middle column. It stays in the flow of that header.
+    pub fn panel_toggle() -> ElementBuilder {
+        Self::panel_toggle_with("Show or hide the details panel")
+    }
+
+    /// [`Self::panel_toggle`] with the app's own words, for the tooltip and the
+    /// accessible name.
+    pub fn panel_toggle_with(label: impl Into<Cow<'static, str>>) -> ElementBuilder {
+        Self::toggle_label("rw-panel-toggle", "panel-toggle-label", label)
+            .append([rwire::icon(rwire::Icon::PanelRight)])
+    }
+
+    /// The shared shape of a fold label (sidebar, panel): a compact icon button
+    /// that stays in the flow of the header hosting it.
+    fn toggle_label(
+        id: &'static str,
+        role: &'static str,
+        label: impl Into<Cow<'static, str>>,
+    ) -> ElementBuilder {
+        let label = label.into();
+        el(El::Label)
+            .attr("for", id)
+            .attr("data-shell", role)
+            .attr("title", &label)
+            .attr("aria-label", &label)
+            .attr("role", "button")
+            .attr("tabindex", "0")
+            .st([
+                St::DisplayInlineFlex,
+                St::ItemsCenter,
+                St::JustifyCenter,
+                St::RoundedSm,
+                St::TextMuted,
+                St::CursorPointer,
+                St::FlexShrink0,
+            ])
+            .style(
+                Style::new()
+                    .set("width", "1.75rem")
+                    .set("height", "1.75rem"),
+            )
+    }
+
+    /// The control for [`Self::collapsible_sidebar`], with the library's
+    /// English words.
+    pub fn sidebar_toggle() -> ElementBuilder {
+        Self::sidebar_toggle_with("Show or hide the list")
+    }
+
+    /// [`Self::sidebar_toggle`] with the app's own words, for the tooltip and
+    /// the accessible name.
+    pub fn sidebar_toggle_with(label: impl Into<Cow<'static, str>>) -> ElementBuilder {
+        Self::toggle_label("rw-side-toggle", "side-toggle-label", label)
+            .append([rwire::icon(rwire::Icon::Menu)])
     }
 
     /// Add custom class.
@@ -344,6 +458,47 @@ impl AppShell {
         if let Some(ref extra) = self.extra_class {
             root = root.class(extra.as_ref());
         }
+        if self.collapsible_panel {
+            // Same fold, on the detail panel: `:has` hides the column and its
+            // handle, the main column takes the width back.
+            let mut toggle = el(El::Input)
+                .attr("type", "checkbox")
+                .attr("id", "rw-panel-toggle")
+                .attr("data-shell", "panel-toggle")
+                .attr("aria-label", "Show the details panel")
+                .st([St::SrOnly]);
+            if self.panel_collapsed {
+                toggle = toggle.bool_attr(At::Checked);
+            }
+            root = root.append([
+                toggle,
+                el(El::Style).text(
+                    "[data-shell-root]:has(> [data-shell=panel-toggle]:checked)>div>[data-shell=panel],\
+                     [data-shell-root]:has(> [data-shell=panel-toggle]:checked)>div>[data-shell=handle][data-pane=panel]{display:none}",
+                ),
+            ]);
+        }
+        if self.collapsible {
+            // Fold control, pure CSS: the checkbox lives on the root, the app's
+            // own label (`sidebar_toggle`) flips it, and `:has` hides the column
+            // and its handle.
+            let mut toggle = el(El::Input)
+                .attr("type", "checkbox")
+                .attr("id", "rw-side-toggle")
+                .attr("data-shell", "side-toggle")
+                .attr("aria-label", "Show the list")
+                .st([St::SrOnly]);
+            if self.sidebar_collapsed {
+                toggle = toggle.bool_attr(At::Checked);
+            }
+            root = root.append([
+                toggle,
+                el(El::Style).text(
+                    "[data-shell-root]:has(> [data-shell=side-toggle]:checked)>div>[data-shell=sidebar],\
+                     [data-shell-root]:has(> [data-shell=side-toggle]:checked)>div>[data-shell=handle][data-pane=sidebar]{display:none}",
+                ),
+            ]);
+        }
         if let Some((one, drawer)) = self.breakpoints {
             // One column never starts above the drawer threshold.
             let one = one.min(drawer);
@@ -384,6 +539,7 @@ impl AppShell {
                 .st([St::Flex1, St::MinW0, St::MinH0, St::OverflowYAuto])
                 .append(self.main_content),
         );
+
         if let Some(panel) = self.panel {
             if let Some(ref h) = self.on_resize {
                 row.push(Self::handle("panel", h));
@@ -427,6 +583,95 @@ mod tests {
         let shell = AppShell::new().sidebar_width(280).header_height(64);
         assert_eq!(shell.sidebar_width, 280);
         assert_eq!(shell.header_height, 64);
+    }
+
+    #[test]
+    fn a_collapsible_shell_ships_the_checkbox_the_two_labels_and_the_rules() {
+        let html = AppShell::new()
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
+            .collapsible_sidebar(true)
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-shell=\"side-toggle\""), "{html}");
+        assert!(html.contains("id=\"rw-side-toggle\""), "{html}");
+        assert!(
+            html.contains(">div>[data-shell=sidebar]") && html.contains("{display:none}"),
+            "the fold rules are missing: {html}"
+        );
+        assert!(
+            html.contains(":has(> [data-shell=side-toggle]:checked)"),
+            "{html}"
+        );
+        // The control lives in an app header, not floating.
+        let toggle = AppShell::sidebar_toggle().to_static_html();
+        assert!(toggle.contains("for=\"rw-side-toggle\""), "{toggle}");
+        assert!(!toggle.contains("position:absolute"), "{toggle}");
+    }
+
+    /// A remembered layout comes back folded: the checkbox is checked on the
+    /// first paint, so the CSS `:has` rule applies without a round-trip.
+    #[test]
+    fn a_remembered_fold_starts_checked() {
+        let html = AppShell::new()
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
+            .panel(Some(el(El::Div).text("details")))
+            .collapsible_sidebar(true)
+            .collapsible_panel(true)
+            .sidebar_collapsed(true)
+            .panel_collapsed(true)
+            .build()
+            .to_static_html();
+        assert!(
+            html.contains("id=\"rw-side-toggle\" type=\"checkbox\"")
+                || html.contains("id=\"rw-side-toggle\""),
+            "{html}"
+        );
+        // The two boxes carry `checked`, and only when the app asked.
+        // `:checked` appears in the two rules as well: count the attribute.
+        assert_eq!(html.matches(" checked>").count(), 2, "{html}");
+        let plain = AppShell::new()
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
+            .collapsible_sidebar(true)
+            .build()
+            .to_static_html();
+        assert!(!plain.contains(" checked>"), "{plain}");
+    }
+
+    #[test]
+    fn a_collapsible_panel_ships_its_checkbox_and_rules() {
+        let html = AppShell::new()
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
+            .panel(Some(el(El::Div).text("details")))
+            .collapsible_panel(true)
+            .build()
+            .to_static_html();
+        assert!(html.contains("data-shell=\"panel-toggle\""), "{html}");
+        assert!(html.contains("id=\"rw-panel-toggle\""), "{html}");
+        assert!(
+            html.contains(":has(> [data-shell=panel-toggle]:checked)"),
+            "{html}"
+        );
+        assert!(
+            html.contains(">div>[data-shell=panel]"),
+            "the details column must disappear: {html}"
+        );
+        let toggle = AppShell::panel_toggle().to_static_html();
+        assert!(toggle.contains("for=\"rw-panel-toggle\""), "{toggle}");
+        assert!(!toggle.contains("position:absolute"), "{toggle}");
+    }
+
+    #[test]
+    fn a_plain_shell_has_no_fold_control() {
+        let html = AppShell::new()
+            .sidebar(el(El::Div).text("list"))
+            .main(el(El::Div).text("thread"))
+            .build()
+            .to_static_html();
+        assert!(!html.contains("side-toggle"), "{html}");
     }
 
     #[test]

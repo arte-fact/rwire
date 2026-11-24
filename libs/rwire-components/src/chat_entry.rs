@@ -6,7 +6,7 @@
 //! claw-rwire's thread widgets (`MinW0`/`BreakWords` so bodies wrap at the
 //! column edge; rail via a hairline flex strip).
 //!
-//! Use it à la carte, or let [`ChatTranscript`](crate::ChatTranscript) build
+//! Use it on its own, or let [`ChatTranscript`](crate::ChatTranscript) build
 //! entries from a [`ChatItem`](crate::ChatItem) implementation.
 
 use std::borrow::Cow;
@@ -29,6 +29,8 @@ pub struct ChatEntry {
     detail: Option<ChatDetail>,
     grouped: bool,
     streaming: bool,
+    bubble: bool,
+    rail: bool,
 }
 
 impl ChatEntry {
@@ -44,6 +46,8 @@ impl ChatEntry {
             detail: None,
             grouped: false,
             streaming: false,
+            bubble: false,
+            rail: true,
         }
     }
 
@@ -60,6 +64,8 @@ impl ChatEntry {
         entry.detail = item.detail(ctx);
         entry.grouped = grouped;
         entry.streaming = item.streaming();
+        entry.bubble = item.bubble();
+        entry.rail = item.rail();
         entry.build()
     }
 
@@ -106,6 +112,21 @@ impl ChatEntry {
         self
     }
 
+    /// Render as a bubble: the local user's turn, right-aligned on a tinted
+    /// rounded block instead of the accent rail of a full-width entry.
+    pub fn bubble(mut self, bubble: bool) -> Self {
+        self.bubble = bubble;
+        self
+    }
+
+    /// The hairline tone rail down the left edge (default on). Turn it off for a
+    /// surface that wants the body flush with the column: no lateral border, the
+    /// text sitting on the page.
+    pub fn rail(mut self, rail: bool) -> Self {
+        self.rail = rail;
+        self
+    }
+
     fn intent_text(intent: ChatIntent) -> St {
         match intent {
             ChatIntent::Default => St::TextHigh,
@@ -124,7 +145,7 @@ impl ChatEntry {
     }
 
     /// The hairline accent rail (claw's proven 2px flex strip).
-    fn rail(intent: ChatIntent) -> ElementBuilder {
+    fn rail_strip(intent: ChatIntent) -> ElementBuilder {
         el(El::Span)
             .style(Style::new().width("2px").set("flex", "0 0 2px"))
             .st([St::SelfStretch, Self::intent_rail(intent)])
@@ -133,13 +154,48 @@ impl ChatEntry {
     /// Build into an ElementBuilder.
     pub fn build(self) -> ElementBuilder {
         let intent = self.author.intent;
+        let bubble = self.bubble;
 
-        // Header: author · tag · time (suppressed when grouped).
+        // Header: author · tag · time (suppressed when grouped). In a bubble the
+        // author is implied by the side the block sits on: no name inside it.
+        // What the app still wants to say about the turn ("terminal") and the
+        // time go **under** the bubble, muted.
         let mut column: Vec<ElementBuilder> = Vec::new();
-        if !self.grouped {
-            let mut header = vec![el(El::Span)
-                .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
-                .text(self.author.name.as_ref())];
+        let mut bubble_meta: Vec<ElementBuilder> = Vec::new();
+        if bubble {
+            if let Some(suffix) = &self.author.suffix {
+                bubble_meta.push(
+                    el(El::Span)
+                        .st([St::TextXs, St::TextMuted])
+                        .text(suffix.as_ref()),
+                );
+            }
+            if let Some(time) = &self.time {
+                bubble_meta.push(
+                    el(El::Span)
+                        .st([St::TextLow, St::TextXs])
+                        .text(time.as_ref()),
+                );
+            }
+        } else if !self.grouped {
+            // The name is plain text unless the app supplied a node (a link to
+            // the author's own session); the suffix then qualifies it.
+            let name = match self.author.name_node {
+                Some(node) => el(El::Span)
+                    .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
+                    .append([node]),
+                None => el(El::Span)
+                    .st([St::FontBold, St::TextSm, Self::intent_text(intent)])
+                    .text(self.author.name.as_ref()),
+            };
+            let mut header = vec![name];
+            if let Some(suffix) = &self.author.suffix {
+                header.push(
+                    el(El::Span)
+                        .st([St::TextXs, St::TextMuted])
+                        .text(suffix.as_ref()),
+                );
+            }
             if let Some(tag) = self.tag {
                 header.push(
                     el(El::Span)
@@ -189,6 +245,48 @@ impl ChatEntry {
                 .append(body_col),
         );
 
+        if bubble {
+            // The user's turn: tinted rounded block on the right, width follows
+            // the content up to a share of the column, and a muted line under
+            // it (suffix, time) — the model's output stays plain, full width.
+            let content = el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::FlexCol,
+                    St::GapXs,
+                    St::MinW0,
+                    St::BgMuted,
+                    St::RoundedLg,
+                    St::PxMd,
+                    St::PySm,
+                    St::TextSm,
+                ])
+                .style(Style::new().set("max-width", "min(85%, 46rem)"))
+                .append([el(El::Span)
+                    .st([St::SrOnly])
+                    .text(self.author.name.as_ref())])
+                .append(column);
+            let mut root = el(El::Div)
+                .st([
+                    St::DisplayFlex,
+                    St::FlexCol,
+                    St::ItemsEnd,
+                    St::GapXs,
+                    St::MinW0,
+                ])
+                .attr("aria-label", self.author.name.as_ref());
+            root = root.append([content]);
+            if !bubble_meta.is_empty() {
+                root = root.append([el(El::Div)
+                    .st([St::DisplayFlex, St::ItemsCenter, St::GapSm])
+                    .append(bubble_meta)]);
+            }
+            if let Some(key) = self.key {
+                root = root.id(format!("ce-{key}").as_str());
+            }
+            return root;
+        }
+
         // MinW0 + BreakWords: wrap at the column edge instead of overflowing.
         let block = el(El::Div)
             .st([
@@ -201,7 +299,10 @@ impl ChatEntry {
             ])
             .append(column);
 
-        let mut row: Vec<ElementBuilder> = vec![Self::rail(intent)];
+        let mut row: Vec<ElementBuilder> = Vec::new();
+        if self.rail {
+            row.push(Self::rail_strip(intent));
+        }
         if let Some(avatar) = self.author.avatar {
             row.push(
                 el(El::Span)
@@ -252,5 +353,70 @@ mod tests {
     fn no_trailing_by_default() {
         let entry = ChatEntry::new(ChatAuthor::agent("claw"), el(El::P).text("hi")).build();
         assert_eq!(header_texts(&entry), vec!["claw"]);
+    }
+
+    #[test]
+    fn the_name_can_be_a_node_with_a_muted_suffix() {
+        // A multi-author thread links the name to the author's own session and
+        // qualifies it ("terminal", "via MCP").
+        let link = el(El::A)
+            .attr("href", "/s/office/flambeau")
+            .text("flambeau@office");
+        let entry = ChatEntry::new(
+            ChatAuthor::agent("flambeau@office")
+                .name_node(link)
+                .suffix("via MCP"),
+            el(El::P).text("fais le lint"),
+        )
+        .build();
+        let html = entry.to_static_html();
+        assert!(html.contains("href=\"/s/office/flambeau\""), "{html}");
+        assert!(html.contains("flambeau@office"), "{html}");
+        assert!(html.contains("via MCP"), "{html}");
+        // The suffix follows the name, inside the same header row.
+        assert_eq!(header_texts(&entry), vec!["via MCP"]);
+    }
+
+    /// A bubble shows no author name: the suffix ("terminal") and the time
+    /// sit **under** the block, muted.
+    #[test]
+    fn a_bubble_puts_its_time_under_the_block() {
+        let entry = ChatEntry::new(
+            ChatAuthor::user("Vous").suffix("terminal"),
+            el(El::P).text("typed in the pane"),
+        )
+        .bubble(true)
+        .time("10:02")
+        .build();
+        let html = entry.to_static_html();
+        // Le bloc de texte, puis la ligne d'informations en dessous.
+        assert!(html.contains("typed in the pane"), "{html}");
+        assert!(html.contains("terminal"), "{html}");
+        assert!(html.contains("10:02"), "{html}");
+        // The name is no longer visible text: it stays the accessible label
+        // du tour.
+        assert!(html.contains("aria-label=\"Vous\""), "{html}");
+        // The time comes after the text block, not inside it.
+        let after_block = html.split("typed in the pane").nth(1).unwrap_or_default();
+        assert!(
+            after_block.contains("10:02"),
+            "l'heure vient sous la bulle : {html}"
+        );
+        assert!(
+            !after_block.contains("bg-muted"),
+            "le bloc ne se rouvre pas sous la bulle : {html}"
+        );
+    }
+
+    #[test]
+    fn without_a_node_the_name_stays_plain_text() {
+        let entry = ChatEntry::new(
+            ChatAuthor::user("Vous").suffix("terminal"),
+            el(El::P).text("hi"),
+        )
+        .build();
+        let html = entry.to_static_html();
+        assert!(!html.contains("<a "), "{html}");
+        assert_eq!(header_texts(&entry), vec!["Vous", "terminal"]);
     }
 }
