@@ -1,0 +1,11 @@
+[package]
+name = "audio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rwire = { path = "../../libs/rwire" }
+rwire-audio = { path = "../../libs/rwire-audio" }
+rwire-components = { path = "../../libs/rwire-components" }
+rwire-themes = { path = "../../libs/rwire-themes" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

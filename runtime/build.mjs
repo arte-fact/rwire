@@ -67,7 +67,7 @@ console.log(`runtime.min.js: ${min.length} bytes (${gz} gzipped)`);
 }
 
 // --- extensions: separately-built lazy modules (ESM for dynamic import) ---
-export const EXTS = ["vim", "map", "push"];
+export const EXTS = ["vim", "map", "push", "audio", "audio-worklet"];
 mkdirSync(new URL("dist/ext/", import.meta.url), { recursive: true });
 for (const name of EXTS) {
   await build({
