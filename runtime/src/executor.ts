@@ -383,8 +383,22 @@ export function x(d: Uint8Array): void {
         const [stc, sl] = rv(d, i);
         i += sl;
         const inv = d[i++];
-        (fb2[ti] || (fb2[ti] = [])).push({ e: r[f], s: stc, n: !!inv });
-        uf2(ti);
+        const el = r[f];
+        const list = fb2[ti] || (fb2[ti] = []);
+        const ex = list.find((b) => b.e === el);
+        if (ex) {
+          // Re-emitted binding for a live element: refresh in place instead of
+          // stacking a duplicate (the registry used to grow on every re-render).
+          if (ex.s !== stc) el.classList.remove("u" + ex.s);
+          ex.s = stc;
+          ex.n = !!inv;
+        } else {
+          list.push({ e: el, s: stc, n: !!inv });
+        }
+        // O(1): the target state did not change, so apply to this element only —
+        // uf2(ti) re-applied every binding of the target on each re-emission.
+        if (fl2[ti] !== !!inv) el.classList.add("u" + stc);
+        else el.classList.remove("u" + stc);
       } else if (o === OP.BIND_TOGGLE) {
         const [f, l] = rv(d, i);
         i += l;
@@ -405,8 +419,19 @@ export function x(d: Uint8Array): void {
           mv = d[i++];
         const [stc, sl] = rv(d, i);
         i += sl;
-        (sb2[si] || (sb2[si] = [])).push({ e: r[f], v: mv, s: stc });
-        us2(si);
+        const el = r[f];
+        const list = sb2[si] || (sb2[si] = []);
+        const ex = list.find((b) => b.e === el);
+        if (ex) {
+          if (ex.s !== stc) el.classList.remove("u" + ex.s);
+          ex.v = mv;
+          ex.s = stc;
+        } else {
+          list.push({ e: el, v: mv, s: stc });
+        }
+        // O(1), same rationale as BIND_TARGET above.
+        if (sl2[si] === mv) el.classList.add("u" + stc);
+        else el.classList.remove("u" + stc);
       } else if (o === OP.BIND_SELECT) {
         const [f, l] = rv(d, i);
         i += l;
@@ -658,6 +683,17 @@ export function x(d: Uint8Array): void {
         for (const c in lb) {
           lb[c] = lb[c].filter((x) => x.e && x.e.isConnected);
           if (!lb[c].length) delete lb[c];
+        }
+        // Action registries: same purge — a re-render re-emits BIND_TARGET for
+        // live elements only; bindings whose element left the document must not
+        // accumulate (they made every later uf2()/us2() walk an ever-growing list).
+        for (const ti in fb2) {
+          fb2[ti] = fb2[ti].filter((b) => b.e && b.e.isConnected);
+          if (!fb2[ti].length) delete fb2[ti];
+        }
+        for (const si in sb2) {
+          sb2[si] = sb2[si].filter((b) => b.e && b.e.isConnected);
+          if (!sb2[si].length) delete sb2[si];
         }
         for (const c in lv) {
           if (lv[c].isConnected) ul(+c);

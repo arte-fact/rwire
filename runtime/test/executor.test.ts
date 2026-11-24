@@ -4,7 +4,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { x } from "../src/executor.ts";
 import { st, E, V, P, Y, AT, AV, SE, resetSession } from "../src/state.ts";
-import { fl2, sl2, resetActions } from "../src/actions.ts";
+import { fl2, fb2, sl2, sb2, resetActions } from "../src/actions.ts";
 import { resetDelegation } from "../src/delegate.ts";
 import { resetLive, lv, lb } from "../src/live.ts";
 import { rv, wv } from "../src/varint.ts";
@@ -477,6 +477,8 @@ test("INIT_TARGET + BIND_TARGET + BIND_TOGGLE flip classes through state", () =>
   t.id = "m";
   const btn = doc.createElement("button");
   btn.id = "k";
+  doc.body.appendChild(t);
+  doc.body.appendChild(btn);
   run(
     syms("m", "k"),
     [0x47, 3, 0], // target 3 = false
@@ -501,6 +503,54 @@ test("inverted BIND_TARGET applies the class while false", () => {
   assert.ok(t.classList.contains("u5"), "inverted binding active at false");
 });
 
+test("re-emitted BIND_TARGET refreshes in place instead of growing the registry", () => {
+  const t = doc.createElement("div");
+  t.id = "re";
+  doc.body.appendChild(t);
+  const bind = [0x48, ...vint(0), 3, ...vint(77), 0] as number[];
+  run(syms("re"), [0x47, 3, 1], [0x01, ...vint(0x80)], bind); // target 3 = true
+  run([0x01, ...vint(0x80)], bind); // same binding re-emitted by a re-render
+  run([0x01, ...vint(0x80)], bind);
+  assert.equal(fb2[3].length, 1, "one binding per element, not one per emission");
+  assert.ok(t.classList.contains("u77"), "class applied from the target state alone");
+  // state change still reaches every binding of the target (uf2 path kept)
+  fl2[3] = false;
+  run([0x01, ...vint(0x80)], [0x49, ...vint(0), 0, 3]); // toggle binding on the element
+  assert.equal(fb2[3].length, 1);
+});
+
+test("BATCH_END purges action bindings whose element left the document", () => {
+  const t = doc.createElement("div");
+  t.id = "gone";
+  doc.body.appendChild(t);
+  run(syms("gone"), [0x47, 4, 0], [0x01, ...vint(0x80)], [0x48, ...vint(0), 4, ...vint(9), 0]);
+  assert.equal(fb2[4].length, 1);
+  doc.body.removeChild(t); // element leaves the document
+  run(); // empty batch: BATCH_END purge runs
+  assert.equal(fb2[4], undefined, "disconnected element's binding is purged");
+  // live element keeps its binding across batches
+  const k = doc.createElement("div");
+  k.id = "kept";
+  doc.body.appendChild(k);
+  run(syms("kept"), [0x47, 5, 0], [0x01, ...vint(0x80)], [0x48, ...vint(0), 5, ...vint(9), 0]);
+  run();
+  assert.equal(fb2[5].length, 1);
+});
+
+test("re-emitted BIND_SELECTOR refreshes in place and BATCH_END purges selectors too", () => {
+  const a = doc.createElement("div");
+  a.id = "sa";
+  doc.body.appendChild(a);
+  const bind = [0x4b, ...vint(0), 6, 0, ...vint(21)] as number[];
+  run(syms("sa"), [0x4a, 6, 0], [0x01, ...vint(0x80)], bind);
+  run([0x01, ...vint(0x80)], bind);
+  assert.equal(sb2[6].length, 1, "one selector binding per element");
+  assert.ok(a.classList.contains("u21"));
+  doc.body.removeChild(a);
+  run();
+  assert.equal(sb2[6], undefined);
+});
+
 test("INIT_SELECTOR + BIND_SELECTOR + BIND_SELECT switch exclusive classes", () => {
   const a = doc.createElement("div");
   a.id = "ta";
@@ -508,6 +558,9 @@ test("INIT_SELECTOR + BIND_SELECTOR + BIND_SELECT switch exclusive classes", () 
   b.id = "tb";
   const btn = doc.createElement("button");
   btn.id = "sw";
+  doc.body.appendChild(a);
+  doc.body.appendChild(b);
+  doc.body.appendChild(btn);
   run(
     syms("ta", "tb", "sw"),
     [0x4a, 2, 0], // selector 2 = variant 0
@@ -531,6 +584,8 @@ test("BIND_TIMED_TOGGLE sets true immediately (revert is timer-based)", () => {
   t.id = "tt";
   const btn = doc.createElement("button");
   btn.id = "go";
+  doc.body.appendChild(t);
+  doc.body.appendChild(btn);
   run(
     syms("tt", "go"),
     [0x47, 5, 0],

@@ -26,8 +26,12 @@ import { gzipSync } from "node:zlib";
 // +250B raw / +120B gzip (R2 review): a handle reports through its own binding (no
 // bubbling to an ancestor's handler), swallows native clicks, handles pointercancel and
 // bounds the width; a correctness fix of the same opcode.
-const MAX_RAW = 21_250;
-const MAX_GZIP = 8_040;
+// +402B raw / +115B gzip (2026-11-24): BIND_TARGET/BIND_SELECTOR apply O(1) to the
+// re-emitted element (dedup by element) and BATCH_END purges the action registries of
+// disconnected elements — the registries used to grow on every region re-render, making
+// every later toggle walk a 10x-too-big list (97.9% of a 9.1s onmessage block, trace 3).
+const MAX_RAW = 21_700;
+const MAX_GZIP = 8_200;
 
 test("runtime.min.js stays within the size budget", () => {
   let src: Buffer;
