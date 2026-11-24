@@ -5188,7 +5188,7 @@ const ENTRIES: &[ComponentEntry] = &[
         variants: &[],
         bool_props: &[BoolProp {
             name: "failed",
-            description: "Add a failed call (opens the block)",
+            description: "Add a failed call (the call opens, the run stays closed)",
             default: false,
         }],
         build_demo: chat_calls_demo,

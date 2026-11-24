@@ -1,15 +1,16 @@
 //! ChatCalls component.
 //!
 //! A run of tool calls collapsed into **one** transcript block: a summary line
-//! ("4 appels d'outils · Bash, Read, Edit") and, behind a native `<details>`,
+//! ("4 tool calls · Bash, Read, Edit") and, behind a native `<details>`,
 //! each call with its argument summary, its state and its own disclosure for the
 //! full input and output. Native `<details>` means the toggle costs no server
 //! round-trip and keeps keyboard and screen-reader semantics.
 //!
 //! It fits where a chat surface would otherwise interleave dozens of one-line
 //! tool rows with the actual conversation: the prose stays readable, and the
-//! machinery is one click away. The block opens by itself while a call is still
-//! running or when one failed, and stays closed once everything succeeded.
+//! machinery is one click away. The run stays **closed** by default (the native
+//! `<summary>` triangle is the only affordance, no "details" label), and the
+//! expanded calls are indented under their summary.
 //!
 //! The run carries no chrome of its own — no background, no rounding, no
 //! padding: it reads as one line of the transcript, not as a message bubble.
@@ -51,11 +52,12 @@ pub enum ChatCallState {
 }
 
 impl ChatCallState {
-    fn label(self) -> &'static str {
+    /// The state's word, from the run's text table (English by default).
+    fn label(self, labels: &ChatCallsLabels) -> &str {
         match self {
-            Self::Running => "en cours",
-            Self::Ok => "ok",
-            Self::Error => "erreur",
+            Self::Running => labels.running.as_ref(),
+            Self::Ok => labels.ok.as_ref(),
+            Self::Error => labels.error.as_ref(),
         }
     }
 
@@ -64,6 +66,46 @@ impl ChatCallState {
             Self::Running => St::TextAccent,
             Self::Ok => St::TextMuted,
             Self::Error => St::TextError,
+        }
+    }
+}
+
+/// The words a run of tool calls shows. English by default: a library speaks its
+/// own language, the app brings its strings in with [`ChatCalls::labels`].
+///
+/// `{n}` (the count) and `{tools}` (up to three tool names) are substituted in the
+/// summary templates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatCallsLabels {
+    /// No call in the run.
+    pub none: Cow<'static, str>,
+    /// Exactly one call; `{tools}` is its tool name.
+    pub one: Cow<'static, str>,
+    /// Several calls; `{n}` is the count and `{tools}` the names.
+    pub many: Cow<'static, str>,
+    /// Exactly one failed call.
+    pub failure_one: Cow<'static, str>,
+    /// Several failed calls; `{n}` is the count.
+    pub failure_many: Cow<'static, str>,
+    /// A call still in flight.
+    pub running: Cow<'static, str>,
+    /// A call that returned.
+    pub ok: Cow<'static, str>,
+    /// A call that failed.
+    pub error: Cow<'static, str>,
+}
+
+impl Default for ChatCallsLabels {
+    fn default() -> Self {
+        Self {
+            none: "No tool call".into(),
+            one: "1 tool call · {tools}".into(),
+            many: "{n} tool calls · {tools}".into(),
+            failure_one: "1 failure".into(),
+            failure_many: "{n} failures".into(),
+            running: "running".into(),
+            ok: "ok".into(),
+            error: "error".into(),
         }
     }
 }
@@ -105,7 +147,8 @@ impl ChatCall {
 #[derive(Default)]
 pub struct ChatCalls {
     calls: Vec<ChatCall>,
-    open: Option<bool>,
+    open: bool,
+    labels: ChatCallsLabels,
     extra_class: Option<Cow<'static, str>>,
 }
 
@@ -120,10 +163,17 @@ impl ChatCalls {
         self
     }
 
-    /// Force the block open or closed. By default it opens while a call runs or
-    /// after a failure, and stays closed once every call succeeded.
+    /// Force the block open or closed. Closed by default: the run is a single
+    /// line of the transcript, expanded on demand by the reader.
     pub fn open(mut self, open: bool) -> Self {
-        self.open = Some(open);
+        self.open = open;
+        self
+    }
+
+    /// Replace the words the run shows (see [`ChatCallsLabels`]): an app in
+    /// another language passes its own, the library stays English.
+    pub fn labels(mut self, labels: ChatCallsLabels) -> Self {
+        self.labels = labels;
         self
     }
 
@@ -133,10 +183,9 @@ impl ChatCalls {
         self
     }
 
-    /// Whether the block starts expanded.
+    /// Whether the block starts expanded: never, unless the app asked.
     pub fn starts_open(&self) -> bool {
         self.open
-            .unwrap_or_else(|| self.calls.iter().any(|c| c.state != ChatCallState::Ok))
     }
 
     /// The summary line: how many calls, and which tools (three names at most).
@@ -156,11 +205,22 @@ impl ChatCalls {
         } else {
             shown
         };
-        match n {
-            0 => "Aucun appel d'outil".to_string(),
-            1 => format!("1 appel d'outil · {tools}"),
-            n => format!("{n} appels d'outils · {tools}"),
-        }
+        let template = match n {
+            0 => return self.labels.none.to_string(),
+            1 => self.labels.one.as_ref(),
+            _ => self.labels.many.as_ref(),
+        };
+        template
+            .replace("{n}", &n.to_string())
+            .replace("{tools}", &tools)
+    }
+
+    /// One call's line — name, argument summary, state — as a flex row. It is a
+    /// `<span>`, never the `<summary>`: a flex `<summary>` drops its marker.
+    fn line_row(line: Vec<ElementBuilder>) -> ElementBuilder {
+        el(El::Span)
+            .st([St::DisplayFlex, St::ItemsCenter, St::GapSm, St::MinW0])
+            .append(line)
     }
 
     /// Build the block into an ElementBuilder.
@@ -173,20 +233,16 @@ impl ChatCalls {
             .count();
 
         let text = self.summary_text();
-        let mut summary = vec![
-            el(El::Span).st([St::TextSm, St::TextMuted]).text(&text),
-            el(El::Span)
-                .st([St::TextXs, St::TextMuted, St::WhitespaceNowrap])
-                .text("détails"),
-        ];
+        let mut summary = vec![el(El::Span).st([St::TextSm, St::TextMuted]).text(&text)];
         if errors > 0 {
             summary.push(
                 el(El::Span)
                     .st([St::TextXs, St::TextError, St::WhitespaceNowrap])
-                    .text(&format!(
-                        "{errors} échec{}",
-                        if errors > 1 { "s" } else { "" }
-                    )),
+                    .text(&if errors > 1 {
+                        self.labels.failure_many.replace("{n}", &errors.to_string())
+                    } else {
+                        self.labels.failure_one.to_string()
+                    }),
             );
         }
 
@@ -208,21 +264,17 @@ impl ChatCalls {
                     .text(call.summary.as_ref()),
                 el(El::Span)
                     .st([St::TextXs, St::WhitespaceNowrap, call.state.ink()])
-                    .text(call.state.label()),
+                    .text(call.state.label(&self.labels)),
             ];
             let mut rows: Vec<ElementBuilder> = Vec::new();
             match call.detail {
                 Some(detail) => {
+                    // No flex on a `<summary>`: it would lose its native marker,
+                    // the only affordance of the call. The row is a span inside.
                     let mut inner = el(El::Details).st([St::TextSm]).append([
                         el(El::Summary)
-                            .st([
-                                St::DisplayFlex,
-                                St::ItemsCenter,
-                                St::GapSm,
-                                St::MinW0,
-                                St::CursorPointer,
-                            ])
-                            .append(line),
+                            .st([St::CursorPointer, St::PxXs])
+                            .append([Self::line_row(line)]),
                         detail,
                     ]);
                     if call.state != ChatCallState::Ok {
@@ -233,14 +285,8 @@ impl ChatCalls {
                 None => {
                     rows.push(
                         el(El::Div)
-                            .st([
-                                St::DisplayFlex,
-                                St::ItemsCenter,
-                                St::GapSm,
-                                St::MinW0,
-                                St::PyXs,
-                            ])
-                            .append(line),
+                            .st([St::PyXs, St::PlSm])
+                            .append([Self::line_row(line)]),
                     );
                 }
             }
@@ -253,29 +299,25 @@ impl ChatCalls {
 
         // No chrome of its own: the run sits on the transcript like a line of
         // text, never in a filled rounded block that would read as a message
-        // bubble of its own.
-        let mut block = el(El::Details)
-            .st([
-                St::DisplayFlex,
-                St::FlexCol,
-                St::GapXs,
-                St::MinW0,
-                St::TextSm,
-            ])
-            .append([
-                el(El::Summary)
+        // bubble of its own. The `<summary>` stays a list item (a flex one
+        // would lose the native triangle), and the expanded calls are indented
+        // under it.
+        let mut block = el(El::Details).st([St::MinW0, St::TextSm]).append([
+            el(El::Summary)
+                .st([St::CursorPointer, St::MinW0])
+                .append([el(El::Span)
                     .st([
-                        St::DisplayFlex,
+                        St::DisplayInlineFlex,
                         St::ItemsCenter,
                         St::GapSm,
                         St::FlexWrap,
-                        St::CursorPointer,
+                        St::MinW0,
                     ])
-                    .append(summary),
-                el(El::Div)
-                    .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::MinW0, St::MtXs])
-                    .append(calls),
-            ]);
+                    .append(summary)]),
+            el(El::Div)
+                .st([St::DisplayFlex, St::FlexCol, St::GapSm, St::MinW0, St::PlMd])
+                .append(calls),
+        ]);
         if open {
             block = block.bool_attr(At::Open);
         }
@@ -300,10 +342,7 @@ mod tests {
     #[test]
     fn the_summary_counts_the_calls_and_names_the_tools_once() {
         let html = run().build().to_static_html();
-        assert!(
-            html.contains("3 appels d&#39;outils") || html.contains("3 appels d'outils"),
-            "{html}"
-        );
+        assert!(html.contains("3 tool calls"), "{html}");
         assert!(html.contains("Bash, Read"), "{html}");
     }
 
@@ -326,24 +365,58 @@ mod tests {
     }
 
     #[test]
-    fn a_running_or_failed_call_opens_the_block() {
+    fn the_block_stays_closed_even_while_running_or_after_a_failure() {
         let running = ChatCalls::new().call(ChatCall::new("Bash", "cargo test"));
-        assert!(running.starts_open());
+        assert!(
+            !running.starts_open(),
+            "closed by default, even while running"
+        );
         let failed = run().call(
             ChatCall::new("Edit", "src/lib.rs")
                 .state(ChatCallState::Error)
                 .detail(el(El::Pre).text("permission denied")),
         );
-        assert!(failed.starts_open());
+        assert!(
+            !failed.starts_open(),
+            "closed by default, even after a failure"
+        );
         let html = failed.build().to_static_html();
-        assert!(html.contains("1 échec"), "{html}");
-        assert!(html.contains("permission denied"), "{html}");
+        // The failure reads in the summary without opening the block: the
+        // failing call opens, not the run.
+        assert!(html.contains("1 failure"), "{html}");
+        let outer = html.split('>').next().unwrap_or_default();
+        assert!(!outer.contains("open"), "run open: {outer}");
+    }
+
+    /// The summary carries the native triangle (no "details" label) and the
+    /// expanded calls are indented under it.
+    #[test]
+    fn the_summary_keeps_its_triangle_and_the_calls_are_indented() {
+        let html = run().build().to_static_html();
+        assert!(html.contains("<summary"), "{html}");
+        // No "details" word in the summary: the native triangle is the whole
+        // affordance, the count and the tool names are the label.
+        let line = html
+            .split("<summary")
+            .nth(1)
+            .and_then(|r| r.split("</summary>").next())
+            .unwrap_or_default();
+        assert!(!line.contains("details"), "{line}");
+        assert!(line.contains("3 tool calls"), "{line}");
+        // A flex `<summary>` would lose its marker: the line is a span.
+        let summary = line.split('>').next().unwrap_or_default();
+        assert!(!summary.contains("display:flex"), "summary flex: {summary}");
+        // The calls are indented under the summary (`PlMd`).
+        assert!(
+            html.contains(&format!("u{}", rwire::style_tokens::St::PlMd.as_u16())),
+            "{html}"
+        );
     }
 
     #[test]
     fn a_single_call_reads_in_the_singular() {
         let one = ChatCalls::new().call(ChatCall::new("Bash", "ls"));
-        assert_eq!(one.summary_text(), "1 appel d'outil · Bash");
+        assert_eq!(one.summary_text(), "1 tool call · Bash");
     }
 
     #[test]
@@ -353,10 +426,41 @@ mod tests {
             .call(ChatCall::new("Read", "b"))
             .call(ChatCall::new("Edit", "c"))
             .call(ChatCall::new("Grep", "d"));
+        assert_eq!(many.summary_text(), "4 tool calls · Bash, Read, Edit +1");
+    }
+
+    #[test]
+    fn the_app_brings_its_own_words() {
+        let labels = ChatCallsLabels {
+            none: "Nothing ran".into(),
+            one: "1 call ({tools})".into(),
+            many: "{n} calls ({tools})".into(),
+            failure_one: "1 failed".into(),
+            failure_many: "{n} failed".into(),
+            running: "in flight".into(),
+            ..ChatCallsLabels::default()
+        };
         assert_eq!(
-            many.summary_text(),
-            "4 appels d'outils · Bash, Read, Edit +1"
+            ChatCalls::new().labels(labels.clone()).summary_text(),
+            "Nothing ran"
         );
+        assert_eq!(
+            ChatCalls::new()
+                .call(ChatCall::new("Bash", "ls"))
+                .labels(labels.clone())
+                .summary_text(),
+            "1 call (Bash)"
+        );
+        let html = run()
+            .labels(labels)
+            .call(ChatCall::new("Read", "src/lib.rs").state(ChatCallState::Running))
+            .call(ChatCall::new("Edit", "src/a.rs").state(ChatCallState::Error))
+            .call(ChatCall::new("Write", "src/b.rs").state(ChatCallState::Error))
+            .build()
+            .to_static_html();
+        assert!(html.contains("6 calls (Bash, Read, Edit +1)"), "{html}");
+        assert!(html.contains("2 failed"), "{html}");
+        assert!(html.contains("in flight"), "{html}");
     }
 
     #[test]
