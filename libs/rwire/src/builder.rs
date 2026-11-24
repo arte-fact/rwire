@@ -558,6 +558,47 @@ impl Clone for Box<dyn SyncedRenderer> {
     }
 }
 
+/// A [`SyncedRenderer`] wrapper that attaches a stable identity to a region —
+/// see [`ElementBuilder::with_identity`]. Everything delegates to the inner
+/// renderer; only `identity()` is overridden.
+struct IdentityRenderer {
+    inner: Box<dyn SyncedRenderer>,
+    identity: u64,
+}
+
+impl SyncedRenderer for IdentityRenderer {
+    fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
+        self.inner.render_with_state(state)
+    }
+    fn clone_box(&self) -> Box<dyn SyncedRenderer> {
+        Box::new(IdentityRenderer {
+            inner: self.inner.clone_box(),
+            identity: self.identity,
+        })
+    }
+    fn state_type_id(&self) -> TypeId {
+        self.inner.state_type_id()
+    }
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        self.inner.create_default_state()
+    }
+    fn storage_type(&self) -> StorageType {
+        self.inner.storage_type()
+    }
+    fn table_name(&self) -> Option<&'static str> {
+        self.inner.table_name()
+    }
+    fn deps(&self) -> RendererDeps {
+        self.inner.deps()
+    }
+    fn identity(&self) -> Option<u64> {
+        Some(self.identity)
+    }
+    fn is_outlet(&self) -> bool {
+        self.inner.is_outlet()
+    }
+}
+
 /// A binding from an element to a Target's boolean state.
 #[derive(Clone, Debug)]
 struct TargetBinding {
@@ -823,6 +864,36 @@ impl ElementBuilder {
             storage_type: S::STORAGE_TYPE,
             table_name,
         }))
+    }
+
+    /// Attach a stable identity to this synced region (no-op on a plain element).
+    ///
+    /// When the parent region re-renders, a region carrying an identity is
+    /// matched to its previous wire id **by identity**, never positionally —
+    /// so prepending a sibling region does not shift this region's id, and its
+    /// live DOM span (plus its own standalone updates) survives unchanged.
+    /// Identity-less regions keep matching positionally per state type.
+    ///
+    /// Semantics:
+    /// - `identity` is an app-supplied stable key (e.g. a block's first message
+    ///   index); it must be unique per parent region and per state type.
+    /// - On collision (two children with the same identity under one parent),
+    ///   the first unconsumed match wins.
+    /// - Contract: a parent must re-emit ALL its windowed children on every
+    ///   render (placeholders included) — a child the parent stops emitting is
+    ///   unregistered (`reconcile_nested_regions`).
+    /// - Overrides any identity the renderer itself carries (action reflectors
+    ///   set their own; don't call this on those).
+    ///
+    /// ```ignore
+    /// ElementBuilder::synced_with_storage::<ConvView, _>(move |_| bloc(key), deps)
+    ///     .with_identity(key)
+    /// ```
+    pub fn with_identity(mut self, identity: u64) -> Self {
+        if let Some(r) = self.synced.take() {
+            self.synced = Some(Box::new(IdentityRenderer { inner: r, identity }));
+        }
+        self
     }
 
     /// Wrap a boxed synced renderer in a placeholder element.
@@ -2066,6 +2137,11 @@ impl ElementBuilder {
         self.breakpoint_groups.hash(hasher);
         // Morph key: part of the element's identity for later reconciliations.
         self.key.hash(hasher);
+        // A synced child's identity (when it has one) is part of this element's
+        // hash: the parent's render dedup must notice when its SET of keyed
+        // children changes (prepend/trim of a windowed list), even though every
+        // placeholder looks alike.
+        self.synced.as_ref().and_then(|r| r.identity()).hash(hasher);
         // Events: type, handler identity and param bytes. Params are hashed on
         // purpose — a re-render that changes only a binding's params (e.g. a
         // sentinel's cursor) must be re-emitted, or the client never re-keys
