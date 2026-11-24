@@ -64,7 +64,7 @@ impl Link {
 
     /// Compute style tokens for the link.
     pub fn compute_tokens(&self) -> Vec<St> {
-        vec![St::TextAccent, St::NoDecoration, St::CursorPointer]
+        vec![St::TextLink, St::NoDecoration, St::CursorPointer]
     }
 
     /// Build the link into an ElementBuilder.
@@ -99,6 +99,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_link_takes_the_link_color() {
+        let tokens = Link::new("/x").compute_tokens();
+        assert!(tokens.contains(&St::TextLink), "{tokens:?}");
+        assert!(!tokens.contains(&St::TextAccent));
+        let html = rwire::router::Link::to("/", "x").to_static_html();
+        let link = St::TextLink.as_u16();
+        assert!(html.contains(&format!("u{link}")), "{html}");
+    }
+
+    #[test]
     fn test_link_defaults() {
         let link = Link::new("/about");
         assert_eq!(link.href, "/about");
@@ -109,7 +119,7 @@ mod tests {
     fn test_link_default_tokens() {
         let link = Link::new("/about");
         let tokens = link.compute_tokens();
-        assert!(tokens.contains(&St::TextAccent));
+        assert!(tokens.contains(&St::TextLink));
         assert!(tokens.contains(&St::NoDecoration));
         assert!(tokens.contains(&St::CursorPointer));
     }

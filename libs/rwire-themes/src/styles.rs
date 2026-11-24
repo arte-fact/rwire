@@ -136,8 +136,17 @@ fn solid_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
     }
 }
 
+/// The code ground (`BgCode` reads `--Qc`): a step **darker** than the page in
+/// both modes — mixing the app ground with black darkens a light grey as well as
+/// nord0. Every style declares it, so a code card never comes out lighter than
+/// the page it sits on.
+fn code_ground_css(css: &mut String) {
+    css.push_str("--Qc:color-mix(in srgb,var(--a) 86%,#000);");
+}
+
 fn solid_q_css(css: &mut String, _is_dark: bool) {
     css.push_str("--Qd:var(--Z1);--Qgw:none;");
+    code_ground_css(css);
     css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
     css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
@@ -166,6 +175,7 @@ fn brutalist_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
 }
 
 fn brutalist_q_css(css: &mut String, _is_dark: bool) {
+    code_ground_css(css);
     css.push_str("--Qd:none;--Qgw:none;");
     css.push_str("--Qb:2px;--Qbl:3px;--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
     css.push_str("--Qol:3px;--Qoo:0px;--Qf:var(--K);");
@@ -186,6 +196,7 @@ fn minimal_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
 }
 
 fn minimal_q_css(css: &mut String, _is_dark: bool) {
+    code_ground_css(css);
     css.push_str("--Qd:none;--Qgw:none;");
     css.push_str("--Qb:0;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:transparent;--Qbs:none;");
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
@@ -204,6 +215,7 @@ fn glass_color_css(css: &mut String, rp: &ResolvedPalette, _is_dark: bool) {
 }
 
 fn glass_q_css(css: &mut String, is_dark: bool) {
+    code_ground_css(css);
     css.push_str("--Qd:none;--Qgw:none;");
     css.push_str(
         "--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:rgba(255,255,255,0.1);--Qbs:solid;",
@@ -228,6 +240,7 @@ fn neon_color_css(css: &mut String, rp: &ResolvedPalette, _is_dark: bool) {
 }
 
 fn neon_q_css(css: &mut String, _is_dark: bool) {
+    code_ground_css(css);
     css.push_str("--Qd:none;--Qgw:0 0 8px var(--n9),0 0 16px var(--n9);");
     css.push_str("--Qb:2px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--n9);--Qbs:solid;");
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--n9);");
@@ -274,6 +287,7 @@ fn cloth_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
 }
 
 fn cloth_q_css(css: &mut String, _is_dark: bool) {
+    code_ground_css(css);
     css.push_str("--Qft:\"EB Garamond\",Garamond,Georgia,serif;");
     css.push_str("--Qfd:Cinzel,\"Trajan Pro\",Georgia,serif;");
     css.push_str("--Qd:none;--Qgw:none;");
@@ -317,7 +331,8 @@ fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "K", &rp.accent[5]); // focus ring
         css_var(css, "j", &n[2]); // soft ink: nord4 (/app)
         css_var(css, "j2", &n[5]); // faint ink wanted (kept if it reads on every ground)
-                                   // Success as a fill: the palette's bright green (nord14), dark text on it.
+        css_var(css, "Y0d", &n[7]); // idle dot wanted: nord3 (/app)
+                                    // Success as a fill: the palette's bright green (nord14), dark text on it.
         css_var(css, "o", &rp.green[6]);
         css_var(css, "o2", &n[10]);
     } else {
@@ -337,6 +352,7 @@ fn studio_color_css(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         css_var(css, "K", &rp.accent[8]);
         css_var(css, "j", &n[7]); // soft ink: nord3 (/app)
         css_var(css, "j2", &mix(&n[6], &n[7], 0.5)); // faint ink wanted
+        css_var(css, "Y0d", &n[5]); // idle dot wanted: near /app's #9aa3b5
     }
 }
 
@@ -351,6 +367,7 @@ fn studio_q_css(css: &mut String, is_dark: bool) {
     css.push_str(";--Z2:");
     css.push_str(shadow);
     css.push_str(";--Qgw:none;");
+    code_ground_css(css);
     css.push_str("--Qb:1px;--Qbl:var(--Qb);--Qbt:var(--Qb);--Qbc:var(--h);--Qbs:solid;");
     css.push_str("--Qol:2px;--Qoo:2px;--Qf:var(--K);");
     css.push_str("--Qbf:none;--Qso:1;--Qgr:none;");
@@ -374,7 +391,16 @@ mod tests {
         assert!(light.contains("--t:#ECEFF4;"), "{light}");
         assert!(light.contains("--R2:8px;--R3:10px;--R4:14px;"));
         assert!(light.contains("--Qd:0 10px 30px"));
+        // The code ground is darker than the page (same expression both modes).
+        assert!(
+            light.contains("--Qc:color-mix(in srgb,var(--a) 86%,#000)"),
+            "{light}"
+        );
         let dark = generate_theme_css(&Theme::dark().palette(nord()).style(studio()));
+        assert!(
+            dark.contains("--Qc:color-mix(in srgb,var(--a) 86%,#000)"),
+            "{dark}"
+        );
         assert!(dark.contains("--a:#2E3440;"), "nord0: {dark}");
         assert!(dark.contains("--r:#3B4252;"), "nord1 cards");
         assert!(dark.contains("--t:#434C5E;"), "nord2 raised");

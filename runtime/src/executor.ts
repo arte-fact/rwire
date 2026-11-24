@@ -12,7 +12,7 @@ import { sep } from "./events.ts";
 import { fm } from "./morph.ts";
 import { BL, xi } from "./bind.ts";
 import { fl2, fb2, sl2, sb2, uf2, us2 } from "./actions.ts";
-import { bind, ack } from "./delegate.ts";
+import { bind, ack, own } from "./delegate.ts";
 import { ls, ul, lv, lb, type LiveBind, type LiveEl, type LiveSum } from "./live.ts";
 
 /** Extensions already imported (once per page). */
@@ -383,8 +383,22 @@ export function x(d: Uint8Array): void {
         const [stc, sl] = rv(d, i);
         i += sl;
         const inv = d[i++];
-        (fb2[ti] || (fb2[ti] = [])).push({ e: r[f], s: stc, n: !!inv });
-        uf2(ti);
+        const el = r[f];
+        const list = fb2[ti] || (fb2[ti] = []);
+        const ex = list.find((b) => b.e === el);
+        if (ex) {
+          // Re-emitted binding for a live element: refresh in place instead of
+          // stacking a duplicate (the registry used to grow on every re-render).
+          if (ex.s !== stc) el.classList.remove("u" + ex.s);
+          ex.s = stc;
+          ex.n = !!inv;
+        } else {
+          list.push({ e: el, s: stc, n: !!inv });
+        }
+        // O(1): the target state did not change, so apply to this element only —
+        // uf2(ti) re-applied every binding of the target on each re-emission.
+        if (fl2[ti] !== !!inv) el.classList.add("u" + stc);
+        else el.classList.remove("u" + stc);
       } else if (o === OP.BIND_TOGGLE) {
         const [f, l] = rv(d, i);
         i += l;
@@ -405,8 +419,19 @@ export function x(d: Uint8Array): void {
           mv = d[i++];
         const [stc, sl] = rv(d, i);
         i += sl;
-        (sb2[si] || (sb2[si] = [])).push({ e: r[f], v: mv, s: stc });
-        us2(si);
+        const el = r[f];
+        const list = sb2[si] || (sb2[si] = []);
+        const ex = list.find((b) => b.e === el);
+        if (ex) {
+          if (ex.s !== stc) el.classList.remove("u" + ex.s);
+          ex.v = mv;
+          ex.s = stc;
+        } else {
+          list.push({ e: el, v: mv, s: stc });
+        }
+        // O(1), same rationale as BIND_TARGET above.
+        if (sl2[si] === mv) el.classList.add("u" + stc);
+        else el.classList.remove("u" + stc);
       } else if (o === OP.BIND_SELECT) {
         const [f, l] = rv(d, i);
         i += l;
@@ -478,28 +503,53 @@ export function x(d: Uint8Array): void {
         ob.observe(sel);
       } else if (o === OP.BIND_RESIZE) {
         // Pointer-drag resize handle: dragging resizes the PREVIOUS element
-        // sibling's width (client-side only; min 8rem). Adjacency pairing
-        // keeps the wire format to a single ref.
+        // sibling's width (the NEXT one with data-rz="n", a right-hand panel;
+        // client-side; from 8rem to the parent's width minus 256). On release
+        // (or cancel) the width goes to the server through the handle's own
+        // click binding with data-w, once; a double-click restores the default
+        // width (data-w=""). Native clicks on the handle never reach the server
+        // (or an ancestor's handler). Adjacency pairing keeps the wire format
+        // to a single ref.
         const [f, fl] = rv(d, i);
         i += fl;
         const h = r[f];
-        h.__hk = "z";
+        const n = h.dataset.rz == "n";
+        h.__hk = n ? "zn" : "z";
+        const tg = () => (n ? h.nextElementSibling : h.previousElementSibling) as HTMLElement | null;
+        const tell = (w: string) => {
+          h.dataset.w = w;
+          own(h, "click");
+        };
+        h.addEventListener("click", (e) => e.stopImmediatePropagation(), true);
         h.addEventListener("pointerdown", (e) => {
-          const tgt = h.previousElementSibling as HTMLElement | null;
+          const tgt = tg();
           if (!tgt) return;
           e.preventDefault();
           const sx = (e as PointerEvent).clientX,
-            sw = tgt.getBoundingClientRect().width;
+            sw = tgt.getBoundingClientRect().width,
+            pw = tgt.parentElement?.getBoundingClientRect().width;
+          const max = pw ? Math.max(128, pw - 256) : 1e9;
+          let w = 0;
           const mv = (ev: PointerEvent) => {
-            tgt.style.width = Math.max(128, sw + ev.clientX - sx) + "px";
+            w = Math.min(max, Math.max(128, sw + (n ? sx - ev.clientX : ev.clientX - sx)));
+            tgt.style.width = w + "px";
             tgt.style.flex = "0 0 auto";
           };
           const up = () => {
             removeEventListener("pointermove", mv as EventListener);
             removeEventListener("pointerup", up);
+            removeEventListener("pointercancel", up);
+            if (w) tell("" + Math.round(w));
           };
           addEventListener("pointermove", mv as EventListener);
           addEventListener("pointerup", up);
+          addEventListener("pointercancel", up);
+        });
+        h.addEventListener("dblclick", () => {
+          const tgt = tg();
+          if (!tgt) return;
+          tgt.style.width = tgt.style.flex = "";
+          tell("");
         });
       } else if (o === OP.LIVE_SOURCE) {
         const [f, fl] = rv(d, i);
@@ -633,6 +683,17 @@ export function x(d: Uint8Array): void {
         for (const c in lb) {
           lb[c] = lb[c].filter((x) => x.e && x.e.isConnected);
           if (!lb[c].length) delete lb[c];
+        }
+        // Action registries: same purge — a re-render re-emits BIND_TARGET for
+        // live elements only; bindings whose element left the document must not
+        // accumulate (they made every later uf2()/us2() walk an ever-growing list).
+        for (const ti in fb2) {
+          fb2[ti] = fb2[ti].filter((b) => b.e && b.e.isConnected);
+          if (!fb2[ti].length) delete fb2[ti];
+        }
+        for (const si in sb2) {
+          sb2[si] = sb2[si].filter((b) => b.e && b.e.isConnected);
+          if (!sb2[si].length) delete sb2[si];
         }
         for (const c in lv) {
           if (lv[c].isConnected) ul(+c);

@@ -44,7 +44,7 @@ fn compact_icon_buttons_are_32px_with_an_18px_glyph() {
 }
 
 /// Square, not just tall: width, min-width and height all come from `--Qzi`,
-/// and the square does not shrink in a flex row (mcp-agents measured a
+/// and the square does not shrink in a flex row (a dashboard measured a
 /// 20 × 32 toggle in its sidebar footer).
 #[test]
 fn icon_buttons_are_square_from_qzi_and_do_not_shrink() {
@@ -95,7 +95,10 @@ fn under_a_finger_or_below_sm_every_button_is_44px() {
         .expect("touch-target media block")
         .1;
     // min-height / min-width beat the 32 px square.
-    assert!(block.contains("[role=button]){min-height:44px}"), "{block}");
+    assert!(
+        block.contains("[role=button],[data-touch]){min-height:44px}"),
+        "{block}"
+    );
     assert!(block.contains(":where(button,[role=tab],[role=button]){min-width:44px}"));
 }
 

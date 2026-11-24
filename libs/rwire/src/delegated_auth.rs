@@ -198,6 +198,11 @@ pub const DEFAULT_MAX_CONCURRENT_VALIDATIONS: usize = 16;
 /// Default time an open WebSocket survives an unreachable validator.
 pub const DEFAULT_OUTAGE_GRACE: Duration = Duration::from_secs(300);
 
+/// How long a logout may spend telling the authority to retire the session
+/// (default 3 s): the visitor's cookie is cleared whatever happens, so the page
+/// never waits longer than this.
+pub const LOGOUT_HOOK_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// A cache key: the SHA-256 of the credential, never the credential itself,
 /// so a memory dump or a stray `Debug` of the cache shows no token.
 type Key = [u8; 32];
@@ -327,11 +332,64 @@ fn insert_bounded<V>(
     map.insert(key, value);
 }
 
+/// What a submitted login form carries, as the application's login closure
+/// receives it.
+#[derive(Debug, Clone, Default)]
+pub struct LoginForm {
+    fields: Vec<(String, String)>,
+}
+
+impl LoginForm {
+    /// Parse an `application/x-www-form-urlencoded` body.
+    pub fn parse(body: &str) -> Self {
+        let fields = body
+            .split('&')
+            .filter_map(|pair| {
+                let (name, value) = pair.split_once('=')?;
+                Some((
+                    crate::server::url_decode(name),
+                    crate::server::url_decode(value),
+                ))
+            })
+            .collect();
+        Self { fields }
+    }
+
+    /// A submitted field, first occurrence wins.
+    pub fn field(&self, name: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Every submitted field, in submission order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.fields.iter().map(|(n, v)| (n.as_str(), v.as_str()))
+    }
+}
+
+/// A login attempt the application judges: the form it submitted, and the
+/// session value to store on success (or the message to show on failure).
+pub(crate) type LoginFn = Arc<dyn Fn(LoginForm) -> LoginFuture + Send + Sync>;
+pub(crate) type LoginFuture =
+    std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+/// Builds the login page; `error` is the message to show after a refused
+/// attempt (`None` on a first visit).
+pub(crate) type LoginPageFn = Arc<dyn Fn(Option<&str>) -> crate::ElementBuilder + Send + Sync>;
+/// Called with the session value when the visitor logs out, so the authority can
+/// retire it; rwire clears its cookie either way.
+pub(crate) type LogoutFn = Arc<dyn Fn(String) -> LogoutFuture + Send + Sync>;
+pub(crate) type LogoutFuture = std::pin::Pin<Box<dyn Future<Output = ()> + Send>>;
+
 /// Delegated authentication settings and cache. See the [module docs](self).
 pub struct DelegatedAuth {
     cookie: String,
     validate: Arc<ValidateFn>,
     login_url: Option<String>,
+    login: Option<LoginFn>,
+    login_page: Option<LoginPageFn>,
+    logout: Option<LogoutFn>,
     cache_ttl: Duration,
     cache_capacity: usize,
     timeout: Duration,
@@ -375,6 +433,9 @@ impl DelegatedAuth {
             cookie: cookie.into(),
             validate: Arc::new(move |request| Box::pin(validate(request)) as ValidateFuture),
             login_url: None,
+            login: None,
+            login_page: None,
+            logout: None,
             cache_ttl: DEFAULT_CACHE_TTL,
             cache_capacity: DEFAULT_CACHE_CAPACITY,
             timeout: DEFAULT_VALIDATE_TIMEOUT,
@@ -403,6 +464,94 @@ impl DelegatedAuth {
     pub fn login_url(mut self, url: impl Into<String>) -> Self {
         self.login_url = Some(url.into());
         self
+    }
+
+    /// Serve **rwire's own login form** instead of redirecting to
+    /// [`Self::login_url`]: `login` receives the submitted fields and returns
+    /// the session cookie value to store (the authority's token), or the
+    /// message to show when it refuses.
+    ///
+    /// With a login form configured, `POST /login` is judged by `login`, a
+    /// successful attempt sets the cookie this `DelegatedAuth` is named after
+    /// (`Path=/; HttpOnly; SameSite=Lax`) and redirects to `next` (a path on
+    /// this app) or `/`; a refused attempt re-renders the page with the
+    /// message. `GET`/`POST /logout` clears the cookie and redirects to
+    /// `/login`. Anonymous page requests get the page with a `200` instead of a
+    /// redirect; WebSocket handshakes are still refused, as with `login_url`.
+    ///
+    /// The look comes from [`Self::login_page`]; without it, rwire's built-in
+    /// card is used.
+    pub fn login_form<F, Fut>(mut self, login: F) -> Self
+    where
+        F: Fn(LoginForm) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<String, String>> + Send + 'static,
+    {
+        self.login = Some(Arc::new(move |form| Box::pin(login(form)) as LoginFuture));
+        self
+    }
+
+    /// The page shown by [`Self::login_form`]: the application draws it with the
+    /// design system (tokens, components), and rwire renders it with the app's
+    /// theme, like any other page of the capsule.
+    pub fn login_page<F>(mut self, render: F) -> Self
+    where
+        F: Fn(Option<&str>) -> crate::ElementBuilder + Send + Sync + 'static,
+    {
+        self.login_page = Some(Arc::new(render));
+        self
+    }
+
+    /// Told the session value when the visitor logs out: the authority retires
+    /// it (a hub deleting its own session), instead of leaving it valid until
+    /// it expires. rwire clears its cookie whether the hook answers or not, and
+    /// waits for it at most [`LOGOUT_HOOK_TIMEOUT`].
+    pub fn on_logout<F, Fut>(mut self, retire: F) -> Self
+    where
+        F: Fn(String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.logout = Some(Arc::new(move |value| {
+            Box::pin(retire(value)) as LogoutFuture
+        }));
+        self
+    }
+
+    /// Whether [`Self::login_form`] is configured.
+    pub(crate) fn serves_login_form(&self) -> bool {
+        self.login.is_some()
+    }
+
+    /// The cookie this gate reads and writes.
+    pub(crate) fn cookie_name(&self) -> &str {
+        &self.cookie
+    }
+
+    /// The application's login page for `error` (`None`: the built-in one).
+    pub(crate) fn login_page_for(&self, error: Option<&str>) -> Option<crate::ElementBuilder> {
+        self.login_page.as_ref().map(|render| render(error))
+    }
+
+    /// Tell the authority that `value` is being retired, if a hook is set.
+    pub(crate) async fn sign_out(&self, value: &str) {
+        let Some(retire) = self.logout.as_ref() else {
+            return;
+        };
+        match tokio::time::timeout(LOGOUT_HOOK_TIMEOUT, retire(value.to_string())).await {
+            Ok(()) => {}
+            Err(_) => eprintln!("logout hook timed out after {LOGOUT_HOOK_TIMEOUT:?}"),
+        }
+    }
+
+    /// Judge a submitted form: the cookie value to store, or the refusal.
+    pub(crate) async fn submit_login(&self, body: &str) -> Result<String, String> {
+        let Some(login) = self.login.as_ref() else {
+            return Err("login form not configured".to_string());
+        };
+        let value = login(LoginForm::parse(body)).await?;
+        if value.is_empty() || value.contains([';', '\r', '\n']) {
+            return Err("the login returned an unusable session value".to_string());
+        }
+        Ok(value)
     }
 
     /// How long a successful validation is reused (default 30 s), which is also

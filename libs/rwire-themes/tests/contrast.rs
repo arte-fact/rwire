@@ -199,7 +199,7 @@ fn every_subtle_pair_reads_at_aa_in_every_builtin_theme() {
     );
 }
 
-/// E2 criterion: the studio style with the Nord palette (mcp-agents' theme),
+/// E2 criterion: the studio style with the Nord palette (the reference dashboard's theme),
 /// in light and dark, reads at AA on every pair, the canvas and the primary
 /// button included.
 #[test]
@@ -210,7 +210,7 @@ fn studio_with_nord_reads_at_aa() {
             .palette(palettes::nord());
         let v = vars(&generate_theme_css(&theme));
         // Beyond the shared pairs: the primary button, and the soft ink (`/app`'s
-        // `ink-soft`, `TextMuted`) on every ground mcp-agents sets text on.
+        // `ink-soft`, `TextMuted`) on every ground the dashboard sets text on.
         let pairs = PAIRS.iter().chain(&[
             (St::TextOnPrimary, St::BgPrimary),
             (St::TextMuted, St::BgApp),
@@ -275,7 +275,7 @@ fn worst_on_grounds(v: &HashMap<String, String>, color: &str) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-/// Parity with mcp-agents' old front (/app), measured by its parity script:
+/// Parity with the previous front (/app), measured by its parity script:
 /// with studio + Nord, a token takes /app's exact value whenever it passes
 /// (4.5:1 for text, 3:1 for a non-text mark) on every ground it is used on.
 #[test]
@@ -405,8 +405,8 @@ fn categorical_marks_reach_3_to_1_on_their_fill() {
     assert!(out.is_empty(), "{}", out.join("\n"));
 }
 
-/// The brand mark of mcp-agents: an "m" in nord6 on `Cat(1)` (nord10), as the
-/// old front draws it (3.6:1, a logotype).
+/// The brand mark of a dashboard: an "m" in nord6 on `Cat(1)` (nord10), as the
+/// previous front draws it (3.6:1, a logotype).
 #[test]
 fn the_nord_brand_mark_is_nord6_on_cat_1() {
     for dark in [false, true] {
@@ -418,4 +418,149 @@ fn the_nord_brand_mark_is_nord6_on_cat_1() {
         // The read text on that fill is still at AA.
         assert!(contrast_ratio(&resolve(&v, "Y1o"), &resolve(&v, "Y1")) >= MIN_TEXT_CONTRAST);
     }
+}
+
+/// Status dots (`Tone::dot`, `--Y?d`) reach 3:1, the WCAG threshold for
+/// graphics, on every ground a dot sits on: app, subtle, surface, raised (a
+/// hovered row), the selected row and the sidebar, in every built-in theme.
+#[test]
+fn status_dots_reach_3_to_1_on_every_ground() {
+    use rwire::theme::MIN_MARK_CONTRAST;
+    let dots = [
+        "Y0d", "Yad", "Yid", "Ysd", "Ywd", "Yxd", "Y1d", "Y2d", "Y3d", "Y4d", "Y5d", "Y6d",
+    ];
+    let mut out = Vec::new();
+    for (palette_name, palette) in palettes() {
+        for (style_name, style) in styles() {
+            for dark in [false, true] {
+                let mut theme = if dark { Theme::dark() } else { Theme::light() }.style(style);
+                if let Some(p) = palette.clone() {
+                    theme = theme.palette(p);
+                }
+                let v = vars(&generate_theme_css(&theme));
+                for dot in dots {
+                    let d = resolve(&v, dot);
+                    for g in ["a", "b", "r", "t", "n0", "Qs"] {
+                        if !v.contains_key(g) {
+                            continue;
+                        }
+                        let r = contrast_ratio(&d, &resolve(&v, g));
+                        if r < MIN_MARK_CONTRAST {
+                            out.push(format!(
+                                "{palette_name}/{style_name}/{dark}: --{dot} {d} on --{g} = {r:.2}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        out.is_empty(),
+        "{} below 3:1:\n{}",
+        out.len(),
+        out.join("\n")
+    );
+}
+
+/// studio + Nord dots against the previous front's (/app): equal where /app's
+/// passes 3:1 on every dot ground, else the nearest that does (named gaps).
+#[test]
+fn studio_nord_dots_match_app_where_contrast_allows() {
+    use rwire::theme::MIN_MARK_CONTRAST;
+    let worst = |v: &HashMap<String, String>, c: &str| {
+        ["a", "b", "r", "t", "n0", "Qs"]
+            .iter()
+            .map(|g| contrast_ratio(c, &resolve(v, g)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    // (dark, var, /app value, what)
+    let cases: &[(bool, &str, &str, &str)] = &[
+        (true, "Ysd", "#a3be8c", "generating: nord14"),
+        (true, "Y5d", "#ebcb8b", "validation: nord13"),
+        (false, "Ysd", "#a3be8c", "generating: nord14"),
+        (false, "Y5d", "#ebcb8b", "validation: nord13"),
+        (false, "Y0d", "#9aa3b5", "idle / inactive"),
+        (true, "Y0d", "#4c566a", "idle / inactive: nord3"),
+    ];
+    for &(dark, var, app, what) in cases {
+        let v = studio_nord(dark);
+        let ours = resolve(&v, var);
+        let mode = if dark { "dark" } else { "light" };
+        let (app_w, ours_w) = (worst(&v, app), worst(&v, &ours));
+        assert!(
+            ours_w >= MIN_MARK_CONTRAST,
+            "--{var} {mode}: {ours} = {ours_w:.2}"
+        );
+        if app_w >= MIN_MARK_CONTRAST {
+            assert!(
+                ours.eq_ignore_ascii_case(app),
+                "--{var} {mode} ({what}): /app's {app} passes ({app_w:.2}), rwire has {ours}"
+            );
+            println!("= {mode:5} --{var:4} {app}  {what}");
+        } else {
+            assert!(!ours.eq_ignore_ascii_case(app));
+            println!("≠ {mode:5} --{var:4} {what}: /app {app} worst {app_w:.2}; rwire {ours} worst {ours_w:.2}");
+        }
+    }
+}
+
+/// Links (`St::TextLink`, `--lk`) read at AA on the app, surface and sidebar
+/// grounds, in every built-in theme and mode (they were the fixed accent step
+/// 11, 2.28:1 on Nord's dark ground).
+#[test]
+fn links_read_at_aa_on_every_ground() {
+    let mut out = Vec::new();
+    for (palette_name, palette) in palettes() {
+        for (style_name, style) in styles() {
+            for dark in [false, true] {
+                let mut theme = if dark { Theme::dark() } else { Theme::light() }.style(style);
+                if let Some(p) = palette.clone() {
+                    theme = theme.palette(p);
+                }
+                let v = vars(&generate_theme_css(&theme));
+                let link = resolve(&v, var_of(St::TextLink));
+                for g in ["a", "r", "Qs"] {
+                    if !v.contains_key(g) {
+                        continue;
+                    }
+                    let r = contrast_ratio(&link, &resolve(&v, g));
+                    if r < MIN_TEXT_CONTRAST {
+                        out.push(format!(
+                            "{palette_name}/{style_name}/{dark}: --lk {link} on --{g} = {r:.2}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        out.is_empty(),
+        "{} below AA:\n{}",
+        out.len(),
+        out.join("\n")
+    );
+}
+
+/// studio + Nord links against the previous front's `--link`: nord8 in dark mode
+/// (equal); in light mode the previous front's `#4b6d96`, like the accent's step 11
+/// `#4c6b94`, is under AA on nord4 (the app ground), so rwire takes the nearest
+/// that reads (a named gap).
+#[test]
+fn studio_nord_links_match_the_old_front() {
+    let v = studio_nord(true);
+    let dark = resolve(&v, "lk");
+    assert!(dark.eq_ignore_ascii_case("#88c0d0"), "{dark}");
+    let v = studio_nord(false);
+    let light = resolve(&v, "lk");
+    let worst = |c: &str| {
+        ["a", "r", "Qs"]
+            .iter()
+            .map(|g| contrast_ratio(c, &resolve(&v, g)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (app, ours) = (worst("#4b6d96"), worst(&light));
+    assert!(app < MIN_TEXT_CONTRAST && ours >= MIN_TEXT_CONTRAST);
+    println!("≠ light --lk  /app #4b6d96 worst {app:.2}; old rwire #4c6b94 worst {:.2}; rwire {light} worst {ours:.2}", worst("#4c6b94"));
+    println!("= dark  --lk  #88c0d0 (nord8)");
 }

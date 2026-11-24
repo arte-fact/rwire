@@ -289,6 +289,31 @@ pub struct Theme {
     touch_below: Option<u16>,
 }
 
+/// The responsive rules of a three-column `AppShell` under `scope` (a
+/// selector for its root): below `drawer` px the panel becomes a drawer over
+/// the main column; below `one_column` px a single column shows, the sidebar
+/// or the main one as the root's `data-mobile` says (`list` / `main`), and
+/// the panel covers the screen. The theme emits them for every shell at its
+/// defaults (one column below [`Theme::touch_below`], else 760; drawer below
+/// 1100); a shell with its own thresholds emits its own.
+#[doc(hidden)]
+pub fn shell_layout_css(scope: &str, one_column: u16, drawer: u16) -> String {
+    // One column never starts above the drawer threshold; child combinators keep
+    // a shell nested in another's main column out of the outer rules.
+    let one_column = one_column.min(drawer);
+    let (d, o) = (drawer.saturating_sub(1), one_column.saturating_sub(1));
+    format!(
+        "@media (max-width:{d}.98px){{\
+         {scope}>div>[data-shell=panel]{{position:fixed;top:0;right:0;bottom:0;z-index:40;max-width:100vw;box-shadow:var(--Qd,0 8px 24px rgba(0,0,0,.25))}}\
+         {scope}>div>[data-pane=panel]{{display:none}}}}\
+         @media (max-width:{o}.98px){{\
+         {scope}>div>[data-shell=handle]{{display:none}}\
+         {scope}>div>[data-shell=sidebar]{{width:100%!important;border-right:0}}\
+         {scope}>div>[data-shell=panel]{{left:0;width:100%!important}}\
+         {scope}[data-mobile=list]>div>[data-shell=main],{scope}[data-mobile=main]>div>[data-shell=sidebar]{{display:none}}}}\n"
+    )
+}
+
 /// How dense the controls and lists are, for a site or for a tool.
 ///
 /// It sets the `--Qz*` hooks: control height (`--Qzh`, `St::HControl`), control
@@ -315,7 +340,7 @@ impl Density {
             // The tokens' fallbacks are the comfortable sizes.
             Density::Comfortable => "",
             Density::Compact => {
-                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzcx:var(--S2);--Qzcy:.125rem;--Qzp:.38rem .55rem;\
+                "--Qzh:2rem;--Qzt:var(--T2);--Qzy:var(--S2);--Qzcx:9.6px;--Qzcy:2.4px;--Qzp:6.08px 8.8px;\
                  --Qzi:32px;--Qzg:18px;--Qzq:0;"
             }
         }
@@ -447,7 +472,7 @@ impl Theme {
     /// The viewport width (px) below which interactive controls get 44 px touch
     /// targets, even under a fine pointer (a coarse pointer gets them at any
     /// width). The default is the `sm` breakpoint, 640; an app whose "phone"
-    /// layout starts wider sets its own (mcp-agents: 760). The `sm`
+    /// layout starts wider sets its own (a dashboard: 760). The `sm`
     /// breakpoint itself does not move.
     pub fn touch_below(mut self, px: u16) -> Self {
         self.touch_below = Some(px);
@@ -773,6 +798,13 @@ pub fn generate_theme_css(theme: &Theme) -> String {
             "html{{font-size:{mobile}px}}@media(min-width:640px){{html{{font-size:{desktop}px}}}}"
         );
     }
+    // Three-column shells at the theme's thresholds (a shell with its own emits
+    // its own rules, under `[data-shell-bp]`).
+    css.push_str(&shell_layout_css(
+        "[data-shell-root]:not([data-shell-bp])",
+        theme.touch_below.unwrap_or(760),
+        1100,
+    ));
     // 44 px touch targets under a coarse pointer, or below `touch_below` (the
     // `sm` breakpoint by default), for every interactive control whatever its
     // classes. Zero specificity (`:where`): an app's own min-height wins. Icon
@@ -784,8 +816,8 @@ pub fn generate_theme_css(theme: &Theme) -> String {
         let below = theme.touch_below.unwrap_or(640);
         let _ = writeln!(
             css,
-            "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}\
-             :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button]){{min-height:44px}}\
+            "@media (pointer:coarse),(max-width:{}.98px){{:root{{--Qzi:44px}}:where(a[data-touch]){{display:inline-flex;align-items:center}}\
+             :where(button,select,input:not([type=checkbox],[type=radio],[type=range],[type=hidden]),[role=tab],[role=button],[data-touch]){{min-height:44px}}\
              :where(button,[role=tab],[role=button]){{min-width:44px}}}}",
             below.saturating_sub(1)
         );
@@ -892,6 +924,8 @@ fn root_block(theme: &Theme, is_dark: bool) -> String {
     // (`a`, `b`, `r`, `t`) as the style finally sets them.
     subtle_pairs(&mut css, &rp, is_dark);
     tone_pairs(&mut css, &rp, is_dark);
+    dot_colors(&mut css, &rp, is_dark);
+    link_color(&mut css, &rp, is_dark);
 
     // --- Q-vars (theme-style hooks for non-color customization) ---
     (theme.style.q_css)(&mut css, is_dark);
@@ -1148,7 +1182,7 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         |css: &mut String, n: usize, color: &str, preferred: Option<&str>, mark: Option<&str>| {
             let c = hex(color);
             let inks: Vec<String> = preferred
-                .map(&near)
+                .map(near)
                 .unwrap_or_default()
                 .into_iter()
                 .chain(std::iter::once(c.clone()))
@@ -1247,6 +1281,86 @@ fn tone_pairs(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
         .chain(faint_order.iter().map(|&i| hex(&rp.neutral[i])))
         .collect();
     css_var(css, "j2", &first_readable(&faint, &plain));
+}
+
+/// The status dots' colors (`--Y?d`), one per tone, each reaching
+/// [`MIN_MARK_CONTRAST`] (a dot is a graphic) on every ground a dot sits on:
+/// app, subtle, surface, raised (a hovered row), the selected row (`--n0`) and
+/// the sidebar (`--Qs`, when the style sets one). Each starts from the tone's
+/// own color (a style may name the neutral one it wants in `--Y0d`) and, when
+/// that does not reach 3:1, takes the nearest that does (darkened in light
+/// mode, lightened in dark mode). Called after the style and the tones.
+fn dot_colors(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let grounds: Vec<String> = ["a", "b", "r", "t", "n0", "Qs"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let dot = |preferred: &str| -> String {
+        let p = hex(preferred);
+        std::iter::once(p.clone())
+            .chain((1..=100).map(|i| mix(toward, &p, f64::from(i) * 0.01)))
+            .find(|c| {
+                grounds
+                    .iter()
+                    .all(|g| contrast_ratio(c, g) >= MIN_MARK_CONTRAST)
+            })
+            .unwrap_or_else(|| toward.to_string())
+    };
+    let declared = |name: &str, fallback: &str| {
+        declared_color(css, name).unwrap_or_else(|| fallback.to_string())
+    };
+    let neutral = declared("Y0d", &rp.neutral[6]);
+    let wanted = [
+        ("Y0d", neutral),
+        ("Yad", declared("v", &rp.accent[8])),
+        ("Yid", rp.accent[8].clone()),
+        ("Ysd", declared("o", &rp.green[8])),
+        ("Ywd", declared("p", &rp.amber[8])),
+        ("Yxd", declared("q", &rp.red[8])),
+    ];
+    for (name, color) in wanted {
+        css_var(css, name, &dot(&color));
+    }
+    let given = rp.categorical.len().clamp(1, 6);
+    for n in 1..=6 {
+        match rp.categorical.get(n - 1).filter(|_| n <= given) {
+            Some(color) => css_var(css, &format!("Y{n}d"), &dot(color)),
+            None => {
+                let from = (n - 1) % given + 1;
+                css_var(css, &format!("Y{n}d"), &format!("var(--Y{from}d)"));
+            }
+        }
+    }
+}
+
+/// The links' color (`--lk`, `St::TextLink`): at [`MIN_TEXT_CONTRAST`] on the
+/// grounds links sit on (app, surface, the sidebar when the style sets one).
+/// It starts from the accent's step 11 in light mode and step 6 in dark mode
+/// (a style may name its own in `--lk`) and, when that does not read, takes
+/// the nearest that does. Called after the style.
+fn link_color(css: &mut String, rp: &ResolvedPalette, is_dark: bool) {
+    use crate::tokens::palette::css_color_to_hex as hex;
+    let grounds: Vec<String> = ["a", "r", "Qs"]
+        .iter()
+        .filter_map(|name| declared_color(css, name))
+        .map(|c| hex(&c))
+        .collect();
+    let preferred = declared_color(css, "lk")
+        .unwrap_or_else(|| rp.accent[if is_dark { 5 } else { 10 }].clone());
+    let toward = if is_dark { "#ffffff" } else { "#000000" };
+    let p = hex(&preferred);
+    let link = std::iter::once(p.clone())
+        .chain((1..=100).map(|i| mix(toward, &p, f64::from(i) * 0.01)))
+        .find(|c| {
+            grounds
+                .iter()
+                .all(|g| contrast_ratio(c, g) >= MIN_TEXT_CONTRAST)
+        })
+        .unwrap_or_else(|| toward.to_string());
+    css_var(css, "lk", &link);
 }
 
 /// The last value declared for `--name` in `css`, when it is a plain color
@@ -1397,7 +1511,9 @@ mod tests {
 
         // System: exactly the light block, then the dark block in the media query
         // (the mode-independent rules, such as touch targets, follow once).
-        let block = |css: &str| css.split("@media (pointer").next().unwrap().to_string();
+        // A mode's block: up to its first closing line (the mode-independent
+        // rules, shells and touch targets, follow once).
+        let block = |css: &str| css.split_inclusive("}\n").next().unwrap().to_string();
         let (light, dark) = (block(&light), block(&dark));
         let (head, tail) = system
             .split_once("@media (prefers-color-scheme:dark){")
@@ -1465,7 +1581,7 @@ mod tests {
         assert!(!root.contains("--Qz"), "{comfy}");
         let compact = generate_theme_css(&Theme::new().density(Density::Compact));
         assert!(compact.contains("--Qzh:2rem;"), "{compact}");
-        assert!(compact.contains("--Qzp:.38rem .55rem;"));
+        assert!(compact.contains("--Qzp:6.08px 8.8px;"));
         assert!(compact.contains("--Qzy:var(--S2);"));
         // Icon buttons: 32 px squares, 18 px glyphs, no padding (`/app`).
         assert!(
@@ -1495,7 +1611,7 @@ mod tests {
             .1;
         assert!(rule.contains(":where(button,select,input:not("), "{rule}");
         assert!(
-            rule.contains("[role=tab],[role=button]){min-height:44px}"),
+            rule.contains("[role=tab],[role=button],[data-touch]){min-height:44px}"),
             "{rule}"
         );
         assert!(rule.contains("{min-width:44px}"), "{rule}");
@@ -1524,7 +1640,7 @@ mod tests {
         let default = generate_theme_css(&Theme::new());
         assert!(!touch_rule_applies(&default, 700.0));
         assert!(touch_rule_applies(&default, 639.0));
-        // mcp-agents' phone threshold: 760.
+        // A dashboard's phone threshold: 760.
         let app = generate_theme_css(&Theme::new().touch_below(760));
         assert!(touch_rule_applies(&app, 700.0));
         assert!(!touch_rule_applies(&app, 760.0));
@@ -1693,7 +1809,9 @@ mod tests {
         // Single block should be compact.
         // +~400B (R1): the neutral and six categorical tones (`--Y0g…--Y6o`), the faint ink.
         // +~200B (R1): 44 px touch targets below `Theme::touch_below` (a theme setting).
-        assert!(css.len() < 2800, "Theme CSS too large: {} bytes", css.len());
+        // +~650B (R2): the three-column shell's drawer and single-column rules, whose
+        // one-column threshold follows `Theme::touch_below`.
+        assert!(css.len() < 3500, "Theme CSS too large: {} bytes", css.len());
     }
 
     #[test]
