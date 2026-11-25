@@ -558,6 +558,47 @@ impl Clone for Box<dyn SyncedRenderer> {
     }
 }
 
+/// A [`SyncedRenderer`] wrapper that attaches a stable identity to a region —
+/// see [`ElementBuilder::with_identity`]. Everything delegates to the inner
+/// renderer; only `identity()` is overridden.
+struct IdentityRenderer {
+    inner: Box<dyn SyncedRenderer>,
+    identity: u64,
+}
+
+impl SyncedRenderer for IdentityRenderer {
+    fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
+        self.inner.render_with_state(state)
+    }
+    fn clone_box(&self) -> Box<dyn SyncedRenderer> {
+        Box::new(IdentityRenderer {
+            inner: self.inner.clone_box(),
+            identity: self.identity,
+        })
+    }
+    fn state_type_id(&self) -> TypeId {
+        self.inner.state_type_id()
+    }
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        self.inner.create_default_state()
+    }
+    fn storage_type(&self) -> StorageType {
+        self.inner.storage_type()
+    }
+    fn table_name(&self) -> Option<&'static str> {
+        self.inner.table_name()
+    }
+    fn deps(&self) -> RendererDeps {
+        self.inner.deps()
+    }
+    fn identity(&self) -> Option<u64> {
+        Some(self.identity)
+    }
+    fn is_outlet(&self) -> bool {
+        self.inner.is_outlet()
+    }
+}
+
 /// A binding from an element to a Target's boolean state.
 #[derive(Clone, Debug)]
 struct TargetBinding {
@@ -823,6 +864,36 @@ impl ElementBuilder {
             storage_type: S::STORAGE_TYPE,
             table_name,
         }))
+    }
+
+    /// Attach a stable identity to this synced region (no-op on a plain element).
+    ///
+    /// When the parent region re-renders, a region carrying an identity is
+    /// matched to its previous wire id **by identity**, never positionally —
+    /// so prepending a sibling region does not shift this region's id, and its
+    /// live DOM span (plus its own standalone updates) survives unchanged.
+    /// Identity-less regions keep matching positionally per state type.
+    ///
+    /// Semantics:
+    /// - `identity` is an app-supplied stable key (e.g. a block's first message
+    ///   index); it must be unique per parent region and per state type.
+    /// - On collision (two children with the same identity under one parent),
+    ///   the first unconsumed match wins.
+    /// - Contract: a parent must re-emit ALL its windowed children on every
+    ///   render (placeholders included) — a child the parent stops emitting is
+    ///   unregistered (`reconcile_nested_regions`).
+    /// - Overrides any identity the renderer itself carries (action reflectors
+    ///   set their own; don't call this on those).
+    ///
+    /// ```ignore
+    /// ElementBuilder::synced_with_storage::<ConvView, _>(move |_| bloc(key), deps)
+    ///     .with_identity(key)
+    /// ```
+    pub fn with_identity(mut self, identity: u64) -> Self {
+        if let Some(r) = self.synced.take() {
+            self.synced = Some(Box::new(IdentityRenderer { inner: r, identity }));
+        }
+        self
     }
 
     /// Wrap a boxed synced renderer in a placeholder element.
@@ -1920,9 +1991,13 @@ impl ElementBuilder {
     /// Bind a one-shot visibility sentinel to this element (infinite scroll /
     /// content streaming). When the element nears the viewport, `handler`
     /// fires once with `next` as its param — read it via `ctx.item_index()`
-    /// and ignore stale values. Each render must pass the new `next`, which
-    /// re-keys the binding so the morph installs a fresh observer; one
-    /// request in flight is therefore structural, not a convention.
+    /// and ignore stale values. Each render must pass the new `next`: params
+    /// are part of the content hash, so that change alone re-emits the
+    /// binding, which re-keys it (`__hk`) and the morph installs a fresh
+    /// observer — one request in flight is therefore structural, not a
+    /// convention, and no extra attribute is needed to re-arm the sentinel.
+    /// `next` must be a deterministic function of the state (see
+    /// [`HandlerSpec::with_param_bytes`]).
     ///
     /// ```ignore
     /// el(El::Div).on_visible(load_more(), state.delivered as u32)
@@ -2016,8 +2091,15 @@ impl ElementBuilder {
     /// Compute a content hash of the element tree for render dedup.
     ///
     /// Hashes the deterministic visual content: element type, class, text,
-    /// attributes, style tokens, event types, and children (recursive).
-    /// Skips: synced renderer boxes, handler closures.
+    /// attributes, style tokens, morph key, events (type + handler id + param
+    /// bytes), and children (recursive). Skips: synced renderer boxes, handler
+    /// closures.
+    ///
+    /// Event params are hashed so that a re-render changing only a binding's
+    /// params is re-emitted (the client re-keys the binding, e.g. re-arming a
+    /// one-shot sentinel). Anti-loop contract: params must be a deterministic
+    /// function of the state — never of a clock, an RNG or a hidden counter,
+    /// or every render would re-emit.
     pub fn content_hash(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.hash_content(&mut hasher);
@@ -2053,8 +2135,28 @@ impl ElementBuilder {
         self.style_props.hash(hasher);
         self.pseudo_groups.hash(hasher);
         self.breakpoint_groups.hash(hasher);
-        for (ev, _) in &self.events {
+        // Morph key: part of the element's identity for later reconciliations.
+        self.key.hash(hasher);
+        // A synced child's identity (when it has one) is part of this element's
+        // hash: the parent's render dedup must notice when its SET of keyed
+        // children changes (prepend/trim of a windowed list), even though every
+        // placeholder looks alike.
+        self.synced.as_ref().and_then(|r| r.identity()).hash(hasher);
+        // Events: type, handler identity and param bytes. Params are hashed on
+        // purpose — a re-render that changes only a binding's params (e.g. a
+        // sentinel's cursor) must be re-emitted, or the client never re-keys
+        // the binding. Anti-loop contract: params must be a deterministic
+        // function of the state (see `HandlerSpec::with_param_bytes`).
+        for (ev, spec) in &self.events {
             ev.as_u8().hash(hasher);
+            let id = spec.handler_id();
+            if id != 0 {
+                id.hash(hasher);
+            } else if let Some(h) = &spec.remote_handler {
+                // Same fallback the wire id uses at registration (wire_handler_id).
+                h.fn_id().hash(hasher);
+            }
+            spec.param_bytes.hash(hasher);
         }
         // Hash target/selector bindings
         for tb in &self.target_bindings {
@@ -4353,5 +4455,58 @@ mod raw_text_tests {
         let mut out = String::new();
         push_raw_text(&mut out, "style", "a>b{c:d}</style>");
         assert_eq!(out, "a>b{c:d}<\\/style>");
+    }
+}
+
+#[cfg(test)]
+mod content_hash_tests {
+    use super::*;
+
+    fn spec_with(handler_id: u32, params: Option<Vec<u8>>) -> HandlerSpec {
+        HandlerSpec {
+            storage_type: StorageType::Memory,
+            state_type_id: None,
+            remote_handler: None,
+            param_bytes: params,
+            changes: ChangeSet::all(),
+            debounce_ms: 0,
+            handler_id,
+        }
+    }
+
+    #[test]
+    fn event_handler_id_and_params_are_hashed() {
+        let a = el(El::Div).on(Ev::Click, spec_with(7, Some(vec![1])));
+        let same = el(El::Div).on(Ev::Click, spec_with(7, Some(vec![1])));
+        let other_param = el(El::Div).on(Ev::Click, spec_with(7, Some(vec![2])));
+        let other_handler = el(El::Div).on(Ev::Click, spec_with(8, Some(vec![1])));
+        let no_params = el(El::Div).on(Ev::Click, spec_with(7, None));
+        assert_eq!(a.content_hash(), same.content_hash());
+        assert_ne!(
+            a.content_hash(),
+            other_param.content_hash(),
+            "a param change alone must change the hash (sentinel re-arm)"
+        );
+        assert_ne!(
+            a.content_hash(),
+            other_handler.content_hash(),
+            "the handler id must change the hash"
+        );
+        assert_ne!(
+            a.content_hash(),
+            no_params.content_hash(),
+            "present vs absent params must differ"
+        );
+    }
+
+    #[test]
+    fn morph_key_is_hashed() {
+        let a = el(El::Div).key(1u32);
+        let same = el(El::Div).key(1u32);
+        let other = el(El::Div).key(2u32);
+        let none = el(El::Div);
+        assert_eq!(a.content_hash(), same.content_hash());
+        assert_ne!(a.content_hash(), other.content_hash());
+        assert_ne!(a.content_hash(), none.content_hash());
     }
 }

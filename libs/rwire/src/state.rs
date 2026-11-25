@@ -859,6 +859,12 @@ impl HandlerSpec {
     ///
     /// This is used by `ElementBuilder::on_ref()` to attach item reference
     /// data to the handler.
+    ///
+    /// These bytes are hashed into the element's content hash (render dedup),
+    /// so a re-render whose only change is these params is re-emitted, not
+    /// deduplicated. They must therefore be a **deterministic function of the
+    /// state** — never of a clock, an RNG or a hidden counter, or every render
+    /// would re-emit and the update would never dedup.
     pub fn with_param_bytes(mut self, bytes: Vec<u8>) -> Self {
         self.param_bytes = Some(bytes);
         self
