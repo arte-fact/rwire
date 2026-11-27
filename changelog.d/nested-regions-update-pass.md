@@ -35,4 +35,31 @@ pass walks nested regions (server-level tests over a real WebSocket:
   real copy (the discovery pass itself renders the state's default, as a seed
   region would).
 
+Review round 2 (independent review of this branch) follow-ups, all in
+`libs/rwire/tests/nested_regions_update.rs` plus growth-bound comments in
+`server.rs`:
+
+- The update-answer assertions are now opcode-level: a small batch parser
+  (`wire::parse`) requires the text to be carried by a `SET_TEXT` on a ref
+  appended under a `CREATE_SYNCED`/`GET_SYNCED` wrapper of the same batch.
+  Raw symbol bytes alone cannot prove the emit fix (symbol collection interns
+  even when the span stays empty) — verified by reverting the inline fill: the
+  four minted-anew-region tests fail with "not painted by a SET_TEXT inside a
+  synced span", then pass again with the fix restored.
+- Failing-first coverage of the two server-side changes: a mid-pass-discovered
+  region whose memory state mints a distinct token per `Default` must render
+  from the connection's seeded copy (token stable across passes; without the
+  `reconcile_nested_regions` seeding it changes every pass), and a
+  `#[storage(shared)]` state first read mid-pass gets a shared-cache entry +
+  subscription in `build_type_update`, so a later background publish reaches
+  the client with the real shared copy.
+- Measured cascade cost: the cascade walks the whole subtree of a re-rendered
+  region regardless of the children's dep masks — a depth-12 chain with
+  narrow (`FIELD_LEAF`-only) masks and a `FIELD_TOP`-only change costs exactly
+  12 renderer invocations per pass (counter test).
+- Growth bound documented at both discovery sites: `states` and
+  `subscribed_keys` grow by at most one entry per distinct state type / table
+  (a per-app compile-time constant), never per region or per pass; disconnect
+  drops them all.
+
 No wire-format change, no API break.
