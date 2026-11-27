@@ -1,5 +1,5 @@
 //! A view that combines per-connection state with shared state, the way the
-//! mcp-agents trial needed it: the selected session is in each tab's route,
+//! web front-end trial needed it: the selected session is in each tab's route,
 //! the fleet is shared and published by a background task.
 //!
 //! Pattern (no global lock, no `notify_all`): a renderer over the

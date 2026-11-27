@@ -88,7 +88,10 @@ pub mod tone;
 pub mod url_safety;
 // Builder API exports
 pub use actions::{reflect_action, reflect_action_errors, ActionKey, Actions, Phase, Resolver};
-pub use builder::{el, ElementBuilder, ElementKey, LiveBind, LiveOutput, LiveSource, LiveSum};
+pub use builder::{
+    el, ElementBuilder, ElementKey, LiveBind, LiveOutput, LiveSource, LiveSum, Read, ReadSpec,
+    StateLookup,
+};
 
 // Item reference exports
 pub use item_ref::{ItemRef, IterWithRef};

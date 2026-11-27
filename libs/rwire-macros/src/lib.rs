@@ -448,14 +448,13 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Attribute macro for renderer functions.
 ///
-/// Transforms a function taking `&State` and returning `ElementBuilder` into
-/// a synced element factory. The returned element will automatically re-render
-/// when state changes, with fine-grained dependency tracking.
+/// Transforms a function taking one or more `&State` parameters and returning
+/// `ElementBuilder` into a synced element factory. The returned element will
+/// automatically re-render when any of those states changes, with fine-grained
+/// dependency tracking **per parameter**: a change to a field one parameter
+/// does not read does not re-render the region.
 ///
-/// # Dependency Detection
-///
-/// By default, the macro analyzes the function body to detect which state fields
-/// are accessed. Only changes to those fields trigger re-renders.
+/// # One state
 ///
 /// ```ignore
 /// #[renderer]
@@ -464,6 +463,23 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     el(El::Span).text(&state.count.to_string())
 /// }
 /// ```
+///
+/// # Several states
+///
+/// A renderer may read several states — e.g. the per-connection route plus a
+/// shared fleet — without nesting regions:
+///
+/// ```ignore
+/// #[renderer]
+/// fn session_panel(route: &CurrentRoute, fleet: &Fleet) -> ElementBuilder {
+///     // depends on `route`'s and `fleet`'s read fields, each tracked separately
+///     ...
+/// }
+/// ```
+///
+/// Each parameter must be a `&T` with a distinct `T` (a duplicated type, a
+/// `&mut`, or a tuple parameter is a compile error). The first parameter is the
+/// region's primary type, used for nested-region matching.
 ///
 /// # Always Re-render
 ///
@@ -567,54 +583,154 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let block = &input.block;
     let return_type = &input.sig.output;
 
-    // Extract the state type from the first parameter
-    let state_type = match input.sig.inputs.first() {
-        Some(FnArg::Typed(pat_type)) => {
-            // Extract the type from &T
-            match pat_type.ty.as_ref() {
-                Type::Reference(type_ref) => type_ref.elem.as_ref().clone(),
-                other => other.clone(),
+    // Every parameter must be `&T` with T a plain state type: no `&mut`, no
+    // tuple, no receiver. (A single non-reference parameter is accepted for
+    // backwards compatibility and treated as `&T`, as before.)
+    let mut params: Vec<(syn::Pat, syn::Type)> = Vec::new();
+    for arg in &input.sig.inputs {
+        let FnArg::Typed(pat_type) = arg else {
+            return syn::Error::new_spanned(&input.sig, "renderer cannot take a self parameter")
+                .to_compile_error()
+                .into();
+        };
+        let (pat, ty) = match pat_type.ty.as_ref() {
+            Type::Reference(type_ref) => {
+                if type_ref.mutability.is_some() {
+                    return syn::Error::new_spanned(
+                        &pat_type.ty,
+                        "renderer parameters must be &State (immutable); &mut is not supported",
+                    )
+                    .to_compile_error()
+                    .into();
+                }
+                if matches!(type_ref.elem.as_ref(), Type::Tuple(_)) {
+                    return syn::Error::new_spanned(
+                        &type_ref.elem,
+                        "tuple parameters are not supported; pass each state as its own &State parameter",
+                    )
+                    .to_compile_error()
+                    .into();
+                }
+                (
+                    pat_type.pat.as_ref().clone(),
+                    type_ref.elem.as_ref().clone(),
+                )
+            }
+            other if params.is_empty() => (pat_type.pat.as_ref().clone(), other.clone()),
+            other => {
+                return syn::Error::new_spanned(
+                    other,
+                    "renderer parameters must be &State references",
+                )
+                .to_compile_error()
+                .into();
+            }
+        };
+        params.push((pat, ty));
+    }
+    if params.is_empty() {
+        return syn::Error::new_spanned(
+            &input.sig,
+            "renderer must take at least one &State parameter",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // A duplicated state type would be ambiguous to resolve at render time.
+    for (i, (_, ty)) in params.iter().enumerate() {
+        for (_, other) in params.iter().skip(i + 1) {
+            let norm = |t: &syn::Type| {
+                quote!(#t)
+                    .to_string()
+                    .split_whitespace()
+                    .collect::<String>()
+            };
+            if norm(ty) == norm(other) {
+                return syn::Error::new_spanned(
+                    other,
+                    "duplicated state type in renderer: each &State parameter must be a distinct type",
+                )
+                .to_compile_error()
+                .into();
             }
         }
-        _ => {
-            return syn::Error::new_spanned(
-                &input.sig,
-                "renderer must take &State as first argument",
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
+    }
 
-    // Get the parameter pattern
-    let param_pat = match input.sig.inputs.first() {
-        Some(FnArg::Typed(pat_type)) => pat_type.pat.as_ref().clone(),
-        _ => unreachable!(),
-    };
+    // Infer the fields each parameter reads, so the region re-renders only when
+    // a field one of its parameters reads changes. Falls back to `always()` per
+    // parameter when that parameter is used in a way we can't track
+    // (over-approximation keeps it correct).
+    let deps_exprs: Vec<proc_macro2::TokenStream> = params
+        .iter()
+        .map(|(pat, ty)| {
+            let param_ident = match pat {
+                syn::Pat::Ident(pi) => Some(pi.ident.clone()),
+                _ => None,
+            };
+            match param_ident
+                .as_ref()
+                .and_then(|p| infer_accessed_fields(block, p))
+            {
+                Some(fields) if !fields.is_empty() => {
+                    let consts = field_index_consts(ty, &fields);
+                    quote! { rwire::RendererDeps::from_fields(&[#(#consts),*]) }
+                }
+                _ => quote! { rwire::RendererDeps::always() },
+            }
+        })
+        .collect();
 
-    // Infer the state fields this renderer reads so it only re-renders when one
-    // of them changes. Falls back to `always()` if the state param is used in a
-    // way we can't track (over-approximation keeps it correct).
-    let param_ident = match &param_pat {
-        syn::Pat::Ident(pi) => Some(pi.ident.clone()),
-        _ => None,
-    };
-    let deps_expr = match param_ident
-        .as_ref()
-        .and_then(|p| infer_accessed_fields(block, p))
-    {
-        Some(fields) if !fields.is_empty() => {
-            let consts = field_index_consts(&state_type, &fields);
-            quote! { rwire::RendererDeps::from_fields(&[#(#consts),*]) }
+    // Single state: the original expansion, unchanged.
+    if params.len() == 1 {
+        let (param_pat, state_type) = &params[0];
+        let deps_expr = &deps_exprs[0];
+        let expanded = quote! {
+            #vis fn #fn_name() -> rwire::ElementBuilder {
+                const DEPS: rwire::RendererDeps = #deps_expr;
+                fn #inner_name(#param_pat: &#state_type) #return_type #block
+                rwire::ElementBuilder::synced_with_storage::<#state_type, _>(#inner_name, DEPS)
+            }
+        };
+        return TokenStream::from(expanded);
+    }
+
+    // Several states: one ReadSpec (read + per-parameter field mask) each, and a
+    // render closure that resolves every read through the lookup and downcasts.
+    let const_decls = deps_exprs.iter().enumerate().map(|(i, deps)| {
+        let name = syn::Ident::new(&format!("DEPS_{i}"), fn_name.span());
+        quote! { const #name: rwire::RendererDeps = #deps; }
+    });
+    let specs = params.iter().enumerate().map(|(i, (_, ty))| {
+        let name = syn::Ident::new(&format!("DEPS_{i}"), fn_name.span());
+        quote! { rwire::ReadSpec::new::<#ty>(#name) }
+    });
+    let inner_params = params
+        .iter()
+        .map(|(pat, ty)| quote! { #pat: &#ty })
+        .collect::<Vec<_>>();
+    let lookups = params.iter().map(|(pat, ty)| {
+        quote! {
+            let #pat = lookup(::std::any::TypeId::of::<#ty>())?
+                .downcast_ref::<#ty>()?;
         }
-        _ => quote! { rwire::RendererDeps::always() },
-    };
+    });
+    let args = params
+        .iter()
+        .map(|(pat, _)| quote! { #pat })
+        .collect::<Vec<_>>();
 
     let expanded = quote! {
         #vis fn #fn_name() -> rwire::ElementBuilder {
-            const DEPS: rwire::RendererDeps = #deps_expr;
-            fn #inner_name(#param_pat: &#state_type) #return_type #block
-            rwire::ElementBuilder::synced_with_storage::<#state_type, _>(#inner_name, DEPS)
+            #(#const_decls)*
+            fn #inner_name(#(#inner_params),*) #return_type #block
+            rwire::ElementBuilder::synced_multi(
+                ::std::vec![#(#specs),*],
+                |lookup| {
+                    #(#lookups)*
+                    ::std::option::Option::Some(#inner_name(#(#args),*))
+                },
+            )
         }
     };
 

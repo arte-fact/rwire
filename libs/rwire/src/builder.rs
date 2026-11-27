@@ -395,8 +395,7 @@ pub(crate) fn tree_has_region(
                 return true;
             }
             if depth < MAX_NESTING {
-                let state = renderer.create_default_state();
-                let rendered = renderer.render_with_state(state.as_ref());
+                let rendered = render_with_default_states(renderer.as_ref());
                 if rendered.is_some_and(|out| walk(&out, found, depth + 1)) {
                     return true;
                 }
@@ -405,6 +404,23 @@ pub(crate) fn tree_has_region(
         el.children.iter().any(|child| walk(child, found, depth))
     }
     walk(root, found, 0)
+}
+
+/// Render a region with a default instance of every read it declares (the
+/// discovery pass renders regions this way). `None` when a read has no default.
+pub(crate) fn render_with_default_states(renderer: &dyn SyncedRenderer) -> Option<ElementBuilder> {
+    let mut defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+    for read in renderer.reads() {
+        if let Some(default) = renderer.default_state_for(read.type_id) {
+            defaults.insert(read.type_id, default);
+        }
+    }
+    let lookup = |type_id: TypeId| {
+        defaults
+            .get(&type_id)
+            .map(|state| as_dyn_any(state.as_ref()))
+    };
+    renderer.render_with_states(&lookup)
 }
 
 /// Create a new element builder.
@@ -466,19 +482,131 @@ impl ElementKey for usize {
     }
 }
 
-/// For a static render: the state a synced region renders from, given its
-/// renderer (`None`: the state's default).
-pub(crate) type StaticStates<'a> = dyn Fn(&dyn SyncedRenderer) -> Option<&'a dyn Any> + 'a;
+/// For a static render: the state a synced region renders one of its reads
+/// from, given that read (`None`: the read's default).
+pub(crate) type StaticStates<'a> = dyn Fn(&Read) -> Option<&'a dyn Any> + 'a;
+
+/// One state a synced region reads: its type, where that state lives (so the
+/// connection can resolve it and subscribe to its cache key), and the field
+/// mask the renderer depends on for it.
+///
+/// A single-state region has exactly one read — the primary type
+/// ([`SyncedRenderer::state_type_id`]); a multi-state region (a `#[renderer]`
+/// with several `&State` parameters) has one per parameter, in order.
+#[derive(Clone, Debug)]
+pub struct Read {
+    /// The state type this read resolves.
+    pub type_id: TypeId,
+    /// Where that state lives (per-connection memory, or the shared/persisted cache).
+    pub storage: StorageType,
+    /// Cache-key base for shared/persisted state (the State `TABLE_NAME`).
+    pub table: Option<&'static str>,
+    /// The fields of this state the renderer reads.
+    pub deps: RendererDeps,
+}
+
+impl Read {
+    /// The read of a `#[renderer]` parameter `&S`, with `deps` the parameter's
+    /// field mask.
+    pub fn new<S: State>(deps: RendererDeps) -> Self {
+        Self {
+            type_id: TypeId::of::<S>(),
+            storage: S::STORAGE_TYPE,
+            table: if S::TABLE_NAME.is_empty() {
+                None
+            } else {
+                Some(S::TABLE_NAME)
+            },
+            deps,
+        }
+    }
+}
+
+/// Resolves one of a renderer's reads at render time: the state for `type_id`,
+/// or `None` when the connection does not hold it (a missing state makes the
+/// render return `None`, as a missing single state does today).
+pub type StateLookup<'a> = dyn Fn(TypeId) -> Option<&'a dyn Any> + 'a;
+
+fn as_dyn_any(state: &(dyn Any + Send + Sync)) -> &dyn Any {
+    state
+}
+
+/// A [`StateLookup`] over a connection's state map.
+pub(crate) fn state_lookup<'m>(
+    states: &'m HashMap<TypeId, &(dyn Any + Send + Sync)>,
+) -> impl Fn(TypeId) -> Option<&'m dyn Any> + 'm {
+    move |type_id| states.get(&type_id).copied().map(as_dyn_any)
+}
+
+/// Render `renderer` in an update pass: every read resolves from the pass's
+/// state map or, when the type is missing from it (a region discovered mid-pass
+/// may read a memory state never seeded), from a fresh default of that read.
+/// A read that cannot be resolved at all makes the render return `None`.
+fn render_in_pass(
+    renderer: &dyn SyncedRenderer,
+    states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
+) -> Option<ElementBuilder> {
+    let mut defaults: Vec<(TypeId, Box<dyn Any + Send + Sync>)> = Vec::new();
+    for read in renderer.reads() {
+        if !states.contains_key(&read.type_id) {
+            if let Some(default) = renderer.default_state_for(read.type_id) {
+                defaults.push((read.type_id, default));
+            }
+        }
+    }
+    let lookup = |type_id: TypeId| {
+        states.get(&type_id).copied().map(as_dyn_any).or_else(|| {
+            defaults
+                .iter()
+                .find(|(tid, _)| *tid == type_id)
+                .map(|(_, default)| as_dyn_any(default.as_ref()))
+        })
+    };
+    renderer.render_with_states(&lookup)
+}
 
 pub trait SyncedRenderer: Send + Sync {
     /// Render with the given state, returning a new ElementBuilder.
+    ///
+    /// This is the single-state entry point: it supplies the primary read only.
+    /// A renderer that reads several states renders through
+    /// [`Self::render_with_states`] instead.
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder>;
+    /// Render resolving every read through `states`. A read `states` cannot
+    /// resolve makes the whole render return `None`. Default: the primary
+    /// (first) read, via [`Self::render_with_state`].
+    fn render_with_states<'a>(
+        &self,
+        states: &dyn Fn(TypeId) -> Option<&'a dyn Any>,
+    ) -> Option<ElementBuilder> {
+        let reads = self.reads();
+        let read = reads.first()?;
+        states(read.type_id).and_then(|state| self.render_with_state(state))
+    }
     /// Clone this renderer into a boxed trait object.
     fn clone_box(&self) -> Box<dyn SyncedRenderer>;
-    /// Get the TypeId of the state type this renderer expects.
+    /// Every state this renderer reads; the first is the primary type.
+    ///
+    /// Default: the single read of the existing one-state API, derived from
+    /// [`Self::state_type_id`], [`Self::storage_type`], [`Self::table_name`]
+    /// and [`Self::deps`]. Renderers over several states override it.
+    fn reads(&self) -> Vec<Read> {
+        vec![Read {
+            type_id: self.state_type_id(),
+            storage: self.storage_type(),
+            table: self.table_name(),
+            deps: self.deps(),
+        }]
+    }
+    /// Get the TypeId of the state type this renderer expects (the primary read).
     fn state_type_id(&self) -> TypeId;
     /// Create a default state instance for this renderer's state type.
     fn create_default_state(&self) -> Box<dyn Any + Send + Sync>;
+    /// A default instance for one of this renderer's read types (discovery and
+    /// SSR fallbacks). Default: the primary read only.
+    fn default_state_for(&self, type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
+        (type_id == self.state_type_id()).then(|| self.create_default_state())
+    }
     /// Storage class of this renderer's state (default: memory).
     fn storage_type(&self) -> StorageType {
         StorageType::Memory
@@ -596,6 +724,107 @@ impl SyncedRenderer for IdentityRenderer {
     }
     fn is_outlet(&self) -> bool {
         self.inner.is_outlet()
+    }
+}
+
+/// The boxed render closure of a multi-state region: it receives the state
+/// lookup and returns the rendered content (or `None` when a read is missing).
+/// The lookup is borrowed for `'x` and resolves states living `'a`.
+type MultiRenderFn = dyn for<'x, 'a> Fn(&'x (dyn Fn(TypeId) -> Option<&'a dyn Any> + 'x)) -> Option<ElementBuilder>
+    + Send
+    + Sync;
+
+/// A [`Read`] plus a default-state factory for it, used by the discovery and
+/// SSR fallbacks. What the `#[renderer]` macro emits one of, per `&State`
+/// parameter.
+pub struct ReadSpec {
+    read: Read,
+    default: Arc<dyn Fn() -> Box<dyn Any + Send + Sync> + Send + Sync>,
+}
+
+impl ReadSpec {
+    /// The read of a `#[renderer]` parameter `&S`, with `deps` the parameter's
+    /// field mask, and `S::default()` as the fallback state.
+    pub fn new<S: State + Default>(deps: RendererDeps) -> Self {
+        Self {
+            read: Read::new::<S>(deps),
+            default: Arc::new(|| Box::new(S::default()) as Box<dyn Any + Send + Sync>),
+        }
+    }
+}
+
+/// Implementation of [`SyncedRenderer`] for a region reading several states
+/// (what the `#[renderer]` macro emits for N `&State` parameters).
+struct MultiStateRenderer {
+    specs: Vec<ReadSpec>,
+    render: Arc<MultiRenderFn>,
+}
+
+impl SyncedRenderer for MultiStateRenderer {
+    fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
+        // The single-state entry point supplies the primary read only; the
+        // other reads stay unresolved, so the render returns `None`.
+        let primary = self.specs.first()?.read.type_id;
+        let lookup = |type_id: TypeId| {
+            if type_id == primary {
+                Some(state)
+            } else {
+                None
+            }
+        };
+        self.render_with_states(&lookup)
+    }
+
+    fn render_with_states<'a>(
+        &self,
+        states: &dyn Fn(TypeId) -> Option<&'a dyn Any>,
+    ) -> Option<ElementBuilder> {
+        (self.render)(states)
+    }
+
+    fn clone_box(&self) -> Box<dyn SyncedRenderer> {
+        Box::new(MultiStateRenderer {
+            specs: self
+                .specs
+                .iter()
+                .map(|spec| ReadSpec {
+                    read: spec.read.clone(),
+                    default: Arc::clone(&spec.default),
+                })
+                .collect(),
+            render: Arc::clone(&self.render),
+        })
+    }
+
+    fn reads(&self) -> Vec<Read> {
+        self.specs.iter().map(|spec| spec.read.clone()).collect()
+    }
+
+    fn state_type_id(&self) -> TypeId {
+        self.specs[0].read.type_id
+    }
+
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        (self.specs[0].default)()
+    }
+
+    fn default_state_for(&self, type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
+        self.specs
+            .iter()
+            .find(|spec| spec.read.type_id == type_id)
+            .map(|spec| (spec.default)())
+    }
+
+    fn storage_type(&self) -> StorageType {
+        self.specs[0].read.storage
+    }
+
+    fn table_name(&self) -> Option<&'static str> {
+        self.specs[0].read.table
+    }
+
+    fn deps(&self) -> RendererDeps {
+        self.specs[0].read.deps
     }
 }
 
@@ -896,6 +1125,131 @@ impl ElementBuilder {
         self
     }
 
+    /// Create a synced region that reads several states, one [`ReadSpec`] per
+    /// `&State` parameter of a `#[renderer]` function.
+    ///
+    /// `render` receives a lookup resolving each read's TypeId to its state and
+    /// returns the content, or `None` when a read is missing (as a missing
+    /// single state does today). This is what the `#[renderer]` macro emits for
+    /// a function with more than one state parameter; prefer the macro.
+    ///
+    /// The first spec is the primary read: it keys nested-region matching and
+    /// the single-state accessors.
+    ///
+    /// A `#[renderer]` with several state parameters compiles and tracks each
+    /// parameter's fields separately:
+    ///
+    /// ```
+    /// use rwire::{el, renderer, El, ElementBuilder, State};
+    ///
+    /// #[derive(State, Default)]
+    /// struct Route { path: String }
+    ///
+    /// #[derive(State, Default)]
+    /// #[storage(shared)]
+    /// struct Fleet { count: u32 }
+    ///
+    /// #[renderer]
+    /// fn panel(route: &Route, fleet: &Fleet) -> ElementBuilder {
+    ///     let path = route.path.clone();
+    ///     el(El::P).text(&format!("{path} / {}", fleet.count))
+    /// }
+    ///
+    /// let region = panel();
+    /// assert!(region.is_synced());
+    /// ```
+    ///
+    /// A duplicated state type is a compile error:
+    ///
+    /// ```compile_fail
+    /// use rwire::{el, renderer, El, ElementBuilder, State};
+    ///
+    /// #[derive(State, Default)]
+    /// struct A { x: u8 }
+    ///
+    /// #[derive(State, Default)]
+    /// struct B { y: u8 }
+    ///
+    /// #[renderer]
+    /// fn dup(a: &A, b: &B, c: &A) -> ElementBuilder {
+    ///     el(El::Div)
+    /// }
+    /// ```
+    ///
+    /// A `&mut` parameter is a compile error:
+    ///
+    /// ```compile_fail
+    /// use rwire::{el, renderer, El, ElementBuilder, State};
+    ///
+    /// #[derive(State, Default)]
+    /// struct A { x: u8 }
+    ///
+    /// #[renderer]
+    /// fn mutating(a: &mut A) -> ElementBuilder {
+    ///     el(El::Div)
+    /// }
+    /// ```
+    ///
+    /// A tuple parameter is a compile error (pass each state separately):
+    ///
+    /// ```compile_fail
+    /// use rwire::{el, renderer, El, ElementBuilder, State};
+    ///
+    /// #[derive(State, Default)]
+    /// struct A { x: u8 }
+    ///
+    /// #[derive(State, Default)]
+    /// struct B { y: u8 }
+    ///
+    /// #[renderer]
+    /// fn tupled(pair: (&A, &B)) -> ElementBuilder {
+    ///     el(El::Div)
+    /// }
+    /// ```
+    pub fn synced_multi<F>(specs: Vec<ReadSpec>, render: F) -> Self
+    where
+        F: for<'x, 'a> Fn(
+                &'x (dyn Fn(TypeId) -> Option<&'a dyn Any> + 'x),
+            ) -> Option<ElementBuilder>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self::synced_from(Box::new(MultiStateRenderer {
+            specs,
+            render: Arc::new(render),
+        }))
+    }
+
+    /// A readable alias of [`Self::synced_with_storage`] with
+    /// [`RendererDeps::always`]: a region over `S` that re-renders on any
+    /// change of `S`.
+    ///
+    /// ```ignore
+    /// #[renderer]
+    /// fn root(me: &Me) -> ElementBuilder {
+    ///     ElementBuilder::region::<Room>(|room| board(room, me.token))
+    /// }
+    /// ```
+    pub fn region<S>(render: impl Fn(&S) -> ElementBuilder + Send + Sync + 'static) -> Self
+    where
+        S: State + Default,
+    {
+        Self::synced_with_storage::<S, _>(render, RendererDeps::always())
+    }
+
+    /// [`Self::region`] with an explicit dependency mask: the region re-renders
+    /// only when one of the fields in `deps` changes.
+    pub fn region_with_deps<S>(
+        render: impl Fn(&S) -> ElementBuilder + Send + Sync + 'static,
+        deps: RendererDeps,
+    ) -> Self
+    where
+        S: State + Default,
+    {
+        Self::synced_with_storage::<S, _>(render, deps)
+    }
+
     /// Wrap a boxed synced renderer in a placeholder element.
     pub(crate) fn synced_from(synced: Box<dyn SyncedRenderer>) -> Self {
         Self {
@@ -1140,7 +1494,7 @@ impl ElementBuilder {
     /// are runtime-only and omitted.
     pub fn to_static_html(&self) -> String {
         let mut out = String::new();
-        self.write_static_html(&mut out, None, &|_| None);
+        self.write_static_html(&mut out, None, &|_: &Read| None);
         out
     }
 
@@ -1149,13 +1503,13 @@ impl ElementBuilder {
     /// rendered page (SSR) can inline exactly the CSS its classes need.
     pub fn static_style_rules(&self) -> std::collections::BTreeSet<StyleKey> {
         let mut keys = std::collections::BTreeSet::new();
-        self.collect_static_style_rules(&mut keys, &|_| None);
+        self.collect_static_style_rules(&mut keys, &|_: &Read| None);
         keys
     }
 
     /// [`Self::to_static_html`] and [`Self::static_style_rules`] in one pass,
-    /// with synced regions rendered from the state `state_for` returns for their
-    /// renderer (`None`: the state's default).
+    /// with synced regions rendered from the state `state_for` returns for each
+    /// of their reads (`None`: that read's default).
     pub(crate) fn to_static_html_and_styles(
         &self,
         state_for: &StaticStates<'_>,
@@ -1197,14 +1551,39 @@ impl ElementBuilder {
         }
     }
 
-    /// A synced region's content for a static render: rendered from the state
-    /// `state_for` supplies, or from the state's default.
+    /// A synced region's content for a static render: every read resolved
+    /// through `state_for` (a read it cannot resolve falls back to that read's
+    /// default), then rendered through [`SyncedRenderer::render_with_states`].
     fn render_static_region(&self, state_for: &StaticStates<'_>) -> Option<ElementBuilder> {
         let renderer = self.synced.as_ref()?;
-        match state_for(renderer.as_ref()) {
-            Some(state) => renderer.render_with_state(state),
-            None => renderer.render_with_state(renderer.create_default_state().as_ref()),
+        let reads = renderer.reads();
+        // Defaults are built up front so the resolved references below can
+        // borrow them while `state_for` results come in.
+        let mut defaults: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
+        for read in &reads {
+            if state_for(read).is_none() {
+                if let Some(default) = renderer.default_state_for(read.type_id) {
+                    defaults.insert(read.type_id, default);
+                }
+            }
         }
+        let mut resolved: Vec<(TypeId, &dyn Any)> = Vec::with_capacity(reads.len());
+        for read in &reads {
+            let state = match state_for(read) {
+                Some(state) => state,
+                None => defaults
+                    .get(&read.type_id)
+                    .map(|default| as_dyn_any(default.as_ref()))?,
+            };
+            resolved.push((read.type_id, state));
+        }
+        let lookup = |type_id: TypeId| {
+            resolved
+                .iter()
+                .find(|(tid, _)| *tid == type_id)
+                .map(|(_, state)| *state)
+        };
+        renderer.render_with_states(&lookup)
     }
 
     /// Write this tree's static HTML to `out`, and its style keys to `keys`
@@ -2308,6 +2687,18 @@ impl SyncedElement {
         self.state_type_id
     }
 
+    /// Every state this region reads; the first is the primary type (matching
+    /// [`Self::state_type_id`]). The single-state case is a one-element list.
+    pub fn reads(&self) -> Vec<Read> {
+        self.renderer.reads()
+    }
+
+    /// A default instance for one of this region's read types, when the
+    /// renderer can produce one.
+    pub fn create_default_state_for(&self, type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
+        self.renderer.default_state_for(type_id)
+    }
+
     /// The enclosing synced region's id, or `None` for a top-level region.
     pub fn parent(&self) -> Option<u32> {
         self.parent
@@ -2562,12 +2953,10 @@ impl BuildContext {
             self.next_synced_id += 1;
 
             // Render once, cache result for emit pass (single-render path)
-            let state_type_id = renderer.state_type_id();
-            if let Some(state) = states.get(&state_type_id) {
-                if let Some(rendered) = renderer.render_with_state(*state) {
-                    self.collect_symbols_multi(&rendered, states);
-                    self.synced_render_cache.insert(synced_id, rendered);
-                }
+            let lookup = state_lookup(states);
+            if let Some(rendered) = renderer.render_with_states(&lookup) {
+                self.collect_symbols_multi(&rendered, states);
+                self.synced_render_cache.insert(synced_id, rendered);
             }
             return;
         }
@@ -3327,9 +3716,11 @@ pub fn build_synced_update_with_known_symbols(
             continue;
         }
 
-        // Layer 1: Skip elements bound to a different state type
+        // Layer 1: the changed type must be one of the region's reads (for a
+        // single-state region, its one read — unchanged behaviour).
+        let reads = se.reads();
         if let Some(changed_id) = changed_state_type_id {
-            if se.state_type_id != changed_id {
+            if !reads.iter().any(|read| read.type_id == changed_id) {
                 if trace {
                     eprintln!("[rwire-trace] se={} skip: state-type", se.id);
                 }
@@ -3337,8 +3728,19 @@ pub fn build_synced_update_with_known_symbols(
             }
         }
 
-        // Skip elements that don't need updating (bitmask check)
-        if !se.deps.needs_update(changes) {
+        // The mask check uses the matching read's deps (any read's deps when no
+        // changed type is given), so a change to an untouched field of one state
+        // does not re-render the region.
+        let needs_update = match changed_state_type_id {
+            Some(changed_id) => reads
+                .iter()
+                .find(|read| read.type_id == changed_id)
+                .map(|read| read.deps)
+                .unwrap_or(se.deps)
+                .needs_update(changes),
+            None => reads.iter().any(|read| read.deps.needs_update(changes)),
+        };
+        if !needs_update {
             if trace {
                 eprintln!(
                     "[rwire-trace] se={} skip: deps mask={:#x} always={} changes={:?}",
@@ -3348,14 +3750,12 @@ pub fn build_synced_update_with_known_symbols(
             continue;
         }
 
-        // Render once, use for both symbol collection and emission. A state
-        // type missing from the pass's map renders from a fresh default (a
-        // region discovered mid-pass may read a memory state never seeded).
-        let mut default_slot = None;
-        let Some(state) = update_pass_state(states, &*se.renderer, &mut default_slot) else {
-            continue;
-        };
-        if let Some(rendered) = se.renderer.render_with_state(state) {
+        // Render once, use for both symbol collection and emission. Every read
+        // resolves from the pass's map or, when the type is missing from it (a
+        // region discovered mid-pass may read a memory state never seeded),
+        // from a fresh default of that read; a read that cannot be resolved
+        // yields None, as before.
+        if let Some(rendered) = render_in_pass(&*se.renderer, states) {
             // Layer 2: emit the region itself only if its output changed.
             let parent_changed = match prev_hashes {
                 Some(ref mut hashes) => {
@@ -3738,29 +4138,26 @@ fn emit_update_element(
             // A genuinely new nested region: no standalone update covers it, so
             // build its content inline. It has no prior children, so its own nested
             // regions match against an empty scope (all fresh) rather than the
-            // enclosing region's children. Its state may be missing from the pass's
-            // map (a memory state never seeded): render from a fresh default so the
-            // span is not left empty.
-            let mut default_slot = None;
-            if let Some(state) = update_pass_state(states, &**renderer, &mut default_slot) {
-                if let Some(rendered) = renderer.render_with_state(state) {
-                    let child_ids: NestedChildSlots = HashMap::new();
-                    let mut child_consumed: HashSet<u32> = HashSet::new();
-                    emit_update_element(
-                        &rendered,
-                        wrapper_ref,
-                        buf,
-                        symbol_map,
-                        handlers,
-                        &child_ids,
-                        &mut child_consumed,
-                        synced_counter,
-                        states,
-                        Some(synced_id),
-                        discovered,
-                        client_actions,
-                    );
-                }
+            // enclosing region's children. A read missing from the pass's map (a
+            // memory state never seeded) renders from a fresh default so the span
+            // is not left empty.
+            if let Some(rendered) = render_in_pass(&**renderer, states) {
+                let child_ids: NestedChildSlots = HashMap::new();
+                let mut child_consumed: HashSet<u32> = HashSet::new();
+                emit_update_element(
+                    &rendered,
+                    wrapper_ref,
+                    buf,
+                    symbol_map,
+                    handlers,
+                    &child_ids,
+                    &mut child_consumed,
+                    synced_counter,
+                    states,
+                    Some(synced_id),
+                    discovered,
+                    client_actions,
+                );
             }
         }
 
@@ -3969,22 +4366,19 @@ fn collect_symbols_recursive_with_known(
         // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
         *synced_counter += 1;
 
-        // Render and collect symbols from the rendered content. A state type
-        // missing from the pass's map renders from a fresh default so the new
-        // region's strings are interned (without this they were never sent and
-        // the region painted empty).
-        let mut default_slot = None;
-        if let Some(state) = update_pass_state(states, &**renderer, &mut default_slot) {
-            if let Some(rendered) = renderer.render_with_state(state) {
-                collect_symbols_recursive_with_known(
-                    &rendered,
-                    new_symbols,
-                    symbol_map,
-                    next_idx,
-                    synced_counter,
-                    states,
-                );
-            }
+        // Render and collect symbols from the rendered content. A read missing
+        // from the pass's map renders from a fresh default so the new region's
+        // strings are interned (without this they were never sent and the region
+        // painted empty).
+        if let Some(rendered) = render_in_pass(&**renderer, states) {
+            collect_symbols_recursive_with_known(
+                &rendered,
+                new_symbols,
+                symbol_map,
+                next_idx,
+                synced_counter,
+                states,
+            );
         }
         return;
     }
@@ -4185,7 +4579,7 @@ mod map_def_tests {
             el(El::P).style_util(St::BgApp).text("a"),
             el(El::Input).style_util(St::FlexCenter),
         ]);
-        let (html, keys) = tree.to_static_html_and_styles(&|_| None);
+        let (html, keys) = tree.to_static_html_and_styles(&|_: &Read| None);
         assert_eq!(html, tree.to_static_html());
         assert_eq!(keys, tree.static_style_rules());
         assert_eq!(keys.len(), 2);
