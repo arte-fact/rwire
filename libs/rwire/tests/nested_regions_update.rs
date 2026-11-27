@@ -20,11 +20,18 @@
 //! a `Late` state at first render), and the `prepend_*` handlers insert a
 //! same-typed sibling region before an existing one, shifting its position.
 
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use rwire::protocol::varint::write_varint;
-use rwire::{el, handler, renderer, El, ElementBuilder, Ev, RendererDeps, Server, State};
+use rwire::{
+    el, handler, renderer, El, ElementBuilder, Ev, HandlerFn, MemoryState, RendererDeps, Server,
+    State,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -348,4 +355,83 @@ async fn a_minted_anew_region_renders_inline_with_its_nested_region() {
     assert_saw(&client, "mid:extra:0");
     assert_saw(&client, "inner:main:1:0:0");
     assert_saw(&client, "inner:extra:1:0:0");
+}
+
+/// Limit 3 of the perf study: a nested region the cascade re-rendered with the
+/// parent's fresh renderer — but whose output is unchanged — must NOT be
+/// rendered a second time by the layer-1 pass with its stored (older)
+/// renderer when its deps match the ChangeSet. Counted directly: the child's
+/// renderer runs exactly once during the update pass.
+#[test]
+fn a_cascade_touched_child_is_not_rendered_twice() {
+    #[derive(Default)]
+    struct Level {
+        a: u32,
+    }
+    impl MemoryState for Level {}
+
+    let renders = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&renders);
+    // The parent (type Level) nests a child region of the SAME type, whose
+    // renderer counts its invocations and renders constant content (so the
+    // cascade's fresh render is hash-unchanged, yet the layer-1 pass would
+    // still pick it up: same type as the changed state, deps always).
+    let parent = ElementBuilder::synced_with_deps::<Level, _>(
+        move |level| {
+            let _ = level.a; // read, but kept out of the output: parent hash unchanged
+            let cnt = Arc::clone(&counter);
+            el(El::Div)
+                .text("p")
+                .append([ElementBuilder::synced_with_deps::<Level, _>(
+                    move |_child| {
+                        cnt.fetch_add(1, Ordering::SeqCst);
+                        el(El::Span).text("child")
+                    },
+                    RendererDeps::always(),
+                )])
+        },
+        RendererDeps::always(),
+    );
+
+    type States<'a> = HashMap<TypeId, &'a (dyn Any + Send + Sync)>;
+
+    let initial: Box<dyn Any + Send + Sync> = Box::new(Level { a: 0 });
+    let mut states: States = HashMap::new();
+    states.insert(TypeId::of::<Level>(), initial.as_ref());
+    let mut ctx = rwire::builder::BuildContext::new();
+    ctx.collect_symbols_multi(&parent, &states);
+    ctx.emit_multi(&parent);
+    let synced = ctx.take_synced_elements();
+    let mut hashes = ctx.take_synced_hashes();
+    let mut known = ctx.take_symbol_map();
+    assert_eq!(synced.len(), 2, "parent + nested child region");
+
+    // Update pass: Level changed (a: 0 -> 1), changed type = Level.
+    renders.store(0, Ordering::SeqCst);
+    let updated: Box<dyn Any + Send + Sync> = Box::new(Level { a: 1 });
+    let mut states2: States = HashMap::new();
+    states2.insert(TypeId::of::<Level>(), updated.as_ref());
+    let mut handlers: HashMap<u32, HandlerFn> = HashMap::new();
+    let mut discovered: Vec<rwire::builder::SyncedElement> = Vec::new();
+    let mut rerendered: Vec<u32> = Vec::new();
+    let _bytes = rwire::builder::build_synced_update_with_known_symbols(
+        &synced,
+        &states2,
+        &mut handlers,
+        rwire::ChangeSet::all(),
+        Some(&mut known),
+        Some(TypeId::of::<Level>()),
+        Some(&mut hashes),
+        None,
+        None,
+        Some(&mut discovered),
+        Some(&mut rerendered),
+        0,
+        None,
+    );
+    assert_eq!(
+        renders.load(Ordering::SeqCst),
+        1,
+        "the nested child rendered once (by the cascade), not again by the layer-1 pass"
+    );
 }

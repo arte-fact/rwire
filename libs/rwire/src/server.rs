@@ -2947,9 +2947,26 @@ impl ConnectionState {
         // nothing re-rendered (a closure region's renderer changes with its parent).
         self.reconcile_nested_regions(discovered, &rerendered);
         if !rerendered.is_empty() {
-            for (_, key) in
+            // A shared state a newly discovered region reads for the first time may
+            // have no cache entry yet (entries are created lazily at connect, for the
+            // regions registered then): create it now so the next pass injects the
+            // real copy, and subscribe this connection to its broadcasts.
+            let mut cache = shared
+                .shared_cache
+                .write()
+                .map_err(|_| "shared cache lock poisoned")?;
+            for (tid, key) in
                 shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
             {
+                if key.starts_with("__shared__:") {
+                    if let Some(synced) =
+                        self.synced_elements.iter().find(|s| s.state_type_id == tid)
+                    {
+                        cache
+                            .entry(key.clone())
+                            .or_insert_with(|| synced.renderer.create_default_state());
+                    }
+                }
                 if self.subscribed_keys.insert(key.clone()) {
                     shared.subscribe(self.connection_id, &key);
                 }

@@ -24,5 +24,15 @@ pass walks nested regions (server-level tests over a real WebSocket:
   for identity-less regions; keyed regions keep their id via
   `with_identity`); the new span is now filled inline from its state instead
   of staying empty.
+- **No double render of an unchanged nested region.** A child the cascade
+  re-rendered with the parent's fresh renderer — but whose output was
+  unchanged — is no longer rendered a second time by the layer-1 pass with its
+  stored (older) renderer when its deps match the ChangeSet (CPU-only cost;
+  regression test counts the renderer invocations).
+- **Shared state first read by a region discovered mid-pass**: the connection
+  now lazily creates the shared-cache entry and subscribes to its broadcasts
+  when the update pass registers the new region, so the next pass injects the
+  real copy (the discovery pass itself renders the state's default, as a seed
+  region would).
 
 No wire-format change, no API break.

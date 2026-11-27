@@ -3304,6 +3304,10 @@ pub fn build_synced_update_with_known_symbols(
                 .push((s.id, s.renderer.identity()));
         }
     }
+    // Nested regions the render-pass cascade already re-rendered (matched children
+    // of a re-rendered parent), emitted or not: the outer loop must not render them
+    // a second time with their stored (older) renderer.
+    let mut cascade_touched: HashSet<u32> = HashSet::new();
     let no_children: NestedChildSlots = HashMap::new();
 
     let trace = std::env::var_os("RWIRE_TRACE").is_some();
@@ -3315,7 +3319,11 @@ pub fn build_synced_update_with_known_symbols(
 
         // Already rendered as a nested region of a parent re-rendered above (with
         // the parent's fresh renderer, which takes precedence over the stored one).
-        if rendered_cache.contains_key(&se.id) {
+        // `cascade_touched` covers the children the cascade re-rendered even when
+        // their output was unchanged: re-rendering them here with the stored (old)
+        // renderer would only burn CPU — the fresh render already proved the
+        // content unchanged.
+        if rendered_cache.contains_key(&se.id) || cascade_touched.contains(&se.id) {
             continue;
         }
 
@@ -3408,6 +3416,7 @@ pub fn build_synced_update_with_known_symbols(
                         continue; // genuinely new: built inline by the emit pass
                     };
                     consumed_ids.insert(child_id);
+                    cascade_touched.insert(child_id);
                     // The connection adopts the fresh renderer either way.
                     refreshed.push(SyncedElement {
                         id: child_id,
