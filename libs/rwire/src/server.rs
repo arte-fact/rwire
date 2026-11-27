@@ -153,7 +153,7 @@ fn shared_persisted_keys(
         .map(|h| (h.state_type_id(), h.storage_type(), h.table_name()));
     let from_synced = synced.iter().flat_map(|s| {
         s.reads()
-            .into_iter()
+            .iter()
             .map(|read| (read.type_id, read.storage, read.table))
     });
 

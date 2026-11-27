@@ -542,12 +542,15 @@ pub(crate) fn state_lookup<'m>(
 /// state map or, when the type is missing from it (a region discovered mid-pass
 /// may read a memory state never seeded), from a fresh default of that read.
 /// A read that cannot be resolved at all makes the render return `None`.
+/// `reads` is the renderer's read list (the region's cached reads, so the hot
+/// pass does not re-allocate it).
 fn render_in_pass(
     renderer: &dyn SyncedRenderer,
+    reads: &[Read],
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
 ) -> Option<ElementBuilder> {
     let mut defaults: Vec<(TypeId, Box<dyn Any + Send + Sync>)> = Vec::new();
-    for read in renderer.reads() {
+    for read in reads {
         if !states.contains_key(&read.type_id) {
             if let Some(default) = renderer.default_state_for(read.type_id) {
                 defaults.push((read.type_id, default));
@@ -704,17 +707,29 @@ impl SyncedRenderer for IdentityRenderer {
     fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
         self.inner.render_with_state(state)
     }
+    fn render_with_states<'a>(
+        &self,
+        states: &dyn Fn(TypeId) -> Option<&'a dyn Any>,
+    ) -> Option<ElementBuilder> {
+        self.inner.render_with_states(states)
+    }
     fn clone_box(&self) -> Box<dyn SyncedRenderer> {
         Box::new(IdentityRenderer {
             inner: self.inner.clone_box(),
             identity: self.identity,
         })
     }
+    fn reads(&self) -> Vec<Read> {
+        self.inner.reads()
+    }
     fn state_type_id(&self) -> TypeId {
         self.inner.state_type_id()
     }
     fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
         self.inner.create_default_state()
+    }
+    fn default_state_for(&self, type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
+        self.inner.default_state_for(type_id)
     }
     fn storage_type(&self) -> StorageType {
         self.inner.storage_type()
@@ -2728,6 +2743,9 @@ pub struct SyncedElement {
     /// The enclosing synced region's id, or `None` for a top-level region. Lets a
     /// region's whole subtree be pruned when its parent swaps it out (router outlet).
     pub(crate) parent: Option<u32>,
+    /// The region's reads, cached at construction so an update pass borrows a
+    /// slice instead of allocating a `Vec` per region per pass.
+    reads: Vec<Read>,
 }
 
 impl Clone for SyncedElement {
@@ -2738,6 +2756,7 @@ impl Clone for SyncedElement {
             state_type_id: self.state_type_id,
             deps: self.deps,
             parent: self.parent,
+            reads: self.reads.clone(),
         }
     }
 }
@@ -2752,12 +2771,14 @@ impl SyncedElement {
         state_type_id: TypeId,
         deps: RendererDeps,
     ) -> Self {
+        let reads = renderer.reads();
         Self {
             id,
             renderer,
             state_type_id,
             deps,
             parent: None,
+            reads,
         }
     }
 
@@ -2768,8 +2789,8 @@ impl SyncedElement {
 
     /// Every state this region reads; the first is the primary type (matching
     /// [`Self::state_type_id`]). The single-state case is a one-element list.
-    pub fn reads(&self) -> Vec<Read> {
-        self.renderer.reads()
+    pub fn reads(&self) -> &[Read] {
+        &self.reads
     }
 
     /// The region's human-readable name, when it has one (see
@@ -3180,6 +3201,7 @@ impl BuildContext {
                 renderer: renderer.clone_box(),
                 deps: renderer.deps(),
                 parent: self.current_synced_parent,
+                reads: renderer.reads(),
             });
 
             if let Some(rendered) = renderer.render_with_state(state) {
@@ -3339,6 +3361,7 @@ impl BuildContext {
                 renderer: renderer.clone_box(),
                 deps: renderer.deps(),
                 parent: self.current_synced_parent,
+                reads: renderer.reads(),
             });
 
             // Use cached render from collect_symbols_multi (single-render path)
@@ -3855,7 +3878,7 @@ pub fn build_synced_update_with_known_symbols(
         // region discovered mid-pass may read a memory state never seeded),
         // from a fresh default of that read; a read that cannot be resolved
         // yields None, as before.
-        if let Some(rendered) = render_in_pass(&*se.renderer, states) {
+        if let Some(rendered) = render_in_pass(&*se.renderer, reads, states) {
             // Layer 2: emit the region itself only if its output changed.
             let parent_changed = match prev_hashes {
                 Some(ref mut hashes) => {
@@ -3920,6 +3943,15 @@ pub fn build_synced_update_with_known_symbols(
                     };
                     consumed_ids.insert(child_id);
                     cascade_touched.insert(child_id);
+                    let reads = renderer.reads();
+                    // Multi-read resolution: render_in_pass resolves EVERY read
+                    // of the child (from the pass's state map or a fresh default
+                    // of that read). The single-state render_with_state would
+                    // leave a multi-state child's secondary reads unresolved and
+                    // return None — and since its id already landed in
+                    // cascade_touched, the outer loop would skip it, leaving the
+                    // child stale (0 bytes) while a single-state sibling updates.
+                    let child_render = render_in_pass(&*renderer, &reads, states);
                     // The connection adopts the fresh renderer either way.
                     refreshed.push(SyncedElement {
                         id: child_id,
@@ -3927,13 +3959,9 @@ pub fn build_synced_update_with_known_symbols(
                         renderer: renderer.clone_box(),
                         deps: renderer.deps(),
                         parent: Some(parent_id),
+                        reads,
                     });
-                    let mut default_slot = None;
-                    let Some(state) = update_pass_state(states, &*renderer, &mut default_slot)
-                    else {
-                        continue;
-                    };
-                    let Some(child) = renderer.render_with_state(state) else {
+                    let Some(child) = child_render else {
                         continue;
                     };
                     // The cascade must reach this child's own nested regions
@@ -4106,25 +4134,6 @@ fn nested_synced_renderers(el: &ElementBuilder) -> Vec<Box<dyn SyncedRenderer>> 
     out
 }
 
-/// The state a region renders from during an update pass: the pass's map, or
-/// a fresh default when the type isn't in it. A region first discovered
-/// during an update pass can read a memory state the connection never seeded
-/// (memory states are seeded at first render and on view swap only) — without
-/// the fallback the region rendered as an empty span. `slot` holds the created
-/// default so the returned reference can borrow it.
-fn update_pass_state<'a>(
-    states: &HashMap<TypeId, &'a (dyn Any + Send + Sync)>,
-    renderer: &dyn SyncedRenderer,
-    slot: &'a mut Option<Box<dyn Any + Send + Sync>>,
-) -> Option<&'a (dyn Any + Send + Sync)> {
-    let tid = renderer.state_type_id();
-    if let Some(state) = states.get(&tid) {
-        return Some(*state);
-    }
-    *slot = Some(renderer.create_default_state());
-    slot.as_ref().map(|b| b.as_ref())
-}
-
 /// The stable wire id for a handler binding.
 ///
 /// Prefers the macro-assigned [`HandlerSpec::handler_id`]; for handlers built
@@ -4222,6 +4231,7 @@ fn emit_update_element(
             renderer: renderer.clone_box(),
             deps: renderer.deps(),
             parent: enclosing_synced,
+            reads: renderer.reads(),
         });
 
         let wrapper_ref = buf.create_synced(synced_id);
@@ -4244,7 +4254,7 @@ fn emit_update_element(
             // enclosing region's children. A read missing from the pass's map (a
             // memory state never seeded) renders from a fresh default so the span
             // is not left empty.
-            if let Some(rendered) = render_in_pass(&**renderer, states) {
+            if let Some(rendered) = render_in_pass(&**renderer, &renderer.reads(), states) {
                 let child_ids: NestedChildSlots = HashMap::new();
                 let mut child_consumed: HashSet<u32> = HashSet::new();
                 emit_update_element(
@@ -4473,7 +4483,7 @@ fn collect_symbols_recursive_with_known(
         // from the pass's map renders from a fresh default so the new region's
         // strings are interned (without this they were never sent and the region
         // painted empty).
-        if let Some(rendered) = render_in_pass(&**renderer, states) {
+        if let Some(rendered) = render_in_pass(&**renderer, &renderer.reads(), states) {
             collect_symbols_recursive_with_known(
                 &rendered,
                 new_symbols,

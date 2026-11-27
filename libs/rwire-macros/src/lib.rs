@@ -495,13 +495,22 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// # Always Re-render
 ///
 /// Use `#[renderer(always)]` when field dependencies can't be statically determined
-/// (e.g., accessing fields through methods, closures, or dynamic indexes):
+/// (e.g., accessing fields through methods, closures, or dynamic indexes), or for a
+/// "trigger" renderer that must re-render on any change of its state even though it
+/// reads no field (e.g. a clock). `always` overrides the analysis for **every**
+/// parameter: each read gets `RendererDeps::always()`.
 ///
 /// ```ignore
 /// #[renderer(always)]
 /// fn render_debug(state: &AppState) -> ElementBuilder {
 ///     // Complex logic that can't be analyzed
 ///     el(El::Pre).text(&format!("{:?}", state))
+/// }
+///
+/// #[renderer(always)]
+/// fn clock(_t: &Tick) -> ElementBuilder {
+///     // a trigger renderer: re-renders on every Tick change
+///     el(El::Span).text("tick")
 /// }
 /// ```
 ///
@@ -550,6 +559,21 @@ fn infer_accessed_fields(block: &syn::Block, param: &syn::Ident) -> Option<Vec<s
             syn::visit::visit_expr_field(self, node);
         }
 
+        fn visit_macro(&mut self, node: &'ast syn::Macro) {
+            // The AST visitor does not descend into a macro's token stream, so
+            // a field read only inside one (e.g. `format!("{x} {}", a.y)`) is
+            // invisible to visit_expr_field — and would be silently lost when
+            // the same parameter also reads a field outside the macro. Scan the
+            // tokens directly: any use of the parameter there (a `param.field`
+            // access, a whole-param pass, an implicit capture in a format
+            // string) is unanalyzable, so the parameter falls back to always().
+            if ident_used_in_token_stream(&node.tokens, self.param) {
+                self.opaque = true;
+                return;
+            }
+            syn::visit::visit_macro(self, node);
+        }
+
         fn visit_ident(&mut self, id: &'ast syn::Ident) {
             if id == self.param {
                 self.opaque = true;
@@ -570,19 +594,24 @@ fn infer_accessed_fields(block: &syn::Block, param: &syn::Ident) -> Option<Vec<s
     }
 }
 
+/// Whether `ident` appears anywhere in `tokens` — including inside string
+/// literals (implicit format-string captures like `format!("{a:?}")`, where the
+/// ident lives in the literal, not as a token). Any hit means "used somewhere
+/// unanalyzable" -> always(), the conservative answer.
+fn ident_used_in_token_stream(tokens: &proc_macro2::TokenStream, ident: &syn::Ident) -> bool {
+    // Scan the stringified token stream for the ident as a delimited word.
+    let name = ident.to_string();
+    let text = tokens.to_string();
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|word| word == name)
+}
+
 /// Whether `ident` appears anywhere in `block`'s token stream — including inside
 /// macro invocations, whose tokens the AST visitor does not descend into. Used to
 /// tell a truly unread parameter (empty dependency set) from one used only in a
 /// way the analysis cannot see (depend on everything).
 fn ident_used_in_tokens(block: &syn::Block, ident: &syn::Ident) -> bool {
-    // Scan the stringified token stream for the ident as a delimited word: this
-    // also catches implicit format-string captures (`format!("{a:?}")`), where
-    // the ident lives inside the string literal, not as a token. Any hit means
-    // "used somewhere unanalyzable" -> always(), the conservative answer.
-    let name = ident.to_string();
-    let text = quote::ToTokens::to_token_stream(block).to_string();
-    text.split(|c: char| !c.is_alphanumeric() && c != '_')
-        .any(|word| word == name)
+    ident_used_in_token_stream(&quote::ToTokens::to_token_stream(block), ident)
 }
 
 /// Map field idents to `<StateType>::FIELD_<NAME>` const references.
@@ -601,7 +630,30 @@ fn field_index_consts(
 }
 
 #[proc_macro_attribute]
-pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn renderer(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // `#[renderer(always)]`: an explicit always() override for every parameter
+    // (a "trigger" renderer that re-renders on any change of its state, e.g. a
+    // clock, even when it reads no field).
+    let force_always = if attr.is_empty() {
+        false
+    } else {
+        let attr2 = proc_macro2::TokenStream::from(attr);
+        let mut idents = attr2.clone().into_iter().filter_map(|tt| match tt {
+            proc_macro2::TokenTree::Ident(id) => Some(id),
+            _ => None,
+        });
+        match (idents.next(), idents.next()) {
+            (Some(id), None) if id == "always" => true,
+            _ => {
+                return syn::Error::new_spanned(
+                    attr2,
+                    "unsupported #[renderer(...)] attribute; only `always` is supported",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+    };
     let input = parse_macro_input!(item as ItemFn);
     let fn_name = &input.sig.ident;
     let inner_name = syn::Ident::new(&format!("__{}_inner", fn_name), fn_name.span());
@@ -690,6 +742,9 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let deps_exprs: Vec<proc_macro2::TokenStream> = params
         .iter()
         .map(|(pat, ty)| {
+            if force_always {
+                return quote! { rwire::RendererDeps::always() };
+            }
             let param_ident = match pat {
                 syn::Pat::Ident(pi) => Some(pi.ident.clone()),
                 _ => None,
@@ -926,6 +981,47 @@ pub fn derive_selector(input: TokenStream) -> TokenStream {
 pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Pass the impl block through unchanged.
     item
+}
+
+#[cfg(test)]
+mod renderer_analysis_tests {
+    use super::*;
+
+    /// Run `infer_accessed_fields` on `src`'s body for `param`; `None` means the
+    /// parameter is opaque (the caller falls back to always()).
+    fn analyze(src: &str, param: &str) -> Option<Vec<String>> {
+        let f: ItemFn = syn::parse_str(src).unwrap();
+        let ident = syn::Ident::new(param, proc_macro2::Span::call_site());
+        infer_accessed_fields(&f.block, &ident)
+            .map(|fields| fields.iter().map(|f| f.to_string()).collect())
+    }
+
+    #[test]
+    fn a_field_read_only_inside_a_macro_marks_the_param_opaque() {
+        // `a.y` lives in format!'s token stream, invisible to the AST visitor;
+        // with an outside read too, the mask {x} would silently lose it.
+        let src = r#"fn f(a: &Alpha) { let x = a.x; let _s = format!("{x} {}", a.y); }"#;
+        assert_eq!(analyze(src, "a"), None, "a.y inside format! -> always()");
+    }
+
+    #[test]
+    fn a_param_used_only_inside_a_macro_is_opaque() {
+        let src = r#"fn f(a: &Alpha) { let _s = format!("{a:?}"); }"#;
+        assert_eq!(analyze(src, "a"), None);
+    }
+
+    #[test]
+    fn a_macro_not_using_the_param_keeps_the_outside_mask() {
+        let src = r#"fn f(a: &Alpha) { let x = a.x; let _s = format!("{x}"); }"#;
+        assert_eq!(analyze(src, "a"), Some(vec!["x".to_string()]));
+    }
+
+    #[test]
+    fn an_unread_param_stays_unread() {
+        let src = r#"fn f(a: &Alpha, _b: &Beta) { let _s = format!("hi"); }"#;
+        assert_eq!(analyze(src, "a"), Some(vec![]));
+        assert_eq!(analyze(src, "_b"), Some(vec![]));
+    }
 }
 
 #[cfg(test)]

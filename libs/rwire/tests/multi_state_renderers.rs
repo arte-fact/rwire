@@ -23,8 +23,8 @@ use futures::{SinkExt, StreamExt};
 use rwire::builder::{build_synced_update_with_known_symbols, BuildContext, SyncedElement};
 use rwire::protocol::opcodes::GET_SYNCED;
 use rwire::{
-    el, outlet, renderer, ChangeSet, CurrentRoute, El, ElementBuilder, Router, Server,
-    SharedServerState, State,
+    el, outlet, renderer, ChangeSet, CurrentRoute, El, ElementBuilder, RendererDeps, Router,
+    Server, SharedServerState, State,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -882,4 +882,215 @@ fn the_macro_names_the_region_after_the_function() {
         ]);
     let synced = collect_regions(&root, &states);
     assert_eq!(synced[0].name(), Some("closure region"));
+}
+
+// ============================================================================
+// Review fix: the parent re-render cascade must update a NESTED MULTI-STATE
+// region (multi-read resolution, not the single-state render_with_state)
+// ============================================================================
+
+/// A multi-state child region: reads Alpha.x and Beta.y.
+#[renderer]
+fn child_panel(a: &Alpha, b: &Beta) -> ElementBuilder {
+    let x = a.x;
+    let y = b.y;
+    el(El::Span).text(&format!("child {x}|{y}"))
+}
+
+/// A single-state child region over the same primary type, for contrast.
+#[renderer]
+fn child_solo(a: &Alpha) -> ElementBuilder {
+    let x = a.x;
+    el(El::B).text(&format!("solo {x}"))
+}
+
+/// A parent region over Alpha with `always()` whose own output does NOT change
+/// when Alpha.x changes (the read is kept out of the output); it nests the two
+/// children above.
+fn parent_always() -> ElementBuilder {
+    ElementBuilder::synced_with_deps::<Alpha, _>(
+        move |a| {
+            let _ = a.x;
+            el(El::Div)
+                .text("parent")
+                .append([child_panel(), child_solo()])
+        },
+        RendererDeps::always(),
+    )
+}
+
+/// Alpha.x 0 -> 1: the parent's own output is unchanged (hash dedup skips it),
+/// but the cascade must re-render BOTH nested children with their fresh
+/// renderers and emit them. Before the fix the multi-state child got 0 bytes:
+/// the cascade called the single-state render_with_state, which leaves its
+/// secondary reads unresolved and returns None, while its id still landed in
+/// cascade_touched so the outer loop skipped it.
+#[test]
+fn a_nested_multi_state_region_is_updated_by_the_parent_cascade() {
+    let alpha0 = Alpha { x: 0, z: 0 };
+    let beta = Beta { y: 7, w: 0 };
+    let states0 = alpha_beta_states(&alpha0, &beta);
+    let root = el(El::Div).append([parent_always()]);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols_multi(&root, &states0);
+    ctx.emit_multi(&root);
+    let synced = ctx.take_synced_elements();
+    let mut hashes = ctx.take_synced_hashes();
+    let mut known = ctx.take_symbol_map();
+    assert_eq!(
+        synced.len(),
+        3,
+        "parent + multi-state child + single-state child"
+    );
+    let parent_id = synced[0].id;
+    let multi_id = synced[1].id;
+    let solo_id = synced[2].id;
+    assert_eq!(synced[1].parent(), Some(parent_id));
+    assert_eq!(synced[2].parent(), Some(parent_id));
+
+    let alpha1 = Alpha { x: 1, z: 0 };
+    let states1 = alpha_beta_states(&alpha1, &beta);
+    let mut handlers: HashMap<u32, rwire::HandlerFn> = HashMap::new();
+    let mut discovered: Vec<SyncedElement> = Vec::new();
+    let mut rerendered: Vec<u32> = Vec::new();
+    let bytes = build_synced_update_with_known_symbols(
+        &synced,
+        &states1,
+        &mut handlers,
+        ChangeSet::all(),
+        Some(&mut known),
+        Some(TypeId::of::<Alpha>()),
+        Some(&mut hashes),
+        None,
+        None,
+        Some(&mut discovered),
+        Some(&mut rerendered),
+        0,
+        None,
+    );
+    let bytes = bytes.as_ref();
+    assert!(
+        !has_get_synced_for_id(bytes, parent_id),
+        "the parent's output is unchanged: it must not be emitted"
+    );
+    assert!(
+        has_get_synced_for_id(bytes, multi_id),
+        "the nested MULTI-STATE child must receive the update (0 bytes before the fix)"
+    );
+    assert!(
+        has_get_synced_for_id(bytes, solo_id),
+        "the single-state child receives it too"
+    );
+    assert!(
+        contains(bytes, "child 1|7"),
+        "the multi-state child's new content is sent"
+    );
+    assert!(
+        contains(bytes, "solo 1"),
+        "the solo child's new content is sent"
+    );
+}
+
+// ============================================================================
+// Review fixes: `#[renderer(always)]` (a trigger renderer) and field reads
+// hidden inside a macro token stream
+// ============================================================================
+
+#[derive(State, Default)]
+#[storage(memory)]
+struct Tick {
+    n: u64,
+}
+
+/// A trigger renderer: `#[renderer(always)]` re-renders on ANY change of Tick
+/// even though the parameter is never read.
+#[renderer(always)]
+fn clock(_t: &Tick) -> ElementBuilder {
+    el(El::Span).text("tick")
+}
+
+/// Multi-state with `always`: every parameter's read gets always().
+#[renderer(always)]
+fn clock_duo(a: &Alpha, _t: &Tick) -> ElementBuilder {
+    let x = a.x;
+    el(El::Span).text(&x.to_string())
+}
+
+#[test]
+fn the_renderer_always_attribute_forces_always_on_every_read() {
+    let tick = Tick { n: 1 };
+    assert_eq!(tick.n, 1, "the trigger renderer never reads this field");
+    let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<Tick>(), &tick);
+    let root = el(El::Div).append([clock()]);
+    let synced = collect_regions(&root, &states);
+    assert!(
+        synced[0].reads()[0].deps.always,
+        "#[renderer(always)] overrides the empty mask of an unread parameter"
+    );
+    // Any field change re-renders (an unread param without `always` would not).
+    let bytes = update_for(
+        &synced,
+        &states,
+        Some(TypeId::of::<Tick>()),
+        ChangeSet::from_fields(&[Tick::FIELD_N]),
+    );
+    assert!(
+        has_get_synced_for_id(&bytes, 0),
+        "a trigger renderer re-renders on any field change of its state"
+    );
+
+    // Several parameters: `always` applies to each read.
+    let alpha = Alpha { x: 1, z: 0 };
+    let beta = Beta { y: 0, w: 0 };
+    let states2 = alpha_beta_states(&alpha, &beta);
+    let root = el(El::Div).append([clock_duo()]);
+    let synced = collect_regions(&root, &states2);
+    assert_eq!(synced[0].reads().len(), 2);
+    for read in synced[0].reads() {
+        assert!(read.deps.always, "always applies to every read");
+    }
+}
+
+/// Two fields, one read outside a macro, one inside `format!`.
+#[derive(State, Default)]
+#[storage(memory)]
+struct Gamma {
+    x: u32,
+    y: u32,
+}
+
+/// Reads `g.x` outside the macro and `g.y` inside `format!`: the macro hides the
+/// `g.y` read, so the parameter falls back to always() — a mask of just {x}
+/// would never re-render on a `g.y` change.
+#[renderer]
+fn macro_mixed(g: &Gamma) -> ElementBuilder {
+    let x = g.x;
+    el(El::P).text(&format!("{x} {}", g.y))
+}
+
+#[test]
+fn a_field_read_only_inside_a_macro_falls_back_to_always() {
+    let gamma = Gamma { x: 1, y: 2 };
+    let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<Gamma>(), &gamma);
+    let root = el(El::Div).append([macro_mixed()]);
+    let synced = collect_regions(&root, &states);
+    let read = &synced[0].reads()[0];
+    assert!(
+        read.deps.always,
+        "a param with a field read inside format! must be always(), not mask {{x}} (got mask={:#x})",
+        read.deps.mask
+    );
+    // Behaviorally: a change of the macro-hidden field re-renders the region.
+    let bytes = update_for(
+        &synced,
+        &states,
+        Some(TypeId::of::<Gamma>()),
+        ChangeSet::from_fields(&[Gamma::FIELD_Y]),
+    );
+    assert!(
+        has_get_synced_for_id(&bytes, 0),
+        "Gamma.y (read only inside format!) must re-render the region"
+    );
 }
