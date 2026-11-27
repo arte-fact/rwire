@@ -54,13 +54,35 @@
   per-region `Vec` allocation per update pass — and `render_in_pass` takes that cached
   slice. **API break:** `SyncedElement::reads()` changed from `Vec<Read>` to `&[Read]`
   (the API is introduced by this branch, so nothing outside it consumes the old shape).
-- Out-of-tree consumer check: `../claw-rwire` is **absent** on this machine (checked next
-  to the rwire clone and the usual workspace locations), so the
-  `cargo check --manifest-path ../claw-rwire/Cargo.toml` smoke check from CLAUDE.md could
-  not be run here. Downstream `mcp-agents` (`crates/web-rwire`) and `life-board`
-  (`lot/b-web`) pass against this branch with a throwaway path override.
-- Known gap left to the base branch (`fix/nested-regions-update-pass`, T2's functions):
-  `build_type_update`'s lazily-created shared-cache entries and `reconcile_nested_regions'`
-  state seeding still look only at a region's **primary** read, so a secondary shared or
-  memory read of a region first discovered mid-pass is neither cached nor seeded until a
-  handler touches that type. Details in MR !2.
+- Out-of-tree consumer check: `claw-rwire` **exists** at github.com/arte-fact/claw-rwire
+  (the earlier fragment wrongly claimed it was absent). Cloned, its `path = "../rwire/..."`
+  deps pointed at this branch's head with a throwaway symlink override (never committed
+  downstream): `cargo check --all-targets` **passes with 0 warnings**. Downstream
+  `mcp-agents` (`crates/web-rwire`) and `life-board` (`lot/b-web`) pass against this
+  branch with a throwaway path override.
+
+### Re-review round 3 fixes (independent re-review of this MR)
+
+- **Secondary reads of a mid-pass-discovered region are now seeded/cached**
+  (`build_type_update` + `reconcile_nested_regions` previously looked only at a region's
+  **primary** read). `reconcile_nested_regions` iterates `region.reads()` and seeds the
+  connection's state map with every read's `default_state_for`; the mid-pass shared-cache
+  entry is created for every read (found via `reads()`, default via
+  `create_default_state_for`) and now covers persisted `{table}:{session}` keys too, not
+  only `__shared__:` ones, and the connection is subscribed. Without this, a multi-state
+  region discovered mid-pass whose secondary memory state has a per-default-distinct
+  `Default` rendered from a fresh throwaway default on every pass — the emit-pass text was
+  never interned, so the region's span stayed **empty** on the wire. Failing-first tests
+  (each verified to fail with the fix reverted): `..._seeds_its_secondary_memory_read`
+  (counter `Default` starting at 7, stable across passes),
+  `..._caches_and_subscribes_its_secondary_shared_read`,
+  `..._caches_its_secondary_persisted_read` in tests/nested_regions_update.rs.
+- **IdentityRenderer (`with_identity`) delegation is now tested**: a keyed multi-state
+  region (`#[renderer]` with 2 state params wrapped in `with_identity`) re-renders on a
+  secondary-state change, on a primary change with the secondary read missing from the
+  pass map (`default_state_for`), and a prepend keeps the keyed children's wire ids while
+  the parent cascade re-renders them through the wrapper. Removing any of the
+  `reads()` / `render_with_states` / `default_state_for` delegations fails these tests
+  (verified individually). Tests: `a_keyed_multi_state_region_rerenders_when_any_of_its_states_changes`,
+  `a_prepend_keeps_keyed_multi_state_ids_and_the_cascade_renders_them` in
+  tests/multi_state_renderers.rs.
