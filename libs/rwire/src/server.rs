@@ -2996,6 +2996,13 @@ impl ConnectionState {
             self.synced_hashes.retain(|id, _| !dropped.contains(id));
         }
         for region in discovered {
+            // A region first discovered during an update pass can read a memory
+            // state the connection never seeded (memory states are seeded at first
+            // render and on view swap only): seed it now, so later update passes
+            // and handlers on that type find the connection's copy.
+            self.states
+                .entry(region.state_type_id)
+                .or_insert_with(|| region.create_default_state());
             if let Some(existing) = self
                 .synced_elements
                 .iter_mut()
