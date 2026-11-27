@@ -1094,3 +1094,237 @@ fn a_field_read_only_inside_a_macro_falls_back_to_always() {
         "Gamma.y (read only inside format!) must re-render the region"
     );
 }
+
+// ============================================================================
+// Review round 3: IdentityRenderer (ElementBuilder::with_identity) must
+// delegate the multi-state surface — reads() / render_with_states /
+// default_state_for — so a KEYED multi-state region keeps every read and
+// re-renders when any of its states changes. Removing any of those
+// delegations from IdentityRenderer must fail these tests.
+// ============================================================================
+
+/// Parent state of the keyed list.
+#[derive(State, Default)]
+#[storage(memory)]
+struct KeyList {
+    keys: Vec<u64>,
+}
+
+/// A keyed multi-state child region: `panel()` reads Alpha.x and Beta.y; the
+/// wrapper attaches `key` as the region's identity.
+fn keyed_panel(key: u64) -> ElementBuilder {
+    panel().with_identity(key)
+}
+
+/// The parent region: one keyed child per key, oldest first.
+fn keyed_list_region() -> ElementBuilder {
+    ElementBuilder::synced_with_deps::<KeyList, _>(
+        move |s| {
+            el(El::Div)
+                .class("list")
+                .append(s.keys.iter().map(|&k| keyed_panel(k)))
+        },
+        RendererDeps::always(),
+    )
+}
+
+type KeyedStates<'a> = HashMap<TypeId, &'a (dyn Any + Send + Sync)>;
+
+fn keyed_states<'a>(list: &'a KeyList, alpha: &'a Alpha, beta: &'a Beta) -> KeyedStates<'a> {
+    let mut states: KeyedStates<'a> = alpha_beta_states(alpha, beta);
+    states.insert(TypeId::of::<KeyList>(), list);
+    states
+}
+
+/// Build the initial render of `keyed_list_region()` and run one update pass
+/// over the collected regions, returning the emitted bytes plus the
+/// discovered/rerendered lists.
+fn keyed_passes(
+    keys: &[u64],
+    alpha: &Alpha,
+    beta: &Beta,
+    pass_states: &KeyedStates,
+    changed: Option<TypeId>,
+) -> (Vec<u8>, Vec<SyncedElement>, Vec<u32>) {
+    let list = KeyList {
+        keys: keys.to_vec(),
+    };
+    let states = keyed_states(&list, alpha, beta);
+    let root = el(El::Div).append([keyed_list_region()]);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols_multi(&root, &states);
+    ctx.emit_multi(&root);
+    let synced = ctx.take_synced_elements();
+    let mut hashes = ctx.take_synced_hashes();
+    let mut known = ctx.take_symbol_map();
+    assert_eq!(synced.len(), 1 + keys.len(), "parent + one region per key");
+
+    let mut handlers: HashMap<u32, rwire::HandlerFn> = HashMap::new();
+    let mut discovered: Vec<SyncedElement> = Vec::new();
+    let mut rerendered: Vec<u32> = Vec::new();
+    let bytes = build_synced_update_with_known_symbols(
+        &synced,
+        pass_states,
+        &mut handlers,
+        ChangeSet::all(),
+        Some(&mut known),
+        changed,
+        Some(&mut hashes),
+        None,
+        None,
+        Some(&mut discovered),
+        Some(&mut rerendered),
+        0,
+        None,
+    );
+    (bytes.as_ref().to_vec(), discovered, rerendered)
+}
+
+/// A change of a SECONDARY state of a keyed multi-state region must re-render
+/// the keyed region (reads() delegation), and a primary change with the
+/// secondary read missing from the pass map must still render it from that
+/// read's default (default_state_for + render_with_states delegation).
+#[test]
+fn a_keyed_multi_state_region_rerenders_when_any_of_its_states_changes() {
+    let alpha = Alpha { x: 0, z: 0 };
+    let beta = Beta { y: 0, w: 0 };
+
+    // Initial render with keys [10, 20].
+    let list = KeyList { keys: vec![10, 20] };
+    let states0 = keyed_states(&list, &alpha, &beta);
+    let root = el(El::Div).append([keyed_list_region()]);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols_multi(&root, &states0);
+    ctx.emit_multi(&root);
+    let synced = ctx.take_synced_elements();
+    let mut hashes = ctx.take_synced_hashes();
+    let mut known = ctx.take_symbol_map();
+    assert_eq!(synced.len(), 3, "parent + two keyed multi-state children");
+    let parent_id = synced[0].id;
+    let child_a = synced[1].id;
+    let child_b = synced[2].id;
+    assert_eq!(synced[1].parent(), Some(parent_id));
+    assert_eq!(synced[2].parent(), Some(parent_id));
+    // The IdentityRenderer wrapper keeps BOTH reads of the inner multi-state
+    // renderer (this alone fails if the reads() delegation is removed).
+    assert_eq!(synced[1].reads().len(), 2, "keyed region keeps both reads");
+    assert_eq!(synced[2].reads().len(), 2, "keyed region keeps both reads");
+
+    let mut run_pass = |pass_states: &KeyedStates, changed: Option<TypeId>| -> Vec<u8> {
+        let mut handlers: HashMap<u32, rwire::HandlerFn> = HashMap::new();
+        let mut discovered: Vec<SyncedElement> = Vec::new();
+        let mut rerendered: Vec<u32> = Vec::new();
+        let bytes = build_synced_update_with_known_symbols(
+            &synced,
+            pass_states,
+            &mut handlers,
+            ChangeSet::all(),
+            Some(&mut known),
+            changed,
+            Some(&mut hashes),
+            None,
+            None,
+            Some(&mut discovered),
+            Some(&mut rerendered),
+            0,
+            None,
+        );
+        bytes.as_ref().to_vec()
+    };
+
+    // Pass A: only the SECONDARY state (Beta.y 0 -> 9) changed. The parent
+    // (KeyList) is untouched; both keyed children must re-render.
+    let beta9 = Beta { y: 9, w: 0 };
+    let states_a = keyed_states(&list, &alpha, &beta9);
+    let bytes = run_pass(&states_a, Some(TypeId::of::<Beta>()));
+    assert!(
+        !has_get_synced_for_id(&bytes, parent_id),
+        "the parent did not change: it must not be emitted"
+    );
+    assert!(
+        has_get_synced_for_id(&bytes, child_a) && has_get_synced_for_id(&bytes, child_b),
+        "a change of the secondary state (Beta) must re-render the keyed multi-state region"
+    );
+    assert!(
+        contains(&bytes, "0|9"),
+        "the re-rendered keyed region carries the new Beta.y"
+    );
+
+    // Pass B: the PRIMARY state changed (Alpha.x 0 -> 1) and Beta is ABSENT
+    // from the pass map: the read must resolve through default_state_for.
+    let alpha1 = Alpha { x: 1, z: 0 };
+    let mut states_b: KeyedStates = HashMap::new();
+    states_b.insert(TypeId::of::<KeyList>(), &list);
+    states_b.insert(TypeId::of::<Alpha>(), &alpha1);
+    let bytes = run_pass(&states_b, Some(TypeId::of::<Alpha>()));
+    assert!(
+        has_get_synced_for_id(&bytes, child_a) && has_get_synced_for_id(&bytes, child_b),
+        "an Alpha change must re-render the keyed region even with Beta missing from the pass map"
+    );
+    assert!(
+        contains(&bytes, "1|0"),
+        "the missing secondary read resolves to Beta's default (y=0) via default_state_for"
+    );
+}
+
+/// Prepending a keyed sibling: the existing keyed multi-state children keep
+/// their wire ids (identity matching) and the parent cascade re-renders them
+/// through the IdentityRenderer (render_with_states delegation), while the new
+/// child is built inline.
+#[test]
+fn a_prepend_keeps_keyed_multi_state_ids_and_the_cascade_renders_them() {
+    let (bytes0, discovered0, _rerendered0) = keyed_passes(
+        &[10, 20],
+        &Alpha { x: 0, z: 0 },
+        &Beta { y: 0, w: 0 },
+        &keyed_states(
+            &KeyList { keys: vec![10, 20] },
+            &Alpha { x: 0, z: 0 },
+            &Beta { y: 0, w: 0 },
+        ),
+        Some(TypeId::of::<KeyList>()),
+    );
+    assert!(bytes0.is_empty(), "nothing changed: no update expected");
+    let _ = discovered0;
+
+    // Prepend key 5 and change both states: the parent re-renders, the keyed
+    // children keep ids 1 and 2 (matched by identity), the new child gets id 3.
+    let list2 = KeyList {
+        keys: vec![5, 10, 20],
+    };
+    let alpha1 = Alpha { x: 1, z: 0 };
+    let beta9 = Beta { y: 9, w: 0 };
+    let states = keyed_states(&list2, &alpha1, &beta9);
+    let (bytes, discovered, rerendered) = keyed_passes(
+        &[10, 20],
+        &Alpha { x: 0, z: 0 },
+        &Beta { y: 0, w: 0 },
+        &states,
+        Some(TypeId::of::<KeyList>()),
+    );
+
+    let mut seen = std::collections::HashSet::new();
+    let child_order: Vec<u32> = discovered
+        .iter()
+        .filter(|s| s.parent() == Some(0))
+        .map(|s| s.id)
+        .filter(|id| seen.insert(*id))
+        .collect();
+    assert_eq!(
+        child_order,
+        vec![3, 1, 2],
+        "prepended keyed multi-state child gets a fresh id first; the keyed children keep theirs"
+    );
+    assert!(
+        rerendered.contains(&1) && rerendered.contains(&2),
+        "the cascade re-rendered the kept keyed children: {rerendered:?}"
+    );
+    assert!(
+        has_get_synced_for_id(&bytes, 1) && has_get_synced_for_id(&bytes, 2),
+        "the kept keyed multi-state children are emitted with their new content"
+    );
+    assert!(
+        contains(&bytes, "1|9"),
+        "the cascade rendered them through the IdentityRenderer with BOTH states resolved"
+    );
+}
