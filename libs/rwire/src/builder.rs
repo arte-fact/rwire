@@ -626,6 +626,12 @@ pub trait SyncedRenderer: Send + Sync {
     fn identity(&self) -> Option<u64> {
         None
     }
+    /// An optional human-readable name for this region, printed by `RWIRE_TRACE`
+    /// (e.g. `[rwire-trace] se=3 (agent_window) RENDER`). The `#[renderer]` macro
+    /// names the region after its function; see [`ElementBuilder::with_name`].
+    fn name(&self) -> Option<&'static str> {
+        None
+    }
     /// Whether this region is the router's [`outlet`](crate::router::outlet). Only the
     /// built-in outlet answers `true`; the server checks at startup that an app which
     /// registers a `Router` has one.
@@ -825,6 +831,62 @@ impl SyncedRenderer for MultiStateRenderer {
 
     fn deps(&self) -> RendererDeps {
         self.specs[0].read.deps
+    }
+}
+
+/// A [`SyncedRenderer`] wrapper that attaches a human-readable name to a region —
+/// see [`ElementBuilder::with_name`]. Everything delegates to the inner renderer;
+/// only `name()` is overridden.
+struct NameRenderer {
+    inner: Box<dyn SyncedRenderer>,
+    name: &'static str,
+}
+
+impl SyncedRenderer for NameRenderer {
+    fn render_with_state(&self, state: &dyn Any) -> Option<ElementBuilder> {
+        self.inner.render_with_state(state)
+    }
+    fn render_with_states<'a>(
+        &self,
+        states: &dyn Fn(TypeId) -> Option<&'a dyn Any>,
+    ) -> Option<ElementBuilder> {
+        self.inner.render_with_states(states)
+    }
+    fn clone_box(&self) -> Box<dyn SyncedRenderer> {
+        Box::new(NameRenderer {
+            inner: self.inner.clone_box(),
+            name: self.name,
+        })
+    }
+    fn reads(&self) -> Vec<Read> {
+        self.inner.reads()
+    }
+    fn state_type_id(&self) -> TypeId {
+        self.inner.state_type_id()
+    }
+    fn create_default_state(&self) -> Box<dyn Any + Send + Sync> {
+        self.inner.create_default_state()
+    }
+    fn default_state_for(&self, type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
+        self.inner.default_state_for(type_id)
+    }
+    fn storage_type(&self) -> StorageType {
+        self.inner.storage_type()
+    }
+    fn table_name(&self) -> Option<&'static str> {
+        self.inner.table_name()
+    }
+    fn deps(&self) -> RendererDeps {
+        self.inner.deps()
+    }
+    fn identity(&self) -> Option<u64> {
+        self.inner.identity()
+    }
+    fn is_outlet(&self) -> bool {
+        self.inner.is_outlet()
+    }
+    fn name(&self) -> Option<&'static str> {
+        Some(self.name)
     }
 }
 
@@ -1121,6 +1183,23 @@ impl ElementBuilder {
     pub fn with_identity(mut self, identity: u64) -> Self {
         if let Some(r) = self.synced.take() {
             self.synced = Some(Box::new(IdentityRenderer { inner: r, identity }));
+        }
+        self
+    }
+
+    /// Attach a human-readable name to this synced region (no-op on a plain
+    /// element). The name is printed by `RWIRE_TRACE` alongside the region id —
+    /// `[rwire-trace] se=3 (agent_window) RENDER` — so a render trace can be read
+    /// without mapping ids back to code. The `#[renderer]` macro names its
+    /// region after the function; call this to override it:
+    ///
+    /// ```ignore
+    /// ElementBuilder::synced_with_storage::<FleetView, _>(view, deps)
+    ///     .with_name("agent_window.fleet")
+    /// ```
+    pub fn with_name(mut self, name: &'static str) -> Self {
+        if let Some(r) = self.synced.take() {
+            self.synced = Some(Box::new(NameRenderer { inner: r, name }));
         }
         self
     }
@@ -2693,6 +2772,12 @@ impl SyncedElement {
         self.renderer.reads()
     }
 
+    /// The region's human-readable name, when it has one (see
+    /// [`ElementBuilder::with_name`]); printed by `RWIRE_TRACE`.
+    pub fn name(&self) -> Option<&'static str> {
+        self.renderer.name()
+    }
+
     /// A default instance for one of this region's read types, when the
     /// renderer can produce one.
     pub fn create_default_state_for(&self, type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
@@ -3594,6 +3679,15 @@ pub type SentCss<'a> = Option<&'a mut HashSet<StyleKey>>;
 /// Note: This function uses GET_SYNCED opcodes with varint-encoded IDs instead of
 /// GET_BY_ID with symbol table entries for "__synced_N" strings. This significantly
 /// reduces update message sizes (~15 bytes per synced element).
+/// The `RWIRE_TRACE` label of a region: its wire id, plus its name when it has
+/// one (`3 (agent_window)`).
+fn trace_label(id: u32, name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("{id} ({name})"),
+        None => id.to_string(),
+    }
+}
+
 pub fn build_synced_update_multi(
     synced: &[SyncedElement],
     states: &HashMap<TypeId, &(dyn Any + Send + Sync)>,
@@ -3722,7 +3816,10 @@ pub fn build_synced_update_with_known_symbols(
         if let Some(changed_id) = changed_state_type_id {
             if !reads.iter().any(|read| read.type_id == changed_id) {
                 if trace {
-                    eprintln!("[rwire-trace] se={} skip: state-type", se.id);
+                    eprintln!(
+                        "[rwire-trace] se={} skip: state-type",
+                        trace_label(se.id, se.renderer.name())
+                    );
                 }
                 continue;
             }
@@ -3744,7 +3841,10 @@ pub fn build_synced_update_with_known_symbols(
             if trace {
                 eprintln!(
                     "[rwire-trace] se={} skip: deps mask={:#x} always={} changes={:?}",
-                    se.id, se.deps.mask, se.deps.always, changes
+                    trace_label(se.id, se.renderer.name()),
+                    se.deps.mask,
+                    se.deps.always,
+                    changes
                 );
             }
             continue;
@@ -3784,7 +3884,10 @@ pub fn build_synced_update_with_known_symbols(
                 has_updates = true;
             }
             if trace {
-                eprintln!("[rwire-trace] se={} RENDER", se.id);
+                eprintln!(
+                    "[rwire-trace] se={} RENDER",
+                    trace_label(se.id, se.renderer.name())
+                );
             }
 
             // A nested region's content is a function of its parent's render (a

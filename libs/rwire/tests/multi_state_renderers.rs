@@ -34,7 +34,7 @@ use tokio_tungstenite::tungstenite::Message;
 // Update filter (unit)
 // ============================================================================
 
-#[derive(State, Default)]
+#[derive(State, Default, Debug)]
 #[storage(memory)]
 struct Alpha {
     x: u32,
@@ -553,4 +553,333 @@ async fn ssr_paints_the_route_and_the_shared_state_of_a_two_state_region() {
         page.contains("panel b: live"),
         "the SSR paint is missing the two-state region:\n{page}"
     );
+}
+
+// ============================================================================
+// The front's worst case (perf study limit 1): ONE region reading FIVE states
+// ============================================================================
+
+/// The web front's agent window reads five states: the fleet, the hub's
+/// answers, the action blocks, the thread, and the per-connection `Ui`. As one
+/// region, with a per-state field mask each.
+#[derive(State, Default)]
+#[storage(shared)]
+struct WinFleet {
+    tick: u64,
+    machines: u32,
+}
+
+#[derive(State, Default)]
+#[storage(shared)]
+struct WinAnswers {
+    pending: u32,
+    other: u32,
+}
+
+#[derive(State, Default)]
+#[storage(shared)]
+struct WinBlocks {
+    count: u32,
+    other: u32,
+}
+
+#[derive(State, Default)]
+#[storage(shared)]
+struct WinThread {
+    fragments: u32,
+    other: u32,
+}
+
+#[derive(State, Default)]
+#[storage(memory)]
+struct WinUi {
+    overlay: bool,
+    draft: String,
+}
+
+/// Reads one field of each of the five states.
+#[renderer]
+fn agent_window(
+    fleet: &WinFleet,
+    answers: &WinAnswers,
+    blocks: &WinBlocks,
+    thread: &WinThread,
+    ui: &WinUi,
+) -> ElementBuilder {
+    let tick = fleet.tick;
+    let pending = answers.pending;
+    let count = blocks.count;
+    let fragments = thread.fragments;
+    let overlay = ui.overlay;
+    el(El::Section).text(&format!("{tick}|{pending}|{count}|{fragments}|{overlay}"))
+}
+
+#[test]
+fn one_region_can_read_five_states_with_per_state_masks() {
+    let fleet = WinFleet {
+        tick: 1,
+        machines: 2,
+    };
+    let answers = WinAnswers {
+        pending: 3,
+        other: 0,
+    };
+    let blocks = WinBlocks { count: 4, other: 0 };
+    let thread = WinThread {
+        fragments: 5,
+        other: 0,
+    };
+    let ui = WinUi {
+        overlay: true,
+        draft: String::new(),
+    };
+    let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<WinFleet>(), &fleet);
+    states.insert(TypeId::of::<WinAnswers>(), &answers);
+    states.insert(TypeId::of::<WinBlocks>(), &blocks);
+    states.insert(TypeId::of::<WinThread>(), &thread);
+    states.insert(TypeId::of::<WinUi>(), &ui);
+
+    // The untouched fields exist to prove the per-read masks exclude them.
+    assert_eq!(
+        (
+            fleet.machines,
+            answers.other,
+            blocks.other,
+            thread.other,
+            ui.draft.len()
+        ),
+        (2, 0, 0, 0, 0)
+    );
+
+    let root = el(El::Div).append([agent_window()]);
+    let synced = collect_regions(&root, &states);
+    assert_eq!(synced.len(), 1, "five states, ONE region");
+
+    // Five reads, in parameter order; the first (fleet) is the primary type.
+    let reads = synced[0].reads();
+    assert_eq!(reads.len(), 5);
+    assert_eq!(
+        reads.iter().map(|r| r.type_id).collect::<Vec<_>>(),
+        vec![
+            TypeId::of::<WinFleet>(),
+            TypeId::of::<WinAnswers>(),
+            TypeId::of::<WinBlocks>(),
+            TypeId::of::<WinThread>(),
+            TypeId::of::<WinUi>(),
+        ]
+    );
+    assert_eq!(synced[0].state_type_id(), TypeId::of::<WinFleet>());
+
+    // Per-state field masks: only the read field of each state.
+    assert_eq!(reads[0].deps.mask, 1u64 << WinFleet::FIELD_TICK);
+    assert_eq!(reads[1].deps.mask, 1u64 << WinAnswers::FIELD_PENDING);
+    assert_eq!(reads[2].deps.mask, 1u64 << WinBlocks::FIELD_COUNT);
+    assert_eq!(reads[3].deps.mask, 1u64 << WinThread::FIELD_FRAGMENTS);
+    assert_eq!(reads[4].deps.mask, 1u64 << WinUi::FIELD_OVERLAY);
+
+    // A change to a READ field of ANY of the five states re-renders the region.
+    for (tid, field) in [
+        (TypeId::of::<WinFleet>(), WinFleet::FIELD_TICK),
+        (TypeId::of::<WinAnswers>(), WinAnswers::FIELD_PENDING),
+        (TypeId::of::<WinBlocks>(), WinBlocks::FIELD_COUNT),
+        (TypeId::of::<WinThread>(), WinThread::FIELD_FRAGMENTS),
+        (TypeId::of::<WinUi>(), WinUi::FIELD_OVERLAY),
+    ] {
+        let bytes = update_for(
+            &synced,
+            &states,
+            Some(tid),
+            ChangeSet::from_fields(&[field]),
+        );
+        assert!(
+            has_get_synced_for_id(&bytes, 0),
+            "a change to a read field of {tid:?} must re-render the five-state region"
+        );
+    }
+
+    // A change to an UNTOUCHED field of any state does not.
+    for (tid, field) in [
+        (TypeId::of::<WinFleet>(), WinFleet::FIELD_MACHINES),
+        (TypeId::of::<WinAnswers>(), WinAnswers::FIELD_OTHER),
+        (TypeId::of::<WinBlocks>(), WinBlocks::FIELD_OTHER),
+        (TypeId::of::<WinThread>(), WinThread::FIELD_OTHER),
+        (TypeId::of::<WinUi>(), WinUi::FIELD_DRAFT),
+    ] {
+        let bytes = update_for(
+            &synced,
+            &states,
+            Some(tid),
+            ChangeSet::from_fields(&[field]),
+        );
+        assert!(
+            bytes.is_empty(),
+            "an untouched field of {tid:?} must not re-render the five-state region"
+        );
+    }
+}
+
+// ============================================================================
+// Limit 5: an UNREAD renderer parameter contributes an empty dependency set
+// ============================================================================
+
+/// `b` is never read: its read carries an empty mask, so Beta's changes do not
+/// re-render the region.
+#[renderer]
+fn half_read(a: &Alpha, _b: &Beta) -> ElementBuilder {
+    let x = a.x;
+    el(El::P).text(&x.to_string())
+}
+
+/// All parameters unread: the region renders once and only re-renders on
+/// whole-change passes (ChangeSet::all(), e.g. a route swap).
+#[renderer]
+fn fully_unread(_a: &Alpha, _b: &Beta) -> ElementBuilder {
+    el(El::P).text("static content")
+}
+
+/// Used only through a macro the analysis cannot see into: still always().
+#[renderer]
+fn macro_hidden(a: &Alpha) -> ElementBuilder {
+    el(El::Pre).text(&format!("{a:?}"))
+}
+
+#[test]
+fn an_unread_parameter_has_an_empty_mask_for_its_state() {
+    let alpha = Alpha { x: 1, z: 0 };
+    let beta = Beta { y: 2, w: 0 };
+    let states = alpha_beta_states(&alpha, &beta);
+    let root = el(El::Div).append([half_read()]);
+    let synced = collect_regions(&root, &states);
+
+    let reads = synced[0].reads();
+    assert_eq!(reads.len(), 2);
+    assert_eq!(
+        reads[0].deps.mask,
+        1u64 << Alpha::FIELD_X,
+        "read param: mask"
+    );
+    assert_eq!(reads[1].deps.mask, 0, "unread param: empty mask");
+    assert!(!reads[1].deps.always, "unread param is not always()");
+
+    // Beta changed (any field): no re-render.
+    for field in [Beta::FIELD_Y, Beta::FIELD_W] {
+        let bytes = update_for(
+            &synced,
+            &states,
+            Some(TypeId::of::<Beta>()),
+            ChangeSet::from_fields(&[field]),
+        );
+        assert!(
+            bytes.is_empty(),
+            "an unread parameter's state must not re-render the region"
+        );
+    }
+    // Alpha.x changed: re-render.
+    let bytes = update_for(
+        &synced,
+        &states,
+        Some(TypeId::of::<Alpha>()),
+        ChangeSet::from_fields(&[Alpha::FIELD_X]),
+    );
+    assert!(has_get_synced_for_id(&bytes, 0));
+}
+
+#[test]
+fn an_all_unread_renderer_renders_once_and_only_on_all_changed() {
+    let alpha = Alpha { x: 1, z: 0 };
+    let beta = Beta { y: 2, w: 0 };
+    let states = alpha_beta_states(&alpha, &beta);
+    let root = el(El::Div).append([fully_unread()]);
+    let synced = collect_regions(&root, &states);
+    assert_eq!(synced.len(), 1, "it still renders (once) at registration");
+    for read in synced[0].reads() {
+        assert_eq!(read.deps.mask, 0);
+        assert!(!read.deps.always);
+    }
+
+    // Field-level changes of either state: no re-render.
+    for (tid, field) in [
+        (TypeId::of::<Alpha>(), Alpha::FIELD_X),
+        (TypeId::of::<Beta>(), Beta::FIELD_Y),
+    ] {
+        let bytes = update_for(
+            &synced,
+            &states,
+            Some(tid),
+            ChangeSet::from_fields(&[field]),
+        );
+        assert!(
+            bytes.is_empty(),
+            "all-unread renderer ignores field changes"
+        );
+    }
+    // A whole-change pass (route swap) still re-renders it.
+    let bytes = update_for(
+        &synced,
+        &states,
+        Some(TypeId::of::<Alpha>()),
+        ChangeSet::all(),
+    );
+    assert!(
+        has_get_synced_for_id(&bytes, 0),
+        "ChangeSet::all() still reaches an all-unread region"
+    );
+}
+
+#[test]
+fn a_parameter_used_only_inside_a_macro_stays_always() {
+    let alpha = Alpha { x: 1, z: 0 };
+    let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<Alpha>(), &alpha);
+    let root = el(El::Div).append([macro_hidden()]);
+    let synced = collect_regions(&root, &states);
+    assert!(
+        synced[0].reads()[0].deps.always,
+        "a use hidden inside format! stays always()"
+    );
+}
+
+// ============================================================================
+// Limit 9: an optional human-readable name on regions, surfaced in RWIRE_TRACE
+// ============================================================================
+
+#[renderer]
+fn named_solo(a: &Alpha) -> ElementBuilder {
+    el(El::P).text(&a.x.to_string())
+}
+
+#[test]
+fn the_macro_names_the_region_after_the_function() {
+    let alpha = Alpha { x: 1, z: 0 };
+    let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<Alpha>(), &alpha);
+
+    let root = el(El::Div).append([named_solo(), panel().with_name("custom.panel")]);
+    let synced = collect_regions(&root, &states);
+    assert_eq!(synced.len(), 2);
+    // The single-state renderer is named after its fn.
+    let names: Vec<Option<&str>> = synced.iter().map(|se| se.name()).collect();
+    assert!(
+        names.contains(&Some("named_solo")),
+        "the #[renderer] fn name lands on the region: {names:?}"
+    );
+    assert!(
+        names.contains(&Some("custom.panel")),
+        "with_name overrides it: {names:?}"
+    );
+
+    // A closure region gets a name only via with_name.
+    let root = el(El::Div).append([ElementBuilder::region::<Alpha>(|a| {
+        el(El::P).text(&a.x.to_string())
+    })]);
+    let synced = collect_regions(&root, &states);
+    assert_eq!(synced[0].name(), None, "no name unless asked");
+    let root =
+        el(El::Div).append([
+            ElementBuilder::region::<Alpha>(|a| el(El::P).text(&a.x.to_string()))
+                .with_name("closure region"),
+        ]);
+    let synced = collect_regions(&root, &states);
+    assert_eq!(synced[0].name(), Some("closure region"));
 }

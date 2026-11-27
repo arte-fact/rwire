@@ -19,3 +19,11 @@
   `synced_with_storage` with `RendererDeps::always()` / an explicit mask.
 - `ElementBuilder::synced_multi(specs, render)` and the `Read` / `ReadSpec` types back the
   macro expansion for hand-written multi-state renderers.
+- `#[renderer]` parameter that is never read now contributes an **empty** dependency set for
+  that state (the region does not re-render on that state's changes) instead of `always()`;
+  `always()` is kept only when a parameter is used in a way the analysis cannot see at all
+  (e.g. only inside `format!("{:?}", state)`). A renderer whose parameters are all unread
+  renders once and only re-renders on `ChangeSet::all()` passes (e.g. a route swap).
+- Regions can carry an optional human-readable name — `ElementBuilder::with_name("…")`, and
+  `#[renderer]` names its region after the function — printed by `RWIRE_TRACE` as
+  `[rwire-trace] se=3 (agent_window) RENDER`.

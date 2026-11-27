@@ -481,6 +481,17 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `&mut`, or a tuple parameter is a compile error). The first parameter is the
 /// region's primary type, used for nested-region matching.
 ///
+/// A parameter that is never read contributes an **empty** dependency set for its
+/// state: the region does not re-render when that state changes (it still renders
+/// once, and on whole-change passes such as a route swap). `always()` is kept only
+/// when a parameter is used in a way the analysis cannot see at all (e.g. only
+/// inside `format!("{:?}", state)`). A renderer whose parameters are all unread
+/// therefore renders once and only re-renders on `ChangeSet::all()` passes.
+///
+/// The generated region is named after the function (`RWIRE_TRACE` prints
+/// `[rwire-trace] se=3 (agent_window) RENDER`); override it with
+/// `ElementBuilder::with_name` — `panel().with_name("my panel")`.
+///
 /// # Always Re-render
 ///
 /// Use `#[renderer(always)]` when field dependencies can't be statically determined
@@ -557,6 +568,21 @@ fn infer_accessed_fields(block: &syn::Block, param: &syn::Ident) -> Option<Vec<s
     } else {
         Some(collector.fields)
     }
+}
+
+/// Whether `ident` appears anywhere in `block`'s token stream — including inside
+/// macro invocations, whose tokens the AST visitor does not descend into. Used to
+/// tell a truly unread parameter (empty dependency set) from one used only in a
+/// way the analysis cannot see (depend on everything).
+fn ident_used_in_tokens(block: &syn::Block, ident: &syn::Ident) -> bool {
+    // Scan the stringified token stream for the ident as a delimited word: this
+    // also catches implicit format-string captures (`format!("{a:?}")`), where
+    // the ident lives inside the string literal, not as a token. Any hit means
+    // "used somewhere unanalyzable" -> always(), the conservative answer.
+    let name = ident.to_string();
+    let text = quote::ToTokens::to_token_stream(block).to_string();
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|word| word == name)
 }
 
 /// Map field idents to `<StateType>::FIELD_<NAME>` const references.
@@ -676,7 +702,23 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     let consts = field_index_consts(ty, &fields);
                     quote! { rwire::RendererDeps::from_fields(&[#(#consts),*]) }
                 }
-                _ => quote! { rwire::RendererDeps::always() },
+                // No field access was found. If the parameter is used anywhere in
+                // the body in a way the AST analysis cannot see (e.g. only inside a
+                // macro such as `format!("{:?}", state)`), depend on everything. A
+                // parameter whose ident never appears at all is unread: it contributes
+                // an empty dependency set for that state, so the region does not
+                // re-render on that state's changes.
+                Some(_) => {
+                    if param_ident
+                        .as_ref()
+                        .is_some_and(|p| ident_used_in_tokens(block, p))
+                    {
+                        quote! { rwire::RendererDeps::always() }
+                    } else {
+                        quote! { rwire::RendererDeps::none() }
+                    }
+                }
+                None => quote! { rwire::RendererDeps::always() },
             }
         })
         .collect();
@@ -690,6 +732,7 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 const DEPS: rwire::RendererDeps = #deps_expr;
                 fn #inner_name(#param_pat: &#state_type) #return_type #block
                 rwire::ElementBuilder::synced_with_storage::<#state_type, _>(#inner_name, DEPS)
+                    .with_name(stringify!(#fn_name))
             }
         };
         return TokenStream::from(expanded);
@@ -731,6 +774,7 @@ pub fn renderer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     ::std::option::Option::Some(#inner_name(#(#args),*))
                 },
             )
+            .with_name(stringify!(#fn_name))
         }
     };
 
