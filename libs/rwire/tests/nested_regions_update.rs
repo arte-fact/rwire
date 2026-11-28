@@ -1159,3 +1159,285 @@ fn the_cascade_walks_the_whole_subtree_regardless_of_child_masks() {
          the FIELD_TOP change — layer-1 alone would have rendered only the root"
     );
 }
+
+// ── Review round 3 (MR !2), item 2: a MULTI-STATE region discovered mid-pass
+// ── must seed/cache EVERY read (region.reads()), not just its primary read.
+
+static NEXT_COUNT: AtomicU64 = AtomicU64::new(7);
+
+/// The SECONDARY memory state of `sec_chip`, with a non-default Default: a
+/// counter starting at 7, minted per default. Without reconcile_nested_regions
+/// seeding the read, each update pass renders the region from a fresh
+/// throwaway default and the counter climbs between passes; with seeding it
+/// renders the connection's copy (stable).
+#[derive(State)]
+#[storage(memory)]
+struct SecCounter {
+    count: u64,
+}
+
+impl Default for SecCounter {
+    fn default() -> Self {
+        Self {
+            count: NEXT_COUNT.fetch_add(1, Ordering::SeqCst),
+        }
+    }
+}
+
+#[derive(State, Default)]
+#[storage(memory)]
+struct SecGate {
+    n: u32,
+    show: bool,
+}
+
+#[handler]
+fn reveal_sec_gate(g: &mut SecGate) {
+    g.show = true;
+}
+
+#[handler]
+fn bump_sec_gate(g: &mut SecGate) {
+    g.n += 1;
+}
+
+/// A multi-state region first discovered mid-pass: SecGate (primary) plus the
+/// SECONDARY memory state SecCounter (no handler, no region at first render).
+#[renderer]
+fn sec_chip(g: &SecGate, s: &SecCounter) -> ElementBuilder {
+    let n = g.n;
+    let count = s.count;
+    el(El::Span).text(&format!("chip:{n}:{count}"))
+}
+
+#[renderer]
+fn sec_gate_shell(g: &SecGate) -> ElementBuilder {
+    let mut kids = vec![
+        el(El::Button).text("bump").on(Ev::Click, bump_sec_gate()),
+        el(El::Button)
+            .text("reveal")
+            .on(Ev::Click, reveal_sec_gate()),
+    ];
+    if g.show {
+        kids.push(sec_chip());
+    }
+    el(El::Div).append(kids)
+}
+
+/// The secondary MEMORY read of a mid-pass-discovered multi-state region is
+/// seeded into the connection's state map: after the discovering pass, later
+/// passes render it from the connection's copy, not from a fresh default per
+/// pass (observable via the per-default-distinct counter starting at 7).
+#[tokio::test]
+async fn a_mid_pass_discovered_multi_state_region_seeds_its_secondary_memory_read() {
+    let _ = start_with(19207, sec_gate_shell).await;
+    let mut client = connect(19207).await;
+    let initial = client.read_initial().await;
+    assert_lacks(&initial, "chip:");
+
+    // The chip region appears only during this update pass; its secondary
+    // memory state was never seeded at connect.
+    // The chip region appears only during this update pass; its secondary
+    // memory state was never seeded at connect, so the discovering pass itself
+    // renders a throwaway default (the span fill lands on the next pass).
+    client.click(reveal_sec_gate()).await;
+    let _answer = client.read_answer().await;
+    assert_saw(&client, "chip:0:"); // the region was discovered and rendered
+
+    // Two outer bumps re-render the region (SecGate is one of its reads). With
+    // the secondary read SEEDED into the connection's state map, both passes
+    // render the SAME string (interned in the render pass, emitted in the emit
+    // pass) — the span is really painted, with the seeded default's counter.
+    // Without the seeding every pass mints a fresh throwaway default, the
+    // emitted text was never interned, and the span stays EMPTY.
+    client.click(bump_sec_gate()).await;
+    let a1 = client.read_answer().await;
+    client.click(bump_sec_gate()).await;
+    let a2 = client.read_answer().await;
+
+    let c1 = painted_with_prefix(&a1, "chip:");
+    let c2 = painted_with_prefix(&a2, "chip:");
+    assert_eq!(
+        c1.len(),
+        1,
+        "answer 1 must paint the chip from the connection's seeded copy (empty span without the fix): {c1:?}"
+    );
+    assert_eq!(c2.len(), 1, "one chip text in answer 2: {c2:?}");
+    let v1: u64 = c1[0].split(':').nth(2).unwrap().parse().unwrap();
+    assert!(
+        v1 >= 7,
+        "the secondary read paints its non-default default (counter starts at 7): {v1}"
+    );
+    let n1 = c1[0].split(':').nth(1).unwrap();
+    let n2 = c2[0].split(':').nth(1).unwrap();
+    let v1 = c1[0].split(':').nth(2).unwrap();
+    let v2 = c2[0].split(':').nth(2).unwrap();
+    assert_ne!(
+        n1, n2,
+        "the region re-rendered with the bumped n: {c1:?} vs {c2:?}"
+    );
+    assert_eq!(
+        v1, v2,
+        "the secondary memory read must render from the connection's seeded copy, not a \
+         fresh default per pass: {c1:?} vs {c2:?}"
+    );
+}
+
+// ── The SECONDARY SHARED read of a mid-pass-discovered multi-state region gets
+// ── a shared-cache entry + subscription (the region's primary is the door).
+
+#[derive(State, Default)]
+#[storage(memory)]
+struct SharedDoor {
+    show: bool,
+}
+
+#[handler]
+fn open_shared_door(d: &mut SharedDoor) {
+    d.show = true;
+}
+
+/// Multi-state region discovered mid-pass: SharedDoor (primary) + Board
+/// (SECONDARY shared read — no region has Board as its primary type).
+#[renderer]
+fn shared_board_chip(d: &SharedDoor, b: &Board) -> ElementBuilder {
+    let show = d.show;
+    el(El::Span).text(&format!("boardchip:{show}:{}:{}", b.label, b.n))
+}
+
+#[renderer]
+fn shared_door_shell(d: &SharedDoor) -> ElementBuilder {
+    let mut kids = vec![el(El::Button)
+        .text("open")
+        .on(Ev::Click, open_shared_door())];
+    if d.show {
+        kids.push(shared_board_chip());
+    }
+    el(El::Div).append(kids)
+}
+
+/// The discovering pass renders the secondary shared read's default, then must
+/// create the shared-cache entry (via the read's default_state_for, not the
+/// primary-only lookup) and subscribe the connection, so a later background
+/// publish reaches it with the real copy.
+#[tokio::test]
+async fn a_mid_pass_discovered_multi_state_region_caches_and_subscribes_its_secondary_shared_read()
+{
+    let shared = start_with(19208, shared_door_shell).await;
+    let mut client = connect(19208).await;
+    let initial = client.read_initial().await;
+    assert_lacks(&initial, "boardchip:");
+    assert!(
+        !shared.has_state(&board_key()),
+        "no region reads Board at first render, so no cache entry exists yet"
+    );
+
+    client.click(open_shared_door()).await;
+    let answer = client.read_answer().await;
+    assert_painted(&answer, "boardchip:true:default:0");
+    // The pass must create the cache entry for the SECONDARY shared read and
+    // subscribe the connection.
+    wait_until(|| shared.has_state(&board_key()) && board_subscribed(&shared)).await;
+
+    // A background publish now reaches this connection with the real copy.
+    shared.update_shared_if::<Board>(|b| {
+        b.label = "real".to_string();
+        b.n = 42;
+        Some(ChangeSet::all())
+    });
+    let frame = client.read_broadcast().await;
+    assert_painted(&frame, "boardchip:true:real:42");
+}
+
+// ── The SECONDARY PERSISTED read of a mid-pass-discovered multi-state region
+// ── gets a cache entry too (the mid-pass entry creation used to cover only
+// ── "__shared__:" keys, not "{table}:{session}" persisted keys).
+
+/// Persisted state read only as a SECONDARY read of the mid-pass region.
+#[derive(State, Default)]
+#[storage(persisted, table = "note")]
+struct Note {
+    text: String,
+}
+
+#[derive(State, Default)]
+#[storage(memory)]
+struct PersistDoor {
+    show: bool,
+}
+
+#[handler]
+fn open_persist_door(d: &mut PersistDoor) {
+    d.show = true;
+}
+
+/// Multi-state region discovered mid-pass: PersistDoor (primary) + Note
+/// (SECONDARY persisted read).
+#[renderer]
+fn persist_note_chip(d: &PersistDoor, note: &Note) -> ElementBuilder {
+    let show = d.show;
+    el(El::Span).text(&format!("notechip:{show}:{}", note.text))
+}
+
+#[renderer]
+fn persist_door_shell(d: &PersistDoor) -> ElementBuilder {
+    let mut kids = vec![el(El::Button)
+        .text("open")
+        .on(Ev::Click, open_persist_door())];
+    if d.show {
+        kids.push(persist_note_chip());
+    }
+    el(El::Div).append(kids)
+}
+
+/// The persisted cache key ("{table}:{session}") of this server, if any.
+fn note_cache_key(shared: &SharedServerState) -> Option<String> {
+    shared
+        .shared_cache
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .find(|k| k.starts_with(&format!("{}:", Note::TABLE_NAME)))
+        .cloned()
+}
+
+fn note_subscribed(shared: &SharedServerState) -> bool {
+    shared
+        .subscriptions
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|(k, v)| k.starts_with(&format!("{}:", Note::TABLE_NAME)) && !v.is_empty())
+}
+
+/// The discovering pass must create the persisted cache entry for the
+/// secondary read (covering "{table}:{session}" keys, not only __shared__)
+/// and subscribe, so a cross-tab persisted write injects the real copy.
+#[tokio::test]
+async fn a_mid_pass_discovered_multi_state_region_caches_its_secondary_persisted_read() {
+    let shared = start_with(19209, persist_door_shell).await;
+    let mut client = connect(19209).await;
+    let initial = client.read_initial().await;
+    assert_lacks(&initial, "notechip:");
+    assert!(
+        note_cache_key(&shared).is_none(),
+        "no persisted cache entry at first render"
+    );
+
+    client.click(open_persist_door()).await;
+    let answer = client.read_answer().await;
+    assert_painted(&answer, "notechip:true:");
+    wait_until(|| note_cache_key(&shared).is_some() && note_subscribed(&shared)).await;
+    let key = note_cache_key(&shared).unwrap();
+
+    // A cross-tab persisted write (same session key) reaches the region.
+    shared.insert_state(
+        key.clone(),
+        Box::new(Note {
+            text: "real".into(),
+        }),
+    );
+    shared.broadcast(&key, TypeId::of::<Note>(), ChangeSet::all(), 0);
+    let frame = client.read_broadcast().await;
+    assert_painted(&frame, "notechip:true:real");
+}

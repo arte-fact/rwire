@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::actions::{ActionKey, Actions, Phase};
 use crate::builder::{
     build_synced_update_with_known_symbols, extract_renderers, BuildContext, ClientActionIndices,
-    ElementBuilder, SyncedElement, SyncedRenderer,
+    ElementBuilder, SyncedElement,
 };
 use crate::capsule;
 use crate::capsule_gen::{self, CapsuleConfig};
@@ -139,8 +139,10 @@ fn shared_cache_key(storage: StorageType, table: Option<&str>, session_id: &str)
 }
 
 /// Collect `(TypeId, cache_key)` for every shared/persisted state referenced by
-/// these handlers and synced elements. Memory state is omitted (it lives
-/// per-connection). Deduplicated; used to drive subscription and state mapping.
+/// these handlers and synced elements — every read of every region, so a region
+/// reading two shared states subscribes to both keys. Memory state is omitted
+/// (it lives per-connection). Deduplicated; used to drive subscription and
+/// state mapping.
 fn shared_persisted_keys(
     handlers: &HashMap<u32, HandlerFn>,
     synced: &[SyncedElement],
@@ -149,12 +151,10 @@ fn shared_persisted_keys(
     let from_handlers = handlers
         .values()
         .map(|h| (h.state_type_id(), h.storage_type(), h.table_name()));
-    let from_synced = synced.iter().map(|s| {
-        (
-            s.state_type_id,
-            s.renderer.storage_type(),
-            s.renderer.table_name(),
-        )
+    let from_synced = synced.iter().flat_map(|s| {
+        s.reads()
+            .iter()
+            .map(|read| (read.type_id, read.storage, read.table))
     });
 
     let mut out: Vec<(TypeId, String)> = Vec::new();
@@ -1169,13 +1169,16 @@ where
         }
         let mut ctx = BuildContext::new();
 
-        // Extract renderers and create default states for proper tree walking
+        // Extract renderers and create default states for proper tree walking.
+        // A region reading several states gets a default for each of its reads.
         let renderers = extract_renderers(&root_element);
         let mut default_states: HashMap<TypeId, Box<dyn Any + Send + Sync>> = HashMap::new();
         for renderer in &renderers {
-            default_states
-                .entry(renderer.state_type_id())
-                .or_insert_with(|| renderer.create_default_state());
+            for read in renderer.reads() {
+                if let Some(default) = renderer.default_state_for(read.type_id) {
+                    default_states.entry(read.type_id).or_insert(default);
+                }
+            }
         }
 
         // Analyze the root for tree-shaking. Scoped so the (non-Send) cache
@@ -1192,11 +1195,14 @@ where
                 .collect();
             // Shared state may have been primed before run(); analyze the real
             // instance so its conditional branches (and their tokens) are walked
-            // into the capsule rather than the empty default.
+            // into the capsule rather than the empty default. Every read of every
+            // renderer contributes its cache key.
             for r in &renderers {
-                if let Some(key) = shared_cache_key(r.storage_type(), r.table_name(), "") {
-                    if let Some(state) = shared_cache_guard.get(&key) {
-                        states_map.insert(r.state_type_id(), state.as_ref());
+                for read in r.reads() {
+                    if let Some(key) = shared_cache_key(read.storage, read.table, "") {
+                        if let Some(state) = shared_cache_guard.get(&key) {
+                            states_map.insert(read.type_id, state.as_ref());
+                        }
                     }
                 }
             }
@@ -1604,6 +1610,10 @@ fn route_path(target: &str) -> &str {
 /// plain `GET` does not have yet, so their regions render the state's default;
 /// the live render replaces the paint on the first WebSocket frame.
 ///
+/// A region reading several states has each read resolved the same way —
+/// `CurrentRoute` to the requested route, a shared read to its cache copy, a
+/// memory read to its default — so e.g. a route + shared renderer paints both.
+///
 /// One pass over the tree, under the shared cache's read lock; the CSS rules
 /// are formatted after it is released.
 fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, path: &str) -> (String, String) {
@@ -1616,14 +1626,14 @@ fn render_ssr(root: &ElementBuilder, shared: &SharedServerState, path: &str) -> 
             .shared_cache
             .read()
             .unwrap_or_else(|e| e.into_inner());
-        let state_for = |renderer: &dyn SyncedRenderer| -> Option<&dyn Any> {
-            if renderer.state_type_id() == TypeId::of::<crate::router::CurrentRoute>() {
+        let state_for = |read: &crate::builder::Read| -> Option<&dyn Any> {
+            if read.type_id == TypeId::of::<crate::router::CurrentRoute>() {
                 return Some(&route);
             }
-            if renderer.storage_type() != StorageType::Shared {
+            if read.storage != StorageType::Shared {
                 return None;
             }
-            let key = shared_cache_key(StorageType::Shared, renderer.table_name(), "")?;
+            let key = shared_cache_key(StorageType::Shared, read.table, "")?;
             cache.get(&key).map(|state| state.as_ref() as &dyn Any)
         };
         root.to_static_html_and_styles(&state_for)
@@ -2945,41 +2955,11 @@ impl ConnectionState {
         // new ones, drop the ones that no longer exist, and subscribe any shared state the
         // newcomers read. The kept ones adopt their parent's fresh renderer even when
         // nothing re-rendered (a closure region's renderer changes with its parent).
-        self.reconcile_nested_regions(discovered, &rerendered);
-        if !rerendered.is_empty() {
-            // A shared state a newly discovered region reads for the first time may
-            // have no cache entry yet (entries are created lazily at connect, for the
-            // regions registered then): create it now so the next pass injects the
-            // real copy, and subscribe this connection to its broadcasts.
-            //
-            // Growth bound: `subscribed_keys` gains at most one entry per shared /
-            // persisted TABLE the connection ever reads — one key per table, not
-            // per region or per pass — so it is bounded by the app's table count, a
-            // compile-time constant, and region churn never grows it. Keys are kept
-            // when their region disappears so a re-discovered region (or a handler
-            // on that table, which re-subscribes on dispatch) keeps receiving
-            // broadcasts; disconnect removes them all (unregister_connection).
-            let mut cache = shared
-                .shared_cache
-                .write()
-                .map_err(|_| "shared cache lock poisoned")?;
-            for (tid, key) in
-                shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
-            {
-                if key.starts_with("__shared__:") {
-                    if let Some(synced) =
-                        self.synced_elements.iter().find(|s| s.state_type_id == tid)
-                    {
-                        cache
-                            .entry(key.clone())
-                            .or_insert_with(|| synced.renderer.create_default_state());
-                    }
-                }
-                if self.subscribed_keys.insert(key.clone()) {
-                    shared.subscribe(self.connection_id, &key);
-                }
-            }
-        }
+        // reconcile_nested_regions is the single owner of secondary-read
+        // cache/subscription creation: it runs on this path AND on the route-swap
+        // path, and after registering the discovered regions it caches/subscribes
+        // every shared/persisted read of every registered region and handler.
+        self.reconcile_nested_regions(shared, discovered, &rerendered)?;
         Ok(update)
     }
 
@@ -2989,11 +2969,25 @@ impl ConnectionState {
     /// it is gone from the client DOM — unregister it (and, transitively, its own children)
     /// so no later broadcast re-renders a stale span. Kept regions get their freshly-built
     /// renderer (its closures may capture newer content); new ones are registered.
+    ///
+    /// Every read of every discovered region is seeded, not just the primary one: memory
+    /// reads land in the connection's state map, shared/persisted reads get a cache entry
+    /// (both `__shared__:` and `{table}:{session}` keys) plus a subscription. This is the
+    /// single owner of that cache/subscription work — the update pass and the route swap
+    /// both call this function.
     fn reconcile_nested_regions(
         &mut self,
+        shared: &SharedServerState,
         discovered: Vec<crate::builder::SyncedElement>,
         rerendered: &[u32],
-    ) {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // A pass that discovered no region and re-rendered none leaves the region set
+        // as it was: nothing to drop, register, seed or subscribe. Return before taking
+        // the process-wide shared-cache write lock, which every connection's update
+        // pass would otherwise contend on even when nothing changed.
+        if discovered.is_empty() && rerendered.is_empty() {
+            return Ok(());
+        }
         let discovered_ids: std::collections::HashSet<u32> =
             discovered.iter().map(|d| d.id).collect();
         let rerendered_set: std::collections::HashSet<u32> = rerendered.iter().copied().collect();
@@ -3021,23 +3015,30 @@ impl ConnectionState {
             self.synced_hashes.retain(|id, _| !dropped.contains(id));
         }
         for region in discovered {
-            // A region first discovered during an update pass can read a memory
-            // state the connection never seeded (memory states are seeded at first
-            // render and on view swap only): seed it now, so later update passes
-            // and handlers on that type find the connection's copy.
+            // A region first discovered during an update pass can read states the
+            // connection never seeded (states are seeded at first render and on view
+            // swap only): seed EVERY read — not just the region's primary type — via
+            // that read's own default_state_for, so later update passes and handlers
+            // on that type find the connection's copy.
             //
             // Growth bound: `states` gains at most one entry per distinct state
-            // TYPE the connection ever renders (`entry` is idempotent per TypeId),
-            // so region churn — a region disappearing and a same-typed one
+            // TYPE the connection ever renders (the seeding is idempotent per
+            // TypeId), so region churn — a region disappearing and a same-typed one
             // reappearing — never grows it. The bound is the app's number of state
             // types, a compile-time constant, not client-controlled input. Entries
             // are deliberately kept when their region disappears: a handler on that
             // type bound elsewhere, or a later re-discovery, reuses the connection's
             // copy instead of minting a fresh default (see the token-stability test
             // in tests/nested_regions_update.rs). Disconnect drops the whole map.
-            self.states
-                .entry(region.state_type_id)
-                .or_insert_with(|| region.create_default_state());
+            for read in region.reads() {
+                if let std::collections::hash_map::Entry::Vacant(slot) =
+                    self.states.entry(read.type_id)
+                {
+                    if let Some(default) = region.create_default_state_for(read.type_id) {
+                        slot.insert(default);
+                    }
+                }
+            }
             if let Some(existing) = self
                 .synced_elements
                 .iter_mut()
@@ -3048,6 +3049,47 @@ impl ConnectionState {
                 self.synced_elements.push(region);
             }
         }
+        // Single owner of shared/persisted cache + subscription creation: every
+        // update pass and every route swap go through this function, so there is
+        // no second copy elsewhere. A shared/persisted read of a region discovered
+        // mid-pass — a multi-state region's secondary reads included — may have no
+        // cache entry yet (entries are created lazily at connect, and only for
+        // "__shared__:" keys): create it now for EVERY read of every registered
+        // region and handler, via that read's own default_state_for, covering
+        // persisted "{table}:{session}" keys as well, so the next pass injects the
+        // real copy, and subscribe the connection to its broadcasts.
+        //
+        // Growth bound: `subscribed_keys` gains at most one entry per shared /
+        // persisted TABLE the connection ever reads — one key per table, not
+        // per region or per pass — so it is bounded by the app's table count, a
+        // compile-time constant, and region churn never grows it. Keys are kept
+        // when their region disappears so a re-discovered region (or a handler
+        // on that table, which re-subscribes on dispatch) keeps receiving
+        // broadcasts; disconnect removes them all (unregister_connection).
+        let keys = shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id);
+        if !keys.is_empty() {
+            let mut cache = shared
+                .shared_cache
+                .write()
+                .map_err(|_| "shared cache lock poisoned")?;
+            for (tid, key) in keys {
+                if let std::collections::hash_map::Entry::Vacant(slot) = cache.entry(key.clone()) {
+                    if let Some(synced) = self
+                        .synced_elements
+                        .iter()
+                        .find(|s| s.reads().iter().any(|read| read.type_id == tid))
+                    {
+                        if let Some(default) = synced.create_default_state_for(tid) {
+                            slot.insert(default);
+                        }
+                    }
+                }
+                if self.subscribed_keys.insert(key.clone()) {
+                    shared.subscribe(self.connection_id, &key);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Run `handler` against its state. Shared/persisted state executes on (and is
@@ -3180,12 +3222,15 @@ impl ConnectionState {
         }
 
         // Initialize any state the matched view's renderers read, so the outlet can
-        // render them inline. `or_insert` preserves state from a prior visit.
+        // render them inline. `or_insert` preserves state from a prior visit. A
+        // region reading several states seeds every one of its reads.
         let view = router.build_for_path(path);
         for r in crate::builder::extract_renderers(&view) {
-            self.states
-                .entry(r.state_type_id())
-                .or_insert_with(|| r.create_default_state());
+            for read in r.reads() {
+                if let Some(default) = r.default_state_for(read.type_id) {
+                    self.states.entry(read.type_id).or_insert(default);
+                }
+            }
         }
 
         // Drop the render-hash dedup cache across a view swap: hashes exist only to skip
@@ -3195,12 +3240,12 @@ impl ConnectionState {
         self.synced_hashes.clear();
 
         // Prune the previous view's regions (every synced region descended from a
-        // CurrentRoute region) so the new view's regions render fresh, not against
-        // stale ids.
+        // region reading CurrentRoute) so the new view's regions render fresh,
+        // not against stale ids.
         let route_regions: HashSet<u32> = self
             .synced_elements
             .iter()
-            .filter(|se| se.state_type_id == route_tid)
+            .filter(|se| se.reads().iter().any(|read| read.type_id == route_tid))
             .map(|se| se.id)
             .collect();
         let mut stale = HashSet::new();
@@ -3282,8 +3327,8 @@ impl ConnectionState {
         };
 
         // Register the new view's regions (refreshing kept ones), drop any the swap
-        // re-rendered away, and subscribe any shared/persisted state they read.
-        self.reconcile_nested_regions(discovered, &rerendered);
+        // re-rendered away, and seed/cache/subscribe every read they have.
+        self.reconcile_nested_regions(shared, discovered, &rerendered)?;
         for (_, key) in
             shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
         {
@@ -3330,11 +3375,21 @@ impl ConnectionState {
                 }
                 let synced = ctx.take_synced_elements();
                 let found = shared_persisted_keys(ctx.handlers(), &synced, &self.session_id);
-                let new_types: Vec<(TypeId, Box<dyn Any + Send + Sync>)> = synced
-                    .iter()
-                    .filter(|se| !states.contains_key(&se.state_type_id))
-                    .map(|se| (se.state_type_id, se.create_default_state()))
-                    .collect();
+                // A default for every read type of every region the view has, so a
+                // multi-state region renders here too (the single-state case is the
+                // region's one read, as before).
+                let mut new_types: Vec<(TypeId, Box<dyn Any + Send + Sync>)> = Vec::new();
+                for se in &synced {
+                    for read in se.reads() {
+                        if !states.contains_key(&read.type_id)
+                            && !new_types.iter().any(|(tid, _)| *tid == read.type_id)
+                        {
+                            if let Some(default) = se.create_default_state_for(read.type_id) {
+                                new_types.push((read.type_id, default));
+                            }
+                        }
+                    }
+                }
                 (new_types, found)
             };
             let mut grew = false;
@@ -3422,12 +3477,14 @@ impl ConnectionState {
             self.ensure_state_initialized_for(handler);
         }
         // Also initialize states from synced element renderers
-        // These states might not have handlers but need to exist for rendering
+        // These states might not have handlers but need to exist for rendering.
+        // A region reading several states seeds every one of its reads.
         for synced in &self.synced_elements {
-            let type_id = synced.state_type_id;
-            self.states
-                .entry(type_id)
-                .or_insert_with(|| synced.create_default_state());
+            for read in synced.reads() {
+                if let Some(default) = synced.create_default_state_for(read.type_id) {
+                    self.states.entry(read.type_id).or_insert(default);
+                }
+            }
         }
     }
 
@@ -3456,10 +3513,11 @@ impl ConnectionState {
                 .or_insert_with(|| handler.create_state());
         }
         for synced in &self.synced_elements {
-            let type_id = synced.state_type_id;
-            self.states
-                .entry(type_id)
-                .or_insert_with(|| synced.create_default_state());
+            for read in synced.reads() {
+                if let Some(default) = synced.create_default_state_for(read.type_id) {
+                    self.states.entry(read.type_id).or_insert(default);
+                }
+            }
         }
     }
 }
@@ -3617,10 +3675,15 @@ where
         conn_state.handlers = ctx.handlers().clone();
         conn_state.synced_elements = ctx.take_synced_elements();
         let before = discovered.len();
+        // A default for EACH read type of EVERY region: a region reading several
+        // states needs them all present to render (and to expose its own nested
+        // regions), so an unseen second type is seeded here too.
         for synced in &conn_state.synced_elements {
-            discovered
-                .entry(synced.state_type_id)
-                .or_insert_with(|| synced.create_default_state());
+            for read in synced.reads() {
+                if let Some(default) = synced.create_default_state_for(read.type_id) {
+                    discovered.entry(read.type_id).or_insert(default);
+                }
+            }
         }
         if discovered.len() == before {
             break;
@@ -3676,14 +3739,16 @@ where
             .map_err(|_| "shared cache lock poisoned")?;
         for (tid, key) in keys {
             if key.starts_with("__shared__:") {
+                // Lazily create the shared instance from any region that reads it
+                // (a multi-state region contributes every one of its shared reads).
                 if let Some(synced) = conn_state
                     .synced_elements
                     .iter()
-                    .find(|s| s.state_type_id == tid)
+                    .find(|s| s.reads().iter().any(|read| read.type_id == tid))
                 {
-                    cache
-                        .entry(key.clone())
-                        .or_insert_with(|| synced.renderer.create_default_state());
+                    if let Some(default) = synced.create_default_state_for(tid) {
+                        cache.entry(key.clone()).or_insert(default);
+                    }
                 }
             }
             if conn_state.subscribed_keys.insert(key.clone()) {
