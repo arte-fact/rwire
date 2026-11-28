@@ -538,6 +538,13 @@ pub(crate) fn state_lookup<'m>(
     move |type_id| states.get(&type_id).copied().map(as_dyn_any)
 }
 
+/// A one-entry [`StateLookup`] holding only the single state the single-state
+/// entry points (`collect_symbols` / `emit`) were given, keyed by its TypeId:
+/// every read of that type resolves to it, every other read stays unresolved.
+fn single_state_lookup<'a>(state: &'a dyn Any) -> impl Fn(TypeId) -> Option<&'a dyn Any> + 'a {
+    move |type_id| (type_id == state.type_id()).then_some(state)
+}
+
 /// Render `renderer` in an update pass: every read resolves from the pass's
 /// state map or, when the type is missing from it (a region discovered mid-pass
 /// may read a memory state never seeded), from a fresh default of that read.
@@ -742,6 +749,9 @@ impl SyncedRenderer for IdentityRenderer {
     }
     fn identity(&self) -> Option<u64> {
         Some(self.identity)
+    }
+    fn name(&self) -> Option<&'static str> {
+        self.inner.name()
     }
     fn is_outlet(&self) -> bool {
         self.inner.is_outlet()
@@ -3003,12 +3013,19 @@ impl BuildContext {
     /// Collect all symbols from an element tree (first pass).
     /// Also tracks used element and event types for tree shaking.
     ///
+    /// Synced regions render through [`SyncedRenderer::render_with_states`] with
+    /// a one-entry lookup holding only the `state` passed here (keyed by its
+    /// TypeId): a single-state region resolves its one read exactly as before,
+    /// while a multi-state region's other reads stay unresolved and it renders
+    /// `None` — pass a full state map to [`Self::collect_symbols_multi`] instead
+    /// (the server does whenever it holds more than one state).
+    ///
     /// Note: Synced element IDs are no longer interned as symbols - they use
     /// dedicated CREATE_SYNCED/GET_SYNCED opcodes with varint encoding.
     pub fn collect_symbols(&mut self, el: &ElementBuilder, state: &dyn Any) {
         // If this is a synced element, render it first with state
         if let Some(renderer) = &el.synced {
-            if let Some(rendered) = renderer.render_with_state(state) {
+            if let Some(rendered) = renderer.render_with_states(&single_state_lookup(state)) {
                 self.collect_symbols(&rendered, state);
             }
             return;
@@ -3093,6 +3110,11 @@ impl BuildContext {
     }
 
     /// Emit opcodes for an element tree (second pass).
+    ///
+    /// Like [`Self::collect_symbols`], synced regions render through
+    /// [`SyncedRenderer::render_with_states`] with a one-entry lookup holding
+    /// only `state`: a multi-state region renders `None` here — use
+    /// [`Self::emit_multi`] with a full state map for those.
     pub fn emit(&mut self, el: &ElementBuilder, state: &dyn Any) -> u32 {
         // Reset synced_id counter - we increment again during emit
         self.next_synced_id = 0;
@@ -3204,7 +3226,7 @@ impl BuildContext {
                 reads: renderer.reads(),
             });
 
-            if let Some(rendered) = renderer.render_with_state(state) {
+            if let Some(rendered) = renderer.render_with_states(&single_state_lookup(state)) {
                 self.synced_hashes
                     .insert(synced_id, rendered.content_hash());
                 // Use CREATE_SYNCED opcode - more compact than CREATE span + SET_ATTR id
@@ -5068,5 +5090,61 @@ mod content_hash_tests {
         assert_eq!(a.content_hash(), same.content_hash());
         assert_ne!(a.content_hash(), other.content_hash());
         assert_ne!(a.content_hash(), none.content_hash());
+    }
+}
+
+#[cfg(test)]
+mod identity_renderer_tests {
+    use super::*;
+
+    struct Unit;
+    impl Default for Unit {
+        fn default() -> Self {
+            Unit
+        }
+    }
+
+    /// The macro's expansion for a named region plus `.with_identity(k)`:
+    /// NameRenderer inside IdentityRenderer (multi-state renderers nest the
+    /// same way).
+    fn named_keyed_region() -> Box<dyn SyncedRenderer> {
+        let inner = SyncedRendererImpl::<Unit> {
+            render: Arc::new(|_| el(El::Div)),
+            deps: RendererDeps::always(),
+            storage_type: StorageType::Memory,
+            table_name: None,
+        };
+        let named = NameRenderer {
+            inner: Box::new(inner),
+            name: "panel",
+        };
+        Box::new(IdentityRenderer {
+            inner: Box::new(named),
+            identity: 7,
+        })
+    }
+
+    #[test]
+    fn identity_renderer_forwards_name_and_every_accessor() {
+        let r = named_keyed_region();
+        assert_eq!(
+            r.name(),
+            Some("panel"),
+            "with_identity must not drop the region name (RWIRE_TRACE loses it)"
+        );
+        assert_eq!(r.identity(), Some(7));
+        assert_eq!(r.state_type_id(), TypeId::of::<Unit>());
+        assert_eq!(r.storage_type(), StorageType::Memory);
+        assert_eq!(r.table_name(), None);
+        assert_eq!(r.deps(), RendererDeps::always());
+        assert_eq!(r.reads().len(), 1);
+        assert!(!r.is_outlet());
+        assert!(r.render_with_state(&Unit).is_some());
+        // The trace line prints the name next to the region id.
+        assert_eq!(trace_label(3, r.name()), "3 (panel)");
+        assert_eq!(
+            format!("[rwire-trace] se={} RENDER", trace_label(3, r.name())),
+            "[rwire-trace] se=3 (panel) RENDER"
+        );
     }
 }
