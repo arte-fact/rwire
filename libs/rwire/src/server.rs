@@ -2955,46 +2955,11 @@ impl ConnectionState {
         // new ones, drop the ones that no longer exist, and subscribe any shared state the
         // newcomers read. The kept ones adopt their parent's fresh renderer even when
         // nothing re-rendered (a closure region's renderer changes with its parent).
+        // reconcile_nested_regions is the single owner of secondary-read
+        // cache/subscription creation: it runs on this path AND on the route-swap
+        // path, and after registering the discovered regions it caches/subscribes
+        // every shared/persisted read of every registered region and handler.
         self.reconcile_nested_regions(shared, discovered, &rerendered)?;
-        if !rerendered.is_empty() {
-            // A shared/persisted state a newly discovered region reads for the first
-            // time may have no cache entry yet (entries are created lazily at connect,
-            // for the regions registered then): create it now — for EVERY read of
-            // every region (a multi-state region's secondary reads included), via that
-            // read's own default, and for persisted "{table}:{session}" keys as well
-            // as "__shared__:" ones — so the next pass injects the real copy, and
-            // subscribe this connection to its broadcasts.
-            //
-            // Growth bound: `subscribed_keys` gains at most one entry per shared /
-            // persisted TABLE the connection ever reads — one key per table, not
-            // per region or per pass — so it is bounded by the app's table count, a
-            // compile-time constant, and region churn never grows it. Keys are kept
-            // when their region disappears so a re-discovered region (or a handler
-            // on that table, which re-subscribes on dispatch) keeps receiving
-            // broadcasts; disconnect removes them all (unregister_connection).
-            let mut cache = shared
-                .shared_cache
-                .write()
-                .map_err(|_| "shared cache lock poisoned")?;
-            for (tid, key) in
-                shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
-            {
-                if let std::collections::hash_map::Entry::Vacant(slot) = cache.entry(key.clone()) {
-                    if let Some(synced) = self
-                        .synced_elements
-                        .iter()
-                        .find(|s| s.reads().iter().any(|read| read.type_id == tid))
-                    {
-                        if let Some(default) = synced.create_default_state_for(tid) {
-                            slot.insert(default);
-                        }
-                    }
-                }
-                if self.subscribed_keys.insert(key.clone()) {
-                    shared.subscribe(self.connection_id, &key);
-                }
-            }
-        }
         Ok(update)
     }
 
@@ -3007,7 +2972,9 @@ impl ConnectionState {
     ///
     /// Every read of every discovered region is seeded, not just the primary one: memory
     /// reads land in the connection's state map, shared/persisted reads get a cache entry
-    /// (both `__shared__:` and `{table}:{session}` keys) plus a subscription.
+    /// (both `__shared__:` and `{table}:{session}` keys) plus a subscription. This is the
+    /// single owner of that cache/subscription work — the update pass and the route swap
+    /// both call this function.
     fn reconcile_nested_regions(
         &mut self,
         shared: &SharedServerState,
@@ -3040,9 +3007,6 @@ impl ConnectionState {
             self.synced_elements.retain(|se| !dropped.contains(&se.id));
             self.synced_hashes.retain(|id, _| !dropped.contains(id));
         }
-        // (TypeId, cache key) of every shared/persisted read of the discovered
-        // regions, collected before registration consumes them.
-        let mut discovered_keys: Vec<(TypeId, String)> = Vec::new();
         for region in discovered {
             // A region first discovered during an update pass can read states the
             // connection never seeded (states are seeded at first render and on view
@@ -3067,14 +3031,6 @@ impl ConnectionState {
                         slot.insert(default);
                     }
                 }
-                if let Some(key) = shared_cache_key(read.storage, read.table, &self.session_id) {
-                    if !discovered_keys
-                        .iter()
-                        .any(|(t, k)| *t == read.type_id && *k == key)
-                    {
-                        discovered_keys.push((read.type_id, key));
-                    }
-                }
             }
             if let Some(existing) = self
                 .synced_elements
@@ -3086,17 +3042,30 @@ impl ConnectionState {
                 self.synced_elements.push(region);
             }
         }
-        // A shared/persisted read of a region discovered mid-pass may have no cache
-        // entry yet: create it now (from any registered region reading that type, via
-        // the read's default_state_for) and subscribe the connection, so the next
-        // broadcast injects the real copy. Covers persisted "{table}:{session}" keys
-        // as well as "__shared__:" ones.
-        if !discovered_keys.is_empty() {
+        // Single owner of shared/persisted cache + subscription creation: every
+        // update pass and every route swap go through this function, so there is
+        // no second copy elsewhere. A shared/persisted read of a region discovered
+        // mid-pass — a multi-state region's secondary reads included — may have no
+        // cache entry yet (entries are created lazily at connect, and only for
+        // "__shared__:" keys): create it now for EVERY read of every registered
+        // region and handler, via that read's own default_state_for, covering
+        // persisted "{table}:{session}" keys as well, so the next pass injects the
+        // real copy, and subscribe the connection to its broadcasts.
+        //
+        // Growth bound: `subscribed_keys` gains at most one entry per shared /
+        // persisted TABLE the connection ever reads — one key per table, not
+        // per region or per pass — so it is bounded by the app's table count, a
+        // compile-time constant, and region churn never grows it. Keys are kept
+        // when their region disappears so a re-discovered region (or a handler
+        // on that table, which re-subscribes on dispatch) keeps receiving
+        // broadcasts; disconnect removes them all (unregister_connection).
+        let keys = shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id);
+        if !keys.is_empty() {
             let mut cache = shared
                 .shared_cache
                 .write()
                 .map_err(|_| "shared cache lock poisoned")?;
-            for (tid, key) in discovered_keys {
+            for (tid, key) in keys {
                 if let std::collections::hash_map::Entry::Vacant(slot) = cache.entry(key.clone()) {
                     if let Some(synced) = self
                         .synced_elements
