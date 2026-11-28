@@ -9,10 +9,14 @@ Step 1 (empty the PR queue) is done. rwire is feature-frozen: it only takes chan
 ## Main
 
 Green CI. Latest merges: #15 (delegated auth hardening) and #16 (lighter capsule HTTP).
+Upstream (GitHub) main is now **b1af31b**: PR #33 (branch
+`fix/nested-regions-update-pass`) was merged by the owner; the GitLab branch is
+frozen at 8943428 and feature branches merge onto b1af31b cleanly.
 
 ## Open PRs
 
-None.
+- !2 `feat/multi-state-renderers` — multi-state renderers (gap 2 below), based on the
+  frozen `fix/nested-regions-update-pass` @ 8943428, fast-forwarded on top.
 
 ## Waiting branches (no PR; rebased on main by merge)
 
@@ -22,7 +26,10 @@ None.
 - `feat/outlet-guard-opt-out` — explicit opt-out for the router outlet guard.
 - `fix/review-minors` — minor follow-ups from an earlier review.
 - `feat/markdown-frontmatter-extra` — free extra fields in the Markdown front matter (asked by news).
-- `docs/multi-state-renderers` — design study for multi-state renderers.
+- ~~`docs/multi-state-renderers`~~ — design study for multi-state renderers: **absorbed by
+  `feat/multi-state-renderers` (!2)**; the study doc (`docs/multi-state-renderers.md`,
+  00dd5c3) and its prototype tests are already in that branch's history, so the waiting
+  branch is gone.
 
 ## mcp-agents front gaps
 
@@ -31,7 +38,7 @@ From §5 of the rwire trial notes (MR !20):
 | Gap | Subject | Status |
 |---|---|---|
 | 1 | optional SQLite persistence (`persist` feature) | fixed in #12 |
-| 2 | multi-state renderers | design study `docs/multi-state-renderers` |
+| 2 | multi-state renderers | branch `feat/multi-state-renderers` (MR !2); study `docs/multi-state-renderers` absorbed into it |
 | 3 | connection hook with the identity (`on_connect`) | waiting branch `feat/on-connect` |
 | 4, 5, 8 | short 404, favicon, capsule `<title>`/gzip | fixed in #16 |
 | 6, 7, 11, 12, 13 | textarea field, style order, disabled reasons, button tooltip, Nord dark contrast | waiting branch `feat/components-styling` |
