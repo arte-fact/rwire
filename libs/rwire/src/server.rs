@@ -2981,6 +2981,13 @@ impl ConnectionState {
         discovered: Vec<crate::builder::SyncedElement>,
         rerendered: &[u32],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // A pass that discovered no region and re-rendered none leaves the region set
+        // as it was: nothing to drop, register, seed or subscribe. Return before taking
+        // the process-wide shared-cache write lock, which every connection's update
+        // pass would otherwise contend on even when nothing changed.
+        if discovered.is_empty() && rerendered.is_empty() {
+            return Ok(());
+        }
         let discovered_ids: std::collections::HashSet<u32> =
             discovered.iter().map(|d| d.id).collect();
         let rerendered_set: std::collections::HashSet<u32> = rerendered.iter().copied().collect();
