@@ -481,12 +481,16 @@ pub fn theme(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `&mut`, or a tuple parameter is a compile error). The first parameter is the
 /// region's primary type, used for nested-region matching.
 ///
-/// A parameter that is never read contributes an **empty** dependency set for its
-/// state: the region does not re-render when that state changes (it still renders
-/// once, and on whole-change passes such as a route swap). `always()` is kept only
-/// when a parameter is used in a way the analysis cannot see at all (e.g. only
-/// inside `format!("{:?}", state)`). A renderer whose parameters are all unread
-/// therefore renders once and only re-renders on `ChangeSet::all()` passes.
+/// In a **multi-state** renderer, a parameter that is never read contributes an
+/// **empty** dependency set for its state: the region does not re-render when that
+/// state changes (it still renders once, and on whole-change passes such as a
+/// route swap). A **single-state** renderer whose parameter is never read keeps
+/// `always()` — the behaviour from before multi-state renderers existed, so no
+/// existing renderer with an unread parameter silently changes. `always()` is also
+/// kept when a parameter is used in a way the analysis cannot see at all (e.g.
+/// only inside `format!("{:?}", state)`). A multi-state renderer whose parameters
+/// are all unread therefore renders once and only re-renders on `ChangeSet::all()`
+/// passes.
 ///
 /// The generated region is named after the function (`RWIRE_TRACE` prints
 /// `[rwire-trace] se=3 (agent_window) RENDER`); override it with
@@ -739,6 +743,7 @@ pub fn renderer(attr: TokenStream, item: TokenStream) -> TokenStream {
     // a field one of its parameters reads changes. Falls back to `always()` per
     // parameter when that parameter is used in a way we can't track
     // (over-approximation keeps it correct).
+    let single_state = params.len() == 1;
     let deps_exprs: Vec<proc_macro2::TokenStream> = params
         .iter()
         .map(|(pat, ty)| {
@@ -760,13 +765,18 @@ pub fn renderer(attr: TokenStream, item: TokenStream) -> TokenStream {
                 // No field access was found. If the parameter is used anywhere in
                 // the body in a way the AST analysis cannot see (e.g. only inside a
                 // macro such as `format!("{:?}", state)`), depend on everything. A
-                // parameter whose ident never appears at all is unread: it contributes
-                // an empty dependency set for that state, so the region does not
-                // re-render on that state's changes.
+                // parameter whose ident never appears at all is unread: in a
+                // MULTI-state renderer it contributes an empty dependency set for
+                // that state, so the region does not re-render on that state's
+                // changes; in a SINGLE-state renderer it keeps always() — the
+                // behaviour from before multi-state renderers existed, so existing
+                // renderers with an unread parameter (e.g. `fn clock(_t: &Tick)`)
+                // do not silently stop re-rendering.
                 Some(_) => {
-                    if param_ident
-                        .as_ref()
-                        .is_some_and(|p| ident_used_in_tokens(block, p))
+                    if single_state
+                        || param_ident
+                            .as_ref()
+                            .is_some_and(|p| ident_used_in_tokens(block, p))
                     {
                         quote! { rwire::RendererDeps::always() }
                     } else {

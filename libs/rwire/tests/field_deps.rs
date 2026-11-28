@@ -34,6 +34,15 @@ fn helper(s: &Two) -> ElementBuilder {
     el(El::Span).text(&s.a.to_string())
 }
 
+// The parameter is never read. A SINGLE-state renderer keeps always() here —
+// the behaviour from before multi-state renderers existed — so the region still
+// re-renders on any change of its state (the empty-deps rule applies only to
+// unread parameters of a MULTI-state renderer, see multi_state_renderers.rs).
+#[renderer]
+fn unread(_s: &Two) -> ElementBuilder {
+    el(El::Span).text("static")
+}
+
 fn deps_of(el: &ElementBuilder) -> rwire::RendererDeps {
     extract_renderers(el)[0].deps()
 }
@@ -64,4 +73,17 @@ fn opaque_state_use_falls_back_to_always() {
     // `opaque` only textually reads `a` (via helper) but passes the whole state,
     // so it must conservatively re-render on any change.
     assert!(deps_of(&opaque()).needs_update(only_b));
+}
+
+#[test]
+fn a_single_state_unread_param_keeps_always() {
+    let deps = deps_of(&unread());
+    assert!(
+        deps.always,
+        "a single-state renderer with an unread param keeps always() (got mask={:#x}, always={})",
+        deps.mask, deps.always
+    );
+    // Behaviourally: any field change of its state re-renders the region.
+    assert!(deps.needs_update(ChangeSet::from_fields(&[Two::FIELD_A])));
+    assert!(deps.needs_update(ChangeSet::from_fields(&[Two::FIELD_B])));
 }
