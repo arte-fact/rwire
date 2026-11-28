@@ -20,7 +20,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use rwire::builder::{build_synced_update_with_known_symbols, BuildContext, SyncedElement};
+use rwire::builder::{
+    build_synced_update_with_known_symbols, extract_renderers, BuildContext, SyncedElement,
+};
 use rwire::protocol::opcodes::GET_SYNCED;
 use rwire::{
     el, outlet, renderer, ChangeSet, CurrentRoute, El, ElementBuilder, RendererDeps, Router,
@@ -882,6 +884,80 @@ fn the_macro_names_the_region_after_the_function() {
         ]);
     let synced = collect_regions(&root, &states);
     assert_eq!(synced[0].name(), Some("closure region"));
+}
+
+#[test]
+fn a_keyed_region_keeps_its_name_for_the_trace() {
+    // panel() is a #[renderer] named "panel" by the macro; .with_identity(k)
+    // wraps it in IdentityRenderer, which must forward name() — RWIRE_TRACE
+    // prints the region through trace_label(se.id, se.renderer.name()).
+    let root = el(El::Div).append([panel().with_identity(7)]);
+    let r = &extract_renderers(&root)[0];
+    assert_eq!(r.name(), Some("panel"), "with_identity keeps the name");
+    assert_eq!(r.identity(), Some(7));
+
+    let alpha = Alpha { x: 1, z: 0 };
+    let beta = Beta { y: 2, w: 0 };
+    let states = alpha_beta_states(&alpha, &beta);
+    let synced = collect_regions(&root, &states);
+    assert_eq!(
+        synced[0].name(),
+        Some("panel"),
+        "the registered region still carries its name (trace prints it)"
+    );
+}
+
+// ============================================================================
+// Re-review: the single-state entry points (collect_symbols / emit) route
+// every region through render_with_states with a one-entry lookup — the one
+// state they were given. A single-state region renders exactly as through the
+// multi pair; a multi-state region's secondary reads stay unresolved there and
+// it renders None (documented on collect_symbols/emit; the server uses the
+// *_multi pair whenever it holds a state map).
+// ============================================================================
+
+#[test]
+fn the_single_state_entry_points_render_solo_regions_and_skip_multi_state_ones() {
+    let alpha = Alpha { x: 987_654, z: 0 };
+    let beta = Beta { y: 123_321, w: 0 };
+
+    // Single-state region: same content through collect_symbols/emit and the
+    // multi pair.
+    let root_solo = el(El::Div).append([named_solo()]);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols(&root_solo, &alpha);
+    ctx.emit(&root_solo, &alpha);
+    let solo_bytes = ctx.finish();
+    assert!(
+        contains(&solo_bytes, "987654"),
+        "a single-state region renders through the single-state entry points"
+    );
+    let mut states: HashMap<TypeId, &(dyn Any + Send + Sync)> = HashMap::new();
+    states.insert(TypeId::of::<Alpha>(), &alpha);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols_multi(&root_solo, &states);
+    ctx.emit_multi(&root_solo);
+    assert!(contains(&ctx.finish(), "987654"));
+
+    // Multi-state region: None via collect_symbols/emit (only one state is
+    // available, the Beta read cannot resolve), full content via the multi pair.
+    let root_panel = el(El::Div).append([panel()]);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols(&root_panel, &alpha);
+    ctx.emit(&root_panel, &alpha);
+    let panel_single = ctx.finish();
+    assert!(
+        !contains(&panel_single, "987654|123321"),
+        "a multi-state region renders None through the single-state entry points"
+    );
+    let states2 = alpha_beta_states(&alpha, &beta);
+    let mut ctx = BuildContext::new();
+    ctx.collect_symbols_multi(&root_panel, &states2);
+    ctx.emit_multi(&root_panel);
+    assert!(
+        contains(&ctx.finish(), "987654|123321"),
+        "the multi pair renders the multi-state region fully"
+    );
 }
 
 // ============================================================================
