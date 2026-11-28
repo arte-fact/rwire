@@ -3304,6 +3304,10 @@ pub fn build_synced_update_with_known_symbols(
                 .push((s.id, s.renderer.identity()));
         }
     }
+    // Nested regions the render-pass cascade already re-rendered (matched children
+    // of a re-rendered parent), emitted or not: the outer loop must not render them
+    // a second time with their stored (older) renderer.
+    let mut cascade_touched: HashSet<u32> = HashSet::new();
     let no_children: NestedChildSlots = HashMap::new();
 
     let trace = std::env::var_os("RWIRE_TRACE").is_some();
@@ -3315,7 +3319,11 @@ pub fn build_synced_update_with_known_symbols(
 
         // Already rendered as a nested region of a parent re-rendered above (with
         // the parent's fresh renderer, which takes precedence over the stored one).
-        if rendered_cache.contains_key(&se.id) {
+        // `cascade_touched` covers the children the cascade re-rendered even when
+        // their output was unchanged: re-rendering them here with the stored (old)
+        // renderer would only burn CPU — the fresh render already proved the
+        // content unchanged.
+        if rendered_cache.contains_key(&se.id) || cascade_touched.contains(&se.id) {
             continue;
         }
 
@@ -3340,95 +3348,114 @@ pub fn build_synced_update_with_known_symbols(
             continue;
         }
 
-        // Render once, use for both symbol collection and emission
-        if let Some(state) = states.get(&se.state_type_id) {
-            if let Some(rendered) = se.renderer.render_with_state(*state) {
-                // Layer 2: emit the region itself only if its output changed.
-                let parent_changed = match prev_hashes {
-                    Some(ref mut hashes) => {
-                        let hash = rendered.content_hash();
-                        if hashes.get(&se.id) == Some(&hash) {
-                            if trace {
-                                eprintln!("[rwire-trace] se={} skip: hash unchanged", se.id);
-                            }
-                            false
-                        } else {
-                            hashes.insert(se.id, hash);
-                            true
+        // Render once, use for both symbol collection and emission. A state
+        // type missing from the pass's map renders from a fresh default (a
+        // region discovered mid-pass may read a memory state never seeded).
+        let mut default_slot = None;
+        let Some(state) = update_pass_state(states, &*se.renderer, &mut default_slot) else {
+            continue;
+        };
+        if let Some(rendered) = se.renderer.render_with_state(state) {
+            // Layer 2: emit the region itself only if its output changed.
+            let parent_changed = match prev_hashes {
+                Some(ref mut hashes) => {
+                    let hash = rendered.content_hash();
+                    if hashes.get(&se.id) == Some(&hash) {
+                        if trace {
+                            eprintln!("[rwire-trace] se={} skip: hash unchanged", se.id);
                         }
+                        false
+                    } else {
+                        hashes.insert(se.id, hash);
+                        true
                     }
-                    None => true,
-                };
-                if parent_changed {
-                    collect_symbols_recursive_with_known(
-                        &rendered,
-                        &mut new_symbols,
-                        symbol_map,
-                        &mut current_next_idx,
-                        &mut synced_counter,
-                        states,
-                    );
-                    has_updates = true;
                 }
-                if trace {
-                    eprintln!("[rwire-trace] se={} RENDER", se.id);
-                }
+                None => true,
+            };
+            if parent_changed {
+                collect_symbols_recursive_with_known(
+                    &rendered,
+                    &mut new_symbols,
+                    symbol_map,
+                    &mut current_next_idx,
+                    &mut synced_counter,
+                    states,
+                );
+                has_updates = true;
+            }
+            if trace {
+                eprintln!("[rwire-trace] se={} RENDER", se.id);
+            }
 
-                // A nested region's content is a function of its parent's render (a
-                // closure region captures values from it), so every EXISTING nested
-                // region of a re-rendered parent is re-rendered with the parent's
-                // fresh renderer — even when the parent's own output (often just the
-                // nested placeholder) is unchanged. Matching mirrors the emit pass:
-                // by identity when the renderer has one, else by state type in
-                // document order, against this parent's children.
-                let mut pending: Vec<(u32, Vec<Box<dyn SyncedRenderer>>)> =
-                    vec![(se.id, nested_synced_renderers(&rendered))];
-                if parent_changed {
-                    rendered_cache.insert(se.id, rendered);
-                }
-                while let Some((parent_id, renderers)) = pending.pop() {
-                    let ids_by_type = children_by_parent.get(&parent_id).unwrap_or(&no_children);
-                    let mut consumed_ids: HashSet<u32> = HashSet::new();
-                    for renderer in renderers {
-                        let tid = renderer.state_type_id();
-                        let wanted = renderer.identity();
-                        let Some(child_id) = ids_by_type.get(&tid).and_then(|slots| {
-                            slots
-                                .iter()
-                                .find(|(id, identity)| {
-                                    !consumed_ids.contains(id) && *identity == wanted
-                                })
-                                .map(|(id, _)| *id)
-                        }) else {
-                            continue; // genuinely new: built inline by the emit pass
-                        };
-                        consumed_ids.insert(child_id);
-                        // The connection adopts the fresh renderer either way.
-                        refreshed.push(SyncedElement {
-                            id: child_id,
-                            state_type_id: tid,
-                            renderer: renderer.clone_box(),
-                            deps: renderer.deps(),
-                            parent: Some(parent_id),
-                        });
-                        let Some(state) = states.get(&tid) else {
-                            continue;
-                        };
-                        let Some(child) = renderer.render_with_state(*state) else {
-                            continue;
-                        };
-                        if let Some(ref mut hashes) = prev_hashes {
+            // A nested region's content is a function of its parent's render (a
+            // closure region captures values from it), so every EXISTING nested
+            // region of a re-rendered parent is re-rendered with the parent's
+            // fresh renderer — even when the parent's own output (often just the
+            // nested placeholder) is unchanged. Matching mirrors the emit pass:
+            // by identity when the renderer has one, else by state type in
+            // document order, against this parent's children.
+            let mut pending: Vec<(u32, Vec<Box<dyn SyncedRenderer>>)> =
+                vec![(se.id, nested_synced_renderers(&rendered))];
+            if parent_changed {
+                rendered_cache.insert(se.id, rendered);
+            }
+            while let Some((parent_id, renderers)) = pending.pop() {
+                let ids_by_type = children_by_parent.get(&parent_id).unwrap_or(&no_children);
+                let mut consumed_ids: HashSet<u32> = HashSet::new();
+                for renderer in renderers {
+                    let tid = renderer.state_type_id();
+                    let wanted = renderer.identity();
+                    let Some(child_id) = ids_by_type.get(&tid).and_then(|slots| {
+                        slots
+                            .iter()
+                            .find(|(id, identity)| {
+                                !consumed_ids.contains(id) && *identity == wanted
+                            })
+                            .map(|(id, _)| *id)
+                    }) else {
+                        continue; // genuinely new: built inline by the emit pass
+                    };
+                    consumed_ids.insert(child_id);
+                    cascade_touched.insert(child_id);
+                    // The connection adopts the fresh renderer either way.
+                    refreshed.push(SyncedElement {
+                        id: child_id,
+                        state_type_id: tid,
+                        renderer: renderer.clone_box(),
+                        deps: renderer.deps(),
+                        parent: Some(parent_id),
+                    });
+                    let mut default_slot = None;
+                    let Some(state) = update_pass_state(states, &*renderer, &mut default_slot)
+                    else {
+                        continue;
+                    };
+                    let Some(child) = renderer.render_with_state(state) else {
+                        continue;
+                    };
+                    // The cascade must reach this child's own nested regions
+                    // even when its output is unchanged: they are re-created by
+                    // this render and may capture new values, so a change of an
+                    // outer state reaches level 3+ through an unchanged parent.
+                    pending.push((child_id, nested_synced_renderers(&child)));
+                    let child_changed = match prev_hashes {
+                        Some(ref mut hashes) => {
                             let hash = child.content_hash();
                             if hashes.get(&child_id) == Some(&hash) {
                                 if trace {
                                     eprintln!(
-                                        "[rwire-trace] se={child_id} nested of {parent_id}: skip: hash unchanged"
-                                    );
+                                            "[rwire-trace] se={child_id} nested of {parent_id}: skip: hash unchanged"
+                                        );
                                 }
-                                continue;
+                                false
+                            } else {
+                                hashes.insert(child_id, hash);
+                                true
                             }
-                            hashes.insert(child_id, hash);
                         }
+                        None => true,
+                    };
+                    if child_changed {
                         if trace {
                             eprintln!("[rwire-trace] se={child_id} nested of {parent_id}: RENDER");
                         }
@@ -3440,7 +3467,6 @@ pub fn build_synced_update_with_known_symbols(
                             &mut synced_counter,
                             states,
                         );
-                        pending.push((child_id, nested_synced_renderers(&child)));
                         rendered_cache.insert(child_id, child);
                         has_updates = true;
                     }
@@ -3577,6 +3603,25 @@ fn nested_synced_renderers(el: &ElementBuilder) -> Vec<Box<dyn SyncedRenderer>> 
     out
 }
 
+/// The state a region renders from during an update pass: the pass's map, or
+/// a fresh default when the type isn't in it. A region first discovered
+/// during an update pass can read a memory state the connection never seeded
+/// (memory states are seeded at first render and on view swap only) — without
+/// the fallback the region rendered as an empty span. `slot` holds the created
+/// default so the returned reference can borrow it.
+fn update_pass_state<'a>(
+    states: &HashMap<TypeId, &'a (dyn Any + Send + Sync)>,
+    renderer: &dyn SyncedRenderer,
+    slot: &'a mut Option<Box<dyn Any + Send + Sync>>,
+) -> Option<&'a (dyn Any + Send + Sync)> {
+    let tid = renderer.state_type_id();
+    if let Some(state) = states.get(&tid) {
+        return Some(*state);
+    }
+    *slot = Some(renderer.create_default_state());
+    slot.as_ref().map(|b| b.as_ref())
+}
+
 /// The stable wire id for a handler binding.
 ///
 /// Prefers the macro-assigned [`HandlerSpec::handler_id`]; for handlers built
@@ -3689,28 +3734,33 @@ fn emit_update_element(
             // emits its standalone CLEAR_CHILDREN + rebuild when its deps changed.
             // Rebuilding its content here instead would be discarded by that same
             // client short-circuit, leaving stale / append-only content.
-        } else if let Some(state) = states.get(&state_type_id) {
+        } else {
             // A genuinely new nested region: no standalone update covers it, so
             // build its content inline. It has no prior children, so its own nested
             // regions match against an empty scope (all fresh) rather than the
-            // enclosing region's children.
-            if let Some(rendered) = renderer.render_with_state(*state) {
-                let child_ids: NestedChildSlots = HashMap::new();
-                let mut child_consumed: HashSet<u32> = HashSet::new();
-                emit_update_element(
-                    &rendered,
-                    wrapper_ref,
-                    buf,
-                    symbol_map,
-                    handlers,
-                    &child_ids,
-                    &mut child_consumed,
-                    synced_counter,
-                    states,
-                    Some(synced_id),
-                    discovered,
-                    client_actions,
-                );
+            // enclosing region's children. Its state may be missing from the pass's
+            // map (a memory state never seeded): render from a fresh default so the
+            // span is not left empty.
+            let mut default_slot = None;
+            if let Some(state) = update_pass_state(states, &**renderer, &mut default_slot) {
+                if let Some(rendered) = renderer.render_with_state(state) {
+                    let child_ids: NestedChildSlots = HashMap::new();
+                    let mut child_consumed: HashSet<u32> = HashSet::new();
+                    emit_update_element(
+                        &rendered,
+                        wrapper_ref,
+                        buf,
+                        symbol_map,
+                        handlers,
+                        &child_ids,
+                        &mut child_consumed,
+                        synced_counter,
+                        states,
+                        Some(synced_id),
+                        discovered,
+                        client_actions,
+                    );
+                }
             }
         }
 
@@ -3919,10 +3969,13 @@ fn collect_symbols_recursive_with_known(
         // Track synced ID but don't intern - using CREATE_SYNCED opcode instead
         *synced_counter += 1;
 
-        // Render and collect symbols from the rendered content
-        let state_type_id = renderer.state_type_id();
-        if let Some(state) = states.get(&state_type_id) {
-            if let Some(rendered) = renderer.render_with_state(*state) {
+        // Render and collect symbols from the rendered content. A state type
+        // missing from the pass's map renders from a fresh default so the new
+        // region's strings are interned (without this they were never sent and
+        // the region painted empty).
+        let mut default_slot = None;
+        if let Some(state) = update_pass_state(states, &**renderer, &mut default_slot) {
+            if let Some(rendered) = renderer.render_with_state(state) {
                 collect_symbols_recursive_with_known(
                     &rendered,
                     new_symbols,

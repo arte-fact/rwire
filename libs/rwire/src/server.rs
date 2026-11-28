@@ -2947,9 +2947,34 @@ impl ConnectionState {
         // nothing re-rendered (a closure region's renderer changes with its parent).
         self.reconcile_nested_regions(discovered, &rerendered);
         if !rerendered.is_empty() {
-            for (_, key) in
+            // A shared state a newly discovered region reads for the first time may
+            // have no cache entry yet (entries are created lazily at connect, for the
+            // regions registered then): create it now so the next pass injects the
+            // real copy, and subscribe this connection to its broadcasts.
+            //
+            // Growth bound: `subscribed_keys` gains at most one entry per shared /
+            // persisted TABLE the connection ever reads — one key per table, not
+            // per region or per pass — so it is bounded by the app's table count, a
+            // compile-time constant, and region churn never grows it. Keys are kept
+            // when their region disappears so a re-discovered region (or a handler
+            // on that table, which re-subscribes on dispatch) keeps receiving
+            // broadcasts; disconnect removes them all (unregister_connection).
+            let mut cache = shared
+                .shared_cache
+                .write()
+                .map_err(|_| "shared cache lock poisoned")?;
+            for (tid, key) in
                 shared_persisted_keys(&self.handlers, &self.synced_elements, &self.session_id)
             {
+                if key.starts_with("__shared__:") {
+                    if let Some(synced) =
+                        self.synced_elements.iter().find(|s| s.state_type_id == tid)
+                    {
+                        cache
+                            .entry(key.clone())
+                            .or_insert_with(|| synced.renderer.create_default_state());
+                    }
+                }
                 if self.subscribed_keys.insert(key.clone()) {
                     shared.subscribe(self.connection_id, &key);
                 }
@@ -2996,6 +3021,23 @@ impl ConnectionState {
             self.synced_hashes.retain(|id, _| !dropped.contains(id));
         }
         for region in discovered {
+            // A region first discovered during an update pass can read a memory
+            // state the connection never seeded (memory states are seeded at first
+            // render and on view swap only): seed it now, so later update passes
+            // and handlers on that type find the connection's copy.
+            //
+            // Growth bound: `states` gains at most one entry per distinct state
+            // TYPE the connection ever renders (`entry` is idempotent per TypeId),
+            // so region churn — a region disappearing and a same-typed one
+            // reappearing — never grows it. The bound is the app's number of state
+            // types, a compile-time constant, not client-controlled input. Entries
+            // are deliberately kept when their region disappears: a handler on that
+            // type bound elsewhere, or a later re-discovery, reuses the connection's
+            // copy instead of minting a fresh default (see the token-stability test
+            // in tests/nested_regions_update.rs). Disconnect drops the whole map.
+            self.states
+                .entry(region.state_type_id)
+                .or_insert_with(|| region.create_default_state());
             if let Some(existing) = self
                 .synced_elements
                 .iter_mut()
